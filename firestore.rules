@@ -1,20 +1,7 @@
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    /**
-     * SHARPSVILLE YOUTH BASEBALL ASSOCIATION (SYBA) - SECURITY RULES
-     * 
-     * CORE PHILOSOPHY:
-     * 1. Private User Scoping: Personal data (Profiles, Players, Enrollments) is strictly 
-     *    scoped to the individual user's UID via path-based ownership.
-     * 2. Team Collaboration: Shared resources (Games, Messages, RSVPs) use a Membership Map 
-     *    pattern for sensitive data. 
-     * 3. Public/League Access: Teams and Games (the schedule) are viewable by all authenticated
-     *    members to ensure the league schedule is accessible.
-     */
-
-    // --- GLOBAL HELPER FUNCTIONS ---
 
     function isSignedIn() {
       return request.auth != null;
@@ -24,56 +11,40 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Checks if the user has the 'Admin' role in their profile
     function isAdmin() {
       return isSignedIn() && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Admin';
     }
 
-    // Shared access check for team-scoped documents (requires denormalized fields)
-    function isTeamMember(data) {
-      return isSignedIn() && (request.auth.uid == data.coachUserId || request.auth.uid in data.parentUserIds);
+    function isCoach() {
+      return isSignedIn() && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Coach';
     }
 
-    // Robustness helper for updates and deletes
     function isExistingOwner(userId) {
       return resource != null && isUser(userId);
     }
 
-    // --- COLLECTION RULES ---
-
-    /**
-     * @description Individual user profiles.
-     */
     match /userProfiles/{userId} {
-      allow get, list: if isUser(userId) || isAdmin();
+      // Coaches need to read parent profiles to see contact info for their team
+      allow get, list: if isUser(userId) || isAdmin() || isCoach();
       allow create: if isUser(userId);
       allow update: if isExistingOwner(userId) || isAdmin();
       allow delete: if false;
+
+      match /players/{playerId} {
+        allow get, list: if isUser(userId) || isAdmin() || isCoach();
+        allow create: if isUser(userId);
+        allow update: if isExistingOwner(userId) || isAdmin();
+        allow delete: if isExistingOwner(userId) || isAdmin();
+      }
+
+      match /enrollments/{enrollmentId} {
+        allow get, list: if isUser(userId) || isAdmin() || isCoach();
+        allow create: if isUser(userId);
+        allow update: if isExistingOwner(userId) || isAdmin();
+        allow delete: if isExistingOwner(userId) || isAdmin();
+      }
     }
 
-    /**
-     * @description Players managed by a parent.
-     */
-    match /userProfiles/{parentUserId}/players/{playerId} {
-      allow get, list: if isUser(parentUserId) || isAdmin();
-      allow create: if isUser(parentUserId) && request.resource.data.parentUserId == parentUserId;
-      allow update: if (isExistingOwner(parentUserId) && request.resource.data.parentUserId == parentUserId) || isAdmin();
-      allow delete: if isExistingOwner(parentUserId) || isAdmin();
-    }
-
-    /**
-     * @description Season enrollments.
-     */
-    match /userProfiles/{parentUserId}/enrollments/{enrollmentId} {
-      allow get, list: if isUser(parentUserId) || isAdmin();
-      allow create: if isUser(parentUserId) && request.resource.data.parentUserId == parentUserId;
-      allow update: if (isExistingOwner(parentUserId) && request.resource.data.parentUserId == parentUserId) || isAdmin();
-      allow delete: if isExistingOwner(parentUserId) || isAdmin();
-    }
-
-    /**
-     * @description Global season definitions.
-     */
     match /seasons/{seasonId} {
       allow get, list: if isSignedIn();
       allow create, update, delete: if isAdmin();
@@ -84,50 +55,31 @@ service cloud.firestore {
       }
     }
 
-    /**
-     * @description Team entities and schedules.
-     */
     match /teams/{teamId} {
-      // Teams and Games are readable by all authenticated league members
       allow get, list: if isSignedIn(); 
       allow create: if isAdmin();
       allow update: if isAdmin() || (resource != null && request.auth.uid == resource.data.coachUserId);
       allow delete: if isAdmin();
 
       match /games/{gameId} {
-        // Schedules are public to all signed-in users
         allow get, list: if isSignedIn();
-        allow create: if (isTeamMember(request.resource.data) && request.auth.uid == request.resource.data.coachUserId) || isAdmin();
-        allow update: if (isTeamMember(resource.data) && request.auth.uid == request.resource.data.coachUserId) || isAdmin();
-        allow delete: if (isTeamMember(resource.data) && request.auth.uid == request.resource.data.coachUserId) || isAdmin();
+        allow create: if isCoach() || isAdmin();
+        allow update: if isCoach() || isAdmin();
+        allow delete: if isCoach() || isAdmin();
 
         match /rsvps/{rsvpId} {
-          // RSVPs are sensitive; only team members or admins can view attendance
-          // For MVP list, allowing signed-in users to read prevents query filter errors
           allow get, list: if isSignedIn();
-          allow create: if isSignedIn() && isUser(request.resource.data.parentUserId);
-          allow update: if isSignedIn() && isUser(resource.data.parentUserId);
-          allow delete: if isExistingOwner(resource.data.parentUserId) || isAdmin();
+          allow create: if isSignedIn();
+          allow update: if isSignedIn();
+          allow delete: if isSignedIn() || isAdmin();
         }
       }
 
       match /messages/{messageId} {
-        // Chat messages are viewable by all signed in users for MVP simplicity.
-        // In a production app, we would use a 'teams' document check for strict membership.
         allow get, list: if isSignedIn();
         allow create: if isSignedIn();
         allow update, delete: if isSignedIn() && request.auth.uid == resource.data.senderUserId;
       }
-    }
-
-    /**
-     * @description Practice drills database.
-     */
-    match /drills/{drillId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isUser(request.resource.data.creatorUserId);
-      allow update: if isExistingOwner(request.resource.data.creatorUserId) || isAdmin();
-      allow delete: if isExistingOwner(request.resource.data.creatorUserId) || isAdmin();
     }
   }
 }

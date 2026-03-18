@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -9,8 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2 } from 'lucide-react';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -22,6 +24,7 @@ interface Player {
   lastName: string;
   dateOfBirth: string;
   parentUserId: string;
+  medicalNotes?: string;
   clearanceUrl?: string;
 }
 
@@ -38,6 +41,7 @@ export default function FamilyPage() {
     firstName: '',
     lastName: '',
     dateOfBirth: '',
+    medicalNotes: '',
   });
 
   const playersQuery = useMemoFirebase(() => {
@@ -63,7 +67,7 @@ export default function FamilyPage() {
     setDoc(playerRef, playerDoc)
       .then(() => {
         toast({ title: "Player Added", description: `${formData.firstName} has been added to your family.` });
-        setFormData({ firstName: '', lastName: '', dateOfBirth: '' });
+        setFormData({ firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' });
         setOpen(false);
       })
       .catch(async (error) => {
@@ -115,10 +119,10 @@ export default function FamilyPage() {
                 <Plus className="mr-2 h-4 w-4" /> Add Player
               </Button>
             </DialogTrigger>
-            <DialogContent className="rounded-2xl">
+            <DialogContent className="rounded-2xl max-w-lg">
               <DialogHeader>
                 <DialogTitle className="font-headline text-2xl">Add New Player</DialogTitle>
-                <DialogDescription>Enter your child's information to create their SYBA profile.</DialogDescription>
+                <DialogDescription>Enter your child's information and any critical medical alerts.</DialogDescription>
               </DialogHeader>
               <form onSubmit={handleAddPlayer}>
                 <div className="space-y-4 py-4">
@@ -154,6 +158,18 @@ export default function FamilyPage() {
                       required
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="medical" className="flex items-center gap-2 text-destructive">
+                      <AlertTriangle className="h-4 w-4" /> Medical Alerts / Allergies
+                    </Label>
+                    <Textarea
+                      id="medical"
+                      placeholder="e.g. Severe peanut allergy, requires inhaler for asthma."
+                      value={formData.medicalNotes}
+                      onChange={(e) => setFormData({ ...formData, medicalNotes: e.target.value })}
+                      className="resize-none"
+                    />
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -184,16 +200,23 @@ export default function FamilyPage() {
             {players.map((player) => (
               <Card key={player.id} className="border-none shadow-lg overflow-hidden group hover:shadow-xl transition-shadow">
                 <CardHeader className="bg-primary/5 pb-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xl">
-                      {player.firstName[0]}{player.lastName[0]}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xl">
+                        {player.firstName[0]}{player.lastName[0]}
+                      </div>
+                      <div>
+                        <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
+                        <CardDescription className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> Born: {player.dateOfBirth}
+                        </CardDescription>
+                      </div>
                     </div>
-                    <div>
-                      <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
-                      <CardDescription className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" /> Born: {player.dateOfBirth}
-                      </CardDescription>
-                    </div>
+                    {player.medicalNotes && (
+                      <Badge variant="destructive" className="h-6 w-6 p-0 flex items-center justify-center rounded-full animate-pulse">
+                        <AlertTriangle className="h-3 w-3" />
+                      </Badge>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="pt-6">
@@ -221,22 +244,17 @@ export default function FamilyPage() {
                         />
                       </Label>
                     </div>
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <Trophy className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-medium">Season Enrollment</span>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    <Button variant="outline" className="w-full justify-between h-auto py-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 border-none font-normal" asChild>
+                      <Link href={`/parent/enroll?playerId=${player.id}`}>
+                        <div className="flex items-center gap-3">
+                          <Trophy className="h-4 w-4 text-primary" />
+                          <span className="text-sm">Season Enrollment</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </Link>
+                    </Button>
                   </div>
                 </CardContent>
-                <CardFooter className="bg-secondary/10 border-t pt-4">
-                  <Button variant="link" className="text-primary p-0 h-auto font-semibold" asChild>
-                    <Link href={`/parent/enroll?playerId=${player.id}`}>
-                      Enroll for Season <ChevronRight className="ml-1 h-3 w-3" />
-                    </Link>
-                  </Button>
-                </CardFooter>
               </Card>
             ))}
           </div>

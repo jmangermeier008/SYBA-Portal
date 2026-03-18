@@ -13,62 +13,61 @@
         },
         "email": {
           "type": "string",
-          "description": "The user's email address, primarily used for authentication and contact.",
+          "description": "The user's email address.",
           "format": "email"
         },
         "displayName": {
           "type": "string",
           "description": "The user's full name."
         },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Primary contact phone number for the parent."
+        },
         "role": {
           "type": "string",
-          "description": "The user's assigned role within the application (e.g., 'Parent', 'Coach', 'Admin')."
+          "description": "The user's assigned role ('Parent', 'Coach', 'Admin')."
         },
         "createdAt": {
           "type": "string",
-          "description": "Timestamp when the user profile was created.",
           "format": "date-time"
         },
         "updatedAt": {
           "type": "string",
-          "description": "Timestamp when the user profile was last updated.",
           "format": "date-time"
         }
       },
       "required": [
         "id",
         "email",
-        "role",
-        "createdAt",
-        "updatedAt"
+        "role"
       ]
     },
     "Player": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Player",
       "type": "object",
-      "description": "Represents a player managed by a parent, including personal details and linked documents.",
+      "description": "Represents a player managed by a parent.",
       "properties": {
         "id": {
-          "type": "string",
-          "description": "Unique identifier for the Player entity."
+          "type": "string"
         },
         "firstName": {
-          "type": "string",
-          "description": "The player's first name."
+          "type": "string"
         },
         "lastName": {
-          "type": "string",
-          "description": "The player's last name."
+          "type": "string"
         },
         "dateOfBirth": {
           "type": "string",
-          "description": "The player's date of birth.",
           "format": "date"
         },
-        "parentUserId": {
+        "medicalNotes": {
           "type": "string",
-          "description": "Reference to the UserProfile of the parent who manages this player."
+          "description": "Critical medical alerts (allergies, etc.)."
+        },
+        "parentUserId": {
+          "type": "string"
         }
       },
       "required": [
@@ -79,58 +78,19 @@
         "parentUserId"
       ]
     },
-    "Season": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Season",
+    "Enrollment": {
+      "title": "Enrollment",
       "type": "object",
-      "description": "Defines a specific playing season.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Season entity."
-        },
-        "name": {
-          "type": "string",
-          "description": "The name of the season (e.g., 'Spring 2024')."
-        },
-        "registrationOpen": {
-          "type": "string",
-          "format": "date"
-        },
-        "registrationClose": {
-          "type": "string",
-          "format": "date"
-        }
-      },
-      "required": [
-        "id",
-        "name"
-      ]
-    },
-    "Division": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Division",
-      "type": "object",
-      "description": "Represents a specific playing division within a season.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Division entity."
-        },
-        "name": {
-          "type": "string",
-          "description": "The name of the division (e.g., 'T-Ball')."
-        },
-        "fee": {
-          "type": "number",
-          "description": "The registration fee amount in cents."
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "fee"
-      ]
+        "id": { "type": "string" },
+        "playerId": { "type": "string" },
+        "seasonId": { "type": "string" },
+        "divisionId": { "type": "string" },
+        "jerseySize": { "type": "string" },
+        "jerseyNumber": { "type": "string" },
+        "paymentStatus": { "type": "string", "enum": ["pending", "paid"] },
+        "teamId": { "type": "string" }
+      }
     }
   },
   "auth": {
@@ -161,23 +121,10 @@
         }
       },
       {
-        "path": "/seasons/{seasonId}",
+        "path": "/userProfiles/{userId}/enrollments/{enrollmentId}",
         "definition": {
-          "entityName": "Season",
-          "schema": {
-            "$ref": "#/backend/entities/Season"
-          },
-          "description": "Global playing seasons."
-        }
-      },
-      {
-        "path": "/seasons/{seasonId}/divisions/{divisionId}",
-        "definition": {
-          "entityName": "Division",
-          "schema": {
-            "$ref": "#/backend/entities/Division"
-          },
-          "description": "Divisions within a season."
+          "entityName": "Enrollment",
+          "description": "Season enrollments."
         }
       }
     ]
