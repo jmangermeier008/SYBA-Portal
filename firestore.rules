@@ -47,27 +47,27 @@ service cloud.firestore {
     match /userProfiles/{userId} {
       allow get: if isSignedIn();
       allow list: if isAdmin();
-      allow create: if isUser(userId);
+      allow create: if isUser(userId) || isAdmin();
       allow update: if isUser(userId) || isAdmin();
       allow delete: if false;
 
       match /clearances/{clearanceId} {
         allow read: if isUser(userId) || isAdmin();
-        allow create: if isUser(userId);
+        allow create: if isUser(userId) || isAdmin();
         allow update: if isUser(userId) || isAdmin();
         allow delete: if isUser(userId) || isAdmin();
       }
 
       match /players/{playerId} {
         allow read: if isSignedIn();
-        allow create: if isUser(userId);
+        allow create: if isUser(userId) || isAdmin();
         allow update: if isUser(userId) || isAdmin();
         allow delete: if isUser(userId) || isAdmin();
       }
 
       match /enrollments/{enrollmentId} {
         allow read: if isSignedIn();
-        allow create: if isUser(userId);
+        allow create: if isUser(userId) || isAdmin();
         allow update: if isUser(userId) || isAdmin();
         allow delete: if isUser(userId) || isAdmin();
       }
