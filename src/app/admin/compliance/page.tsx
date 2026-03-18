@@ -20,7 +20,8 @@ import {
   UserCheck, 
   Eye, 
   History,
-  FileText
+  FileText,
+  Lock
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -51,19 +52,28 @@ interface Player {
 export default function AdminCompliancePage() {
   const db = useFirestore();
   const storage = useStorage();
-  const { user, profile } = useUser();
+  const { user, profile, isAdmin, loading: loadingUser } = useUser();
   const { toast } = useToast();
   
   const [rejectionReason, setRejectionReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [reviewingClearance, setReviewingClearance] = useState<{ userId: string, clearance: any } | null>(null);
 
+  // Role-guarded queries to prevent permission errors for non-admins
   const usersQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
     return query(collection(db, 'userProfiles'), where('role', 'in', ['Coach', 'Admin']));
-  }, [db]);
+  }, [db, isAdmin]);
   
-  const allClearancesQuery = useMemoFirebase(() => collectionGroup(db, 'clearances'), [db]);
-  const allPlayersQuery = useMemoFirebase(() => collectionGroup(db, 'players'), [db]);
+  const allClearancesQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collectionGroup(db, 'clearances');
+  }, [db, isAdmin]);
+
+  const allPlayersQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collectionGroup(db, 'players');
+  }, [db, isAdmin]);
 
   const { data: users, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
   const { data: allClearances } = useCollection<any>(allClearancesQuery);
@@ -153,6 +163,36 @@ export default function AdminCompliancePage() {
       default: return <AlertTriangle className="h-4 w-4 text-muted-foreground opacity-20" />;
     }
   };
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="parent" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to view compliance reports.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="rounded-full px-8">
+                <a href="/">Return Home</a>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">

@@ -3,14 +3,14 @@
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -45,14 +45,31 @@ interface Team {
 
 export default function MasterRosterPage() {
   const db = useFirestore();
+  const { isAdmin, loading: loadingUser } = useUser();
   const { toast } = useToast();
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
 
-  const seasonsQuery = useMemoFirebase(() => collection(db, 'seasons'), [db]);
-  const teamsQuery = useMemoFirebase(() => collection(db, 'teams'), [db]);
-  const enrollmentsQuery = useMemoFirebase(() => collectionGroup(db, 'enrollments'), [db]);
-  const playersQuery = useMemoFirebase(() => collectionGroup(db, 'players'), [db]);
+  // Guarded queries
+  const seasonsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'seasons');
+  }, [db, isAdmin]);
+
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'teams');
+  }, [db, isAdmin]);
+
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collectionGroup(db, 'enrollments');
+  }, [db, isAdmin]);
+
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collectionGroup(db, 'players');
+  }, [db, isAdmin]);
 
   const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
@@ -67,7 +84,6 @@ export default function MasterRosterPage() {
   const handleAssignTeam = (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
     
-    // 1. Update Enrollment record (Non-blocking)
     updateDoc(enrollmentRef, { 
       teamId: newTeamId === 'unassigned' ? null : newTeamId 
     }).catch(async () => {
@@ -78,7 +94,6 @@ export default function MasterRosterPage() {
       }));
     });
 
-    // 2. Remove from Old Team if necessary (Non-blocking)
     if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
       const oldTeamRef = doc(db, 'teams', oldTeamId);
       updateDoc(oldTeamRef, {
@@ -92,7 +107,6 @@ export default function MasterRosterPage() {
       });
     }
 
-    // 3. Add to New Team if necessary (Non-blocking)
     if (newTeamId && newTeamId !== 'unassigned' && newTeamId !== oldTeamId) {
       const newTeamRef = doc(db, 'teams', newTeamId);
       updateDoc(newTeamRef, {
@@ -138,6 +152,36 @@ export default function MasterRosterPage() {
     a.click();
     document.body.removeChild(a);
   };
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="parent" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to view the master roster.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="rounded-full px-8">
+                <a href="/">Return Home</a>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">

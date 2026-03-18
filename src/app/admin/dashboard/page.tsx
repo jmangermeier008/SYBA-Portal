@@ -1,12 +1,13 @@
+
 "use client";
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useFirestore, useCollection } from '@/firebase';
+import { useFirestore, useCollection, useUser } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
 import { use } from 'react';
 import { collection } from 'firebase/firestore';
-import { ShieldCheck, Users, Trophy, Settings, Activity, ArrowUpRight, Database } from 'lucide-react';
+import { ShieldCheck, Users, Trophy, Settings, Activity, ArrowUpRight, Database, Loader2, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
@@ -21,9 +22,18 @@ export default function AdminDashboard({
   use(searchParams);
 
   const db = useFirestore();
+  const { profile, isAdmin, loading: loadingUser } = useUser();
 
-  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
-  const seasonsQuery = useMemoFirebase(() => collection(db, 'seasons'), [db]);
+  // Guarded queries
+  const usersQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'userProfiles');
+  }, [db, isAdmin]);
+
+  const seasonsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'seasons');
+  }, [db, isAdmin]);
 
   const { data: users } = useCollection(usersQuery);
   const { data: seasons } = useCollection(seasonsQuery);
@@ -34,6 +44,36 @@ export default function AdminDashboard({
     { label: 'System Status', value: 'Healthy', icon: Activity, color: 'text-green-600', bg: 'bg-green-100' },
     { label: 'Security Level', value: 'High', icon: ShieldCheck, color: 'text-red-600', bg: 'bg-red-100' },
   ];
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="parent" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to view the admin dashboard.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="rounded-full px-8">
+                <a href="/">Return Home</a>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
