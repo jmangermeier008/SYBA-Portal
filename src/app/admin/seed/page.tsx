@@ -6,19 +6,40 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useFirestore, useUser } from '@/firebase';
-import { doc, setDoc } from 'firebase/firestore';
-import { Loader2, Database, CheckCircle2, AlertTriangle, UserCheck } from 'lucide-react';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { Loader2, Database, CheckCircle2, AlertTriangle, UserCheck, ShieldCheck, User as UserIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 
 export default function SeedPage() {
   const db = useFirestore();
-  const { user } = useUser();
+  const { user, profile } = useUser();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [assignMeAsCoach, setAssignMeAsCoach] = useState(true);
+
+  const handleRoleSwitch = async (newRole: 'Admin' | 'Coach' | 'Parent') => {
+    if (!user || !db) return;
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'userProfiles', user.uid), {
+        role: newRole,
+        updatedAt: new Date().toISOString()
+      });
+      toast({ 
+        title: "Role Updated", 
+        description: `Your role is now ${newRole}. Please refresh or navigate to see changes.` 
+      });
+      // Force a slight delay to allow Firestore to propagate
+      setTimeout(() => window.location.reload(), 500);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Update Failed", description: e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSeed = async () => {
     setLoading(true);
@@ -116,6 +137,9 @@ export default function SeedPage() {
 
       toast({ title: "Seed Successful", description: `POC data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : ''}` });
       setDone(true);
+      if (assignMeAsCoach) {
+        setTimeout(() => window.location.reload(), 1000);
+      }
     } catch (e: any) {
       toast({ variant: "destructive", title: "Seed Failed", description: e.message });
     } finally {
@@ -125,55 +149,102 @@ export default function SeedPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar role={profile?.role.toLowerCase() as any || 'parent'} />
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">POC Data Seeding</h1>
-          <p className="text-muted-foreground">Initialize the database with sample data to test league registration and roster management.</p>
+          <h1 className="text-3xl font-bold font-headline">POC Management Utilities</h1>
+          <p className="text-muted-foreground">Tools to initialize data and switch between roles for testing.</p>
         </header>
 
-        <Card className="max-w-md border-none shadow-xl">
-          <CardHeader>
-            <CardTitle>Initialize Environment</CardTitle>
-            <CardDescription>This will create seasons, teams, and sample player enrollments.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-yellow-700">
-                This utility is for testing purposes. It will overwrite sample data if it already exists.
-              </p>
-            </div>
-
-            <div className="flex items-center space-x-2 p-4 bg-secondary/20 rounded-xl border">
-              <Checkbox 
-                id="assignMe" 
-                checked={assignMeAsCoach} 
-                onCheckedChange={(checked) => setAssignMeAsCoach(!!checked)} 
-              />
-              <div className="grid gap-1.5 leading-none">
-                <Label htmlFor="assignMe" className="text-sm font-bold flex items-center gap-2">
-                  <UserCheck className="h-4 w-4 text-primary" /> Assign Me as Demo Coach
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Your profile role will be changed to Coach for testing.
+        <div className="grid gap-8 md:grid-cols-2">
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                Initialize Environment
+              </CardTitle>
+              <CardDescription>Setup seasons, teams, and sample enrollments.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-yellow-700">
+                  This utility is for testing purposes. It will overwrite sample data if it already exists.
                 </p>
               </div>
-            </div>
-            
-            {done ? (
-              <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
-                <CheckCircle2 className="h-5 w-5" />
-                <span className="text-sm font-medium">Data successfully seeded! You can now switch to the Coach dashboard.</span>
+
+              <div className="flex items-center space-x-2 p-4 bg-secondary/20 rounded-xl border">
+                <Checkbox 
+                  id="assignMe" 
+                  checked={assignMeAsCoach} 
+                  onCheckedChange={(checked) => setAssignMeAsCoach(!!checked)} 
+                />
+                <div className="grid gap-1.5 leading-none">
+                  <Label htmlFor="assignMe" className="text-sm font-bold flex items-center gap-2">
+                    <UserCheck className="h-4 w-4 text-primary" /> Assign Me as Demo Coach
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Your profile role will be changed to Coach for testing rosters.
+                  </p>
+                </div>
               </div>
-            ) : (
-              <Button onClick={handleSeed} className="w-full h-12 rounded-xl text-lg font-bold" disabled={loading}>
-                {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Database className="mr-2 h-5 w-5" />}
-                Seed POC Data
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+              
+              {done ? (
+                <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="text-sm font-medium">Data successfully seeded!</span>
+                </div>
+              ) : (
+                <Button onClick={handleSeed} className="w-full h-12 rounded-xl text-lg font-bold" disabled={loading}>
+                  {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Database className="mr-2 h-5 w-5" />}
+                  Seed POC Data
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+                Role Switcher
+              </CardTitle>
+              <CardDescription>Instantly switch your account's role to test different dashboards.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 rounded-xl border bg-primary/5 space-y-4">
+                <p className="text-sm text-muted-foreground">Current Role: <span className="font-bold text-primary">{profile?.role || 'Loading...'}</span></p>
+                
+                <div className="grid grid-cols-1 gap-3">
+                  <Button 
+                    variant={profile?.role === 'Admin' ? 'default' : 'outline'} 
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Admin')}
+                    disabled={loading}
+                  >
+                    <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Admin
+                  </Button>
+                  <Button 
+                    variant={profile?.role === 'Coach' ? 'default' : 'outline'} 
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Coach')}
+                    disabled={loading}
+                  >
+                    <Loader2 className="mr-2 h-5 w-5" /> Switch to Coach
+                  </Button>
+                  <Button 
+                    variant={profile?.role === 'Parent' ? 'default' : 'outline'} 
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Parent')}
+                    disabled={loading}
+                  >
+                    <UserIcon className="mr-2 h-5 w-5" /> Switch to Parent
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </main>
     </div>
   );
