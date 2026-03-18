@@ -1,15 +1,17 @@
 "use client";
 
+import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, doc, updateDoc, setDoc } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Check, X, HelpCircle, Trophy } from 'lucide-react';
+import { collection, query, orderBy, doc, setDoc } from 'firebase/firestore';
+import { Calendar, MapPin, Clock, Check, X, HelpCircle, Loader2, Users } from 'lucide-react';
 import { format } from 'date-fns';
-import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { useToast } from '@/hooks/use-toast';
 
 interface Game {
   id: string;
@@ -18,47 +20,71 @@ interface Game {
   location: string;
   dateTime: string;
   type: 'Game' | 'Practice';
-  description?: string;
 }
 
-interface RSVP {
+interface Player {
   id: string;
-  status: 'Attending' | 'Not Attending' | 'Maybe';
-  gameId: string;
+  firstName: string;
+  lastName: string;
 }
 
 export default function ParentSchedulesPage() {
   const { user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
   const teamId = "sharpsville-blue-jays";
+
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles', user.uid, 'players');
+  }, [db, user]);
 
   const gamesQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(collection(db, 'teams', teamId, 'games'), orderBy('dateTime', 'asc'));
-  }, [db]);
+  }, [db, teamId]);
 
+  const { data: players } = useCollection<Player>(playersQuery);
   const { data: games, isLoading } = useCollection<Game>(gamesQuery);
 
-  const handleRSVP = async (gameId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
-    if (!user || !db) return;
+  // Set initial player if available
+  if (!selectedPlayerId && players && players.length > 0) {
+    setSelectedPlayerId(players[0].id);
+  }
 
-    const rsvpId = `${user.uid}_${gameId}`;
+  const handleRSVP = async (gameId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
+    if (!user || !db || !selectedPlayerId) {
+      toast({
+        variant: "destructive",
+        title: "Selection Required",
+        description: "Please select a player to RSVP for."
+      });
+      return;
+    }
+
+    const rsvpId = `${selectedPlayerId}_${gameId}`;
     const rsvpRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId);
     
     const rsvpData = {
       id: rsvpId,
       gameId,
-      playerId: "player-id", // Should be determined by which child the RSVP is for
+      playerId: selectedPlayerId,
       parentUserId: user.uid,
       status,
       timestamp: new Date().toISOString(),
-      // Authorization denormalization
       teamId: teamId,
       coachUserId: "coach-id",
       parentUserIds: [user.uid]
     };
 
     setDoc(rsvpRef, rsvpData, { merge: true })
+      .then(() => {
+        toast({
+          title: "RSVP Sent",
+          description: `Availability updated for ${status}.`
+        });
+      })
       .catch(async (error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: rsvpRef.path,
@@ -72,9 +98,27 @@ export default function ParentSchedulesPage() {
     <div className="flex min-h-screen bg-background">
       <Sidebar role="parent" />
       <main className="flex-1 ml-64 p-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Team Schedule</h1>
-          <p className="text-muted-foreground">View upcoming games and practices for your children.</p>
+        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold font-headline">Team Schedule</h1>
+            <p className="text-muted-foreground">View upcoming games and practices for your children.</p>
+          </div>
+          
+          {players && players.length > 0 && (
+            <div className="flex items-center gap-3 bg-white p-2 rounded-xl border shadow-sm">
+              <Users className="h-4 w-4 text-primary ml-2" />
+              <Select value={selectedPlayerId} onValueChange={setSelectedPlayerId}>
+                <SelectTrigger className="w-[200px] border-none shadow-none focus:ring-0">
+                  <SelectValue placeholder="Select Player" />
+                </SelectTrigger>
+                <SelectContent>
+                  {players.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </header>
 
         <div className="space-y-6">
@@ -115,7 +159,7 @@ export default function ParentSchedulesPage() {
                     </div>
 
                     <div className="flex flex-col items-center gap-3">
-                      <span className="text-xs font-bold text-muted-foreground uppercase">Your RSVP</span>
+                      <span className="text-xs font-bold text-muted-foreground uppercase">RSVP for {players?.find(p => p.id === selectedPlayerId)?.firstName || 'Player'}</span>
                       <div className="flex gap-2">
                         <Button
                           variant="outline"

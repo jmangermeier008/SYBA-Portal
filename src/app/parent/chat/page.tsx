@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, addDoc, query, orderBy, limit, serverTimestamp, doc, setDoc } from 'firebase/firestore';
-import { Send, User as UserIcon, MessageSquare } from 'lucide-react';
+import { collection, query, orderBy, limit, doc, setDoc } from 'firebase/firestore';
+import { Send, MessageSquare, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -17,7 +17,7 @@ interface Message {
   content: string;
   senderUserId: string;
   senderName: string;
-  timestamp: any;
+  timestamp: string;
   type: 'Chat' | 'Broadcast';
 }
 
@@ -37,7 +37,7 @@ export default function ParentChatPage() {
       orderBy('timestamp', 'asc'),
       limit(50)
     );
-  }, [db]);
+  }, [db, teamId]);
 
   const { data: messages, isLoading } = useCollection<Message>(messagesQuery);
 
@@ -60,10 +60,10 @@ export default function ParentChatPage() {
       senderName: profile?.displayName || 'Parent',
       timestamp: new Date().toISOString(),
       type: 'Chat',
-      // Authorization denormalization as per blueprint
       teamId: teamId,
-      coachUserId: "coach-id", // Should be fetched from team doc
-      parentUserIds: [user.uid] // Should be fetched from team doc
+      // Denormalized fields for membership map pattern
+      coachUserId: "coach-id", 
+      parentUserIds: [user.uid]
     };
 
     setDoc(messageRef, messageData)
@@ -103,12 +103,12 @@ export default function ParentChatPage() {
               <div className="flex justify-center py-10">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-            ) : messages?.length === 0 ? (
+            ) : !messages || messages.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">
                 <p>No messages yet. Say hello to the team!</p>
               </div>
             ) : (
-              messages?.map((msg) => (
+              messages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex flex-col ${msg.senderUserId === user?.uid ? 'items-end' : 'items-start'}`}

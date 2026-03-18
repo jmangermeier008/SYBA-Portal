@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, getDocs, updateDoc, doc } from 'firebase/firestore';
-import { useFirestore } from '@/firebase';
+import { updateDoc, doc, collection } from 'firebase/firestore';
+import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,40 +20,16 @@ interface UserData {
 }
 
 export default function RolesPage() {
-  const [users, setUsers] = useState<UserData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const { toast } = useToast();
   const db = useFirestore();
+  const { toast } = useToast();
 
-  const fetchUsers = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, 'userProfiles'));
-      const usersData: UserData[] = [];
-      querySnapshot.forEach((doc) => {
-        usersData.push({ ...doc.data(), id: doc.id } as UserData);
-      });
-      setUsers(usersData);
-    } catch (error: any) {
-      if (error.code === 'permission-denied') {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: 'userProfiles',
-          operation: 'list'
-        }));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
+  const { data: users, isLoading } = useCollection<UserData>(usersQuery);
 
   const handleRoleChange = async (uid: string, newRole: string) => {
     const userRef = doc(db, 'userProfiles', uid);
     updateDoc(userRef, { role: newRole })
       .then(() => {
-        setUsers(users.map(u => u.id === uid ? { ...u, role: newRole } : u));
         toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
       })
       .catch(async (error) => {
@@ -81,14 +56,20 @@ export default function RolesPage() {
               <ShieldCheck className="h-6 w-6" />
               <div>
                 <CardTitle className="text-xl font-headline">System Users</CardTitle>
-                <CardDescription className="text-primary-foreground/80">Manage the {users.length} registered accounts</CardDescription>
+                <CardDescription className="text-primary-foreground/80">
+                  Manage the {users?.length || 0} registered accounts
+                </CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {loading ? (
+            {isLoading ? (
               <div className="flex justify-center items-center py-20">
                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              </div>
+            ) : !users || users.length === 0 ? (
+              <div className="text-center py-20 text-muted-foreground">
+                No users found.
               </div>
             ) : (
               <Table>
@@ -105,8 +86,12 @@ export default function RolesPage() {
                     <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
                       <TableCell className="pl-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                            {user.displayName?.[0] || <UserIcon className="h-5 w-5" />}
+                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
+                            {user.displayName ? (
+                              user.displayName[0].toUpperCase()
+                            ) : (
+                              <UserIcon className="h-5 w-5" />
+                            )}
                           </div>
                           <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
                         </div>

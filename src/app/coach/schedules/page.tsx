@@ -1,25 +1,76 @@
 "use client";
 
+import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, doc, setDoc } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Plus, Users, Send } from 'lucide-react';
+import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
-import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function CoachSchedulesPage() {
   const { user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
+  const [isAdding, setIsAdding] = useState(false);
+  const [open, setOpen] = useState(false);
+  
   const teamId = "sharpsville-blue-jays"; // Mock for MVP
+
+  const [formData, setFormData] = useState({
+    type: 'Practice',
+    opponentName: '',
+    location: '',
+    dateTime: '',
+  });
 
   const gamesQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(collection(db, 'teams', teamId, 'games'), orderBy('dateTime', 'asc'));
-  }, [db]);
+  }, [db, teamId]);
 
   const { data: games, isLoading } = useCollection(gamesQuery);
+
+  const handleAddEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !db) return;
+    setIsAdding(true);
+
+    const gameId = Math.random().toString(36).substring(7);
+    const gameRef = doc(db, 'teams', teamId, 'games', gameId);
+    
+    const gameData = {
+      id: gameId,
+      teamId: teamId,
+      ...formData,
+      // Denormalization for rules
+      coachUserId: user.uid,
+      parentUserIds: [] // In a real app, fetch from team doc
+    };
+
+    setDoc(gameRef, gameData)
+      .then(() => {
+        toast({ title: "Event Added", description: "The team schedule has been updated." });
+        setOpen(false);
+        setFormData({ type: 'Practice', opponentName: '', location: '', dateTime: '' });
+      })
+      .catch(async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: gameRef.path,
+          operation: 'create',
+          requestResourceData: gameData
+        }));
+      })
+      .finally(() => setIsAdding(false));
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -30,15 +81,80 @@ export default function CoachSchedulesPage() {
             <h1 className="text-3xl font-bold font-headline">Team Schedule</h1>
             <p className="text-muted-foreground">Manage practices, games, and monitor attendance.</p>
           </div>
-          <Button className="rounded-full shadow-lg shadow-primary/20">
-            <Plus className="mr-2 h-4 w-4" /> Add Event
-          </Button>
+          
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button className="rounded-full shadow-lg shadow-primary/20">
+                <Plus className="mr-2 h-4 w-4" /> Add Event
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="rounded-2xl">
+              <DialogHeader>
+                <DialogTitle className="font-headline text-2xl">New Team Event</DialogTitle>
+                <DialogDescription>Schedule a new practice or game for the Blue Jays.</DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleAddEvent}>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Event Type</Label>
+                    <Select value={formData.type} onValueChange={(v) => setFormData({...formData, type: v})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Practice">Team Practice</SelectItem>
+                        <SelectItem value="Game">League Game</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {formData.type === 'Game' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="opponent">Opponent Name</Label>
+                      <Input 
+                        id="opponent" 
+                        placeholder="e.g. Tigers" 
+                        value={formData.opponentName}
+                        onChange={(e) => setFormData({...formData, opponentName: e.target.value})}
+                        required
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Location</Label>
+                    <Input 
+                      id="location" 
+                      placeholder="e.g. Field 3" 
+                      value={formData.location}
+                      onChange={(e) => setFormData({...formData, location: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dateTime">Date & Time</Label>
+                    <Input 
+                      id="dateTime" 
+                      type="datetime-local" 
+                      value={formData.dateTime}
+                      onChange={(e) => setFormData({...formData, dateTime: e.target.value})}
+                      required
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                  <Button type="submit" disabled={isAdding}>
+                    {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Schedule Event"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
         </header>
 
         <div className="space-y-6">
           {isLoading ? (
             <div className="flex justify-center py-20">
-              <div className="h-10 w-10 animate-spin text-primary border-4 border-primary border-t-transparent rounded-full" />
+              <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
           ) : !games || games.length === 0 ? (
             <Card className="border-none shadow-md py-12 text-center">
