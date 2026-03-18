@@ -32,7 +32,6 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Corrected collection name to match blueprint and rules
       const docRef = doc(db, 'userProfiles', user.uid);
       const docSnap = await getDoc(docRef);
 
@@ -40,6 +39,7 @@ export default function LoginPage() {
         const userData = docSnap.data();
         router.push(`/${userData.role.toLowerCase()}/dashboard`);
       } else {
+        // If profile doesn't exist, we might be in an inconsistent state
         toast({
           variant: "destructive",
           title: "Profile not found",
@@ -47,8 +47,6 @@ export default function LoginPage() {
         });
       }
     } catch (error: any) {
-      // If it's a permission error during getDoc, the try/catch might catch it
-      // but we should still handle auth errors specifically here
       if (error.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: `userProfiles/${auth.currentUser?.uid}`,
@@ -71,12 +69,12 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Trophy className="h-8 w-8 text-primary" />
-          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">Sharpsville Youth Baseball</span>
+          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">SYBA Portal</span>
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-headline">Parent Portal Login</CardTitle>
-            <CardDescription>Enter your credentials to manage your players</CardDescription>
+            <CardTitle className="text-2xl font-headline">Portal Login</CardTitle>
+            <CardDescription>Enter your credentials to access your dashboard</CardDescription>
           </CardHeader>
           <form onSubmit={handleLogin}>
             <CardContent className="space-y-4">
@@ -95,7 +93,7 @@ export default function LoginPage() {
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 New to SYBA?{" "}
-                <Link href="/signup" className="text-primary font-medium hover:underline">Register now</Link>
+                <Link href="/signup" className="text-primary font-medium hover:underline">Create an account</Link>
               </p>
             </CardFooter>
           </form>
