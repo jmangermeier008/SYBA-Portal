@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock } from 'lucide-react';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
+import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
@@ -105,19 +105,11 @@ export default function TeamsAdminPage() {
   };
 
   const handleDeleteTeam = (id: string) => {
-    if (!confirm("Are you sure? This will delete the team entity.")) return;
+    if (!confirm("Are you sure? This will permanently delete this team and its roster associations.")) return;
     
     const teamRef = doc(db, 'teams', id);
-    deleteDoc(teamRef)
-      .then(() => {
-        toast({ title: "Team Deleted" });
-      })
-      .catch(async (error) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: teamRef.path,
-          operation: 'delete'
-        }));
-      });
+    deleteDocumentNonBlocking(teamRef);
+    toast({ title: "Deletion Initiated", description: "The team is being removed from the league." });
   };
 
   if (loadingUser) {
@@ -264,7 +256,8 @@ export default function TeamsAdminPage() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="text-destructive opacity-0 group-hover:opacity-100 transition-opacity" 
+                      type="button"
+                      className="text-destructive hover:bg-destructive/10" 
                       onClick={() => handleDeleteTeam(team.id)}
                     >
                       <Trash2 className="h-4 w-4" />
