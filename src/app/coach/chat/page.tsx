@@ -1,7 +1,8 @@
 "use client";
 
 import { Sidebar } from '@/components/navigation/sidebar';
-import { ParentChatPageContent } from '@/components/chat/parent-chat-content'; // We'll refactor the existing chat to a reusable component
+import { Button } from '@/components/ui/button';
+import { Users } from 'lucide-react';
 
 export default function CoachChatPage() {
   return (
@@ -12,7 +13,6 @@ export default function CoachChatPage() {
           <h1 className="text-3xl font-bold font-headline">Team Communication</h1>
           <p className="text-muted-foreground">Stay connected with your players' parents and assistant coaches.</p>
         </header>
-        {/* Reusing the same chat UI structure for MVP */}
         <div className="max-w-5xl mx-auto h-[calc(100vh-200px)]">
            <div className="bg-white rounded-2xl shadow-xl border h-full flex flex-col items-center justify-center text-center p-12">
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-6">
@@ -27,5 +27,3 @@ export default function CoachChatPage() {
     </div>
   );
 }
-
-import { Users } from 'lucide-react';
