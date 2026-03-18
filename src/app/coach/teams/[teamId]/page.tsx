@@ -1,3 +1,4 @@
+
 "use client";
 
 import { use, useState } from 'react';
@@ -15,7 +16,8 @@ import {
   CalendarCheck, 
   User as UserIcon,
   ChevronLeft,
-  LifeBuoy
+  LifeBuoy,
+  Users
 } from 'lucide-react';
 import Link from 'next/link';
 import { differenceInYears } from 'date-fns';
@@ -61,17 +63,16 @@ interface UserProfile {
 }
 
 export default function TeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
-  const resolvedParams = use(params);
-  const teamId = resolvedParams.teamId;
+  const { teamId } = use(params);
   const db = useFirestore();
 
-  // Query enrollments for this team
+  // Query enrollments for this specific team
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId));
   }, [db, teamId]);
 
-  // Query players (collectionGroup to catch all players under userProfiles)
+  // Query all players - we'll filter them in memory based on enrollments for the POC
   const playersQuery = useMemoFirebase(() => {
     if (!db) return null;
     return collectionGroup(db, 'players');
@@ -102,11 +103,14 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen bg-background items-center justify-center ml-64">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Loading roster details...</p>
-        </div>
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="coach" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
+            <p className="text-muted-foreground font-medium">Loading team roster...</p>
+          </div>
+        </main>
       </div>
     );
   }
@@ -116,19 +120,22 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
       <Sidebar role="coach" />
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8">
-          <Button variant="ghost" asChild className="mb-4">
-            <Link href="/coach/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Teams</Link>
+          <Button variant="ghost" asChild className="mb-4 -ml-2">
+            <Link href="/coach/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to My Teams</Link>
           </Button>
-          <h1 className="text-3xl font-bold font-headline">Team Roster</h1>
-          <p className="text-muted-foreground">Detailed view of your players and parent contact information.</p>
+          <h1 className="text-4xl font-bold font-headline">Team Roster</h1>
+          <p className="text-muted-foreground mt-2">Detailed player profiles and parent contact hub.</p>
         </header>
 
         {!enrollments || enrollments.length === 0 ? (
           <Card className="border-none shadow-md py-20 text-center">
             <CardContent>
-              <UserIcon className="h-16 w-16 text-muted mx-auto mb-4" />
-              <h3 className="text-xl font-bold font-headline">No Players Assigned</h3>
-              <p className="text-muted-foreground">This team roster is currently empty.</p>
+              <Users className="h-16 w-16 text-muted mx-auto mb-4" />
+              <h3 className="text-xl font-bold font-headline">No Players Found</h3>
+              <p className="text-muted-foreground">This team roster is currently empty or players are awaiting assignment.</p>
+              <Button className="mt-6" asChild variant="outline">
+                <Link href="/coach/teams">Check Other Teams</Link>
+              </Button>
             </CardContent>
           </Card>
         ) : (
@@ -140,21 +147,21 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
               if (!player) return null;
 
               return (
-                <Card key={enrollment.id} className="border-none shadow-lg overflow-hidden group hover:shadow-xl transition-shadow">
+                <Card key={enrollment.id} className="border-none shadow-lg overflow-hidden group hover:shadow-xl transition-all border-l-4 border-l-primary">
                   <CardHeader className="bg-primary/5 pb-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl">
+                        <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl shadow-md">
                           {enrollment.jerseyNumber || player.firstName[0]}
                         </div>
                         <div>
-                          <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
-                          <CardDescription className="flex items-center gap-2">
-                            <Badge variant="secondary" className="bg-primary/10 text-primary border-none">
+                          <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>
+                          <CardDescription className="flex items-center gap-2 mt-1">
+                            <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
                               Age: {calculateBaseballAge(player.dateOfBirth)}
                             </Badge>
                             {enrollment.jerseyNumber && (
-                              <Badge variant="outline">#{enrollment.jerseyNumber}</Badge>
+                              <Badge variant="outline" className="text-[10px]">#{enrollment.jerseyNumber}</Badge>
                             )}
                           </CardDescription>
                         </div>
@@ -168,36 +175,36 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                           </DialogTrigger>
                           <DialogContent className="rounded-2xl">
                             <DialogHeader>
-                              <DialogTitle className="flex items-center gap-2 text-destructive">
-                                <AlertTriangle className="h-5 w-5" /> Critical Info: {player.firstName}
+                              <DialogTitle className="flex items-center gap-2 text-destructive font-headline">
+                                <AlertTriangle className="h-5 w-5" /> Health & Safety: {player.firstName}
                               </DialogTitle>
                               <DialogDescription>
-                                Medical alerts and emergency contacts.
+                                Critical medical notes and emergency contact tree.
                               </DialogDescription>
                             </DialogHeader>
                             
-                            <div className="space-y-4">
+                            <div className="space-y-4 mt-4">
                               {player.medicalNotes && (
                                 <div className="bg-destructive/5 p-4 rounded-xl border border-destructive/20">
-                                  <h4 className="text-xs font-bold uppercase mb-2">Medical Alert</h4>
-                                  <p className="font-semibold text-destructive">{player.medicalNotes}</p>
+                                  <h4 className="text-[10px] font-bold uppercase mb-2 tracking-widest text-destructive/70">Medical Alert</h4>
+                                  <p className="font-bold text-destructive">{player.medicalNotes}</p>
                                 </div>
                               )}
 
                               {player.emergencyContacts && player.emergencyContacts.length > 0 && (
                                 <div className="space-y-3">
-                                  <h4 className="text-xs font-bold uppercase flex items-center gap-2">
+                                  <h4 className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 text-muted-foreground">
                                     <LifeBuoy className="h-4 w-4" /> Emergency Contacts
                                   </h4>
                                   {player.emergencyContacts.map((contact, i) => (
-                                    <div key={i} className="bg-secondary/20 p-3 rounded-xl flex justify-between items-center">
+                                    <div key={i} className="bg-secondary/20 p-4 rounded-xl flex justify-between items-center border">
                                       <div>
                                         <p className="font-bold text-sm">{contact.name}</p>
                                         <p className="text-xs text-muted-foreground">{contact.relationship}</p>
                                       </div>
-                                      <Button size="sm" variant="outline" className="rounded-full" asChild>
+                                      <Button size="sm" variant="outline" className="rounded-full shadow-sm bg-white" asChild>
                                         <a href={`tel:${contact.phone}`}>
-                                          <Phone className="h-3 w-3 mr-1" /> {contact.phone}
+                                          <Phone className="h-3 w-3 mr-2 text-primary" /> {contact.phone}
                                         </a>
                                       </Button>
                                     </div>
@@ -212,17 +219,17 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                   </CardHeader>
                   <CardContent className="pt-6 space-y-4">
                     <div className="space-y-3">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                        <UserIcon className="h-3 w-3" /> Parent/Guardian
+                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <UserIcon className="h-3 w-3" /> Primary Guardian
                       </h4>
                       {parent ? (
-                        <div className="bg-secondary/20 p-4 rounded-xl space-y-3">
-                          <p className="font-semibold">{parent.displayName}</p>
+                        <div className="bg-secondary/20 p-4 rounded-xl space-y-3 border border-secondary">
+                          <p className="font-bold text-sm">{parent.displayName}</p>
                           <div className="flex gap-2">
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="flex-1 rounded-full bg-white hover:bg-primary/5"
+                              className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
                               asChild
                             >
                               <a href={`tel:${parent.phoneNumber}`}>
@@ -232,7 +239,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="flex-1 rounded-full bg-white hover:bg-primary/5"
+                              className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
                               asChild
                             >
                               <a href={`sms:${parent.phoneNumber}`}>
@@ -242,16 +249,18 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                           </div>
                         </div>
                       ) : (
-                        <p className="text-xs italic text-muted-foreground">Contact information unavailable</p>
+                        <div className="p-4 rounded-xl bg-muted/30 text-center border border-dashed">
+                          <p className="text-xs italic text-muted-foreground">Guardian info not linked</p>
+                        </div>
                       )}
                     </div>
                     
-                    <div className="pt-2 border-t flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <CalendarCheck className="h-3 w-3" />
-                        <span>Team Member</span>
+                    <div className="pt-4 border-t flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+                        <CalendarCheck className="h-3 w-3 text-primary" />
+                        <span>Verified Member</span>
                       </div>
-                      <Badge variant="outline" className="text-[10px] uppercase font-bold">
+                      <Badge variant="outline" className="text-[10px] uppercase font-bold bg-secondary/30">
                         {enrollment.divisionId}
                       </Badge>
                     </div>
