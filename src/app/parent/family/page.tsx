@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle, UserPlus, Phone, ShieldCheck } from 'lucide-react';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -35,6 +35,9 @@ interface Player {
   ageVerified?: boolean;
   emergencyContacts?: EmergencyContact[];
 }
+
+const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
 export default function FamilyPage() {
   const { user } = useUser();
@@ -111,8 +114,20 @@ export default function FamilyPage() {
     const file = e.target.files?.[0];
     if (!file || !user || !storage || !db) return;
 
+    // Technical Constraint Validation
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast({ variant: "destructive", title: "Invalid File Type", description: "Please upload a PDF, JPEG, or PNG." });
+      return;
+    }
+
+    if (file.size > MAX_SIZE) {
+      toast({ variant: "destructive", title: "File Too Large", description: "Maximum file size is 5MB." });
+      return;
+    }
+
     setUploading(playerId);
-    const storageRef = ref(storage, `users/${user.uid}/players/${playerId}/birth_certificate_${Date.now()}`);
+    // Path: /compliance/{userId}/{docType}_{timestamp}
+    const storageRef = ref(storage, `compliance/${user.uid}/birth_certificate_${playerId}_${Date.now()}`);
 
     try {
       const snapshot = await uploadBytes(storageRef, file);
@@ -310,6 +325,7 @@ export default function FamilyPage() {
                             <input
                               type="file"
                               className="hidden"
+                              accept=".pdf,.jpg,.jpeg,.png"
                               onChange={(e) => handleFileUpload(player.id, e)}
                               disabled={!!uploading}
                             />

@@ -8,18 +8,22 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Loader2, Upload, CheckCircle2, AlertCircle, XCircle, Clock, Info, ShieldAlert } from 'lucide-react';
+import { Loader2, Upload, AlertCircle, Clock, ShieldAlert } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { format, isBefore, addMonths } from 'date-fns';
+import { cn } from '@/lib/utils';
 
 const CLEARANCE_TYPES = [
   { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance', description: 'Mandatory state background check.' },
   { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check', description: 'State police criminal history report.' },
   { id: 'FBI', label: 'FBI Fingerprint or Disclosure Statement', description: 'Federal background check for long-term residents.' },
 ];
+
+const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 
 export default function CoachCompliancePage() {
   const { user } = useUser();
@@ -42,14 +46,26 @@ export default function CoachCompliancePage() {
       return;
     }
 
+    // Technical Constraint Validation
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast({ variant: "destructive", title: "Invalid File Type", description: "Please upload a PDF, JPEG, or PNG." });
+      return;
+    }
+
+    if (file.size > MAX_SIZE) {
+      toast({ variant: "destructive", title: "File Too Large", description: "Maximum file size is 5MB." });
+      return;
+    }
+
     setUploading(type);
-    const storageRef = ref(storage, `users/${user.uid}/clearances/${type}_${Date.now()}`);
+    // Path: /compliance/{userId}/{docType}_{timestamp}
+    const storageRef = ref(storage, `compliance/${user.uid}/${type}_${Date.now()}`);
 
     try {
       const snapshot = await uploadBytes(storageRef, file);
       const url = await getDownloadURL(snapshot.ref);
       
-      const clearanceId = type; // Use type as ID for easy lookup (one per type)
+      const clearanceId = type; 
       const clearanceRef = doc(db, 'userProfiles', user.uid, 'clearances', clearanceId);
       
       await setDoc(clearanceRef, {
@@ -177,6 +193,7 @@ export default function CoachCompliancePage() {
                                 type="file" 
                                 id={`file-${clearanceType.id}`}
                                 className="hidden"
+                                accept=".pdf,.jpg,.jpeg,.png"
                                 onChange={(e) => {
                                   const expInput = document.getElementById(`exp-${clearanceType.id}`) as HTMLInputElement;
                                   const file = e.target.files?.[0];
