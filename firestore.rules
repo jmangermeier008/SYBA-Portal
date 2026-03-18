@@ -14,18 +14,6 @@ service cloud.firestore {
      *    denormalized 'parentUserIds' list.
      * 3. Global Config: Seasons and Divisions are public for reading to all authenticated 
      *    members but restricted to Admins for modifications.
-     * 
-     * DATA STRUCTURE:
-     * - /userProfiles/{userId}: Root user data.
-     * - /userProfiles/{userId}/players/{playerId}: Private child subcollections.
-     * - /teams/{teamId}: Collaborative team hubs.
-     * - /seasons/{seasonId}: Global league configuration.
-     * 
-     * DENORMALIZATION FOR AUTHORIZATION:
-     * To ensure high performance and avoid costly get() calls, we require:
-     * - 'coachUserId' and 'parentUserIds' (array) fields on all Team, Game, Message, and RSVP documents.
-     * - 'parentUserId' fields on Player and Enrollment documents.
-     * - 'creatorUserId' on Drill documents.
      */
 
     // --- GLOBAL HELPER FUNCTIONS ---
@@ -56,64 +44,43 @@ service cloud.firestore {
     // --- COLLECTION RULES ---
 
     /**
-     * @description Individual user profiles containing roles and contact info.
-     * @path /userProfiles/{userId}
-     * @allow (get, list, update) if the user is the owner. (create) if the ID matches the Auth UID.
-     * @deny (create, update) if trying to modify another user's profile.
-     * @principle Ownership.
+     * @description Individual user profiles.
+     * @allow (get, list) if owner or admin. (create) if matching Auth UID. (update) if owner or admin.
      */
     match /userProfiles/{userId} {
-      allow get, list: if isUser(userId);
+      allow get, list: if isUser(userId) || isAdmin();
       allow create: if isUser(userId);
-      allow update: if isExistingOwner(userId);
-      allow delete: if false; // Profiles should generally not be deleted via client logic.
+      allow update: if isExistingOwner(userId) || isAdmin();
+      allow delete: if false;
     }
 
     /**
-     * @description Players managed by a parent. Path-based and field-based ownership.
-     * @path /userProfiles/{parentUserId}/players/{playerId}
-     * @allow (all) if the user matches parentUserId.
-     * @deny (all) if accessing players under a different parent's path.
-     * @principle Structural Segregation & Ownership.
+     * @description Players managed by a parent.
      */
     match /userProfiles/{parentUserId}/players/{playerId} {
-      allow get, list: if isUser(parentUserId);
+      allow get, list: if isUser(parentUserId) || isAdmin();
       allow create: if isUser(parentUserId) && request.resource.data.parentUserId == parentUserId;
-      allow update: if isExistingOwner(parentUserId) && request.resource.data.parentUserId == parentUserId;
-      allow delete: if isExistingOwner(parentUserId);
+      allow update: if (isExistingOwner(parentUserId) && request.resource.data.parentUserId == parentUserId) || isAdmin();
+      allow delete: if isExistingOwner(parentUserId) || isAdmin();
     }
 
     /**
-     * @description Season enrollments and payment tracking for players.
-     * @path /userProfiles/{parentUserId}/enrollments/{enrollmentId}
-     * @allow (all) if the user matches parentUserId.
-     * @deny (all) if accessing enrollments for another parent's path.
-     * @principle Structural Segregation & Ownership.
+     * @description Season enrollments.
      */
     match /userProfiles/{parentUserId}/enrollments/{enrollmentId} {
-      allow get, list: if isUser(parentUserId);
+      allow get, list: if isUser(parentUserId) || isAdmin();
       allow create: if isUser(parentUserId) && request.resource.data.parentUserId == parentUserId;
-      allow update: if isExistingOwner(parentUserId) && request.resource.data.parentUserId == parentUserId;
-      allow delete: if isExistingOwner(parentUserId);
+      allow update: if (isExistingOwner(parentUserId) && request.resource.data.parentUserId == parentUserId) || isAdmin();
+      allow delete: if isExistingOwner(parentUserId) || isAdmin();
     }
 
     /**
      * @description Global season definitions.
-     * @path /seasons/{seasonId}
-     * @allow (get, list) for any signed-in user. (write) for Admins only.
-     * @deny (write) for non-Admin users.
-     * @principle Roles.
      */
     match /seasons/{seasonId} {
       allow get, list: if isSignedIn();
       allow create, update, delete: if isAdmin();
 
-      /**
-       * @description Divisions within a season (e.g., T-Ball).
-       * @path /seasons/{seasonId}/divisions/{divisionId}
-       * @allow (get, list) for any signed-in user. (write) for Admins only.
-       * @principle Roles.
-       */
       match /divisions/{divisionId} {
         allow get, list: if isSignedIn();
         allow create, update, delete: if isAdmin();
@@ -121,62 +88,37 @@ service cloud.firestore {
     }
 
     /**
-     * @description Team entities. Access depends on membership or coaching role.
-     * @path /teams/{teamId}
-     * @allow (get, list) if user is coach or parent of a player on the team. (update) if coach.
-     * @deny (delete, create) via client for non-admins.
-     * @principle Shared Access (Closed Collaborators).
+     * @description Team entities.
      */
     match /teams/{teamId} {
-      allow get, list: if isTeamMember(resource.data);
+      allow get, list: if isTeamMember(resource.data) || isAdmin();
       allow create: if isAdmin();
       allow update: if isAdmin() || (resource != null && request.auth.uid == resource.data.coachUserId);
       allow delete: if isAdmin();
 
-      /**
-       * @description Scheduled games and practices.
-       * @path /teams/{teamId}/games/{gameId}
-       * @allow (get, list) if user is team member. (write) if coach.
-       * @principle Shared Access.
-       */
       match /games/{gameId} {
-        allow get, list: if isTeamMember(resource.data);
-        allow create: if isTeamMember(request.resource.data) && request.auth.uid == request.resource.data.coachUserId;
-        allow update: if isTeamMember(resource.data) && request.auth.uid == resource.data.coachUserId;
-        allow delete: if isTeamMember(resource.data) && request.auth.uid == resource.data.coachUserId;
+        allow get, list: if isTeamMember(resource.data) || isAdmin();
+        allow create: if (isTeamMember(request.resource.data) && request.auth.uid == request.resource.data.coachUserId) || isAdmin();
+        allow update: if (isTeamMember(resource.data) && request.auth.uid == resource.data.coachUserId) || isAdmin();
+        allow delete: if (isTeamMember(resource.data) && request.auth.uid == resource.data.coachUserId) || isAdmin();
 
-        /**
-         * @description RSVPs for specific games.
-         * @path /teams/{teamId}/games/{gameId}/rsvps/{rsvpId}
-         * @allow (get, list) for team members. (write) for the parent who owns the RSVP.
-         * @principle Shared Access + Ownership.
-         */
         match /rsvps/{rsvpId} {
-          allow get, list: if isTeamMember(resource.data);
-          allow create: if isTeamMember(request.resource.data) && isUser(request.resource.data.parentUserId);
-          allow update: if isTeamMember(resource.data) && isUser(resource.data.parentUserId);
-          allow delete: if isExistingOwner(resource.data.parentUserId);
+          allow get, list: if isTeamMember(resource.data) || isAdmin();
+          allow create: if (isTeamMember(request.resource.data) && isUser(request.resource.data.parentUserId)) || isAdmin();
+          allow update: if (isTeamMember(resource.data) && isUser(request.resource.data.parentUserId)) || isAdmin();
+          allow delete: if isExistingOwner(resource.data.parentUserId) || isAdmin();
         }
       }
 
-      /**
-       * @description Team chat and broadcast messages.
-       * @path /teams/{teamId}/messages/{messageId}
-       * @allow (get, list) for team members. (create) for team members. (delete/update) for authors.
-       * @principle Shared Access + Ownership.
-       */
       match /messages/{messageId} {
-        allow get, list: if isTeamMember(resource.data);
-        allow create: if isTeamMember(request.resource.data) && isUser(request.resource.data.senderUserId);
-        allow update, delete: if isExistingOwner(resource.data.senderUserId);
+        allow get, list: if isTeamMember(resource.data) || isAdmin();
+        allow create: if (isTeamMember(request.resource.data) && isUser(request.resource.data.senderUserId)) || isAdmin();
+        allow update, delete: if isExistingOwner(resource.data.senderUserId) || isAdmin();
       }
     }
 
     /**
      * @description Practice drills database.
-     * @path /drills/{drillId}
-     * @allow (get, list) for any signed-in user. (write) for the creator or Admins.
-     * @principle Public Read with Owner-Only Writes.
      */
     match /drills/{drillId} {
       allow get, list: if isSignedIn();

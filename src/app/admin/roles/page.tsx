@@ -10,9 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, ShieldCheck, User as UserIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface UserData {
-  uid: string;
+  id: string;
   email: string;
   displayName: string;
   role: string;
@@ -26,14 +28,19 @@ export default function RolesPage() {
 
   const fetchUsers = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, 'users'));
+      const querySnapshot = await getDocs(collection(db, 'userProfiles'));
       const usersData: UserData[] = [];
       querySnapshot.forEach((doc) => {
-        usersData.push(doc.data() as UserData);
+        usersData.push({ ...doc.data(), id: doc.id } as UserData);
       });
       setUsers(usersData);
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      if (error.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: 'userProfiles',
+          operation: 'list'
+        }));
+      }
     } finally {
       setLoading(false);
     }
@@ -44,13 +51,19 @@ export default function RolesPage() {
   }, []);
 
   const handleRoleChange = async (uid: string, newRole: string) => {
-    try {
-      await updateDoc(doc(db, 'users', uid), { role: newRole });
-      setUsers(users.map(u => u.uid === uid ? { ...u, role: newRole } : u));
-      toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Update Failed", description: error.message });
-    }
+    const userRef = doc(db, 'userProfiles', uid);
+    updateDoc(userRef, { role: newRole })
+      .then(() => {
+        setUsers(users.map(u => u.id === uid ? { ...u, role: newRole } : u));
+        toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
+      })
+      .catch(async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: userRef.path,
+          operation: 'update',
+          requestResourceData: { role: newRole }
+        }));
+      });
   };
 
   return (
@@ -89,7 +102,7 @@ export default function RolesPage() {
                 </TableHeader>
                 <TableBody>
                   {users.map((user) => (
-                    <TableRow key={user.uid} className="group hover:bg-secondary/20 transition-colors">
+                    <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
                       <TableCell className="pl-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
@@ -107,7 +120,7 @@ export default function RolesPage() {
                       <TableCell className="pr-6 text-right">
                         <Select
                           defaultValue={user.role}
-                          onValueChange={(val) => handleRoleChange(user.uid, val)}
+                          onValueChange={(val) => handleRoleChange(user.id, val)}
                         >
                           <SelectTrigger className="w-[140px] rounded-xl ml-auto">
                             <SelectValue />

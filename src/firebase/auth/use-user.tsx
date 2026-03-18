@@ -1,13 +1,14 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useAuth, useFirestore } from '../provider';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export interface UserProfile {
-  uid: string;
+  id: string;
   email: string | null;
   displayName: string | null;
   role: 'Parent' | 'Coach' | 'Admin';
@@ -36,14 +37,23 @@ export function useUser() {
   useEffect(() => {
     if (!user) return;
 
-    const userRef = doc(db, 'users', user.uid);
+    // Standardized on 'userProfiles' collection
+    const userRef = doc(db, 'userProfiles', user.uid);
     const unsubscribeProfile = onSnapshot(userRef, (snapshot) => {
       if (snapshot.exists()) {
-        setProfile(snapshot.data() as UserProfile);
+        const data = snapshot.data();
+        setProfile({ ...data, id: snapshot.id } as UserProfile);
+      } else {
+        setProfile(null);
       }
       setLoading(false);
-    }, (error) => {
-      console.error("Error fetching profile:", error);
+    }, async (error) => {
+      // Emit contextual error for security rules debugging
+      const permissionError = new FirestorePermissionError({
+        path: userRef.path,
+        operation: 'get',
+      });
+      errorEmitter.emit('permission-error', permissionError);
       setLoading(false);
     });
 

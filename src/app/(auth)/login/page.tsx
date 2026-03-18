@@ -12,6 +12,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import Link from 'next/link';
 import { Trophy, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -30,7 +32,8 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      const docRef = doc(db, 'users', user.uid);
+      // Corrected collection name to match blueprint and rules
+      const docRef = doc(db, 'userProfiles', user.uid);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
@@ -44,11 +47,20 @@ export default function LoginPage() {
         });
       }
     } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Login Failed",
-        description: error.message,
-      });
+      // If it's a permission error during getDoc, the try/catch might catch it
+      // but we should still handle auth errors specifically here
+      if (error.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: `userProfiles/${auth.currentUser?.uid}`,
+          operation: 'get'
+        }));
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Login Failed",
+          description: error.message,
+        });
+      }
     } finally {
       setLoading(false);
     }
