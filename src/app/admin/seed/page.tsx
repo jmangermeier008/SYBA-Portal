@@ -38,33 +38,69 @@ export default function SeedPage() {
         await setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div);
       }
 
-      // 2. Seed Teams
-      const teams = [
-        { 
-          id: 'blue-jays-spring-2024', 
-          name: 'Blue Jays', 
-          seasonId, 
-          divisionId: 'tball', 
-          coach_uid: 'demo-coach-uid', 
-          player_ids: [],
-          createdAt: new Date().toISOString()
-        },
-        { 
-          id: 'tigers-spring-2024', 
-          name: 'Tigers', 
-          seasonId, 
-          divisionId: 'minors', 
-          coach_uid: 'demo-coach-uid', 
-          player_ids: [],
-          createdAt: new Date().toISOString()
-        },
-      ];
+      // 2. Seed Sample Users (Profiles only, auth must be done via UI)
+      const demoCoachUid = 'demo-coach-uid';
+      const demoParentUid = 'demo-parent-uid';
 
-      for (const team of teams) {
-        await setDoc(doc(db, 'teams', team.id), team);
-      }
+      await setDoc(doc(db, 'userProfiles', demoCoachUid), {
+        id: demoCoachUid,
+        displayName: 'Coach Mike Smith',
+        email: 'coach@example.com',
+        role: 'Coach',
+        createdAt: new Date().toISOString()
+      });
 
-      toast({ title: "Seed Successful", description: "POC data has been initialized." });
+      await setDoc(doc(db, 'userProfiles', demoParentUid), {
+        id: demoParentUid,
+        displayName: 'Jane Doe',
+        email: 'parent@example.com',
+        phoneNumber: '(555) 123-4567',
+        role: 'Parent',
+        shareContactInfo: true,
+        createdAt: new Date().toISOString()
+      });
+
+      // 3. Seed Teams
+      const teamId = 'blue-jays-spring-2024';
+      const samplePlayerId = 'sample-player-1';
+
+      await setDoc(doc(db, 'teams', teamId), { 
+        id: teamId, 
+        name: 'Blue Jays', 
+        seasonId, 
+        divisionId: 'tball', 
+        coach_uid: demoCoachUid, 
+        player_ids: [samplePlayerId],
+        createdAt: new Date().toISOString()
+      });
+
+      // 4. Seed Players & Enrollments for the demo parent
+      await setDoc(doc(db, 'userProfiles', demoParentUid, 'players', samplePlayerId), {
+        id: samplePlayerId,
+        firstName: 'Tommy',
+        lastName: 'Doe',
+        dateOfBirth: '2018-05-15',
+        parentUserId: demoParentUid,
+        medicalNotes: 'Peanut Allergy',
+        ageVerified: true,
+        emergencyContacts: [
+          { name: 'John Doe', phone: '(555) 987-6543', relationship: 'Father' }
+        ]
+      });
+
+      await setDoc(doc(db, 'userProfiles', demoParentUid, 'enrollments', 'demo-enroll-1'), {
+        id: 'demo-enroll-1',
+        playerId: samplePlayerId,
+        seasonId,
+        divisionId: 'tball',
+        parentUserId: demoParentUid,
+        paymentStatus: 'paid',
+        teamId: teamId,
+        jerseySize: 'Youth S',
+        jerseyNumber: '10'
+      });
+
+      toast({ title: "Seed Successful", description: "POC data with players and enrollments initialized." });
       setDone(true);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Seed Failed", description: e.message });
@@ -85,20 +121,20 @@ export default function SeedPage() {
         <Card className="max-w-md border-none shadow-xl">
           <CardHeader>
             <CardTitle>Initialize Environment</CardTitle>
-            <CardDescription>This will create the "Spring 2024" season and sample teams.</CardDescription>
+            <CardDescription>This will create seasons, teams, and sample player enrollments.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
               <p className="text-xs text-yellow-700">
-                This utility is for testing purposes. It will overwrite the "Spring 2024" configuration if it already exists.
+                This utility is for testing purposes. It will overwrite sample data if it already exists.
               </p>
             </div>
             
             {done ? (
               <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="text-sm font-medium">Data successfully seeded! You can now test Parent enrollment.</span>
+                <span className="text-sm font-medium">Data successfully seeded! Log in as a Coach to see your roster.</span>
               </div>
             ) : (
               <Button onClick={handleSeed} className="w-full h-12 rounded-xl" disabled={loading}>
