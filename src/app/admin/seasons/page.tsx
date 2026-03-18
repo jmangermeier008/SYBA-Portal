@@ -12,7 +12,8 @@ import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface Season {
   id: string;
@@ -38,45 +39,59 @@ export default function SeasonsAdminPage() {
 
   const { data: seasons, isLoading } = useCollection<Season>(seasonsQuery);
 
-  const handleCreateSeason = async (e: React.FormEvent) => {
+  const handleCreateSeason = (e: React.FormEvent) => {
     e.preventDefault();
     setIsAdding(true);
 
     const seasonId = formData.name.toLowerCase().replace(/\s+/g, '-');
     const seasonRef = doc(db, 'seasons', seasonId);
 
-    try {
-      await setDoc(seasonRef, {
-        id: seasonId,
-        ...formData,
+    const seasonData = {
+      id: seasonId,
+      ...formData,
+    };
+
+    // Non-blocking write
+    setDoc(seasonRef, seasonData)
+      .then(() => {
+        // Default divisions for a new season
+        const divisions = [
+          { id: 'tball', name: 'T-Ball', fee: 5000 },
+          { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
+          { id: 'minors', name: 'Minor League', fee: 10000 },
+          { id: 'majors', name: 'Major League', fee: 12500 },
+        ];
+
+        for (const div of divisions) {
+          setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div);
+        }
+
+        toast({ title: "Season Created", description: `${formData.name} is now active.` });
+        setOpen(false);
+        setFormData({ name: '', registrationOpen: '', registrationClose: '' });
+      })
+      .catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: seasonRef.path,
+          operation: 'create',
+          requestResourceData: seasonData
+        }));
+      })
+      .finally(() => {
+        setIsAdding(false);
       });
-
-      // Default divisions for a new season
-      const divisions = [
-        { id: 'tball', name: 'T-Ball', fee: 5000 },
-        { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
-        { id: 'minors', name: 'Minor League', fee: 10000 },
-        { id: 'majors', name: 'Major League', fee: 12500 },
-      ];
-
-      for (const div of divisions) {
-        await setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div);
-      }
-
-      toast({ title: "Season Created", description: `${formData.name} is now active.` });
-      setOpen(false);
-      setFormData({ name: '', registrationOpen: '', registrationClose: '' });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-    } finally {
-      setIsAdding(false);
-    }
   };
 
   const handleDeleteSeason = async (id: string) => {
     if (!confirm("Are you sure? This will delete the season and all its divisions.")) return;
-    await deleteDoc(doc(db, 'seasons', id));
-    toast({ title: "Season Deleted" });
+    const seasonRef = doc(db, 'seasons', id);
+    deleteDoc(seasonRef).catch(async () => {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({
+        path: seasonRef.path,
+        operation: 'delete'
+      }));
+    });
+    toast({ title: "Season Deletion Initiated" });
   };
 
   return (

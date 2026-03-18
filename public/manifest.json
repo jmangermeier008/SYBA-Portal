@@ -1,20 +1,20 @@
+
 {
-  "name": "Home Run Hub",
-  "short_name": "Hub",
-  "description": "Youth Sports Management Platform",
+  "name": "Sharpsville Youth Baseball Association",
+  "short_name": "SYBA",
+  "description": "Official management portal for Sharpsville Youth Baseball Association.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ECF2F7",
+  "background_color": "#f8fafc",
   "theme_color": "#2E7ECC",
   "icons": [
     {
-      "src": "https://picsum.photos/seed/sports/192/192",
+      "src": "https://picsum.photos/seed/syba/192/192",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     },
     {
-      "src": "https://picsum.photos/seed/sports/512/512",
+      "src": "https://picsum.photos/seed/syba/512/512",
       "sizes": "512x512",
       "type": "image/png"
     }

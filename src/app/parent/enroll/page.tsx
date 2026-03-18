@@ -97,38 +97,40 @@ function EnrollmentForm({ initialPlayerId }: { initialPlayerId: string }) {
       enrollmentDate: new Date().toISOString(),
     };
     
-    try {
-      // 1. Save enrollment record locally first
-      await setDoc(enrollmentRef, enrollmentData);
+    // Non-blocking setDoc
+    setDoc(enrollmentRef, enrollmentData)
+      .then(async () => {
+        // Initiate Stripe Checkout via mock API
+        const response = await fetch('/api/stripe/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enrollmentId,
+            divisionId: formData.divisionId,
+            userId: user.uid,
+            fee: selectedDivision.fee
+          }),
+        });
 
-      // 2. Initiate Stripe Checkout via mock API
-      const response = await fetch('/api/stripe/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          enrollmentId,
-          divisionId: formData.divisionId,
-          userId: user.uid,
-          fee: selectedDivision.fee
-        }),
+        const data = await response.json();
+        
+        if (data.url) {
+          toast({ title: "Registration Saved", description: "Redirecting to secure payment..." });
+          router.push(data.url);
+        } else {
+          toast({ variant: "destructive", title: "Checkout Error", description: "Could not initiate payment." });
+        }
+      })
+      .catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: enrollmentRef.path,
+          operation: 'create',
+          requestResourceData: enrollmentData
+        }));
+      })
+      .finally(() => {
+        setSubmitting(false);
       });
-
-      const { url } = await response.json();
-
-      toast({ title: "Registration Saved", description: "Redirecting to secure payment..." });
-      
-      // 3. Redirect to payment
-      setTimeout(() => {
-        router.push(url);
-      }, 1000);
-    } catch (error: any) {
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: enrollmentRef.path,
-        operation: 'create',
-        requestResourceData: enrollmentData
-      }));
-      setSubmitting(false);
-    }
   };
 
   const getDivisionFee = () => {

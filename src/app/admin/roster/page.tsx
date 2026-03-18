@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface Enrollment {
   id: string;
@@ -62,35 +64,49 @@ export default function MasterRosterPage() {
     (!selectedDivision || selectedDivision === 'all-divisions' || e.divisionId === selectedDivision)
   );
 
-  const handleAssignTeam = async (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
+  const handleAssignTeam = (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
     
-    try {
-      // 1. Update Enrollment record
-      await updateDoc(enrollmentRef, { 
-        teamId: newTeamId === 'unassigned' ? null : newTeamId 
+    // 1. Update Enrollment record (Non-blocking)
+    updateDoc(enrollmentRef, { 
+      teamId: newTeamId === 'unassigned' ? null : newTeamId 
+    }).catch(async () => {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({
+        path: enrollmentRef.path,
+        operation: 'update',
+        requestResourceData: { teamId: newTeamId }
+      }));
+    });
+
+    // 2. Remove from Old Team if necessary (Non-blocking)
+    if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
+      const oldTeamRef = doc(db, 'teams', oldTeamId);
+      updateDoc(oldTeamRef, {
+        player_ids: arrayRemove(playerId)
+      }).catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: oldTeamRef.path,
+          operation: 'update',
+          requestResourceData: { player_ids: 'arrayRemove' }
+        }));
       });
-
-      // 2. Remove from Old Team if necessary
-      if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
-        const oldTeamRef = doc(db, 'teams', oldTeamId);
-        await updateDoc(oldTeamRef, {
-          player_ids: arrayRemove(playerId)
-        });
-      }
-
-      // 3. Add to New Team if necessary
-      if (newTeamId && newTeamId !== 'unassigned' && newTeamId !== oldTeamId) {
-        const newTeamRef = doc(db, 'teams', newTeamId);
-        await updateDoc(newTeamRef, {
-          player_ids: arrayUnion(playerId)
-        });
-      }
-
-      toast({ title: "Assignment Updated", description: "Player roster status modified successfully." });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Assignment Failed", description: "Insufficient permissions or database error." });
     }
+
+    // 3. Add to New Team if necessary (Non-blocking)
+    if (newTeamId && newTeamId !== 'unassigned' && newTeamId !== oldTeamId) {
+      const newTeamRef = doc(db, 'teams', newTeamId);
+      updateDoc(newTeamRef, {
+        player_ids: arrayUnion(playerId)
+      }).catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: newTeamRef.path,
+          operation: 'update',
+          requestResourceData: { player_ids: 'arrayUnion' }
+        }));
+      });
+    }
+
+    toast({ title: "Assignment Initiated", description: "Updating roster status in the background." });
   };
 
   const exportRosterCSV = () => {
