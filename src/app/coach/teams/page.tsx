@@ -4,9 +4,9 @@
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, UserPlus, Mail, ChevronRight, Loader2 } from 'lucide-react';
+import { Users, Mail, ChevronRight, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, where } from 'firebase/firestore';
 
 interface Team {
@@ -14,15 +14,17 @@ interface Team {
   name: string;
   seasonId: string;
   divisionId: string;
-  coachUserId?: string;
+  coach_uid?: string;
 }
 
 export default function CoachTeamsPage() {
+  const { user } = useUser();
   const db = useFirestore();
   
   const teamsQuery = useMemoFirebase(() => {
-    return collection(db, 'teams');
-  }, [db]);
+    if (!db || !user) return null;
+    return query(collection(db, 'teams'), where('coach_uid', '==', user.uid));
+  }, [db, user?.uid]);
 
   const { data: teams, isLoading } = useCollection<Team>(teamsQuery);
 
@@ -70,7 +72,7 @@ export default function CoachTeamsPage() {
                       <div className="flex -space-x-2">
                         {[1, 2, 3, 4].map((i) => (
                           <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-accent flex items-center justify-center text-[10px] text-white font-bold">
-                            P{i}
+                            P
                           </div>
                         ))}
                       </div>

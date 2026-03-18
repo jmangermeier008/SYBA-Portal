@@ -16,10 +16,8 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   XCircle, 
-  ExternalLink, 
   ShieldCheck, 
   UserCheck, 
-  Trash2, 
   Eye, 
   History,
   FileText
@@ -30,6 +28,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface UserProfile {
   id: string;
@@ -58,13 +58,11 @@ export default function AdminCompliancePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [reviewingClearance, setReviewingClearance] = useState<{ userId: string, clearance: any } | null>(null);
 
-  // Volunteer Data
   const usersQuery = useMemoFirebase(() => {
     return query(collection(db, 'userProfiles'), where('role', 'in', ['Coach', 'Admin']));
   }, [db]);
+  
   const allClearancesQuery = useMemoFirebase(() => collectionGroup(db, 'clearances'), [db]);
-
-  // Player Data
   const allPlayersQuery = useMemoFirebase(() => collectionGroup(db, 'players'), [db]);
 
   const { data: users, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
@@ -82,25 +80,30 @@ export default function AdminCompliancePage() {
     setIsProcessing(true);
     const { userId, clearance } = reviewingClearance;
     const clearanceRef = doc(db, 'userProfiles', userId, 'clearances', clearance.id);
+    
+    const updateData = {
+      status,
+      rejectionReason: status === 'Rejected' ? rejectionReason : null,
+      verifiedBy: user.uid,
+      verifiedByName: profile?.displayName || 'Admin',
+      verifiedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-    try {
-      await updateDoc(clearanceRef, {
-        status,
-        rejectionReason: status === 'Rejected' ? rejectionReason : null,
-        verifiedBy: user.uid,
-        verifiedByName: profile?.displayName || 'Admin',
-        verifiedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-
-      toast({ title: `Clearance ${status}`, description: `The volunteer profile has been updated.` });
-      setRejectionReason('');
-      setReviewingClearance(null);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Update Failed", description: error.message });
-    } finally {
-      setIsProcessing(false);
-    }
+    updateDoc(clearanceRef, updateData)
+      .then(() => {
+        toast({ title: `Clearance ${status}`, description: `The volunteer profile has been updated.` });
+        setRejectionReason('');
+        setReviewingClearance(null);
+      })
+      .catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: clearanceRef.path,
+          operation: 'update',
+          requestResourceData: updateData
+        }));
+      })
+      .finally(() => setIsProcessing(false));
   };
 
   const handleVerifyPlayer = async (player: Player) => {
@@ -114,16 +117,27 @@ export default function AdminCompliancePage() {
       }
 
       const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
-      await updateDoc(playerRef, {
+      const updateData = {
         ageVerified: true,
         birthCertificateUrl: deleteField(),
         verifiedBy: user.uid,
         verifiedByName: profile?.displayName || 'Admin',
         verifiedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      });
+      };
 
-      toast({ title: "Player Verified", description: "DOB confirmed and document redacted." });
+      updateDoc(playerRef, updateData)
+        .then(() => {
+          toast({ title: "Player Verified", description: "DOB confirmed and document redacted." });
+        })
+        .catch(async () => {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: playerRef.path,
+            operation: 'update',
+            requestResourceData: updateData
+          }));
+        });
+
     } catch (error: any) {
       toast({ variant: "destructive", title: "Verification Failed", description: error.message });
     } finally {
@@ -184,7 +198,7 @@ export default function AdminCompliancePage() {
                     </TableHeader>
                     <TableBody>
                       {users?.map((user) => {
-                        const userClearances = allClearances?.filter(c => c.__path?.includes(user.id)) || [];
+                        const userClearances = allClearances?.filter(c => c.userId === user.id) || [];
                         const ca = userClearances.find(c => c.type === 'ChildAbuse');
                         const cr = userClearances.find(c => c.type === 'CriminalRecord');
                         const fbi = userClearances.find(c => c.type === 'FBI');

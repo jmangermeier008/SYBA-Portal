@@ -15,6 +15,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { format, isBefore, addMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 const CLEARANCE_TYPES = [
   { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance', description: 'Mandatory state background check.' },
@@ -36,7 +38,7 @@ export default function CoachCompliancePage() {
   const clearancesQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, 'userProfiles', user.uid, 'clearances');
-  }, [db, user]);
+  }, [db, user?.uid]);
 
   const { data: clearances, isLoading } = useCollection<any>(clearancesQuery);
 
@@ -46,7 +48,6 @@ export default function CoachCompliancePage() {
       return;
     }
 
-    // Technical Constraint Validation
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast({ variant: "destructive", title: "Invalid File Type", description: "Please upload a PDF, JPEG, or PNG." });
       return;
@@ -58,7 +59,6 @@ export default function CoachCompliancePage() {
     }
 
     setUploading(type);
-    // Path: /compliance/{userId}/{docType}_{timestamp}
     const storageRef = ref(storage, `compliance/${user.uid}/${type}_${Date.now()}`);
 
     try {
@@ -68,16 +68,28 @@ export default function CoachCompliancePage() {
       const clearanceId = type; 
       const clearanceRef = doc(db, 'userProfiles', user.uid, 'clearances', clearanceId);
       
-      await setDoc(clearanceRef, {
+      const clearanceData = {
         id: clearanceId,
+        userId: user.uid, // Critical for Admin filtering
         type,
         status: 'Pending',
         fileUrl: url,
         expirationDate,
         updatedAt: new Date().toISOString(),
-      });
-      
-      toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
+      };
+
+      setDoc(clearanceRef, clearanceData)
+        .then(() => {
+          toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
+        })
+        .catch(async () => {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: clearanceRef.path,
+            operation: 'create',
+            requestResourceData: clearanceData
+          }));
+        });
+        
     } catch (error: any) {
       toast({ variant: "destructive", title: "Upload Failed", description: error.message });
     } finally {
