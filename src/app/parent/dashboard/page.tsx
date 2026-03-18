@@ -1,14 +1,15 @@
+
 "use client";
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useAuth } from '@/lib/firebase/auth-context';
-import { Users, Calendar, Trophy, AlertCircle } from 'lucide-react';
+import { useUser } from '@/firebase';
+import { Users, Calendar, Trophy, AlertCircle, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
 export default function ParentDashboard() {
-  const { profile } = useAuth();
+  const { profile } = useUser();
 
   return (
     <div className="flex min-h-screen bg-background">

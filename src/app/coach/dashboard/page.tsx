@@ -1,14 +1,16 @@
+
 "use client";
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useUser } from '@/firebase';
 import { Dumbbell, Users, Calendar, Star, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
 
 export default function CoachDashboard() {
-  const { profile } = useAuth();
+  const { profile } = useUser();
 
   return (
     <div className="flex min-h-screen bg-background">

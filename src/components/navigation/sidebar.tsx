@@ -1,8 +1,9 @@
+
 "use client";
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useUser, useAuth } from '@/firebase';
 import { cn } from '@/lib/utils';
 import {
   Trophy,
@@ -16,7 +17,6 @@ import {
   LogOut,
   User as UserIcon
 } from 'lucide-react';
-import { auth } from '@/lib/firebase/config';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -27,7 +27,8 @@ interface SidebarProps {
 
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
-  const { profile } = useAuth();
+  const { profile } = useUser();
+  const auth = useAuth();
   const router = useRouter();
 
   const handleSignOut = async () => {

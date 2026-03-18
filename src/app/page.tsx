@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useUser } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
@@ -8,7 +9,7 @@ import Link from 'next/link';
 import { Trophy, Users, Calendar, MessageSquare, ArrowRight } from 'lucide-react';
 
 export default function Home() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading } = useUser();
   const router = useRouter();
 
   useEffect(() => {
@@ -22,7 +23,7 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
       <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
-        <Link className="flex items-center justify-center gap-2" href="#">
+        <Link className="flex items-center justify-center gap-2" href="/">
           <Trophy className="h-6 w-6 text-primary" />
           <span className="text-xl font-bold font-headline tracking-tight text-primary">Home Run Hub</span>
         </Link>
@@ -66,21 +67,27 @@ export default function Home() {
             <div className="grid gap-12 lg:grid-cols-3">
               <div className="flex flex-col items-center space-y-4 text-center group">
                 <div className="p-4 bg-primary/10 rounded-2xl group-hover:bg-primary/20 transition-colors">
-                  <Users className="h-10 w-10 text-primary" />
+                  <span className="h-10 w-10 text-primary flex items-center justify-center">
+                    <Users className="h-10 w-10" />
+                  </span>
                 </div>
                 <h3 className="text-xl font-bold font-headline">Family Management</h3>
                 <p className="text-muted-foreground">Easily manage your children's profiles, documents, and enrollments in one secure dashboard.</p>
               </div>
               <div className="flex flex-col items-center space-y-4 text-center group">
                 <div className="p-4 bg-accent/10 rounded-2xl group-hover:bg-accent/20 transition-colors">
-                  <Calendar className="h-10 w-10 text-accent-foreground" />
+                  <span className="h-10 w-10 text-accent-foreground flex items-center justify-center">
+                    <Calendar className="h-10 w-10" />
+                  </span>
                 </div>
                 <h3 className="text-xl font-bold font-headline">Team Scheduling</h3>
                 <p className="text-muted-foreground">Real-time schedules with RSVP tracking. Know who's coming to the game instantly.</p>
               </div>
               <div className="flex flex-col items-center space-y-4 text-center group">
                 <div className="p-4 bg-secondary rounded-2xl group-hover:bg-secondary/80 transition-colors">
-                  <MessageSquare className="h-10 w-10 text-primary" />
+                  <span className="h-10 w-10 text-primary flex items-center justify-center">
+                    <MessageSquare className="h-10 w-10" />
+                  </span>
                 </div>
                 <h3 className="text-xl font-bold font-headline">Team Chat</h3>
                 <p className="text-muted-foreground">Secure team communication with instant broadcast notifications for urgent updates.</p>
