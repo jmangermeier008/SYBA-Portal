@@ -149,8 +149,3 @@ export function useMemoFirebase<T>(factory: () => T, deps: DependencyList): T {
   }
   return memoized;
 }
-
-export const useUser = () => {
-  const { user, isUserLoading, userError } = useFirebase();
-  return { user, isUserLoading, userError };
-};

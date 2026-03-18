@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, User, getAuth } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useAuth, useFirestore } from '../provider';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -48,6 +48,10 @@ export function useUser() {
       }
       setLoading(false);
     }, async (error) => {
+      // Check if user is still logged in before emitting error
+      const currentAuth = getAuth();
+      if (!currentAuth.currentUser) return;
+
       // Emit contextual error for security rules debugging
       const permissionError = new FirestorePermissionError({
         path: userRef.path,
