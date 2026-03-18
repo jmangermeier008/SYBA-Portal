@@ -74,6 +74,10 @@
         "parentUserId": {
           "type": "string"
         },
+        "clearanceUrl": {
+          "type": "string",
+          "description": "URL to the stored clearance document."
+        },
         "emergencyContacts": {
           "type": "array",
           "items": {
@@ -113,12 +117,14 @@
       "properties": {
         "id": { "type": "string" },
         "playerId": { "type": "string" },
+        "parentUserId": { "type": "string" },
         "seasonId": { "type": "string" },
         "divisionId": { "type": "string" },
         "jerseySize": { "type": "string" },
         "jerseyNumber": { "type": "string" },
         "paymentStatus": { "type": "string", "enum": ["pending", "paid"] },
-        "teamId": { "type": "string" }
+        "teamId": { "type": "string" },
+        "enrollmentDate": { "type": "string", "format": "date-time" }
       }
     }
   },
@@ -161,6 +167,13 @@
         "definition": {
           "entityName": "Team",
           "description": "League teams."
+        }
+      },
+      {
+        "path": "/teams/{teamId}/games/{gameId}",
+        "definition": {
+          "entityName": "Game",
+          "description": "Team schedule events."
         }
       }
     ]

@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, CreditCard, ShieldCheck, Trophy } from 'lucide-react';
+import { Loader2, CreditCard, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -76,7 +76,11 @@ function EnrollmentForm({ initialPlayerId }: { initialPlayerId: string }) {
     setSubmitting(true);
     
     const selectedDivision = divisions?.find(d => d.id === formData.divisionId);
-    if (!selectedDivision) return;
+    if (!selectedDivision) {
+      toast({ variant: "destructive", title: "Error", description: "Please select a valid division." });
+      setSubmitting(false);
+      return;
+    }
 
     const enrollmentId = Math.random().toString(36).substring(7);
     const enrollmentRef = doc(db, 'userProfiles', user.uid, 'enrollments', enrollmentId);
@@ -89,26 +93,42 @@ function EnrollmentForm({ initialPlayerId }: { initialPlayerId: string }) {
       parentUserId: user.uid,
       jerseySize: formData.jerseySize,
       paymentStatus: 'pending',
-      stripeCheckoutSessionId: '',
       registrationFeeAmount: selectedDivision.fee,
       enrollmentDate: new Date().toISOString(),
     };
     
-    setDoc(enrollmentRef, enrollmentData)
-      .then(() => {
-        toast({ title: "Registration Submitted", description: "Redirecting to payment..." });
-        setTimeout(() => {
-          router.push('/parent/dashboard?success=true');
-        }, 1500);
-      })
-      .catch(async (error) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: enrollmentRef.path,
-          operation: 'create',
-          requestResourceData: enrollmentData
-        }));
-        setSubmitting(false);
+    try {
+      // 1. Save enrollment record locally first
+      await setDoc(enrollmentRef, enrollmentData);
+
+      // 2. Initiate Stripe Checkout via mock API
+      const response = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enrollmentId,
+          divisionId: formData.divisionId,
+          userId: user.uid,
+          fee: selectedDivision.fee
+        }),
       });
+
+      const { url } = await response.json();
+
+      toast({ title: "Registration Saved", description: "Redirecting to secure payment..." });
+      
+      // 3. Redirect to payment
+      setTimeout(() => {
+        router.push(url);
+      }, 1000);
+    } catch (error: any) {
+      errorEmitter.emit('permission-error', new FirestorePermissionError({
+        path: enrollmentRef.path,
+        operation: 'create',
+        requestResourceData: enrollmentData
+      }));
+      setSubmitting(false);
+    }
   };
 
   const getDivisionFee = () => {

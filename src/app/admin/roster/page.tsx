@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -71,25 +71,25 @@ export default function MasterRosterPage() {
         teamId: newTeamId === 'unassigned' ? null : newTeamId 
       });
 
-      // 2. Update Old Team player_ids array if it existed
-      if (oldTeamId && oldTeamId !== 'unassigned') {
+      // 2. Remove from Old Team if necessary
+      if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
         const oldTeamRef = doc(db, 'teams', oldTeamId);
         await updateDoc(oldTeamRef, {
           player_ids: arrayRemove(playerId)
         });
       }
 
-      // 3. Update New Team player_ids array
-      if (newTeamId && newTeamId !== 'unassigned') {
+      // 3. Add to New Team if necessary
+      if (newTeamId && newTeamId !== 'unassigned' && newTeamId !== oldTeamId) {
         const newTeamRef = doc(db, 'teams', newTeamId);
         await updateDoc(newTeamRef, {
           player_ids: arrayUnion(playerId)
         });
       }
 
-      toast({ title: "Assignment Updated", description: "Player team assignment and roster array modified." });
+      toast({ title: "Assignment Updated", description: "Player roster status modified successfully." });
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Assignment Failed", description: error.message });
+      toast({ variant: "destructive", title: "Assignment Failed", description: "Insufficient permissions or database error." });
     }
   };
 
@@ -130,7 +130,7 @@ export default function MasterRosterPage() {
         <header className="mb-8 flex justify-between items-start">
           <div>
             <h1 className="text-3xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-muted-foreground">Assign players to teams and monitor league-wide compliance.</p>
+            <p className="text-muted-foreground">Manage league assignments and track registration compliance.</p>
           </div>
           <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!filteredEnrollments?.length}>
             <Download className="mr-2 h-4 w-4" /> Export for Uniforms
@@ -141,7 +141,7 @@ export default function MasterRosterPage() {
           <CardContent className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Season Filter</label>
+                <label className="text-xs font-bold uppercase text-muted-foreground">Season</label>
                 <Select value={selectedSeason} onValueChange={setSelectedSeason}>
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="All Seasons" />
@@ -153,7 +153,7 @@ export default function MasterRosterPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Division Filter</label>
+                <label className="text-xs font-bold uppercase text-muted-foreground">Division</label>
                 <Select value={selectedDivision} onValueChange={setSelectedDivision}>
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="All Divisions" />
@@ -183,7 +183,7 @@ export default function MasterRosterPage() {
         <Card className="border-none shadow-xl overflow-hidden">
           <CardHeader className="bg-primary text-primary-foreground">
             <CardTitle className="text-xl font-headline">Registration Queue</CardTitle>
-            <CardDescription className="text-primary-foreground/80">Manage assignments and verify documents.</CardDescription>
+            <CardDescription className="text-primary-foreground/80">Monitor compliance and assign teams.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             {loadingEnrollments ? (
@@ -192,17 +192,16 @@ export default function MasterRosterPage() {
               </div>
             ) : !filteredEnrollments || filteredEnrollments.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">
-                No registrations found for this selection.
+                No matching registrations found.
               </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="pl-6">Player Name</TableHead>
-                    <TableHead>Division</TableHead>
+                    <TableHead className="pl-6">Player</TableHead>
                     <TableHead>Paid</TableHead>
                     <TableHead>Clearance</TableHead>
-                    <TableHead>Team Assignment</TableHead>
+                    <TableHead>Assignment</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -211,11 +210,8 @@ export default function MasterRosterPage() {
                     return (
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
                         <TableCell className="pl-6 py-4">
-                          <div className="font-semibold">{p ? `${p.firstName} ${p.lastName}` : 'Unknown Player'}</div>
-                          <div className="text-[10px] text-muted-foreground font-mono">{e.jerseySize} Size</div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">{e.divisionId}</Badge>
+                          <div className="font-semibold">{p ? `${p.firstName} ${p.lastName}` : 'Loading...'}</div>
+                          <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.jerseySize}</div>
                         </TableCell>
                         <TableCell>
                           {e.paymentStatus === 'paid' ? (
