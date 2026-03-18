@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from 'next/link';
@@ -14,7 +15,9 @@ import {
   ShieldCheck,
   Dumbbell,
   LogOut,
-  User as UserIcon
+  User as UserIcon,
+  ClipboardList,
+  Groups
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -51,6 +54,8 @@ export function Sidebar({ role }: SidebarProps) {
     ],
     admin: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
+      { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
+      { label: 'Teams', icon: Users, href: '/admin/teams' },
       { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
       { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
       { label: 'Settings', icon: Settings, href: '/admin/settings' },
