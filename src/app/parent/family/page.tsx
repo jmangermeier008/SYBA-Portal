@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, doc, setDoc } from 'firebase/firestore';
-import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { collection, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy } from 'lucide-react';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -21,14 +22,17 @@ interface Player {
   lastName: string;
   dateOfBirth: string;
   parentUserId: string;
+  clearanceUrl?: string;
 }
 
 export default function FamilyPage() {
-  const { user, profile } = useUser();
+  const { user } = useUser();
   const db = useFirestore();
+  const storage = useStorage();
   const { toast } = useToast();
   
   const [adding, setAdding] = useState(false);
+  const [uploading, setUploading] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
@@ -74,6 +78,28 @@ export default function FamilyPage() {
       });
   };
 
+  const handleFileUpload = async (playerId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setUploading(playerId);
+    const storageRef = ref(storage, `users/${user.uid}/players/${playerId}/clearance_${Date.now()}`);
+
+    try {
+      const snapshot = await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(snapshot.ref);
+      
+      const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
+      await updateDoc(playerRef, { clearanceUrl: url });
+      
+      toast({ title: "Clearance Uploaded", description: "Document saved to player profile." });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Upload Failed", description: error.message });
+    } finally {
+      setUploading(null);
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="parent" />
@@ -81,7 +107,7 @@ export default function FamilyPage() {
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">My Family</h1>
-            <p className="text-muted-foreground">Manage your player profiles for SYBA league registration.</p>
+            <p className="text-muted-foreground">Manage player profiles and required clearances.</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -172,12 +198,28 @@ export default function FamilyPage() {
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-medium">PIAA Clearances</span>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    <div className="relative">
+                      <Label className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer">
+                        <div className="flex items-center gap-3">
+                          {player.clearanceUrl ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <FileText className="h-4 w-4 text-primary" />
+                          )}
+                          <span className="text-sm font-medium">PIAA / Birth Certificate</span>
+                        </div>
+                        {uploading === player.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        ) : (
+                          <Upload className="h-4 w-4 text-muted-foreground" />
+                        )}
+                        <input
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => handleFileUpload(player.id, e)}
+                          disabled={!!uploading}
+                        />
+                      </Label>
                     </div>
                     <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer">
                       <div className="flex items-center gap-3">

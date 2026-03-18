@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, doc, setDoc } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2 } from 'lucide-react';
+import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,66 @@ import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 
+interface GameEvent {
+  id: string;
+  type: string;
+  opponentName?: string;
+  location: string;
+  dateTime: string;
+}
+
+function EventCard({ game, teamId }: { game: GameEvent, teamId: string }) {
+  const db = useFirestore();
+  const rsvpsQuery = useMemoFirebase(() => collection(db, 'teams', teamId, 'games', game.id, 'rsvps'), [db, teamId, game.id]);
+  const { data: rsvps } = useCollection(rsvpsQuery);
+
+  const attendingCount = rsvps?.filter(r => r.status === 'Attending').length || 0;
+  const totalCount = rsvps?.length || 0;
+
+  return (
+    <Card className="border-none shadow-lg overflow-hidden group">
+      <div className="flex flex-col md:flex-row">
+        <div className={`w-full md:w-48 p-6 flex flex-col items-center justify-center text-white ${game.type === 'Game' ? 'bg-primary' : 'bg-accent'}`}>
+          <span className="text-sm font-bold uppercase tracking-wider">{game.type}</span>
+          <span className="text-3xl font-bold mt-1">{format(new Date(game.dateTime), 'MMM d')}</span>
+          <span className="text-sm opacity-90">{format(new Date(game.dateTime), 'EEEE')}</span>
+        </div>
+        <CardContent className="flex-1 p-6 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="space-y-2 text-center md:text-left">
+            <h3 className="text-xl font-bold font-headline">
+              {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
+            </h3>
+            <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+              <div className="flex items-center justify-center md:justify-start gap-2">
+                <Clock className="h-4 w-4" /> {format(new Date(game.dateTime), 'h:mm a')}
+              </div>
+              <div className="flex items-center justify-center md:justify-start gap-2">
+                <MapPin className="h-4 w-4" /> {game.location}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex items-center gap-2 bg-secondary/30 px-4 py-2 rounded-full">
+              <Users className="h-4 w-4 text-primary" />
+              <span className="text-sm font-bold">{attendingCount} Confirmed</span>
+              <span className="text-xs text-muted-foreground">/ {totalCount} RSVPs</span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
+                Manage RSVPs
+              </Button>
+              <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
+                <Send className="h-3 w-3 mr-1" /> Alert Team
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </div>
+    </Card>
+  );
+}
+
 export default function CoachSchedulesPage() {
   const { user } = useUser();
   const db = useFirestore();
@@ -23,7 +83,7 @@ export default function CoachSchedulesPage() {
   const [isAdding, setIsAdding] = useState(false);
   const [open, setOpen] = useState(false);
   
-  const teamId = "sharpsville-blue-jays"; // Mock for MVP
+  const teamId = "sharpsville-blue-jays";
 
   const [formData, setFormData] = useState({
     type: 'Practice',
@@ -37,7 +97,7 @@ export default function CoachSchedulesPage() {
     return query(collection(db, 'teams', teamId, 'games'), orderBy('dateTime', 'asc'));
   }, [db, teamId]);
 
-  const { data: games, isLoading } = useCollection(gamesQuery);
+  const { data: games, isLoading } = useCollection<GameEvent>(gamesQuery);
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,9 +111,8 @@ export default function CoachSchedulesPage() {
       id: gameId,
       teamId: teamId,
       ...formData,
-      // Denormalization for rules
       coachUserId: user.uid,
-      parentUserIds: [] // In a real app, fetch from team doc
+      parentUserIds: [] 
     };
 
     setDoc(gameRef, gameData)
@@ -165,46 +224,8 @@ export default function CoachSchedulesPage() {
               </CardContent>
             </Card>
           ) : (
-            games.map((game: any) => (
-              <Card key={game.id} className="border-none shadow-lg overflow-hidden group">
-                <div className="flex flex-col md:flex-row">
-                  <div className={`w-full md:w-48 p-6 flex flex-col items-center justify-center text-white ${game.type === 'Game' ? 'bg-primary' : 'bg-accent'}`}>
-                    <span className="text-sm font-bold uppercase tracking-wider">{game.type}</span>
-                    <span className="text-3xl font-bold mt-1">{format(new Date(game.dateTime), 'MMM d')}</span>
-                    <span className="text-sm opacity-90">{format(new Date(game.dateTime), 'EEEE')}</span>
-                  </div>
-                  <CardContent className="flex-1 p-6 flex flex-col md:flex-row justify-between items-center gap-6">
-                    <div className="space-y-2 text-center md:text-left">
-                      <h3 className="text-xl font-bold font-headline">
-                        {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
-                      </h3>
-                      <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                        <div className="flex items-center justify-center md:justify-start gap-2">
-                          <Clock className="h-4 w-4" /> {format(new Date(game.dateTime), 'h:mm a')}
-                        </div>
-                        <div className="flex items-center justify-center md:justify-start gap-2">
-                          <MapPin className="h-4 w-4" /> {game.location}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs font-bold text-muted-foreground uppercase">Attendance Hub</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
-                          View RSVPs
-                        </Button>
-                        <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
-                          <Send className="h-3 w-3 mr-1" /> Alert Team
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </div>
-              </Card>
+            games.map((game) => (
+              <EventCard key={game.id} game={game} teamId={teamId} />
             ))
           )}
         </div>

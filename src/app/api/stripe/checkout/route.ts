@@ -1,25 +1,23 @@
 import { NextResponse } from 'next/server';
 
-// Placeholder for Stripe Session Creation
-// In a real app, you would import Stripe and use process.env.STRIPE_SECRET_KEY
 export async function POST(req: Request) {
   try {
-    const { enrollmentId, division, playerUid } = await req.json();
+    const { enrollmentId, divisionId, userId, fee } = await req.json();
 
-    // Logic to determine price based on division
-    let amount = 5000; // Default $50
-    if (division === 'Coach Pitch') amount = 7500;
-    if (division === 'Minor League') amount = 10000;
-    if (division === 'Major League') amount = 12500;
+    if (!enrollmentId || !userId || !fee) {
+      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+    }
 
-    // Simulate creating a Stripe session
-    const mockSession = {
-      id: 'cs_test_' + Math.random().toString(36).substring(7),
-      url: `https://checkout.stripe.com/pay/${Math.random().toString(36).substring(7)}`
-    };
+    // In a real implementation, you would use the Stripe SDK:
+    // const session = await stripe.checkout.sessions.create({ ... })
+    
+    // Simulating a Stripe Checkout Session URL
+    const mockSessionId = 'cs_test_' + Math.random().toString(36).substring(7);
+    const mockUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/parent/dashboard?session_id=${mockSessionId}&enrollment_id=${enrollmentId}`;
 
-    return NextResponse.json({ url: mockSession.url, sessionId: mockSession.id });
+    return NextResponse.json({ url: mockUrl, sessionId: mockSessionId });
   } catch (error: any) {
+    console.error('Stripe Checkout Error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

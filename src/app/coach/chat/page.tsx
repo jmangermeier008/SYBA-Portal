@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
@@ -8,10 +7,12 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, limit, doc, setDoc } from 'firebase/firestore';
-import { Send, MessageSquare, Loader2, Users } from 'lucide-react';
+import { Send, MessageSquare, Loader2, Users, Megaphone, ShieldAlert } from 'lucide-react';
 import { format } from 'date-fns';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface Message {
   id: string;
@@ -26,9 +27,9 @@ export default function CoachChatPage() {
   const { user, profile } = useUser();
   const db = useFirestore();
   const [newMessage, setNewMessage] = useState('');
+  const [isBroadcast, setIsBroadcast] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Mock team ID for MVP
   const teamId = "sharpsville-blue-jays";
 
   const messagesQuery = useMemoFirebase(() => {
@@ -60,14 +61,17 @@ export default function CoachChatPage() {
       senderUserId: user.uid,
       senderName: profile?.displayName || 'Coach',
       timestamp: new Date().toISOString(),
-      type: 'Chat',
+      type: isBroadcast ? 'Broadcast' : 'Chat',
       teamId: teamId,
-      coachUserId: user.uid, // Coaches set themselves as the coach for the membership map
-      parentUserIds: [] // In a real app, this would be the list of parents on the team
+      coachUserId: user.uid,
+      parentUserIds: [] 
     };
 
     setDoc(messageRef, messageData)
-      .then(() => setNewMessage(''))
+      .then(() => {
+        setNewMessage('');
+        setIsBroadcast(false);
+      })
       .catch(async (error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: messageRef.path,
@@ -81,20 +85,35 @@ export default function CoachChatPage() {
     <div className="flex min-h-screen bg-background">
       <Sidebar role="coach" />
       <main className="flex-1 ml-64 p-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Team Communication</h1>
-          <p className="text-muted-foreground">Stay connected with your players' parents and staff.</p>
+        <header className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold font-headline">Team Communication</h1>
+            <p className="text-muted-foreground">Stay connected with your players' parents and staff.</p>
+          </div>
+          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border shadow-sm">
+            <Megaphone className={`h-4 w-4 ${isBroadcast ? 'text-destructive animate-pulse' : 'text-muted-foreground'}`} />
+            <Label htmlFor="broadcast-mode" className="text-sm font-semibold">Broadcast Mode</Label>
+            <Switch 
+              id="broadcast-mode" 
+              checked={isBroadcast} 
+              onCheckedChange={setIsBroadcast}
+            />
+          </div>
         </header>
 
-        <Card className="border-none shadow-xl h-[calc(100vh-200px)] flex flex-col">
-          <CardHeader className="border-b bg-primary/5">
+        <Card className="border-none shadow-xl h-[calc(100vh-200px)] flex flex-col overflow-hidden">
+          <CardHeader className={`border-b transition-colors ${isBroadcast ? 'bg-destructive/10' : 'bg-primary/5'}`}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white">
-                <Users className="h-5 w-5" />
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white transition-colors ${isBroadcast ? 'bg-destructive shadow-lg shadow-destructive/20' : 'bg-primary shadow-lg shadow-primary/20'}`}>
+                {isBroadcast ? <ShieldAlert className="h-5 w-5" /> : <Users className="h-5 w-5" />}
               </div>
               <div>
-                <CardTitle className="text-lg">Sharpsville Blue Jays Hub</CardTitle>
-                <p className="text-xs text-muted-foreground">Coach View • 12 Active Members</p>
+                <CardTitle className="text-lg">
+                  {isBroadcast ? 'URGENT: Team Broadcast' : 'Sharpsville Blue Jays Hub'}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  {isBroadcast ? 'Message will be sent as a push notification' : 'Standard Team Chat'}
+                </p>
               </div>
             </div>
           </CardHeader>
@@ -121,7 +140,9 @@ export default function CoachChatPage() {
                   </div>
                   <div
                     className={`max-w-[70%] p-3 rounded-2xl text-sm ${
-                      msg.senderUserId === user?.uid
+                      msg.type === 'Broadcast'
+                        ? 'bg-destructive text-white border-2 border-destructive/20'
+                        : msg.senderUserId === user?.uid
                         ? 'bg-primary text-white rounded-tr-none'
                         : 'bg-secondary text-foreground rounded-tl-none'
                     }`}
@@ -132,15 +153,20 @@ export default function CoachChatPage() {
               ))
             )}
           </CardContent>
-          <div className="p-4 border-t">
+          <div className="p-4 border-t bg-white">
             <form onSubmit={handleSendMessage} className="flex gap-2">
               <Input
-                placeholder="Message the team..."
+                placeholder={isBroadcast ? "Type urgent broadcast..." : "Message the team..."}
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
-                className="rounded-full bg-secondary/50 border-none h-11"
+                className={`rounded-full border-none h-11 transition-colors ${isBroadcast ? 'bg-destructive/5 placeholder:text-destructive/50' : 'bg-secondary/50'}`}
               />
-              <Button type="submit" size="icon" className="rounded-full h-11 w-11 shadow-md shadow-primary/20">
+              <Button 
+                type="submit" 
+                size="icon" 
+                variant={isBroadcast ? "destructive" : "default"}
+                className="rounded-full h-11 w-11 shadow-md"
+              >
                 <Send className="h-5 w-5" />
               </Button>
             </form>
