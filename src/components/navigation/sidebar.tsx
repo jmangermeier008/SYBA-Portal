@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from 'next/link';
@@ -65,7 +64,7 @@ export function Sidebar({ role }: SidebarProps) {
       <div className="p-6">
         <Link href="/" className="flex items-center gap-2">
           <Trophy className="h-6 w-6 text-primary" />
-          <span className="text-xl font-bold font-headline text-primary tracking-tight">Home Run Hub</span>
+          <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
         </Link>
       </div>
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { collection, getDocs, updateDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { useFirestore } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -22,6 +22,7 @@ export default function RolesPage() {
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const db = useFirestore();
 
   const fetchUsers = async () => {
     try {
@@ -58,7 +59,7 @@ export default function RolesPage() {
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">User Role Management</h1>
-          <p className="text-muted-foreground">Manage system access levels for parents, coaches, and administrators.</p>
+          <p className="text-muted-foreground">Manage system access levels for SYBA parents, coaches, and admins.</p>
         </header>
 
         <Card className="border-none shadow-xl overflow-hidden">

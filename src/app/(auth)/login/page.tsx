@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from 'react';
@@ -60,12 +59,12 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Trophy className="h-8 w-8 text-primary" />
-          <span className="text-2xl font-bold font-headline text-primary tracking-tight">Home Run Hub</span>
+          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">Sharpsville Youth Baseball</span>
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-headline">Welcome back</CardTitle>
-            <CardDescription>Login to your account to continue</CardDescription>
+            <CardTitle className="text-2xl font-headline">Parent Portal Login</CardTitle>
+            <CardDescription>Enter your credentials to manage your players</CardDescription>
           </CardHeader>
           <form onSubmit={handleLogin}>
             <CardContent className="space-y-4">
@@ -83,8 +82,8 @@ export default function LoginPage() {
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Login"}
               </Button>
               <p className="text-sm text-center text-muted-foreground">
-                Don't have an account?{" "}
-                <Link href="/signup" className="text-primary font-medium hover:underline">Sign up</Link>
+                New to SYBA?{" "}
+                <Link href="/signup" className="text-primary font-medium hover:underline">Register now</Link>
               </p>
             </CardFooter>
           </form>

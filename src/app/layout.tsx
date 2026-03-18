@@ -1,17 +1,16 @@
-
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { Toaster } from '@/components/ui/toaster';
 
 export const metadata: Metadata = {
-  title: 'Home Run Hub | Youth Sports Management',
-  description: 'Manage your baseball team, players, and registrations in one place.',
+  title: 'Sharpsville Youth Baseball Association | SYBA',
+  description: 'Official management portal for Sharpsville Youth Baseball Association. Manage teams, players, and registrations.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Home Run Hub',
+    title: 'SYBA',
   },
 };
 

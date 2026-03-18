@@ -3,14 +3,13 @@
 import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth, useFirestore } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 
@@ -23,14 +22,15 @@ interface Player {
 }
 
 export default function FamilyPage() {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const db = useFirestore();
+  const user = auth.currentUser;
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
 
-  // Form State
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -56,7 +56,7 @@ export default function FamilyPage() {
 
   useEffect(() => {
     fetchPlayers();
-  }, [user]);
+  }, [user, db]);
 
   const handleAddPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +86,7 @@ export default function FamilyPage() {
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">My Family</h1>
-            <p className="text-muted-foreground">Manage your children's profiles and team registrations.</p>
+            <p className="text-muted-foreground">Manage your player profiles for SYBA league registration.</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -97,7 +97,7 @@ export default function FamilyPage() {
             <DialogContent className="rounded-2xl">
               <DialogHeader>
                 <DialogTitle className="font-headline text-2xl">Add New Player</DialogTitle>
-                <DialogDescription>Enter your child's information to create their profile.</DialogDescription>
+                <DialogDescription>Enter your child's information to create their SYBA profile.</DialogDescription>
               </DialogHeader>
               <form onSubmit={handleAddPlayer}>
                 <div className="space-y-4 py-4">
@@ -116,7 +116,7 @@ export default function FamilyPage() {
                       <Label htmlFor="lastName">Last Name</Label>
                       <Input
                         id="lastName"
-                        placeholder="Hub"
+                        placeholder="Jones"
                         value={formData.lastName}
                         onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                         required
@@ -154,7 +154,7 @@ export default function FamilyPage() {
             <CardContent>
               <UserIcon className="h-16 w-16 text-muted mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline">No Players Registered</h3>
-              <p className="text-muted-foreground mb-6">Start by adding your children to manage their sports activity.</p>
+              <p className="text-muted-foreground mb-6">Start by adding your children to manage their SYBA activity.</p>
               <Button onClick={() => setOpen(true)} className="rounded-full">Add Your First Player</Button>
             </CardContent>
           </Card>

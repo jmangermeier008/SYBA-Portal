@@ -3,8 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth, useFirestore } from '@/firebase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, CreditCard, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Badge } from '@/components/ui/badge';
 
 interface Player {
   id: string;
@@ -20,7 +20,9 @@ interface Player {
 }
 
 function EnrollmentForm() {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const db = useFirestore();
+  const user = auth.currentUser;
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialPlayerId = searchParams.get('playerId') || '';
@@ -56,7 +58,7 @@ function EnrollmentForm() {
       }
     };
     fetchPlayers();
-  }, [user, initialPlayerId]);
+  }, [user, initialPlayerId, db]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +66,6 @@ function EnrollmentForm() {
     setSubmitting(true);
     
     try {
-      // Create enrollment in Firestore
       const enrollmentData = {
         ...formData,
         parentUid: user.uid,
@@ -72,12 +73,10 @@ function EnrollmentForm() {
         createdAt: new Date().toISOString(),
       };
       
-      const docRef = await addDoc(collection(db, 'enrollments'), enrollmentData);
+      await addDoc(collection(db, 'enrollments'), enrollmentData);
       
       toast({ title: "Registration Submitted", description: "Redirecting to payment..." });
       
-      // Here you would normally call your Stripe API route
-      // For this demo, we'll simulate a redirect
       setTimeout(() => {
         router.push('/parent/dashboard?success=true');
       }, 1500);
@@ -103,7 +102,7 @@ function EnrollmentForm() {
       <Card className="border-none shadow-xl">
         <CardHeader className="bg-primary text-primary-foreground">
           <CardTitle className="text-2xl font-headline">Season Enrollment</CardTitle>
-          <CardDescription className="text-primary-foreground/80">Complete the form below to register for the Spring 2024 season.</CardDescription>
+          <CardDescription className="text-primary-foreground/80">Complete the form below to register for the SYBA Spring 2024 season.</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-6 pt-6">
@@ -169,14 +168,14 @@ function EnrollmentForm() {
                 </div>
                 <div className="flex flex-col items-end">
                   <Badge className="bg-accent text-accent-foreground border-none mb-1">Division: {formData.division}</Badge>
-                  <p className="text-xs text-muted-foreground italic">Payment processed by Stripe</p>
+                  <p className="text-xs text-muted-foreground italic">Payment processed securely</p>
                 </div>
               </div>
             )}
 
             <div className="flex items-start gap-3 p-4 bg-muted/30 rounded-xl">
               <ShieldCheck className="h-5 w-5 text-green-500 mt-0.5" />
-              <p className="text-xs text-muted-foreground">By clicking enroll, you agree to our Code of Conduct and acknowledge that registration is not complete until payment is received.</p>
+              <p className="text-xs text-muted-foreground">By clicking enroll, you agree to the SYBA Code of Conduct and acknowledge that registration is not complete until payment is received.</p>
             </div>
           </CardContent>
           <CardFooter>
@@ -206,7 +205,7 @@ export default function EnrollPage() {
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">Season Enrollment</h1>
-          <p className="text-muted-foreground">Register your players for the upcoming 2024 season.</p>
+          <p className="text-muted-foreground">Register your players for the upcoming 2024 season at Sharpsville.</p>
         </header>
         <Suspense fallback={<div className="flex justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}>
           <EnrollmentForm />
@@ -214,17 +213,4 @@ export default function EnrollPage() {
       </main>
     </div>
   );
-}
-
-// Minimal Badge replacement as it was missing from original context sometimes
-function Badge({ children, className }: { children: React.ReactNode, className?: string }) {
-  return (
-    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2", className)}>
-      {children}
-    </span>
-  );
-}
-
-function cn(...inputs: any[]) {
-  return inputs.filter(Boolean).join(' ');
 }

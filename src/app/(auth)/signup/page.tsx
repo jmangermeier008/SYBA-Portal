@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from 'react';
@@ -43,7 +42,7 @@ export default function SignupPage() {
 
       toast({
         title: "Account created!",
-        description: "Welcome to Home Run Hub.",
+        description: "Welcome to Sharpsville Youth Baseball Association.",
       });
 
       router.push('/parent/dashboard');
@@ -63,17 +62,17 @@ export default function SignupPage() {
       <div className="w-full max-w-md">
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Trophy className="h-8 w-8 text-primary" />
-          <span className="text-2xl font-bold font-headline text-primary tracking-tight">Home Run Hub</span>
+          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">Sharpsville Youth Baseball</span>
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-headline">Create an account</CardTitle>
-            <CardDescription>Enter your details below to get started</CardDescription>
+            <CardTitle className="text-2xl font-headline">Create SYBA Account</CardTitle>
+            <CardDescription>Sign up to register your players for the season</CardDescription>
           </CardHeader>
           <form onSubmit={handleSignup}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
+                <Label htmlFor="name">Parent Full Name</Label>
                 <Input id="name" placeholder="John Doe" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
               </div>
               <div className="space-y-2">
