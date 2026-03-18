@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Users, Loader2, Trash2, Trophy } from 'lucide-react';
+import { Plus, Users, Loader2, Trash2, Trophy, UserCog } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -19,7 +19,15 @@ interface Team {
   name: string;
   seasonId: string;
   divisionId: string;
-  coachUserId?: string;
+  coach_uid?: string;
+  player_ids?: string[];
+}
+
+interface CoachProfile {
+  id: string;
+  displayName: string;
+  email: string;
+  role: string;
 }
 
 export default function TeamsAdminPage() {
@@ -31,15 +39,19 @@ export default function TeamsAdminPage() {
     name: '',
     seasonId: '',
     divisionId: '',
+    coach_uid: '',
   });
 
   const teamsQuery = useMemoFirebase(() => query(collection(db, 'teams'), orderBy('name', 'asc')), [db]);
   const seasonsQuery = useMemoFirebase(() => collection(db, 'seasons'), [db]);
+  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
 
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const { data: seasons } = useCollection<any>(seasonsQuery);
+  const { data: allUsers } = useCollection<CoachProfile>(usersQuery);
 
-  const selectedSeason = seasons?.find(s => s.id === formData.seasonId);
+  const coaches = allUsers?.filter(u => u.role === 'Coach') || [];
+
   const divisionsQuery = useMemoFirebase(() => {
     if (!formData.seasonId) return null;
     return collection(db, 'seasons', formData.seasonId, 'divisions');
@@ -57,12 +69,13 @@ export default function TeamsAdminPage() {
       await setDoc(teamRef, {
         id: teamId,
         ...formData,
+        player_ids: [],
         createdAt: new Date().toISOString()
       });
 
       toast({ title: "Team Created", description: `${formData.name} has been added.` });
       setOpen(false);
-      setFormData({ name: '', seasonId: '', divisionId: '' });
+      setFormData({ name: '', seasonId: '', divisionId: '', coach_uid: '' });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error", description: error.message });
     } finally {
@@ -135,6 +148,17 @@ export default function TeamsAdminPage() {
                       required
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="coach">Assign Coach</Label>
+                    <Select onValueChange={(val) => setFormData({...formData, coach_uid: val})} value={formData.coach_uid}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Coach" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {coaches.map(c => <SelectItem key={c.id} value={c.id}>{c.displayName}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -181,6 +205,16 @@ export default function TeamsAdminPage() {
                     </Button>
                   </div>
                 </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <UserCog className="h-3.5 w-3.5" />
+                    <span>Coach: {coaches.find(c => c.id === team.coach_uid)?.displayName || 'Unassigned'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>Roster: {team.player_ids?.length || 0} Players</span>
+                  </div>
+                </CardContent>
               </Card>
             ))
           )}

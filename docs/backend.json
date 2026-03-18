@@ -73,6 +73,17 @@
         },
         "parentUserId": {
           "type": "string"
+        },
+        "emergencyContacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "phone": { "type": "string" },
+              "relationship": { "type": "string" }
+            }
+          }
         }
       },
       "required": [
@@ -82,6 +93,19 @@
         "dateOfBirth",
         "parentUserId"
       ]
+    },
+    "Team": {
+      "title": "Team",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Acts as the team_id" },
+        "name": { "type": "string" },
+        "seasonId": { "type": "string" },
+        "divisionId": { "type": "string" },
+        "coach_uid": { "type": "string", "description": "UID of the coach" },
+        "player_ids": { "type": "array", "items": { "type": "string" }, "description": "List of player IDs assigned to this team" }
+      },
+      "required": ["id", "name", "seasonId", "divisionId"]
     },
     "Enrollment": {
       "title": "Enrollment",
@@ -130,6 +154,13 @@
         "definition": {
           "entityName": "Enrollment",
           "description": "Season enrollments."
+        }
+      },
+      {
+        "path": "/teams/{teamId}",
+        "definition": {
+          "entityName": "Team",
+          "description": "League teams."
         }
       }
     ]

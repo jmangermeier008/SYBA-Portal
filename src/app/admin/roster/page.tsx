@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -38,6 +38,7 @@ interface Team {
   name: string;
   seasonId: string;
   divisionId: string;
+  player_ids?: string[];
 }
 
 export default function MasterRosterPage() {
@@ -61,13 +62,32 @@ export default function MasterRosterPage() {
     (!selectedDivision || selectedDivision === 'all-divisions' || e.divisionId === selectedDivision)
   );
 
-  const handleAssignTeam = async (parentUserId: string, enrollmentId: string, teamId: string) => {
+  const handleAssignTeam = async (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
+    
     try {
+      // 1. Update Enrollment record
       await updateDoc(enrollmentRef, { 
-        teamId: teamId === 'unassigned' ? null : teamId 
+        teamId: newTeamId === 'unassigned' ? null : newTeamId 
       });
-      toast({ title: "Assignment Updated", description: "Player team assignment has been modified." });
+
+      // 2. Update Old Team player_ids array if it existed
+      if (oldTeamId && oldTeamId !== 'unassigned') {
+        const oldTeamRef = doc(db, 'teams', oldTeamId);
+        await updateDoc(oldTeamRef, {
+          player_ids: arrayRemove(playerId)
+        });
+      }
+
+      // 3. Update New Team player_ids array
+      if (newTeamId && newTeamId !== 'unassigned') {
+        const newTeamRef = doc(db, 'teams', newTeamId);
+        await updateDoc(newTeamRef, {
+          player_ids: arrayUnion(playerId)
+        });
+      }
+
+      toast({ title: "Assignment Updated", description: "Player team assignment and roster array modified." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Assignment Failed", description: error.message });
     }
@@ -110,7 +130,7 @@ export default function MasterRosterPage() {
         <header className="mb-8 flex justify-between items-start">
           <div>
             <h1 className="text-3xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-muted-foreground">Assign players to teams and monitor registration compliance.</p>
+            <p className="text-muted-foreground">Assign players to teams and monitor league-wide compliance.</p>
           </div>
           <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!filteredEnrollments?.length}>
             <Download className="mr-2 h-4 w-4" /> Export for Uniforms
@@ -214,7 +234,7 @@ export default function MasterRosterPage() {
                         <TableCell className="pr-6">
                           <Select
                             defaultValue={e.teamId || "unassigned"}
-                            onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, val)}
+                            onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
                           >
                             <SelectTrigger className={cn(
                               "w-[180px] rounded-xl",

@@ -16,7 +16,8 @@ import {
   Loader2, 
   CalendarCheck, 
   User as UserIcon,
-  ChevronLeft
+  ChevronLeft,
+  LifeBuoy
 } from 'lucide-react';
 import Link from 'next/link';
 import { format, differenceInYears } from 'date-fns';
@@ -29,6 +30,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
+interface EmergencyContact {
+  name: string;
+  phone: string;
+  relationship: string;
+}
+
 interface Player {
   id: string;
   firstName: string;
@@ -36,6 +43,7 @@ interface Player {
   dateOfBirth: string;
   medicalNotes?: string;
   parentUserId: string;
+  emergencyContacts?: EmergencyContact[];
 }
 
 interface Enrollment {
@@ -78,7 +86,6 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
 
   const calculateBaseballAge = (dob: string) => {
     const birthDate = new Date(dob);
-    // Baseball age is usually calculated as of May 1st of the current year
     const cutoffDate = new Date(new Date().getFullYear(), 4, 1);
     return differenceInYears(cutoffDate, birthDate);
   };
@@ -130,26 +137,51 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                         </CardDescription>
                       </div>
                     </div>
-                    {player.medicalNotes && (
+                    {(player.medicalNotes || (player.emergencyContacts && player.emergencyContacts.length > 0)) && (
                       <Dialog>
                         <DialogTrigger asChild>
                           <Button variant="ghost" size="icon" className="text-destructive bg-destructive/10 hover:bg-destructive/20 rounded-full h-10 w-10 animate-pulse">
                             <AlertTriangle className="h-5 w-5" />
                           </Button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent className="rounded-2xl">
                           <DialogHeader>
                             <DialogTitle className="flex items-center gap-2 text-destructive">
-                              <AlertTriangle className="h-5 w-5" /> Medical Alert
+                              <AlertTriangle className="h-5 w-5" /> Critical Info: {player.firstName}
                             </DialogTitle>
                             <DialogDescription>
-                              Critical health information for {player.firstName} {player.lastName}.
+                              Medical alerts and emergency contacts.
                             </DialogDescription>
                           </DialogHeader>
-                          <div className="bg-destructive/5 p-6 rounded-xl border border-destructive/20">
-                            <p className="font-semibold text-lg leading-relaxed text-destructive">
-                              {player.medicalNotes}
-                            </p>
+                          
+                          <div className="space-y-4">
+                            {player.medicalNotes && (
+                              <div className="bg-destructive/5 p-4 rounded-xl border border-destructive/20">
+                                <h4 className="text-xs font-bold uppercase mb-2">Medical Alert</h4>
+                                <p className="font-semibold text-destructive">{player.medicalNotes}</p>
+                              </div>
+                            )}
+
+                            {player.emergencyContacts && player.emergencyContacts.length > 0 && (
+                              <div className="space-y-3">
+                                <h4 className="text-xs font-bold uppercase flex items-center gap-2">
+                                  <LifeBuoy className="h-4 w-4" /> Emergency Contacts
+                                </h4>
+                                {player.emergencyContacts.map((contact, i) => (
+                                  <div key={i} className="bg-secondary/20 p-3 rounded-xl flex justify-between items-center">
+                                    <div>
+                                      <p className="font-bold text-sm">{contact.name}</p>
+                                      <p className="text-xs text-muted-foreground">{contact.relationship}</p>
+                                    </div>
+                                    <Button size="sm" variant="outline" className="rounded-full" asChild>
+                                      <a href={`tel:${contact.phone}`}>
+                                        <Phone className="h-3 w-3 mr-1" /> {contact.phone}
+                                      </a>
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </DialogContent>
                       </Dialog>
@@ -195,7 +227,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                   <div className="pt-2 border-t flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <CalendarCheck className="h-3 w-3" />
-                      <span>RSVP Rate: 85%</span>
+                      <span>Team Member</span>
                     </div>
                     <Badge variant="outline" className="text-[10px] uppercase font-bold">
                       {enrollment.divisionId}
