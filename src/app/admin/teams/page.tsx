@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from 'react';
@@ -7,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock } from 'lucide-react';
+import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock, ChevronRight } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
 import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -15,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import Link from 'next/link';
 
 interface Team {
   id: string;
@@ -104,7 +104,9 @@ export default function TeamsAdminPage() {
       });
   };
 
-  const handleDeleteTeam = (id: string) => {
+  const handleDeleteTeam = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!confirm("Are you sure? This will permanently delete this team and its roster associations.")) return;
     
     const teamRef = doc(db, 'teams', id);
@@ -148,8 +150,8 @@ export default function TeamsAdminPage() {
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Team Management</h1>
-            <p className="text-muted-foreground">Define teams for each season and division.</p>
+            <h1 className="text-3xl font-bold font-headline">League Teams</h1>
+            <p className="text-muted-foreground">Manage all teams and view their rosters across the association.</p>
           </div>
           
           <Dialog open={open} onOpenChange={setOpen}>
@@ -239,42 +241,49 @@ export default function TeamsAdminPage() {
             </Card>
           ) : (
             teams.map((team) => (
-              <Card key={team.id} className="border-none shadow-md overflow-hidden group">
-                <CardHeader className="bg-primary/5 border-b">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                        <Users className="h-5 w-5" />
+              <Link key={team.id} href={`/admin/teams/${team.id}`} className="block group">
+                <Card className="border-none shadow-md overflow-hidden transition-all hover:shadow-xl hover:ring-2 hover:ring-primary/20 h-full">
+                  <CardHeader className="bg-primary/5 border-b">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                          <Users className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">{team.name}</CardTitle>
+                          <CardDescription>
+                            {seasons?.find((s: any) => s.id === team.seasonId)?.name} • {team.divisionId}
+                          </CardDescription>
+                        </div>
                       </div>
-                      <div>
-                        <CardTitle className="text-lg">{team.name}</CardTitle>
-                        <CardDescription>
-                          {seasons?.find((s: any) => s.id === team.seasonId)?.name} • {team.divisionId}
-                        </CardDescription>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        type="button"
+                        className="text-destructive hover:bg-destructive/10" 
+                        onClick={(e) => handleDeleteTeam(e, team.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4 flex flex-col justify-between h-[100px]">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <UserCog className="h-3.5 w-3.5" />
+                        <span>Coach: {coaches.find(c => c.id === team.coach_uid)?.displayName || 'Unassigned'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Users className="h-3.5 w-3.5" />
+                        <span>Roster: {team.player_ids?.length || 0} Players</span>
                       </div>
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      type="button"
-                      className="text-destructive hover:bg-destructive/10" 
-                      onClick={() => handleDeleteTeam(team.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <UserCog className="h-3.5 w-3.5" />
-                    <span>Coach: {coaches.find(c => c.id === team.coach_uid)?.displayName || 'Unassigned'}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                    <Users className="h-3.5 w-3.5" />
-                    <span>Roster: {team.player_ids?.length || 0} Players</span>
-                  </div>
-                </CardContent>
-              </Card>
+                    <div className="flex items-center justify-end text-primary font-bold text-xs group-hover:translate-x-1 transition-transform">
+                      View Roster <ChevronRight className="h-4 w-4" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
             ))
           )}
         </div>

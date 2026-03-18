@@ -17,7 +17,8 @@ import {
   User as UserIcon,
   ClipboardList,
   FileCheck,
-  Database
+  Database,
+  Megaphone
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -60,6 +61,7 @@ export function Sidebar({ role }: SidebarProps) {
       { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
       { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
       { label: 'Teams', icon: Users, href: '/admin/teams' },
+      { label: 'Communications', icon: Megaphone, href: '/admin/chat' },
       { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
       { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
       { label: 'Seed Data', icon: Database, href: '/admin/seed' },
