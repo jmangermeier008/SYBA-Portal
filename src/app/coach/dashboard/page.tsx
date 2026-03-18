@@ -4,7 +4,7 @@
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser } from '@/firebase';
-import { Dumbbell, Users, Calendar, Star, Send } from 'lucide-react';
+import { Dumbbell, Users, Calendar, Star, Send, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -27,8 +27,10 @@ export default function CoachDashboard() {
                 <Dumbbell className="mr-2 h-4 w-4" /> AI Practice Generator
               </Link>
             </Button>
-            <Button className="rounded-full">
-              <Send className="mr-2 h-4 w-4" /> Send Broadcast
+            <Button className="rounded-full" asChild>
+              <Link href="/coach/chat">
+                <Send className="mr-2 h-4 w-4" /> Send Broadcast
+              </Link>
             </Button>
           </div>
         </header>
@@ -104,7 +106,9 @@ export default function CoachDashboard() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium text-primary">{item.rsvp}</p>
-                      <Button variant="ghost" size="sm" className="h-8 text-xs">Manage</Button>
+                      <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                        <Link href="/coach/schedules">Manage</Link>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -125,11 +129,21 @@ export default function CoachDashboard() {
                   </div>
                 </Link>
               </Button>
-              <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline">
-                <div className="text-left">
-                  <p className="font-semibold flex items-center gap-2"><Users className="h-4 w-4" /> Roster Management</p>
-                  <p className="text-xs text-muted-foreground">View player details and contacts</p>
-                </div>
+              <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
+                <Link href="/coach/teams">
+                  <div className="text-left">
+                    <p className="font-semibold flex items-center gap-2"><Users className="h-4 w-4" /> Roster Management</p>
+                    <p className="text-xs text-muted-foreground">View player details and contacts</p>
+                  </div>
+                </Link>
+              </Button>
+              <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
+                <Link href="/coach/chat">
+                  <div className="text-left">
+                    <p className="font-semibold flex items-center gap-2"><MessageSquare className="h-4 w-4" /> Team Communication</p>
+                    <p className="text-xs text-muted-foreground">Message parents and staff</p>
+                  </div>
+                </Link>
               </Button>
             </CardContent>
           </Card>

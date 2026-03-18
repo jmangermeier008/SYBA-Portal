@@ -1,19 +1,24 @@
+
 "use client";
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useFirestore } from '@/firebase';
+import { useFirestore, useUser } from '@/firebase';
 import { doc, setDoc } from 'firebase/firestore';
-import { Loader2, Database, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Loader2, Database, CheckCircle2, AlertTriangle, UserCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 export default function SeedPage() {
   const db = useFirestore();
+  const { user } = useUser();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [assignMeAsCoach, setAssignMeAsCoach] = useState(true);
 
   const handleSeed = async () => {
     setLoading(true);
@@ -38,17 +43,20 @@ export default function SeedPage() {
         await setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div);
       }
 
-      // 2. Seed Sample Users (Profiles only, auth must be done via UI)
-      const demoCoachUid = 'demo-coach-uid';
+      // 2. Seed Sample Users
+      const demoCoachUid = assignMeAsCoach && user ? user.uid : 'demo-coach-uid';
       const demoParentUid = 'demo-parent-uid';
 
-      await setDoc(doc(db, 'userProfiles', demoCoachUid), {
-        id: demoCoachUid,
-        displayName: 'Coach Mike Smith',
-        email: 'coach@example.com',
-        role: 'Coach',
-        createdAt: new Date().toISOString()
-      });
+      // Only seed profile if it's the demo-coach-uid (don't overwrite current user profile unless necessary)
+      if (!assignMeAsCoach || demoCoachUid === 'demo-coach-uid') {
+        await setDoc(doc(db, 'userProfiles', demoCoachUid), {
+          id: demoCoachUid,
+          displayName: 'Coach Mike Smith',
+          email: 'coach@example.com',
+          role: 'Coach',
+          createdAt: new Date().toISOString()
+        });
+      }
 
       await setDoc(doc(db, 'userProfiles', demoParentUid), {
         id: demoParentUid,
@@ -100,7 +108,7 @@ export default function SeedPage() {
         jerseyNumber: '10'
       });
 
-      toast({ title: "Seed Successful", description: "POC data with players and enrollments initialized." });
+      toast({ title: "Seed Successful", description: `POC data initialized. ${assignMeAsCoach ? 'You are now the coach of the Blue Jays.' : ''}` });
       setDone(true);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Seed Failed", description: e.message });
@@ -123,21 +131,37 @@ export default function SeedPage() {
             <CardTitle>Initialize Environment</CardTitle>
             <CardDescription>This will create seasons, teams, and sample player enrollments.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
               <p className="text-xs text-yellow-700">
                 This utility is for testing purposes. It will overwrite sample data if it already exists.
               </p>
             </div>
+
+            <div className="flex items-center space-x-2 p-4 bg-secondary/20 rounded-xl border">
+              <Checkbox 
+                id="assignMe" 
+                checked={assignMeAsCoach} 
+                onCheckedChange={(checked) => setAssignMeAsCoach(!!checked)} 
+              />
+              <div className="grid gap-1.5 leading-none">
+                <Label htmlFor="assignMe" className="text-sm font-bold flex items-center gap-2">
+                  <UserCheck className="h-4 w-4 text-primary" /> Assign Me as Demo Coach
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Easily test coach features with your current account.
+                </p>
+              </div>
+            </div>
             
             {done ? (
               <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="text-sm font-medium">Data successfully seeded! Log in as a Coach to see your roster.</span>
+                <span className="text-sm font-medium">Data successfully seeded! Switch to Coach role to see your roster.</span>
               </div>
             ) : (
-              <Button onClick={handleSeed} className="w-full h-12 rounded-xl" disabled={loading}>
+              <Button onClick={handleSeed} className="w-full h-12 rounded-xl text-lg font-bold" disabled={loading}>
                 {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Database className="mr-2 h-5 w-5" />}
                 Seed POC Data
               </Button>
