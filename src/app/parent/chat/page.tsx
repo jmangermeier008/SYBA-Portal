@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, limit, doc, setDoc } from 'firebase/firestore';
-import { Send, MessageSquare, Loader2 } from 'lucide-react';
+import { Send, MessageSquare, Loader2, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -27,7 +27,7 @@ export default function ParentChatPage() {
   const [newMessage, setNewMessage] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Mock team ID for MVP - in reality this would come from the parent's active teams
+  // Mock team ID for MVP
   const teamId = "sharpsville-blue-jays";
 
   const messagesQuery = useMemoFirebase(() => {
@@ -61,7 +61,6 @@ export default function ParentChatPage() {
       timestamp: new Date().toISOString(),
       type: 'Chat',
       teamId: teamId,
-      // Denormalized fields for membership map pattern
       coachUserId: "coach-id", 
       parentUserIds: [user.uid]
     };
@@ -86,14 +85,14 @@ export default function ParentChatPage() {
           <p className="text-muted-foreground">Stay connected with your team's coaches and parents.</p>
         </header>
 
-        <Card className="border-none shadow-xl h-[calc(100vh-200px)] flex flex-col">
+        <Card className="border-none shadow-xl h-[calc(100vh-200px)] flex flex-col overflow-hidden">
           <CardHeader className="border-b bg-primary/5">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white">
-                <MessageSquare className="h-5 w-5" />
+              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20">
+                <Users className="h-5 w-5" />
               </div>
               <div>
-                <CardTitle className="text-lg">Sharpsville Blue Jays</CardTitle>
+                <CardTitle className="text-lg font-headline">Sharpsville Blue Jays</CardTitle>
                 <p className="text-xs text-muted-foreground">T-Ball Division • Season: Spring 2024</p>
               </div>
             </div>
@@ -105,6 +104,7 @@ export default function ParentChatPage() {
               </div>
             ) : !messages || messages.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>No messages yet. Say hello to the team!</p>
               </div>
             ) : (
@@ -121,7 +121,9 @@ export default function ParentChatPage() {
                   </div>
                   <div
                     className={`max-w-[70%] p-3 rounded-2xl text-sm ${
-                      msg.senderUserId === user?.uid
+                      msg.type === 'Broadcast'
+                        ? 'bg-destructive text-white border-2 border-destructive/20 shadow-md'
+                        : msg.senderUserId === user?.uid
                         ? 'bg-primary text-white rounded-tr-none'
                         : 'bg-secondary text-foreground rounded-tl-none'
                     }`}
@@ -132,7 +134,7 @@ export default function ParentChatPage() {
               ))
             )}
           </CardContent>
-          <div className="p-4 border-t">
+          <div className="p-4 border-t bg-white">
             <form onSubmit={handleSendMessage} className="flex gap-2">
               <Input
                 placeholder="Type a message..."

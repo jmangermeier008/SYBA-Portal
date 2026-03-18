@@ -30,6 +30,7 @@ export default function CoachChatPage() {
   const [isBroadcast, setIsBroadcast] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Default team for MVP
   const teamId = "sharpsville-blue-jays";
 
   const messagesQuery = useMemoFirebase(() => {
@@ -64,7 +65,7 @@ export default function CoachChatPage() {
       type: isBroadcast ? 'Broadcast' : 'Chat',
       teamId: teamId,
       coachUserId: user.uid,
-      parentUserIds: [] 
+      parentUserIds: [] // In production, this would be the actual roster UIDs
     };
 
     setDoc(messageRef, messageData)
@@ -108,11 +109,11 @@ export default function CoachChatPage() {
                 {isBroadcast ? <ShieldAlert className="h-5 w-5" /> : <Users className="h-5 w-5" />}
               </div>
               <div>
-                <CardTitle className="text-lg">
+                <CardTitle className="text-lg font-headline">
                   {isBroadcast ? 'URGENT: Team Broadcast' : 'Sharpsville Blue Jays Hub'}
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  {isBroadcast ? 'Message will be sent as a push notification' : 'Standard Team Chat'}
+                  {isBroadcast ? 'Message will be highlighted for all parents' : 'Standard Team Chat'}
                 </p>
               </div>
             </div>
@@ -124,6 +125,7 @@ export default function CoachChatPage() {
               </div>
             ) : !messages || messages.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>No messages yet. Send a welcome note to the team!</p>
               </div>
             ) : (
@@ -141,7 +143,7 @@ export default function CoachChatPage() {
                   <div
                     className={`max-w-[70%] p-3 rounded-2xl text-sm ${
                       msg.type === 'Broadcast'
-                        ? 'bg-destructive text-white border-2 border-destructive/20'
+                        ? 'bg-destructive text-white border-2 border-destructive/20 shadow-md'
                         : msg.senderUserId === user?.uid
                         ? 'bg-primary text-white rounded-tr-none'
                         : 'bg-secondary text-foreground rounded-tl-none'
