@@ -47,10 +47,16 @@ export default function SeedPage() {
       const demoCoachUid = assignMeAsCoach && user ? user.uid : 'demo-coach-uid';
       const demoParentUid = 'demo-parent-uid';
 
-      // Only seed profile if it's the demo-coach-uid (don't overwrite current user profile unless necessary)
-      if (!assignMeAsCoach || demoCoachUid === 'demo-coach-uid') {
-        await setDoc(doc(db, 'userProfiles', demoCoachUid), {
-          id: demoCoachUid,
+      // Update current user to Coach if requested
+      if (assignMeAsCoach && user) {
+        await setDoc(doc(db, 'userProfiles', user.uid), {
+          role: 'Coach',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } else {
+        // Seed the default demo coach profile
+        await setDoc(doc(db, 'userProfiles', 'demo-coach-uid'), {
+          id: 'demo-coach-uid',
           displayName: 'Coach Mike Smith',
           email: 'coach@example.com',
           role: 'Coach',
@@ -108,7 +114,7 @@ export default function SeedPage() {
         jerseyNumber: '10'
       });
 
-      toast({ title: "Seed Successful", description: `POC data initialized. ${assignMeAsCoach ? 'You are now the coach of the Blue Jays.' : ''}` });
+      toast({ title: "Seed Successful", description: `POC data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : ''}` });
       setDone(true);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Seed Failed", description: e.message });
@@ -150,7 +156,7 @@ export default function SeedPage() {
                   <UserCheck className="h-4 w-4 text-primary" /> Assign Me as Demo Coach
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Easily test coach features with your current account.
+                  Your profile role will be changed to Coach for testing.
                 </p>
               </div>
             </div>
@@ -158,7 +164,7 @@ export default function SeedPage() {
             {done ? (
               <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="text-sm font-medium">Data successfully seeded! Switch to Coach role to see your roster.</span>
+                <span className="text-sm font-medium">Data successfully seeded! You can now switch to the Coach dashboard.</span>
               </div>
             ) : (
               <Button onClick={handleSeed} className="w-full h-12 rounded-xl text-lg font-bold" disabled={loading}>
