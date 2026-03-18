@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, doc, setDoc } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, CheckCircle2 } from 'lucide-react';
+import { collection, query, orderBy, doc, setDoc, where, limit } from 'firebase/firestore';
+import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -24,9 +24,18 @@ interface GameEvent {
   dateTime: string;
 }
 
+interface Team {
+  id: string;
+  name: string;
+}
+
 function EventCard({ game, teamId }: { game: GameEvent, teamId: string }) {
   const db = useFirestore();
-  const rsvpsQuery = useMemoFirebase(() => collection(db, 'teams', teamId, 'games', game.id, 'rsvps'), [db, teamId, game.id]);
+  const rsvpsQuery = useMemoFirebase(() => {
+    if (!db || !teamId || !game.id) return null;
+    return collection(db, 'teams', teamId, 'games', game.id, 'rsvps');
+  }, [db, teamId, game.id]);
+  
   const { data: rsvps } = useCollection(rsvpsQuery);
 
   const attendingCount = rsvps?.filter(r => r.status === 'Attending').length || 0;
@@ -83,7 +92,14 @@ export default function CoachSchedulesPage() {
   const [isAdding, setIsAdding] = useState(false);
   const [open, setOpen] = useState(false);
   
-  const teamId = "sharpsville-blue-jays";
+  // Dynamically find the coach's team
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(collection(db, 'teams'), where('coach_uid', '==', user.uid), limit(1));
+  }, [db, user?.uid]);
+
+  const { data: userTeams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
+  const activeTeam = userTeams?.[0];
 
   const [formData, setFormData] = useState({
     type: 'Practice',
@@ -93,26 +109,25 @@ export default function CoachSchedulesPage() {
   });
 
   const gamesQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'teams', teamId, 'games'), orderBy('dateTime', 'asc'));
-  }, [db, teamId]);
+    if (!db || !activeTeam) return null;
+    return query(collection(db, 'teams', activeTeam.id, 'games'), orderBy('dateTime', 'asc'));
+  }, [db, activeTeam?.id]);
 
   const { data: games, isLoading } = useCollection<GameEvent>(gamesQuery);
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !db) return;
+    if (!user || !db || !activeTeam) return;
     setIsAdding(true);
 
     const gameId = Math.random().toString(36).substring(7);
-    const gameRef = doc(db, 'teams', teamId, 'games', gameId);
+    const gameRef = doc(db, 'teams', activeTeam.id, 'games', gameId);
     
     const gameData = {
       id: gameId,
-      teamId: teamId,
+      teamId: activeTeam.id,
       ...formData,
       coachUserId: user.uid,
-      parentUserIds: [] 
     };
 
     setDoc(gameRef, gameData)
@@ -141,94 +156,106 @@ export default function CoachSchedulesPage() {
             <p className="text-muted-foreground">Manage practices, games, and monitor attendance.</p>
           </div>
           
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button className="rounded-full shadow-lg shadow-primary/20">
-                <Plus className="mr-2 h-4 w-4" /> Add Event
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="rounded-2xl">
-              <DialogHeader>
-                <DialogTitle className="font-headline text-2xl">New Team Event</DialogTitle>
-                <DialogDescription>Schedule a new practice or game for the Blue Jays.</DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleAddEvent}>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label>Event Type</Label>
-                    <Select value={formData.type} onValueChange={(v) => setFormData({...formData, type: v})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Practice">Team Practice</SelectItem>
-                        <SelectItem value="Game">League Game</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {formData.type === 'Game' && (
+          {activeTeam && (
+            <Dialog open={open} onOpenChange={setOpen}>
+              <DialogTrigger asChild>
+                <Button className="rounded-full shadow-lg shadow-primary/20">
+                  <Plus className="mr-2 h-4 w-4" /> Add Event
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="rounded-2xl">
+                <DialogHeader>
+                  <DialogTitle className="font-headline text-2xl">New Team Event</DialogTitle>
+                  <DialogDescription>Schedule a new practice or game for {activeTeam.name}.</DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleAddEvent}>
+                  <div className="space-y-4 py-4">
                     <div className="space-y-2">
-                      <Label htmlFor="opponent">Opponent Name</Label>
+                      <Label>Event Type</Label>
+                      <Select value={formData.type} onValueChange={(v) => setFormData({...formData, type: v})}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Practice">Team Practice</SelectItem>
+                          <SelectItem value="Game">League Game</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {formData.type === 'Game' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="opponent">Opponent Name</Label>
+                        <Input 
+                          id="opponent" 
+                          placeholder="e.g. Tigers" 
+                          value={formData.opponentName}
+                          onChange={(e) => setFormData({...formData, opponentName: e.target.value})}
+                          required
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="location">Location</Label>
                       <Input 
-                        id="opponent" 
-                        placeholder="e.g. Tigers" 
-                        value={formData.opponentName}
-                        onChange={(e) => setFormData({...formData, opponentName: e.target.value})}
+                        id="location" 
+                        placeholder="e.g. Field 3" 
+                        value={formData.location}
+                        onChange={(e) => setFormData({...formData, location: e.target.value})}
                         required
                       />
                     </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label htmlFor="location">Location</Label>
-                    <Input 
-                      id="location" 
-                      placeholder="e.g. Field 3" 
-                      value={formData.location}
-                      onChange={(e) => setFormData({...formData, location: e.target.value})}
-                      required
-                    />
+                    <div className="space-y-2">
+                      <Label htmlFor="dateTime">Date & Time</Label>
+                      <Input 
+                        id="dateTime" 
+                        type="datetime-local" 
+                        value={formData.dateTime}
+                        onChange={(e) => setFormData({...formData, dateTime: e.target.value})}
+                        required
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="dateTime">Date & Time</Label>
-                    <Input 
-                      id="dateTime" 
-                      type="datetime-local" 
-                      value={formData.dateTime}
-                      onChange={(e) => setFormData({...formData, dateTime: e.target.value})}
-                      required
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                  <Button type="submit" disabled={isAdding}>
-                    {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Schedule Event"}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                    <Button type="submit" disabled={isAdding}>
+                      {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Schedule Event"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )}
         </header>
 
-        <div className="space-y-6">
-          {isLoading ? (
-            <div className="flex justify-center py-20">
-              <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            </div>
-          ) : !games || games.length === 0 ? (
-            <Card className="border-none shadow-md py-12 text-center">
-              <CardContent>
-                <Calendar className="h-16 w-16 text-muted mx-auto mb-4" />
-                <h3 className="text-xl font-bold font-headline">No Events Scheduled</h3>
-                <p className="text-muted-foreground">Add your first team practice or game to get started.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            games.map((game) => (
-              <EventCard key={game.id} game={game} teamId={teamId} />
-            ))
-          )}
-        </div>
+        {!activeTeam && !loadingTeams ? (
+          <Card className="border-none shadow-md py-20 text-center">
+            <CardContent>
+              <ShieldAlert className="h-16 w-16 text-muted mx-auto mb-4" />
+              <h3 className="text-xl font-bold font-headline">No Active Team</h3>
+              <p className="text-muted-foreground">You must be assigned to a team roster to manage schedules.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-6">
+            {isLoading ? (
+              <div className="flex justify-center py-20">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              </div>
+            ) : !games || games.length === 0 ? (
+              <Card className="border-none shadow-md py-12 text-center">
+                <CardContent>
+                  <Calendar className="h-16 w-16 text-muted mx-auto mb-4" />
+                  <h3 className="text-xl font-bold font-headline">No Events Scheduled</h3>
+                  <p className="text-muted-foreground">Add your first team practice or game to get started.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              games.map((game) => (
+                <EventCard key={game.id} game={game} teamId={activeTeam!.id} />
+              ))
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
