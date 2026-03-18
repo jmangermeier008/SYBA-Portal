@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, use } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { collection, doc, setDoc } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -21,12 +21,10 @@ interface Player {
   lastName: string;
 }
 
-function EnrollmentForm() {
+function EnrollmentForm({ initialPlayerId }: { initialPlayerId: string }) {
   const { user } = useUser();
   const db = useFirestore();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const initialPlayerId = searchParams.get('playerId') || '';
   const { toast } = useToast();
   
   const [submitting, setSubmitting] = useState(false);
@@ -64,7 +62,7 @@ function EnrollmentForm() {
       parentUserId: user.uid,
       jerseySize: formData.jerseySize,
       paymentStatus: 'pending',
-      stripeCheckoutSessionId: '', // Set by API
+      stripeCheckoutSessionId: '',
       registrationFeeAmount: getDivisionFeeValue(formData.divisionId),
       enrollmentDate: new Date().toISOString(),
     };
@@ -73,7 +71,6 @@ function EnrollmentForm() {
       .then(() => {
         toast({ title: "Registration Submitted", description: "Redirecting to payment..." });
         
-        // Mock Stripe Redirect
         setTimeout(() => {
           router.push('/parent/dashboard?success=true');
         }, 1500);
@@ -210,7 +207,18 @@ function EnrollmentForm() {
   );
 }
 
-export default function EnrollPage() {
+export default function EnrollPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<any>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  // Destructure and unwrap dynamic props for Next.js 15 compliance
+  use(params);
+  const resolvedSearchParams = use(searchParams);
+  const initialPlayerId = typeof resolvedSearchParams.playerId === 'string' ? resolvedSearchParams.playerId : '';
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="parent" />
@@ -220,7 +228,7 @@ export default function EnrollPage() {
           <p className="text-muted-foreground">Register your players for the upcoming 2024 season at Sharpsville.</p>
         </header>
         <Suspense fallback={<div className="flex justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}>
-          <EnrollmentForm />
+          <EnrollmentForm initialPlayerId={initialPlayerId} />
         </Suspense>
       </main>
     </div>

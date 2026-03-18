@@ -22,11 +22,16 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
+  params,
 }: Readonly<{
   children: React.ReactNode;
+  params: Promise<any>;
 }>) {
+  // Await params in Server Component to prevent enumeration warnings
+  await params;
+
   return (
     <html lang="en">
       <head>

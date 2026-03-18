@@ -4,12 +4,23 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useFirestore, useCollection } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
+import { use } from 'react';
 import { collection } from 'firebase/firestore';
 import { ShieldCheck, Users, Trophy, Settings, Activity, ArrowUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
-export default function AdminDashboard() {
+export default function AdminDashboard({
+  params,
+  searchParams,
+}: {
+  params: Promise<any>;
+  searchParams: Promise<any>;
+}) {
+  // Destructure and unwrap dynamic props for Next.js 15 compliance
+  use(params);
+  use(searchParams);
+
   const db = useFirestore();
 
   const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);

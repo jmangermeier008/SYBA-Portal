@@ -2,12 +2,22 @@
 
 import { useUser } from '@/firebase';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, use } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { Trophy, Users, Calendar, MessageSquare, ArrowRight } from 'lucide-react';
 
-export default function Home() {
+export default function Home({
+  params,
+  searchParams,
+}: {
+  params: Promise<any>;
+  searchParams: Promise<any>;
+}) {
+  // Unwrap dynamic props in Client Component using React.use()
+  use(params);
+  use(searchParams);
+
   const { user, profile, loading } = useUser();
   const router = useRouter();
 
