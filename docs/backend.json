@@ -75,7 +75,8 @@
         "dateOfBirth": { "type": "string", "format": "date" },
         "medicalNotes": { "type": "string" },
         "parentUserId": { "type": "string" },
-        "clearanceUrl": { "type": "string" },
+        "birthCertificateUrl": { "type": "string", "description": "URL to the birth certificate file, deleted after verification." },
+        "ageVerified": { "type": "boolean", "default": false, "description": "Whether the player's DOB has been verified by an admin." },
         "emergencyContacts": {
           "type": "array",
           "items": {

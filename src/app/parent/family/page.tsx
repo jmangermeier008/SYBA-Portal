@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle, UserPlus, Phone } from 'lucide-react';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle, UserPlus, Phone, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -31,7 +31,8 @@ interface Player {
   dateOfBirth: string;
   parentUserId: string;
   medicalNotes?: string;
-  clearanceUrl?: string;
+  birthCertificateUrl?: string;
+  ageVerified?: boolean;
   emergencyContacts?: EmergencyContact[];
 }
 
@@ -74,6 +75,7 @@ export default function FamilyPage() {
       ...formData,
       emergencyContacts: emergencyContacts.filter(c => c.name && c.phone),
       parentUserId: user.uid,
+      ageVerified: false
     };
 
     setDoc(playerRef, playerDoc)
@@ -107,19 +109,19 @@ export default function FamilyPage() {
 
   const handleFileUpload = async (playerId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file || !user || !storage || !db) return;
 
     setUploading(playerId);
-    const storageRef = ref(storage, `users/${user.uid}/players/${playerId}/clearance_${Date.now()}`);
+    const storageRef = ref(storage, `users/${user.uid}/players/${playerId}/birth_certificate_${Date.now()}`);
 
     try {
       const snapshot = await uploadBytes(storageRef, file);
       const url = await getDownloadURL(snapshot.ref);
       
       const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
-      await updateDoc(playerRef, { clearanceUrl: url });
+      await updateDoc(playerRef, { birthCertificateUrl: url });
       
-      toast({ title: "Clearance Uploaded", description: "Document saved to player profile." });
+      toast({ title: "Birth Certificate Uploaded", description: "Identity verification document saved." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Upload Failed", description: error.message });
     } finally {
@@ -134,7 +136,7 @@ export default function FamilyPage() {
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">My Family</h1>
-            <p className="text-muted-foreground">Manage player profiles and required clearances.</p>
+            <p className="text-muted-foreground">Manage player profiles and identity verification.</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -275,38 +277,46 @@ export default function FamilyPage() {
                         </CardDescription>
                       </div>
                     </div>
-                    {player.medicalNotes && (
-                      <Badge variant="destructive" className="h-6 w-6 p-0 flex items-center justify-center rounded-full animate-pulse">
-                        <AlertTriangle className="h-3 w-3" />
+                    {player.ageVerified && (
+                      <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
+                        <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
                       </Badge>
                     )}
                   </div>
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="space-y-3">
-                    <div className="relative">
-                      <Label className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer">
-                        <div className="flex items-center gap-3">
-                          {player.clearanceUrl ? (
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          ) : (
-                            <FileText className="h-4 w-4 text-primary" />
+                    {!player.ageVerified && (
+                      <div className="relative">
+                        <Label className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 transition-colors cursor-pointer">
+                          <div className="flex items-center gap-3">
+                            {player.birthCertificateUrl ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            ) : (
+                              <FileText className="h-4 w-4 text-primary" />
+                            )}
+                            <span className="text-sm font-medium">
+                              {player.birthCertificateUrl ? "Pending Verification" : "Birth Certificate"}
+                            </span>
+                          </div>
+                          {!player.birthCertificateUrl && (
+                            uploading === player.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            ) : (
+                              <Upload className="h-4 w-4 text-muted-foreground" />
+                            )
                           )}
-                          <span className="text-sm font-medium">PIAA / Birth Certificate</span>
-                        </div>
-                        {uploading === player.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        ) : (
-                          <Upload className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        <input
-                          type="file"
-                          className="hidden"
-                          onChange={(e) => handleFileUpload(player.id, e)}
-                          disabled={!!uploading}
-                        />
-                      </Label>
-                    </div>
+                          {!player.birthCertificateUrl && (
+                            <input
+                              type="file"
+                              className="hidden"
+                              onChange={(e) => handleFileUpload(player.id, e)}
+                              disabled={!!uploading}
+                            />
+                          )}
+                        </Label>
+                      </div>
+                    )}
                     <Button variant="outline" className="w-full justify-between h-auto py-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 border-none font-normal" asChild>
                       <Link href={`/parent/enroll?playerId=${player.id}`}>
                         <div className="flex items-center gap-3">
@@ -326,3 +336,16 @@ export default function FamilyPage() {
     </div>
   );
 }
+
+const Badge = ({ children, variant, className }: any) => {
+  const variants: any = {
+    default: "bg-primary text-primary-foreground",
+    destructive: "bg-destructive text-destructive-foreground",
+    outline: "border border-input bg-background",
+  };
+  return (
+    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${variants[variant || 'default']} ${className}`}>
+      {children}
+    </div>
+  );
+};
