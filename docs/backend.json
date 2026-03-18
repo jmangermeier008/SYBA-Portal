@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "UserProfile": {
@@ -14,6 +15,10 @@
           "type": "string",
           "description": "The user's email address, primarily used for authentication and contact.",
           "format": "email"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The user's full name."
         },
         "role": {
           "type": "string",
@@ -63,15 +68,7 @@
         },
         "parentUserId": {
           "type": "string",
-          "description": "Reference to the UserProfile of the parent who manages this player. (Relationship: UserProfile 1:N Player)"
-        },
-        "piaaClearanceDocumentPath": {
-          "type": "string",
-          "description": "Firebase Storage path to the player's PIAA clearance document, if applicable."
-        },
-        "birthCertificateDocumentPath": {
-          "type": "string",
-          "description": "Firebase Storage path to the player's birth certificate document, if applicable."
+          "description": "Reference to the UserProfile of the parent who manages this player."
         }
       },
       "required": [
@@ -86,7 +83,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Season",
       "type": "object",
-      "description": "Defines a specific playing season, including its duration and registration periods.",
+      "description": "Defines a specific playing season.",
       "properties": {
         "id": {
           "type": "string",
@@ -96,41 +93,25 @@
           "type": "string",
           "description": "The name of the season (e.g., 'Spring 2024')."
         },
-        "startDate": {
+        "registrationOpen": {
           "type": "string",
-          "description": "The official start date of the season.",
           "format": "date"
         },
-        "endDate": {
+        "registrationClose": {
           "type": "string",
-          "description": "The official end date of the season.",
           "format": "date"
-        },
-        "registrationOpenDate": {
-          "type": "string",
-          "description": "The date when registration for this season opens.",
-          "format": "date-time"
-        },
-        "registrationCloseDate": {
-          "type": "string",
-          "description": "The date when registration for this season closes.",
-          "format": "date-time"
         }
       },
       "required": [
         "id",
-        "name",
-        "startDate",
-        "endDate",
-        "registrationOpenDate",
-        "registrationCloseDate"
+        "name"
       ]
     },
     "Division": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Division",
       "type": "object",
-      "description": "Represents a specific playing division within a season, including its name and associated registration fee.",
+      "description": "Represents a specific playing division within a season.",
       "properties": {
         "id": {
           "type": "string",
@@ -138,321 +119,23 @@
         },
         "name": {
           "type": "string",
-          "description": "The name of the division (e.g., 'T-Ball', 'Coach Pitch')."
+          "description": "The name of the division (e.g., 'T-Ball')."
         },
-        "seasonId": {
-          "type": "string",
-          "description": "Reference to the Season this division belongs to. (Relationship: Season 1:N Division)"
-        },
-        "feeAmount": {
+        "fee": {
           "type": "number",
-          "description": "The registration fee amount for this division, typically in the smallest currency unit (e.g., cents)."
+          "description": "The registration fee amount in cents."
         }
       },
       "required": [
         "id",
         "name",
-        "seasonId",
-        "feeAmount"
-      ]
-    },
-    "Enrollment": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Enrollment",
-      "type": "object",
-      "description": "Records a player's enrollment in a specific season and division, along with payment status and details.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Enrollment entity."
-        },
-        "playerId": {
-          "type": "string",
-          "description": "Reference to the Player being enrolled. (Relationship: Player 1:N Enrollment)"
-        },
-        "seasonId": {
-          "type": "string",
-          "description": "Reference to the Season the player is enrolling in. (Relationship: Season 1:N Enrollment)"
-        },
-        "divisionId": {
-          "type": "string",
-          "description": "Reference to the Division the player is enrolling in. (Relationship: Division 1:N Enrollment)"
-        },
-        "parentUserId": {
-          "type": "string",
-          "description": "Reference to the UserProfile of the parent who initiated the enrollment. (Relationship: UserProfile 1:N Enrollment)"
-        },
-        "jerseySize": {
-          "type": "string",
-          "description": "The player's requested jersey size."
-        },
-        "paymentStatus": {
-          "type": "string",
-          "description": "The current payment status of the enrollment ('pending', 'paid', 'failed')."
-        },
-        "stripeCheckoutSessionId": {
-          "type": "string",
-          "description": "The ID of the associated Stripe Checkout Session."
-        },
-        "registrationFeeAmount": {
-          "type": "number",
-          "description": "The actual registration fee amount charged for this enrollment."
-        },
-        "enrollmentDate": {
-          "type": "string",
-          "description": "Timestamp when the enrollment was created.",
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "playerId",
-        "seasonId",
-        "divisionId",
-        "parentUserId",
-        "jerseySize",
-        "paymentStatus",
-        "stripeCheckoutSessionId",
-        "registrationFeeAmount",
-        "enrollmentDate"
-      ]
-    },
-    "Team": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Team",
-      "type": "object",
-      "description": "Represents a specific sports team within a season and division.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Team entity."
-        },
-        "name": {
-          "type": "string",
-          "description": "The name of the team (e.g., 'Red Rockets')."
-        },
-        "seasonId": {
-          "type": "string",
-          "description": "Reference to the Season the team belongs to. (Relationship: Season 1:N Team)"
-        },
-        "divisionId": {
-          "type": "string",
-          "description": "Reference to the Division the team plays in. (Relationship: Division 1:N Team)"
-        },
-        "coachUserId": {
-          "type": "string",
-          "description": "Reference to the UserProfile of the coach assigned to this team. (Relationship: UserProfile 1:N Team)"
-        },
-        "playerIds": {
-          "type": "array",
-          "description": "An array of IDs referencing the Players on this team. (Relationship: Player N:N Team)",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "seasonId",
-        "divisionId",
-        "coachUserId",
-        "playerIds"
-      ]
-    },
-    "Game": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Game",
-      "type": "object",
-      "description": "Represents a scheduled game or practice event for a team.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Game entity."
-        },
-        "teamId": {
-          "type": "string",
-          "description": "Reference to the Team participating in this game/event. (Relationship: Team 1:N Game)"
-        },
-        "opponentName": {
-          "type": "string",
-          "description": "The name of the opposing team (for 'Game' type events)."
-        },
-        "location": {
-          "type": "string",
-          "description": "The location where the game/event will take place."
-        },
-        "dateTime": {
-          "type": "string",
-          "description": "The date and time of the game/event.",
-          "format": "date-time"
-        },
-        "type": {
-          "type": "string",
-          "description": "The type of event ('Game' or 'Practice')."
-        },
-        "description": {
-          "type": "string",
-          "description": "An optional description or notes for the game/event."
-        }
-      },
-      "required": [
-        "id",
-        "teamId",
-        "location",
-        "dateTime",
-        "type"
-      ]
-    },
-    "RSVP": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "RSVP",
-      "type": "object",
-      "description": "Records a parent's response to a player's availability for a specific game or event.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the RSVP entity."
-        },
-        "gameId": {
-          "type": "string",
-          "description": "Reference to the Game or event the RSVP is for. (Relationship: Game 1:N RSVP)"
-        },
-        "playerId": {
-          "type": "string",
-          "description": "Reference to the Player whose attendance is being confirmed. (Relationship: Player 1:N RSVP)"
-        },
-        "parentUserId": {
-          "type": "string",
-          "description": "Reference to the UserProfile of the parent who submitted this RSVP. (Relationship: UserProfile 1:N RSVP)"
-        },
-        "status": {
-          "type": "string",
-          "description": "The player's attendance status for the event ('Attending', 'Not Attending', 'Maybe')."
-        },
-        "timestamp": {
-          "type": "string",
-          "description": "Timestamp when the RSVP was submitted or last updated.",
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "gameId",
-        "playerId",
-        "parentUserId",
-        "status",
-        "timestamp"
-      ]
-    },
-    "Message": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Message",
-      "type": "object",
-      "description": "Represents a message sent within a team's real-time chat or as a broadcast notification.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Message entity."
-        },
-        "teamId": {
-          "type": "string",
-          "description": "Reference to the Team the message belongs to. (Relationship: Team 1:N Message)"
-        },
-        "senderUserId": {
-          "type": "string",
-          "description": "Reference to the UserProfile of the sender. (Relationship: UserProfile 1:N Message)"
-        },
-        "content": {
-          "type": "string",
-          "description": "The textual content of the message."
-        },
-        "timestamp": {
-          "type": "string",
-          "description": "Timestamp when the message was sent.",
-          "format": "date-time"
-        },
-        "type": {
-          "type": "string",
-          "description": "The type of message ('Chat' or 'Broadcast')."
-        }
-      },
-      "required": [
-        "id",
-        "teamId",
-        "senderUserId",
-        "content",
-        "timestamp",
-        "type"
-      ]
-    },
-    "Drill": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Drill",
-      "type": "object",
-      "description": "Represents a practice drill suggestion, potentially generated by AI or created by a coach.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the Drill entity."
-        },
-        "name": {
-          "type": "string",
-          "description": "The name of the practice drill."
-        },
-        "description": {
-          "type": "string",
-          "description": "A brief description of what the drill entails."
-        },
-        "instructions": {
-          "type": "string",
-          "description": "Detailed step-by-step instructions on how to perform the drill."
-        },
-        "creatorUserId": {
-          "type": "string",
-          "description": "Reference to the UserProfile of the coach who created this drill. (Relationship: UserProfile 1:N Drill)"
-        },
-        "ageGroup": {
-          "type": "string",
-          "description": "The target age group for which this drill is suitable (e.g., 'U8', 'U10', 'High School')."
-        },
-        "skillLevel": {
-          "type": "string",
-          "description": "The target skill level for players (e.g., 'Beginner', 'Intermediate', 'Advanced')."
-        },
-        "practiceFocus": {
-          "type": "string",
-          "description": "The primary area of focus for this drill (e.g., 'Hitting', 'Fielding', 'Pitching', 'Teamwork')."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp when the drill was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp when the drill was last updated.",
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "description",
-        "instructions",
-        "creatorUserId",
-        "ageGroup",
-        "skillLevel",
-        "practiceFocus",
-        "createdAt",
-        "updatedAt"
+        "fee"
       ]
     }
   },
   "auth": {
     "providers": [
-      "password",
-      "anonymous"
+      "password"
     ]
   },
   "firestore": {
@@ -464,53 +147,17 @@
           "schema": {
             "$ref": "#/backend/entities/UserProfile"
           },
-          "description": "Stores user authentication details and assigned roles. The `userId` parameter directly corresponds to the Firebase Authentication UID. The 'role' field is critical for DBAC.",
-          "params": [
-            {
-              "name": "userId",
-              "description": "The unique Firebase Authentication UID of the user."
-            }
-          ]
+          "description": "User profiles and roles."
         }
       },
       {
-        "path": "/userProfiles/{parentUserId}/players/{playerId}",
+        "path": "/userProfiles/{userId}/players/{playerId}",
         "definition": {
           "entityName": "Player",
           "schema": {
             "$ref": "#/backend/entities/Player"
           },
-          "description": "Player profiles, managed by their `parentUserId`. Includes denormalized `parentUserId` for authorization independence and path-based ownership. Linked documents (PIAA, birth certificate) will reference Firebase Storage paths.",
-          "params": [
-            {
-              "name": "parentUserId",
-              "description": "The unique Firebase Authentication UID of the parent managing this player."
-            },
-            {
-              "name": "playerId",
-              "description": "The unique identifier for the player."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/userProfiles/{parentUserId}/enrollments/{enrollmentId}",
-        "definition": {
-          "entityName": "Enrollment",
-          "schema": {
-            "$ref": "#/backend/entities/Enrollment"
-          },
-          "description": "Records a player's enrollment in a season/division, managed by their `parentUserId`. Includes denormalized `parentUserId`, `playerId`, `seasonId`, `divisionId` for authorization independence and path-based ownership. `paymentStatus` is updated by Stripe webhook.",
-          "params": [
-            {
-              "name": "parentUserId",
-              "description": "The unique Firebase Authentication UID of the parent who initiated the enrollment."
-            },
-            {
-              "name": "enrollmentId",
-              "description": "The unique identifier for the enrollment record."
-            }
-          ]
+          "description": "Players managed by a parent."
         }
       },
       {
@@ -520,13 +167,7 @@
           "schema": {
             "$ref": "#/backend/entities/Season"
           },
-          "description": "Global collection for defining playing seasons. Accessible for reading by all authenticated users, writeable by Admins.",
-          "params": [
-            {
-              "name": "seasonId",
-              "description": "The unique identifier for the season."
-            }
-          ]
+          "description": "Global playing seasons."
         }
       },
       {
@@ -536,116 +177,9 @@
           "schema": {
             "$ref": "#/backend/entities/Division"
           },
-          "description": "Divisions within a specific season. Accessible for reading by all authenticated users, writeable by Admins. Includes denormalized `seasonId` for data integrity and direct querying.",
-          "params": [
-            {
-              "name": "seasonId",
-              "description": "The unique identifier of the parent season."
-            },
-            {
-              "name": "divisionId",
-              "description": "The unique identifier for the division."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/teams/{teamId}",
-        "definition": {
-          "entityName": "Team",
-          "schema": {
-            "$ref": "#/backend/entities/Team"
-          },
-          "description": "Represents a sports team. Includes denormalized `coachUserId`, `seasonId`, `divisionId`. **Crucially, includes denormalized `parentUserIds: string[]` (an array of UIDs of all parents of players on this team) for authorization independence of team-scoped access.**",
-          "params": [
-            {
-              "name": "teamId",
-              "description": "The unique identifier for the team."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/teams/{teamId}/games/{gameId}",
-        "definition": {
-          "entityName": "Game",
-          "schema": {
-            "$ref": "#/backend/entities/Game"
-          },
-          "description": "Scheduled games and practices for a specific team. Includes denormalized `teamId`. **Includes denormalized `coachUserId` and `parentUserIds` (from the parent Team document) for authorization independence for team members.**",
-          "params": [
-            {
-              "name": "teamId",
-              "description": "The unique identifier of the parent team."
-            },
-            {
-              "name": "gameId",
-              "description": "The unique identifier for the game or event."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/teams/{teamId}/games/{gameId}/rsvps/{rsvpId}",
-        "definition": {
-          "entityName": "RSVP",
-          "schema": {
-            "$ref": "#/backend/entities/RSVP"
-          },
-          "description": "Records player attendance responses for a game/event. Includes `parentUserId` (owner of the RSVP), `playerId`. **Includes denormalized `teamId`, `coachUserId`, and `parentUserIds` (from the parent Team document via the Game) for authorization independence, allowing coaches to view all RSVPs for their games and parents to manage their own.**",
-          "params": [
-            {
-              "name": "teamId",
-              "description": "The unique identifier of the parent team."
-            },
-            {
-              "name": "gameId",
-              "description": "The unique identifier of the parent game or event."
-            },
-            {
-              "name": "rsvpId",
-              "description": "The unique identifier for the RSVP."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/teams/{teamId}/messages/{messageId}",
-        "definition": {
-          "entityName": "Message",
-          "schema": {
-            "$ref": "#/backend/entities/Message"
-          },
-          "description": "Real-time chat and broadcast messages for a specific team. Includes `senderUserId` (message author). **Includes denormalized `teamId`, `coachUserId`, and `parentUserIds` (from the parent Team document) for authorization independence, ensuring only team members can read/write.**",
-          "params": [
-            {
-              "name": "teamId",
-              "description": "The unique identifier of the parent team."
-            },
-            {
-              "name": "messageId",
-              "description": "The unique identifier for the message."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/drills/{drillId}",
-        "definition": {
-          "entityName": "Drill",
-          "schema": {
-            "$ref": "#/backend/entities/Drill"
-          },
-          "description": "Practice drill suggestions. Includes denormalized `creatorUserId` for authorization independence, allowing coaches to manage their own drills. Assumed to be readable by all authenticated users (coaches and parents).",
-          "params": [
-            {
-              "name": "drillId",
-              "description": "The unique identifier for the drill."
-            }
-          ]
+          "description": "Divisions within a season."
         }
       }
-    ],
-    "reasoning": "The Firestore structure for Home Run Hub prioritizes security, scalability, and debuggability by strictly adhering to the core design principles, especially Authorization Independence and Structural Segregation.\n\n**Authorization Independence via Denormalization:**\nThis is achieved by strategically denormalizing authorization-relevant fields directly into the documents that require access control. This eliminates the need for expensive and complex `get()` calls in Firestore Security Rules, enabling atomic operations and simplifying rule logic. For instance:\n*   **Player & Enrollment Documents:** `parentUserId` is stored directly in the document and matches the `{parentUserId}` wildcard in their respective paths (`/userProfiles/{parentUserId}/players/{playerId}` and `/userProfiles/{parentUserId}/enrollments/{enrollmentId}`). This allows rules to check `request.auth.uid == resource.data.parentUserId` or `request.auth.uid == parentUserId` directly, without looking up the parent's profile.\n*   **Team, Game, RSVP, and Message Documents:** For collaborative entities, `coachUserId` and a denormalized list of `parentUserIds` (representing all parents of players on the team) are embedded within each `Team` document. Crucially, these `coachUserId` and `parentUserIds` are further denormalized into `Game`, `RSVP`, and `Message` documents. This allows security rules to instantly determine if `request.auth.uid` is the coach or a parent associated with the team, game, or message, fulfilling the \"Membership Map\" strategy for collaborative data. This ensures that rules like `request.auth.uid == resource.data.coachUserId || request.auth.uid in resource.data.parentUserIds` can be evaluated locally without cross-document reads.\n\n**QAPs (Rules are not Filters) and Structural Segregation:**\n\n1.  **User-Owned Data:** User-specific data like `Player` profiles and `Enrollments` are nested under `/userProfiles/{userId}/...`. This structural segregation ensures that `list` operations (queries) for a parent's children or enrollments automatically apply the `parentUserId` filter, making rules simple (`allow list: if request.auth.uid == parentUserId;`). This ensures QAPs as only the authenticated user's data is returned.\n2.  **Global Data:** `Seasons` and `Divisions` are placed in root-level collections (`/seasons/{seasonId}`, `/seasons/{seasonId}/divisions/{divisionId}`). These are generally public (read-only for all authenticated users) and admin-writeable. This segregation clearly defines their homogenous security posture.\n3.  **Collaborative (Team-Scoped) Data:** `Teams` are at a root level (`/teams/{teamId}`), while `Games`, `Messages`, and `RSVPs` are subcollections (`/teams/{teamId}/games/{gameId}/...`). This grouping ensures that `list` operations for a team's schedule (`/teams/{teamId}/games`) or chat (`/teams/{teamId}/messages`) are naturally scoped to a specific team, and the denormalized `coachUserId` and `parentUserIds` in these documents allow rules to enforce team-specific access checks (`allow list: if request.auth.uid == teamId.coachUserId || request.auth.uid in teamId.parentUserIds;`). For RSVPs, parents can perform a collection group query on `rsvps` filtered by their `parentUserId`, which is supported by the denormalized `parentUserId` in the RSVP document.\n4.  **Drills:** Drills are placed in a root-level `/drills/{drillId}` collection. While created by coaches, they are assumed to be broadly accessible for reading, with write access restricted to the `creatorUserId` or admin. This allows for QAPs for listing all drills, or filtering by `creatorUserId` for coaches to manage their own.\n\nThis design leverages explicit data ownership through path-based authorization and denormalized membership lists, enabling clear, concise, and performant security rules that inherently support QAPs by aligning data structure with access patterns."
+    ]
   }
 }
