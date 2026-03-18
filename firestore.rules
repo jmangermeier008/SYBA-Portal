@@ -10,10 +10,9 @@ service cloud.firestore {
      * 1. Private User Scoping: Personal data (Profiles, Players, Enrollments) is strictly 
      *    scoped to the individual user's UID via path-based ownership.
      * 2. Team Collaboration: Shared resources (Games, Messages, RSVPs) use a Membership Map 
-     *    pattern. Access is granted if the user is the assigned Coach or is in the 
-     *    denormalized 'parentUserIds' list.
-     * 3. Global Config: Seasons and Divisions are public for reading to all authenticated 
-     *    members but restricted to Admins for modifications.
+     *    pattern for sensitive data. 
+     * 3. Public/League Access: Teams and Games (the schedule) are viewable by all authenticated
+     *    members to ensure the league schedule is accessible.
      */
 
     // --- GLOBAL HELPER FUNCTIONS ---
@@ -45,7 +44,6 @@ service cloud.firestore {
 
     /**
      * @description Individual user profiles.
-     * @allow (get, list) if owner or admin. (create) if matching Auth UID. (update) if owner or admin.
      */
     match /userProfiles/{userId} {
       allow get, list: if isUser(userId) || isAdmin();
@@ -88,21 +86,24 @@ service cloud.firestore {
     }
 
     /**
-     * @description Team entities.
+     * @description Team entities and schedules.
      */
     match /teams/{teamId} {
-      allow get, list: if isTeamMember(resource.data) || isAdmin();
+      // Teams and Games are readable by all authenticated league members
+      allow get, list: if isSignedIn(); 
       allow create: if isAdmin();
       allow update: if isAdmin() || (resource != null && request.auth.uid == resource.data.coachUserId);
       allow delete: if isAdmin();
 
       match /games/{gameId} {
-        allow get, list: if isTeamMember(resource.data) || isAdmin();
+        // Schedules are public to all signed-in users
+        allow get, list: if isSignedIn();
         allow create: if (isTeamMember(request.resource.data) && request.auth.uid == request.resource.data.coachUserId) || isAdmin();
         allow update: if (isTeamMember(resource.data) && request.auth.uid == resource.data.coachUserId) || isAdmin();
         allow delete: if (isTeamMember(resource.data) && request.auth.uid == resource.data.coachUserId) || isAdmin();
 
         match /rsvps/{rsvpId} {
+          // RSVPs are sensitive; only team members or admins can view attendance
           allow get, list: if isTeamMember(resource.data) || isAdmin();
           allow create: if (isTeamMember(request.resource.data) && isUser(request.resource.data.parentUserId)) || isAdmin();
           allow update: if (isTeamMember(resource.data) && isUser(request.resource.data.parentUserId)) || isAdmin();
@@ -111,6 +112,7 @@ service cloud.firestore {
       }
 
       match /messages/{messageId} {
+        // Chat messages are private to team members
         allow get, list: if isTeamMember(resource.data) || isAdmin();
         allow create: if (isTeamMember(request.resource.data) && isUser(request.resource.data.senderUserId)) || isAdmin();
         allow update, delete: if isExistingOwner(resource.data.senderUserId) || isAdmin();
