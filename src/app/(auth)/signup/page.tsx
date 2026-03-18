@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth, useFirestore } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import Link from 'next/link';
 import { Trophy, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -31,14 +33,25 @@ export default function SignupPage() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Create Firestore user profile
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid,
+      const profileData = {
+        id: user.uid,
         email: user.email,
         displayName: displayName,
-        role: 'Parent', // Default role
+        role: 'Parent',
         createdAt: new Date().toISOString(),
-      });
+        updatedAt: new Date().toISOString(),
+      };
+
+      const userRef = doc(db, 'userProfiles', user.uid);
+      
+      setDoc(userRef, profileData)
+        .catch(async (error) => {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userRef.path,
+            operation: 'create',
+            requestResourceData: profileData
+          }));
+        });
 
       toast({
         title: "Account created!",
@@ -62,7 +75,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md">
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Trophy className="h-8 w-8 text-primary" />
-          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">Sharpsville Youth Baseball</span>
+          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">SYBA Portal</span>
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { useAuth, useFirestore } from '@/firebase';
+import { collection, doc, setDoc } from 'firebase/firestore';
+import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,71 +12,66 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface Player {
   id: string;
   firstName: string;
   lastName: string;
-  dob: string;
-  parentUid: string;
+  dateOfBirth: string;
+  parentUserId: string;
 }
 
 export default function FamilyPage() {
-  const auth = useAuth();
+  const { user, profile } = useUser();
   const db = useFirestore();
-  const user = auth.currentUser;
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+  
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(false);
-  const { toast } = useToast();
-
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    dob: '',
+    dateOfBirth: '',
   });
 
-  const fetchPlayers = async () => {
-    if (!user) return;
-    try {
-      const q = query(collection(db, 'players'), where('parentUid', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      const data: Player[] = [];
-      querySnapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...doc.data() } as Player);
-      });
-      setPlayers(data);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles', user.uid, 'players');
+  }, [db, user]);
 
-  useEffect(() => {
-    fetchPlayers();
-  }, [user, db]);
+  const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
 
   const handleAddPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !db) return;
     setAdding(true);
-    try {
-      await addDoc(collection(db, 'players'), {
-        ...formData,
-        parentUid: user.uid,
-        createdAt: new Date().toISOString(),
+
+    const playerId = Math.random().toString(36).substring(7);
+    const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
+    const playerDoc = {
+      id: playerId,
+      ...formData,
+      parentUserId: user.uid,
+    };
+
+    setDoc(playerRef, playerDoc)
+      .then(() => {
+        toast({ title: "Player Added", description: `${formData.firstName} has been added to your family.` });
+        setFormData({ firstName: '', lastName: '', dateOfBirth: '' });
+        setOpen(false);
+      })
+      .catch(async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: playerRef.path,
+          operation: 'create',
+          requestResourceData: playerDoc
+        }));
+      })
+      .finally(() => {
+        setAdding(false);
       });
-      toast({ title: "Player Added", description: `${formData.firstName} has been added to your family.` });
-      setFormData({ firstName: '', lastName: '', dob: '' });
-      setOpen(false);
-      fetchPlayers();
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-    } finally {
-      setAdding(false);
-    }
   };
 
   return (
@@ -124,12 +119,12 @@ export default function FamilyPage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="dob">Date of Birth</Label>
+                    <Label htmlFor="dateOfBirth">Date of Birth</Label>
                     <Input
-                      id="dob"
+                      id="dateOfBirth"
                       type="date"
-                      value={formData.dob}
-                      onChange={(e) => setFormData({ ...formData, dob: e.target.value })}
+                      value={formData.dateOfBirth}
+                      onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
                       required
                     />
                   </div>
@@ -149,7 +144,7 @@ export default function FamilyPage() {
           <div className="flex justify-center py-20">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
-        ) : players.length === 0 ? (
+        ) : !players || players.length === 0 ? (
           <Card className="border-none shadow-md bg-white py-12 text-center">
             <CardContent>
               <UserIcon className="h-16 w-16 text-muted mx-auto mb-4" />
@@ -170,7 +165,7 @@ export default function FamilyPage() {
                     <div>
                       <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
                       <CardDescription className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" /> Born: {player.dob}
+                        <Calendar className="h-3 w-3" /> Born: {player.dateOfBirth}
                       </CardDescription>
                     </div>
                   </div>

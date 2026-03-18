@@ -2,8 +2,8 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { useAuth, useFirestore } from '@/firebase';
+import { collection, doc, setDoc } from 'firebase/firestore';
+import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, CreditCard, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface Player {
   id: string;
@@ -20,81 +22,85 @@ interface Player {
 }
 
 function EnrollmentForm() {
-  const auth = useAuth();
+  const { user } = useUser();
   const db = useFirestore();
-  const user = auth.currentUser;
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialPlayerId = searchParams.get('playerId') || '';
-  
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
-
+  
+  const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    playerUid: initialPlayerId,
-    season: 'Spring 2024',
-    division: '',
+    playerId: initialPlayerId,
+    seasonId: 'spring-2024',
+    divisionId: '',
     jerseySize: '',
   });
 
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles', user.uid, 'players');
+  }, [db, user]);
+
+  const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
+
   useEffect(() => {
-    const fetchPlayers = async () => {
-      if (!user) return;
-      try {
-        const q = query(collection(db, 'players'), where('parentUid', '==', user.uid));
-        const querySnapshot = await getDocs(q);
-        const data: Player[] = [];
-        querySnapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() } as Player);
-        });
-        setPlayers(data);
-        if (initialPlayerId) setFormData(prev => ({ ...prev, playerUid: initialPlayerId }));
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchPlayers();
-  }, [user, initialPlayerId, db]);
+    if (initialPlayerId) setFormData(prev => ({ ...prev, playerId: initialPlayerId }));
+  }, [initialPlayerId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !db) return;
     setSubmitting(true);
     
-    try {
-      const enrollmentData = {
-        ...formData,
-        parentUid: user.uid,
-        paymentStatus: 'pending',
-        createdAt: new Date().toISOString(),
-      };
-      
-      await addDoc(collection(db, 'enrollments'), enrollmentData);
-      
-      toast({ title: "Registration Submitted", description: "Redirecting to payment..." });
-      
-      setTimeout(() => {
-        router.push('/parent/dashboard?success=true');
-      }, 1500);
-
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-      setSubmitting(false);
-    }
+    const enrollmentId = Math.random().toString(36).substring(7);
+    const enrollmentRef = doc(db, 'userProfiles', user.uid, 'enrollments', enrollmentId);
+    
+    const enrollmentData = {
+      id: enrollmentId,
+      playerId: formData.playerId,
+      seasonId: formData.seasonId,
+      divisionId: formData.divisionId,
+      parentUserId: user.uid,
+      jerseySize: formData.jerseySize,
+      paymentStatus: 'pending',
+      stripeCheckoutSessionId: '', // Set by API
+      registrationFeeAmount: getDivisionFeeValue(formData.divisionId),
+      enrollmentDate: new Date().toISOString(),
+    };
+    
+    setDoc(enrollmentRef, enrollmentData)
+      .then(() => {
+        toast({ title: "Registration Submitted", description: "Redirecting to payment..." });
+        
+        // Mock Stripe Redirect
+        setTimeout(() => {
+          router.push('/parent/dashboard?success=true');
+        }, 1500);
+      })
+      .catch(async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: enrollmentRef.path,
+          operation: 'create',
+          requestResourceData: enrollmentData
+        }));
+        setSubmitting(false);
+      });
   };
 
-  const getDivisionFee = (division: string) => {
-    switch (division) {
-      case 'T-Ball': return '$50.00';
-      case 'Coach Pitch': return '$75.00';
-      case 'Minor League': return '$100.00';
-      case 'Major League': return '$125.00';
-      default: return '$0.00';
+  function getDivisionFeeValue(divisionId: string) {
+    switch (divisionId) {
+      case 'tball': return 5000;
+      case 'coach-pitch': return 7500;
+      case 'minors': return 10000;
+      case 'majors': return 12500;
+      default: return 0;
     }
+  }
+
+  const getDivisionFee = (divisionId: string) => {
+    const value = getDivisionFeeValue(divisionId);
+    return `$${(value / 100).toFixed(2)}`;
   };
 
   return (
@@ -106,38 +112,44 @@ function EnrollmentForm() {
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-6 pt-6">
-            <div className="space-y-2">
-              <Label>Select Player</Label>
-              <Select
-                value={formData.playerUid}
-                onValueChange={(val) => setFormData({ ...formData, playerUid: val })}
-              >
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="Choose a child" />
-                </SelectTrigger>
-                <SelectContent>
-                  {players.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {loading ? (
+              <div className="flex justify-center py-10">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Select Player</Label>
+                <Select
+                  value={formData.playerId}
+                  onValueChange={(val) => setFormData({ ...formData, playerId: val })}
+                >
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder="Choose a child" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {players?.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Division</Label>
                 <Select
-                  value={formData.division}
-                  onValueChange={(val) => setFormData({ ...formData, division: val })}
+                  value={formData.divisionId}
+                  onValueChange={(val) => setFormData({ ...formData, divisionId: val })}
                 >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="Select Division" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="T-Ball">T-Ball (Age 4-6)</SelectItem>
-                    <SelectItem value="Coach Pitch">Coach Pitch (Age 7-8)</SelectItem>
-                    <SelectItem value="Minor League">Minor League (Age 9-10)</SelectItem>
-                    <SelectItem value="Major League">Major League (Age 11-12)</SelectItem>
+                    <SelectItem value="tball">T-Ball (Age 4-6)</SelectItem>
+                    <SelectItem value="coach-pitch">Coach Pitch (Age 7-8)</SelectItem>
+                    <SelectItem value="minors">Minor League (Age 9-10)</SelectItem>
+                    <SelectItem value="majors">Major League (Age 11-12)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -160,15 +172,15 @@ function EnrollmentForm() {
               </div>
             </div>
 
-            {formData.division && (
+            {formData.divisionId && (
               <div className="p-4 rounded-xl bg-secondary/30 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Registration Fee</p>
-                  <p className="text-2xl font-bold text-primary">{getDivisionFee(formData.division)}</p>
+                  <p className="text-2xl font-bold text-primary">{getDivisionFee(formData.divisionId)}</p>
                 </div>
                 <div className="flex flex-col items-end">
-                  <Badge className="bg-accent text-accent-foreground border-none mb-1">Division: {formData.division}</Badge>
-                  <p className="text-xs text-muted-foreground italic">Payment processed securely</p>
+                  <Badge className="bg-accent text-accent-foreground border-none mb-1">Payment Required</Badge>
+                  <p className="text-xs text-muted-foreground italic">Payment processed via Stripe</p>
                 </div>
               </div>
             )}
@@ -182,7 +194,7 @@ function EnrollmentForm() {
             <Button
               type="submit"
               className="w-full h-12 rounded-xl text-lg font-semibold"
-              disabled={submitting || !formData.playerUid || !formData.division || !formData.jerseySize}
+              disabled={submitting || !formData.playerId || !formData.divisionId || !formData.jerseySize}
             >
               {submitting ? (
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
