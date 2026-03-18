@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from 'next/link';
@@ -17,8 +16,8 @@ import {
   LogOut,
   User as UserIcon,
   ClipboardList,
-  FolderLock,
-  FileCheck
+  FileCheck,
+  Database
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -46,7 +45,7 @@ export function Sidebar({ role }: SidebarProps) {
       { label: 'My Teams', icon: Users, href: '/parent/teams' },
       { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
       { label: 'Team Chat', icon: MessageSquare, href: '/parent/chat' },
-      { label: 'Settings', icon: FolderLock, href: '/parent/settings' },
+      { label: 'Settings', icon: Settings, href: '/parent/settings' },
     ],
     coach: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/coach/dashboard' },
@@ -63,6 +62,7 @@ export function Sidebar({ role }: SidebarProps) {
       { label: 'Teams', icon: Users, href: '/admin/teams' },
       { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
       { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
+      { label: 'Seed Data', icon: Database, href: '/admin/seed' },
       { label: 'Settings', icon: Settings, href: '/admin/settings' },
     ],
   };
@@ -78,7 +78,7 @@ export function Sidebar({ role }: SidebarProps) {
         </Link>
       </div>
 
-      <nav className="flex-1 px-4 space-y-1">
+      <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
         {items.map((item) => (
           <Link
             key={item.href}

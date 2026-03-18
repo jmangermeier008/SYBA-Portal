@@ -6,7 +6,7 @@ import { useFirestore, useCollection } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
 import { use } from 'react';
 import { collection } from 'firebase/firestore';
-import { ShieldCheck, Users, Trophy, Settings, Activity, ArrowUpRight } from 'lucide-react';
+import { ShieldCheck, Users, Trophy, Settings, Activity, ArrowUpRight, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
@@ -17,7 +17,6 @@ export default function AdminDashboard({
   params: Promise<any>;
   searchParams: Promise<any>;
 }) {
-  // Destructure and unwrap dynamic props for Next.js 15 compliance
   use(params);
   use(searchParams);
 
@@ -69,36 +68,24 @@ export default function AdminDashboard({
             </CardHeader>
             <CardContent className="space-y-4">
               <Button className="w-full justify-between h-auto py-4 rounded-xl" variant="outline" asChild>
-                <Link href="/admin/roles">
+                <Link href="/admin/seed">
                   <div className="flex items-center gap-3">
-                    <ShieldCheck className="h-5 w-5 text-primary" />
+                    <Database className="h-5 w-5 text-primary" />
                     <div className="text-left">
-                      <p className="font-semibold">User Access Control</p>
-                      <p className="text-xs text-muted-foreground">Manage permissions and roles</p>
+                      <p className="font-semibold">Seed POC Data</p>
+                      <p className="text-xs text-muted-foreground">Initialize seasons and teams for testing</p>
                     </div>
                   </div>
                   <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
                 </Link>
               </Button>
               <Button className="w-full justify-between h-auto py-4 rounded-xl" variant="outline" asChild>
-                <Link href="/admin/seasons">
+                <Link href="/admin/roster">
                   <div className="flex items-center gap-3">
-                    <Trophy className="h-5 w-5 text-primary" />
+                    <Users className="h-5 w-5 text-primary" />
                     <div className="text-left">
-                      <p className="font-semibold">Season Configuration</p>
-                      <p className="text-xs text-muted-foreground">Setup registrations and divisions</p>
-                    </div>
-                  </div>
-                  <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
-                </Link>
-              </Button>
-              <Button className="w-full justify-between h-auto py-4 rounded-xl" variant="outline" asChild>
-                <Link href="/admin/settings">
-                  <div className="flex items-center gap-3">
-                    <Settings className="h-5 w-5 text-primary" />
-                    <div className="text-left">
-                      <p className="font-semibold">Global Settings</p>
-                      <p className="text-xs text-muted-foreground">Configure system-wide parameters</p>
+                      <p className="font-semibold">Master Roster</p>
+                      <p className="text-xs text-muted-foreground">Manage player assignments</p>
                     </div>
                   </div>
                   <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
@@ -115,9 +102,9 @@ export default function AdminDashboard({
             <CardContent>
               <div className="space-y-4">
                 {[
-                  { user: 'Admin', action: 'Updated user role for John Doe', time: '2 mins ago' },
+                  { user: 'Admin', action: 'Initialized POC Data', time: 'Just now' },
                   { user: 'System', action: 'Spring 2024 Season Created', time: '1 hour ago' },
-                  { user: 'Admin', action: 'Modified Major League Fee', time: '3 hours ago' },
+                  { user: 'Admin', action: 'Updated user role for John Doe', time: '2 hours ago' },
                 ].map((log, i) => (
                   <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-secondary/20">
                     <div>
