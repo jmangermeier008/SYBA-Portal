@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup, query, where } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 interface Enrollment {
   id: string;
@@ -56,15 +57,17 @@ export default function MasterRosterPage() {
   const { data: players } = useCollection<Player>(playersQuery);
 
   const filteredEnrollments = enrollments?.filter(e => 
-    (!selectedSeason || e.seasonId === selectedSeason) &&
-    (!selectedDivision || e.divisionId === selectedDivision)
+    (!selectedSeason || selectedSeason === 'all-seasons' || e.seasonId === selectedSeason) &&
+    (!selectedDivision || selectedDivision === 'all-divisions' || e.divisionId === selectedDivision)
   );
 
   const handleAssignTeam = async (parentUserId: string, enrollmentId: string, teamId: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
     try {
-      await updateDoc(enrollmentRef, { teamId });
-      toast({ title: "Assignment Updated", description: "Player successfully assigned to team." });
+      await updateDoc(enrollmentRef, { 
+        teamId: teamId === 'unassigned' ? null : teamId 
+      });
+      toast({ title: "Assignment Updated", description: "Player team assignment has been modified." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Assignment Failed", description: error.message });
     }

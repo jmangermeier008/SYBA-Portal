@@ -1,11 +1,11 @@
 
 "use client";
 
-import { use, useState } from 'react';
+import { use } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, collectionGroup, query, where, doc } from 'firebase/firestore';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { 
@@ -15,7 +15,8 @@ import {
   User as UserIcon,
   ChevronLeft,
   ShieldCheck,
-  Lock
+  Lock,
+  Users
 } from 'lucide-react';
 import Link from 'next/link';
 

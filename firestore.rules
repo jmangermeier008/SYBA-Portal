@@ -12,37 +12,45 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Admin';
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Admin';
     }
 
     function isCoach() {
-      return isSignedIn() && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Coach';
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Coach';
     }
 
-    function isExistingOwner(userId) {
-      return resource != null && isUser(userId);
+    // Support for collection group queries (Listing all players/enrollments across user profiles)
+    match /{path=**}/players/{playerId} {
+      allow read: if isSignedIn();
+    }
+    
+    match /{path=**}/enrollments/{enrollmentId} {
+      allow read: if isSignedIn();
     }
 
     match /userProfiles/{userId} {
       // Parents need to read other parent profiles for the team directory
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
+      allow get, list: if isSignedIn();
       allow create: if isUser(userId);
-      allow update: if isExistingOwner(userId) || isAdmin();
+      allow update: if isUser(userId) || isAdmin();
       allow delete: if false;
 
       match /players/{playerId} {
-        allow get, list: if isSignedIn();
+        allow read: if isSignedIn();
         allow create: if isUser(userId);
-        allow update: if isExistingOwner(userId) || isAdmin();
-        allow delete: if isExistingOwner(userId) || isAdmin();
+        allow update: if isUser(userId) || isAdmin();
+        allow delete: if isUser(userId) || isAdmin();
       }
 
       match /enrollments/{enrollmentId} {
-        allow get, list: if isSignedIn();
+        allow read: if isSignedIn();
         allow create: if isUser(userId);
-        allow update: if isExistingOwner(userId) || isAdmin();
-        allow delete: if isExistingOwner(userId) || isAdmin();
+        allow update: if isUser(userId) || isAdmin();
+        allow delete: if isUser(userId) || isAdmin();
       }
     }
 
