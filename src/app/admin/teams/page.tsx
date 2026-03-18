@@ -7,12 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Users, Loader2, Trash2, Trophy, UserCog } from 'lucide-react';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock } from 'lucide-react';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 interface Team {
   id: string;
@@ -32,6 +34,7 @@ interface CoachProfile {
 
 export default function TeamsAdminPage() {
   const db = useFirestore();
+  const { isAdmin, loading: loadingUser } = useUser();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
@@ -42,9 +45,21 @@ export default function TeamsAdminPage() {
     coach_uid: '',
   });
 
-  const teamsQuery = useMemoFirebase(() => query(collection(db, 'teams'), orderBy('name', 'asc')), [db]);
-  const seasonsQuery = useMemoFirebase(() => collection(db, 'seasons'), [db]);
-  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
+  // Guarded queries
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return query(collection(db, 'teams'), orderBy('name', 'asc'));
+  }, [db, isAdmin]);
+
+  const seasonsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'seasons');
+  }, [db, isAdmin]);
+
+  const usersQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'userProfiles');
+  }, [db, isAdmin]);
 
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const { data: seasons } = useCollection<any>(seasonsQuery);
@@ -53,41 +68,87 @@ export default function TeamsAdminPage() {
   const coaches = allUsers?.filter(u => u.role === 'Coach') || [];
 
   const divisionsQuery = useMemoFirebase(() => {
-    if (!formData.seasonId) return null;
+    if (!db || !formData.seasonId || !isAdmin) return null;
     return collection(db, 'seasons', formData.seasonId, 'divisions');
-  }, [db, formData.seasonId]);
+  }, [db, formData.seasonId, isAdmin]);
   const { data: divisions } = useCollection<any>(divisionsQuery);
 
-  const handleCreateTeam = async (e: React.FormEvent) => {
+  const handleCreateTeam = (e: React.FormEvent) => {
     e.preventDefault();
     setIsAdding(true);
 
     const teamId = `${formData.name.toLowerCase().replace(/\s+/g, '-')}-${formData.seasonId}`;
     const teamRef = doc(db, 'teams', teamId);
+    const teamData = {
+      id: teamId,
+      ...formData,
+      player_ids: [],
+      createdAt: new Date().toISOString()
+    };
 
-    try {
-      await setDoc(teamRef, {
-        id: teamId,
-        ...formData,
-        player_ids: [],
-        createdAt: new Date().toISOString()
+    setDoc(teamRef, teamData)
+      .then(() => {
+        toast({ title: "Team Created", description: `${formData.name} has been added.` });
+        setOpen(false);
+        setFormData({ name: '', seasonId: '', divisionId: '', coach_uid: '' });
+      })
+      .catch(async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: teamRef.path,
+          operation: 'create',
+          requestResourceData: teamData
+        }));
+      })
+      .finally(() => {
+        setIsAdding(false);
       });
-
-      toast({ title: "Team Created", description: `${formData.name} has been added.` });
-      setOpen(false);
-      setFormData({ name: '', seasonId: '', divisionId: '', coach_uid: '' });
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-    } finally {
-      setIsAdding(false);
-    }
   };
 
-  const handleDeleteTeam = async (id: string) => {
+  const handleDeleteTeam = (id: string) => {
     if (!confirm("Are you sure? This will delete the team entity.")) return;
-    await deleteDoc(doc(db, 'teams', id));
-    toast({ title: "Team Deleted" });
+    
+    const teamRef = doc(db, 'teams', id);
+    deleteDoc(teamRef)
+      .then(() => {
+        toast({ title: "Team Deleted" });
+      })
+      .catch(async (error) => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: teamRef.path,
+          operation: 'delete'
+        }));
+      });
   };
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="parent" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to manage teams.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="rounded-full px-8">
+                <a href="/">Return Home</a>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -196,11 +257,16 @@ export default function TeamsAdminPage() {
                       <div>
                         <CardTitle className="text-lg">{team.name}</CardTitle>
                         <CardDescription>
-                          {seasons?.find(s => s.id === team.seasonId)?.name} • {team.divisionId}
+                          {seasons?.find((s: any) => s.id === team.seasonId)?.name} • {team.divisionId}
                         </CardDescription>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" className="text-destructive opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteTeam(team.id)}>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="text-destructive opacity-0 group-hover:opacity-100 transition-opacity" 
+                      onClick={() => handleDeleteTeam(team.id)}
+                    >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
