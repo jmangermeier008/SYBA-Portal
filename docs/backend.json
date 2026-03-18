@@ -1,0 +1,64 @@
+
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information about a registered user (Parent, Coach, or Admin).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["Parent", "Coach", "Admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Player": {
+      "title": "Player Profile",
+      "description": "Profile of a child athlete managed by a parent.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "dob": { "type": "string", "format": "date" },
+        "parentUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["firstName", "lastName", "dob", "parentUid"]
+    },
+    "Enrollment": {
+      "title": "Season Enrollment",
+      "description": "Registration of a player for a specific sports season.",
+      "type": "object",
+      "properties": {
+        "playerUid": { "type": "string" },
+        "parentUid": { "type": "string" },
+        "season": { "type": "string" },
+        "division": { "type": "string" },
+        "jerseySize": { "type": "string" },
+        "paymentStatus": { "type": "string", "enum": ["pending", "paid"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["playerUid", "parentUid", "season", "division"]
+    }
+  },
+  "auth": {
+    "providers": ["email"]
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/players/{playerId}": {
+      "schema": "Player",
+      "description": "Player roster information"
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": "Enrollment",
+      "description": "Registration data"
+    }
+  }
+}

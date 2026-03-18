@@ -1,0 +1,22 @@
+{
+  "name": "Home Run Hub",
+  "short_name": "Hub",
+  "description": "Youth Sports Management Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ECF2F7",
+  "theme_color": "#2E7ECC",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/sports/192/192",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://picsum.photos/seed/sports/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
