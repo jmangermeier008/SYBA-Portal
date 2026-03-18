@@ -28,6 +28,11 @@
           "type": "string",
           "description": "The user's assigned role ('Parent', 'Coach', 'Admin')."
         },
+        "shareContactInfo": {
+          "type": "boolean",
+          "description": "Privacy setting: Whether to share contact details with team members.",
+          "default": false
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"

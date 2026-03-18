@@ -17,7 +17,7 @@ import {
   LogOut,
   User as UserIcon,
   ClipboardList,
-  Groups
+  FolderLock
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -42,8 +42,10 @@ export function Sidebar({ role }: SidebarProps) {
     parent: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/parent/dashboard' },
       { label: 'My Family', icon: UserIcon, href: '/parent/family' },
+      { label: 'My Teams', icon: Users, href: '/parent/teams' },
       { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
       { label: 'Team Chat', icon: MessageSquare, href: '/parent/chat' },
+      { label: 'Settings', icon: FolderLock, href: '/parent/settings' },
     ],
     coach: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/coach/dashboard' },
