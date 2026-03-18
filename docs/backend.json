@@ -22,7 +22,7 @@
         },
         "phoneNumber": {
           "type": "string",
-          "description": "Primary contact phone number for the parent."
+          "description": "Primary contact phone number for the user."
         },
         "role": {
           "type": "string",
@@ -48,36 +48,34 @@
         "role"
       ]
     },
+    "Clearance": {
+      "title": "Clearance",
+      "type": "object",
+      "description": "A state-mandated background check document.",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["ChildAbuse", "CriminalRecord", "FBI"] },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "fileUrl": { "type": "string" },
+        "expirationDate": { "type": "string", "format": "date" },
+        "rejectionReason": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "status", "fileUrl", "expirationDate"]
+    },
     "Player": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Player",
       "type": "object",
       "description": "Represents a player managed by a parent.",
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "firstName": {
-          "type": "string"
-        },
-        "lastName": {
-          "type": "string"
-        },
-        "dateOfBirth": {
-          "type": "string",
-          "format": "date"
-        },
-        "medicalNotes": {
-          "type": "string",
-          "description": "Critical medical alerts (allergies, etc.)."
-        },
-        "parentUserId": {
-          "type": "string"
-        },
-        "clearanceUrl": {
-          "type": "string",
-          "description": "URL to the stored clearance document."
-        },
+        "id": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "dateOfBirth": { "type": "string", "format": "date" },
+        "medicalNotes": { "type": "string" },
+        "parentUserId": { "type": "string" },
+        "clearanceUrl": { "type": "string" },
         "emergencyContacts": {
           "type": "array",
           "items": {
@@ -89,27 +87,19 @@
             }
           }
         }
-      },
-      "required": [
-        "id",
-        "firstName",
-        "lastName",
-        "dateOfBirth",
-        "parentUserId"
-      ]
+      }
     },
     "Team": {
       "title": "Team",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Acts as the team_id" },
+        "id": { "type": "string" },
         "name": { "type": "string" },
         "seasonId": { "type": "string" },
         "divisionId": { "type": "string" },
-        "coach_uid": { "type": "string", "description": "UID of the coach" },
-        "player_ids": { "type": "array", "items": { "type": "string" }, "description": "List of player IDs assigned to this team" }
-      },
-      "required": ["id", "name", "seasonId", "divisionId"]
+        "coach_uid": { "type": "string" },
+        "player_ids": { "type": "array", "items": { "type": "string" } }
+      }
     },
     "Enrollment": {
       "title": "Enrollment",
@@ -120,18 +110,13 @@
         "parentUserId": { "type": "string" },
         "seasonId": { "type": "string" },
         "divisionId": { "type": "string" },
-        "jerseySize": { "type": "string" },
-        "jerseyNumber": { "type": "string" },
         "paymentStatus": { "type": "string", "enum": ["pending", "paid"] },
-        "teamId": { "type": "string" },
-        "enrollmentDate": { "type": "string", "format": "date-time" }
+        "teamId": { "type": "string" }
       }
     }
   },
   "auth": {
-    "providers": [
-      "password"
-    ]
+    "providers": ["password"]
   },
   "firestore": {
     "structure": [
@@ -139,19 +124,20 @@
         "path": "/userProfiles/{userId}",
         "definition": {
           "entityName": "UserProfile",
-          "schema": {
-            "$ref": "#/backend/entities/UserProfile"
-          },
           "description": "User profiles and roles."
+        }
+      },
+      {
+        "path": "/userProfiles/{userId}/clearances/{clearanceId}",
+        "definition": {
+          "entityName": "Clearance",
+          "description": "Coach/Volunteer background checks."
         }
       },
       {
         "path": "/userProfiles/{userId}/players/{playerId}",
         "definition": {
           "entityName": "Player",
-          "schema": {
-            "$ref": "#/backend/entities/Player"
-          },
           "description": "Players managed by a parent."
         }
       },
@@ -167,13 +153,6 @@
         "definition": {
           "entityName": "Team",
           "description": "League teams."
-        }
-      },
-      {
-        "path": "/teams/{teamId}/games/{gameId}",
-        "definition": {
-          "entityName": "Game",
-          "description": "Team schedule events."
         }
       }
     ]

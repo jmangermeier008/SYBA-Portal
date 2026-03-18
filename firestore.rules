@@ -23,14 +23,7 @@ service cloud.firestore {
              get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'Coach';
     }
 
-    function isTeamCoach(teamId) {
-      return isSignedIn() && (
-        get(/databases/$(database)/documents/teams/$(teamId)).data.coach_uid == request.auth.uid ||
-        isAdmin()
-      );
-    }
-
-    // Support for collection group queries (Listing all players/enrollments across user profiles)
+    // Support for collection group queries
     match /{path=**}/players/{playerId} {
       allow read: if isSignedIn();
     }
@@ -39,11 +32,22 @@ service cloud.firestore {
       allow read: if isSignedIn();
     }
 
+    match /{path=**}/clearances/{clearanceId} {
+      allow read: if isSignedIn();
+    }
+
     match /userProfiles/{userId} {
       allow get, list: if isSignedIn();
       allow create: if isUser(userId);
       allow update: if isUser(userId) || isAdmin();
       allow delete: if false;
+
+      match /clearances/{clearanceId} {
+        allow read: if isUser(userId) || isAdmin();
+        allow create: if isUser(userId);
+        allow update: if isUser(userId) || isAdmin();
+        allow delete: if isUser(userId) || isAdmin();
+      }
 
       match /players/{playerId} {
         allow read: if isSignedIn();

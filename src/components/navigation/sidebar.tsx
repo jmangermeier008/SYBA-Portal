@@ -17,7 +17,8 @@ import {
   LogOut,
   User as UserIcon,
   ClipboardList,
-  FolderLock
+  FolderLock,
+  FileCheck
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -50,12 +51,14 @@ export function Sidebar({ role }: SidebarProps) {
     coach: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/coach/dashboard' },
       { label: 'My Teams', icon: Users, href: '/coach/teams' },
+      { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
       { label: 'Practice Drills', icon: Dumbbell, href: '/coach/drills' },
       { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
       { label: 'Team Chat', icon: MessageSquare, href: '/coach/chat' },
     ],
     admin: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
+      { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
       { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
       { label: 'Teams', icon: Users, href: '/admin/teams' },
       { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
