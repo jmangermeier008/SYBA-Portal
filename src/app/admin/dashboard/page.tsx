@@ -138,7 +138,7 @@ export default function AdminDashboard({
   use(searchParams);
 
   const db = useFirestore();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
   const nextWeekISO = format(addDays(new Date(), 7), 'yyyy-MM-dd');
@@ -146,52 +146,52 @@ export default function AdminDashboard({
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'seasons');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collectionGroup(db, 'enrollments');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const coachesQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collection(db, 'userProfiles'), where('role', 'in', ['Coach']));
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const allClearancesQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collectionGroup(db, 'clearances');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const concessionSlotsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(
       collection(db, 'concessionSlots'),
       where('gameDate', '>=', todayISO),
       where('gameDate', '<=', nextWeekISO),
       orderBy('gameDate', 'asc')
     );
-  }, [db, isAdmin, todayISO, nextWeekISO]);
+  }, [db, isAdmin, isBoardMember, todayISO, nextWeekISO]);
 
   const fieldsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'fields');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const boardMeetingsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(
       collection(db, 'boardMeetings'),
       where('date', '>=', todayISO),
       orderBy('date', 'asc'),
       limit(5)
     );
-  }, [db, isAdmin, todayISO]);
+  }, [db, isAdmin, isBoardMember, todayISO]);
 
   const gamesQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(
       collection(db, 'games'),
       where('date', '>=', todayISO),
@@ -199,7 +199,7 @@ export default function AdminDashboard({
       orderBy('date', 'asc'),
       orderBy('time', 'asc')
     );
-  }, [db, isAdmin, todayISO, nextWeekISO]);
+  }, [db, isAdmin, isBoardMember, todayISO, nextWeekISO]);
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
@@ -338,10 +338,10 @@ export default function AdminDashboard({
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -375,7 +375,7 @@ export default function AdminDashboard({
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
 
         {/* Header */}

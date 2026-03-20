@@ -11,9 +11,17 @@ export interface UserProfile {
   id: string;
   email: string | null;
   displayName: string | null;
+  // Legacy single-role field — kept for backward compatibility
   role: 'Parent' | 'Coach' | 'Admin';
-  isAlsoCoach?: boolean;
+  // New multi-role field — takes precedence when present
+  roles?: ('Parent' | 'Coach' | 'Board Member' | 'Admin')[];
   createdAt: string;
+}
+
+function deriveRoles(profile: UserProfile): string[] {
+  if (profile.roles && profile.roles.length > 0) return profile.roles;
+  // Backward compat: derive from old single role field
+  return [profile.role];
 }
 
 export function useUser() {
@@ -65,13 +73,21 @@ export function useUser() {
     return unsubscribeProfile;
   }, [user, db]);
 
+  const roles = profile ? deriveRoles(profile) : [];
+
+  const isAdmin = roles.includes('Admin');
+  const isBoardMember = roles.includes('Board Member') || isAdmin;
+  const isCoach = roles.includes('Coach') || isAdmin;
+  const isParent = roles.includes('Parent');
+
   return {
     user,
     profile,
     loading,
-    isAdmin: profile?.role === 'Admin',
-    // isCoach is true for Coach role, OR for Admins granted coach access
-    isCoach: profile?.role === 'Coach' || (profile?.role === 'Admin' && profile?.isAlsoCoach === true),
-    isParent: profile?.role === 'Parent',
+    roles,
+    isAdmin,
+    isBoardMember,
+    isCoach,
+    isParent,
   };
 }

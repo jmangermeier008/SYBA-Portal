@@ -66,23 +66,23 @@ interface UserProfile {
 export default function AdminTeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
   const { teamId } = use(params);
   const db = useFirestore();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
 
   // Query enrollments for this specific team
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId));
-  }, [db, teamId, isAdmin]);
+  }, [db, teamId, isAdmin, isBoardMember]);
 
   const playersQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collectionGroup(db, 'players');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const usersQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'userProfiles');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<Player>(playersQuery);
@@ -104,7 +104,7 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
   if (isLoading) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="admin" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <div className="text-center space-y-4">
             <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
@@ -115,7 +115,7 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background items-center justify-center">
         <Card className="max-w-md text-center border-none shadow-xl">
@@ -136,7 +136,7 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <Button variant="ghost" asChild className="mb-4 -ml-2">

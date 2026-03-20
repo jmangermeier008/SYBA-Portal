@@ -34,7 +34,7 @@ interface CoachProfile {
 
 export default function TeamsAdminPage() {
   const db = useFirestore();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
@@ -48,19 +48,19 @@ export default function TeamsAdminPage() {
 
   // Guarded queries
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collection(db, 'teams'), orderBy('name', 'asc'));
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'seasons');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const usersQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'userProfiles');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const { data: seasons } = useCollection<any>(seasonsQuery);
@@ -69,9 +69,9 @@ export default function TeamsAdminPage() {
   const coaches = allUsers?.filter(u => u.role === 'Coach' || u.role === 'Admin') || [];
 
   const divisionsQuery = useMemoFirebase(() => {
-    if (!db || !formData.seasonId || !isAdmin) return null;
+    if (!db || !formData.seasonId || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'seasons', formData.seasonId, 'divisions');
-  }, [db, formData.seasonId, isAdmin]);
+  }, [db, formData.seasonId, isAdmin, isBoardMember]);
   const { data: divisions } = useCollection<any>(divisionsQuery);
 
   const handleCreateTeam = (e: React.FormEvent) => {
@@ -127,10 +127,10 @@ export default function TeamsAdminPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -151,7 +151,7 @@ export default function TeamsAdminPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8 flex justify-between items-center">
           <div>

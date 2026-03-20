@@ -6,22 +6,29 @@ import { updateDoc, doc, collection } from 'firebase/firestore';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ShieldCheck, User as UserIcon, Lock, UserCog } from 'lucide-react';
+import { Loader2, ShieldCheck, User as UserIcon, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import Link from 'next/link';
+
+const ALL_ROLES = ['Parent', 'Coach', 'Board Member', 'Admin'] as const;
+type Role = typeof ALL_ROLES[number];
 
 interface UserData {
   id: string;
   email: string;
   displayName: string;
   role: string;
-  isAlsoCoach?: boolean;
+  roles?: string[];
+}
+
+function getUserRoles(user: UserData): string[] {
+  if (user.roles && user.roles.length > 0) return user.roles;
+  return [user.role];
 }
 
 export default function RolesPage() {
@@ -36,48 +43,36 @@ export default function RolesPage() {
 
   const { data: users, isLoading } = useCollection<UserData>(usersQuery);
 
-  const handleRoleChange = async (uid: string, newRole: string) => {
-    const userRef = doc(db, 'userProfiles', uid);
-    const updateData: any = { role: newRole };
-    // Clear the isAlsoCoach flag if the user is no longer an Admin
-    if (newRole !== 'Admin') {
-      updateData.isAlsoCoach = false;
+  const handleRoleToggle = async (uid: string, role: Role, currentRoles: string[], checked: boolean) => {
+    const newRoles = checked
+      ? [...new Set([...currentRoles, role])]
+      : currentRoles.filter((r) => r !== role);
+
+    // Must keep at least one role
+    if (newRoles.length === 0) {
+      toast({ title: "Cannot Remove All Roles", description: "A user must have at least one role.", variant: "destructive" });
+      return;
     }
+
+    const userRef = doc(db, 'userProfiles', uid);
+    // Keep legacy 'role' field in sync with primary role for backward compat
+    const primaryRole = newRoles.includes('Admin') ? 'Admin'
+      : newRoles.includes('Coach') ? 'Coach'
+      : newRoles.includes('Board Member') ? 'Admin' // Board Member maps to Admin in legacy field
+      : 'Parent';
+
+    const updateData = { roles: newRoles, role: primaryRole };
+
     updateDoc(userRef, updateData)
       .then(() => {
-        toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
+        toast({ title: "Roles Updated", description: `User roles updated to: ${newRoles.join(', ')}.` });
       })
-      .catch((error) => {
+      .catch(() => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: userRef.path,
           operation: 'update',
-          requestResourceData: updateData
+          requestResourceData: updateData,
         }));
-      });
-  };
-
-  const handleToggleAlsoCoach = async (uid: string, currentValue: boolean) => {
-    const userRef = doc(db, 'userProfiles', uid);
-    const updateData = { isAlsoCoach: !currentValue };
-    updateDoc(userRef, updateData)
-      .then(() => {
-        toast({
-          title: !currentValue ? "Coach Access Granted" : "Coach Access Removed",
-          description: !currentValue
-            ? "This admin can now access coach dashboards."
-            : "Coach dashboard access has been removed.",
-        });
-      })
-      .catch((error: any) => {
-        if (error?.code === 'permission-denied') {
-          errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: userRef.path,
-            operation: 'update',
-            requestResourceData: updateData
-          }));
-        } else {
-          console.error('[roles] Update error:', error);
-        }
       });
   };
 
@@ -92,7 +87,7 @@ export default function RolesPage() {
   if (!isAdmin) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -113,11 +108,11 @@ export default function RolesPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">User Role Management</h1>
-          <p className="text-muted-foreground">Manage system access levels for SYBA parents, coaches, and admins.</p>
+          <p className="text-muted-foreground">Assign one or more roles to each user. Users see all sections for every role they hold.</p>
         </header>
 
         <Card className="border-none shadow-xl overflow-hidden">
@@ -147,71 +142,55 @@ export default function RolesPage() {
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-6">User</TableHead>
                     <TableHead className="hidden md:table-cell">Email</TableHead>
-                    <TableHead>Current Role</TableHead>
-                    <TableHead className="text-center hidden md:table-cell">Also Coach?</TableHead>
-                    <TableHead className="pr-6 text-right">Change Role</TableHead>
+                    {ALL_ROLES.map((role) => (
+                      <TableHead key={role} className="text-center hidden md:table-cell">{role}</TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((user) => (
-                    <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
-                      <TableCell className="pl-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
-                            {user.displayName ? (
-                              user.displayName[0].toUpperCase()
-                            ) : (
-                              <UserIcon className="h-5 w-5" />
-                            )}
-                          </div>
-                          <div>
-                            <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
-                            {user.isAlsoCoach && (
-                              <div className="flex items-center gap-1 mt-0.5">
-                                <UserCog className="h-3 w-3 text-primary" />
-                                <span className="text-[10px] text-primary font-medium">Also Coach</span>
+                  {users.map((user) => {
+                    const userRoles = getUserRoles(user);
+                    return (
+                      <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
+                        <TableCell className="pl-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
+                              {user.displayName ? (
+                                user.displayName[0].toUpperCase()
+                              ) : (
+                                <UserIcon className="h-5 w-5" />
+                              )}
+                            </div>
+                            <div>
+                              <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
+                              <div className="flex flex-wrap gap-1 mt-0.5">
+                                {userRoles.map((r) => (
+                                  <Badge
+                                    key={r}
+                                    variant={r === 'Admin' ? 'default' : r === 'Coach' ? 'secondary' : 'outline'}
+                                    className="rounded-full px-2 text-[10px]"
+                                  >
+                                    {r}
+                                  </Badge>
+                                ))}
                               </div>
-                            )}
+                            </div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">{user.email}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={user.role === 'Admin' ? 'default' : user.role === 'Coach' ? 'secondary' : 'outline'}
-                          className="rounded-full px-4"
-                        >
-                          {user.role}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center hidden md:table-cell">
-                        {user.role === 'Admin' ? (
-                          <Switch
-                            checked={!!user.isAlsoCoach}
-                            onCheckedChange={() => handleToggleAlsoCoach(user.id, !!user.isAlsoCoach)}
-                            title="Allow this admin to also access coach dashboards"
-                          />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="pr-6 text-right">
-                        <Select
-                          defaultValue={user.role}
-                          onValueChange={(val) => handleRoleChange(user.id, val)}
-                        >
-                          <SelectTrigger className="w-[130px] rounded-xl ml-auto">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Parent">Parent</SelectItem>
-                            <SelectItem value="Coach">Coach</SelectItem>
-                            <SelectItem value="Admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">{user.email}</TableCell>
+                        {ALL_ROLES.map((role) => (
+                          <TableCell key={role} className="text-center hidden md:table-cell">
+                            <Checkbox
+                              checked={userRoles.includes(role)}
+                              onCheckedChange={(checked) =>
+                                handleRoleToggle(user.id, role, userRoles, !!checked)
+                              }
+                            />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

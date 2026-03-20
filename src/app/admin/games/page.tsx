@@ -76,7 +76,7 @@ const EMPTY_FORM = {
 
 export default function AdminGamesPage() {
   const db = useFirestore();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
@@ -90,34 +90,34 @@ export default function AdminGamesPage() {
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const upcomingQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(
       collection(db, 'games'),
       where('date', '>=', todayISO),
       orderBy('date', 'asc'),
       orderBy('time', 'asc')
     );
-  }, [db, isAdmin, todayISO]);
+  }, [db, isAdmin, isBoardMember, todayISO]);
 
   const pastQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin || !showPast) return null;
+    if (!db || (!isAdmin && !isBoardMember) || !showPast) return null;
     return query(
       collection(db, 'games'),
       where('date', '<', todayISO),
       orderBy('date', 'desc'),
       orderBy('time', 'desc')
     );
-  }, [db, isAdmin, showPast, todayISO]);
+  }, [db, isAdmin, isBoardMember, showPast, todayISO]);
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collection(db, 'teams'), orderBy('name', 'asc'));
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const fieldsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'fields');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const { data: upcomingGames, isLoading: loadingUpcoming } = useCollection<Game>(upcomingQuery);
   const { data: pastGames, isLoading: loadingPast } = useCollection<Game>(pastQuery);
@@ -197,10 +197,10 @@ export default function AdminGamesPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -221,7 +221,7 @@ export default function AdminGamesPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
 
         {/* Header */}
