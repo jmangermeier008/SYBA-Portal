@@ -1,16 +1,18 @@
+
 "use client";
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { updateDoc, doc, collection } from 'firebase/firestore';
-import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { Loader2, ShieldCheck, User as UserIcon, Lock, Button } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import Link from 'next/link';
 
 interface UserData {
   id: string;
@@ -22,8 +24,13 @@ interface UserData {
 export default function RolesPage() {
   const db = useFirestore();
   const { toast } = useToast();
+  const { isAdmin, loading: loadingUser } = useUser();
 
-  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
+  const usersQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
+    return collection(db, 'userProfiles');
+  }, [db, isAdmin]);
+
   const { data: users, isLoading } = useCollection<UserData>(usersQuery);
 
   const handleRoleChange = async (uid: string, newRole: string) => {
@@ -40,6 +47,36 @@ export default function RolesPage() {
         }));
       });
   };
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="parent" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to manage system roles.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="rounded-full px-8">
+                <Link href="/">Return Home</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">

@@ -7,13 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trophy, Calendar, Loader2, Trash2 } from 'lucide-react';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { Plus, Trophy, Calendar, Loader2, Trash2, Lock } from 'lucide-react';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import Link from 'next/link';
 
 interface Season {
   id: string;
@@ -25,6 +26,7 @@ interface Season {
 export default function SeasonsAdminPage() {
   const db = useFirestore();
   const { toast } = useToast();
+  const { isAdmin, loading: loadingUser } = useUser();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({
@@ -34,8 +36,9 @@ export default function SeasonsAdminPage() {
   });
 
   const seasonsQuery = useMemoFirebase(() => {
+    if (!db || !isAdmin) return null;
     return query(collection(db, 'seasons'), orderBy('name', 'desc'));
-  }, [db]);
+  }, [db, isAdmin]);
 
   const { data: seasons, isLoading } = useCollection<Season>(seasonsQuery);
 
@@ -51,10 +54,8 @@ export default function SeasonsAdminPage() {
       ...formData,
     };
 
-    // Non-blocking write
     setDoc(seasonRef, seasonData)
       .then(() => {
-        // Default divisions for a new season
         const divisions = [
           { id: 'tball', name: 'T-Ball', fee: 5000 },
           { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
@@ -93,6 +94,36 @@ export default function SeasonsAdminPage() {
     });
     toast({ title: "Season Deletion Initiated" });
   };
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar role="parent" />
+        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to manage seasons.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild className="rounded-full px-8">
+                <Link href="/">Return Home</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
