@@ -54,12 +54,22 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
   const db = useFirestore();
 
   const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId));
-  }, [db, teamId]);
+  }, [db, teamId, user]);
 
-  const teamsQuery = useMemoFirebase(() => collection(db, 'teams'), [db]);
-  const playersQuery = useMemoFirebase(() => collectionGroup(db, 'players'), [db]);
-  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'teams');
+  }, [db, user]);
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collectionGroup(db, 'players');
+  }, [db, user]);
+  const usersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles');
+  }, [db, user]);
 
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers } = useCollection<Player>(playersQuery);
@@ -108,7 +118,7 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
                 <CardHeader className="bg-primary/5 pb-4 border-b">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold">
-                      {enrollment.jerseyNumber || player.firstName[0]}
+                      {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
                     </div>
                     <div>
                       <CardTitle className="text-lg font-headline">{player.firstName} {player.lastName}</CardTitle>

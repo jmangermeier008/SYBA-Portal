@@ -50,7 +50,7 @@ export default function ParentSettingsPage() {
       .then(() => {
         toast({ title: "Settings Saved", description: "Your profile has been updated." });
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: userRef.path,
           operation: 'update',

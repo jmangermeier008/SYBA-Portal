@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, use } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { Trophy, Users, Calendar, MessageSquare, ArrowRight } from 'lucide-react';
+import { Trophy, Users, Calendar, ArrowRight } from 'lucide-react';
 
 export default function Home({
   params,
@@ -91,13 +91,6 @@ export default function Home({
                 </div>
                 <h3 className="text-xl font-bold font-headline">Game Schedules</h3>
                 <p className="text-muted-foreground">Real-time access to practice times, game locations, and league-wide events for all divisions.</p>
-              </div>
-              <div className="flex flex-col items-center space-y-4 text-center group">
-                <div className="p-4 bg-secondary rounded-2xl group-hover:bg-secondary/80 transition-all duration-300">
-                  <MessageSquare className="h-10 w-10 text-primary" />
-                </div>
-                <h3 className="text-xl font-bold font-headline">Team Communication</h3>
-                <p className="text-muted-foreground">Stay connected with coaches and other parents through built-in team chats and rainout alerts.</p>
               </div>
             </div>
           </div>

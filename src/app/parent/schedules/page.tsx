@@ -101,7 +101,7 @@ export default function ParentSchedulesPage() {
       .then(() => {
         toast({ title: "RSVP Sent", description: `Availability updated for ${status}.` });
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: rsvpRef.path,
           operation: 'write',

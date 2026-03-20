@@ -3,7 +3,7 @@
 
 import { use, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, collectionGroup, query, where } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -65,24 +65,25 @@ interface UserProfile {
 export default function TeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
   const { teamId } = use(params);
   const db = useFirestore();
+  const { user } = useUser();
 
   // Query enrollments for this specific team
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId));
-  }, [db, teamId]);
+  }, [db, teamId, user]);
 
   // Query all players - we'll filter them in memory based on enrollments for the POC
   const playersQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !user) return null;
     return collectionGroup(db, 'players');
-  }, [db]);
+  }, [db, user]);
 
   // Query all user profiles to get parent info
   const usersQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !user) return null;
     return collection(db, 'userProfiles');
-  }, [db]);
+  }, [db, user]);
 
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<Player>(playersQuery);
@@ -152,7 +153,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl shadow-md">
-                          {enrollment.jerseyNumber || player.firstName[0]}
+                          {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
                         </div>
                         <div>
                           <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>

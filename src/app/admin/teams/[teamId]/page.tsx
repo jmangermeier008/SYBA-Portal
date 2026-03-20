@@ -8,11 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { 
-  Phone, 
-  MessageSquare, 
-  AlertTriangle, 
-  Loader2, 
-  CalendarCheck, 
+  Phone,
+  Mail,
+  MessageSquare,
+  AlertTriangle,
+  Loader2,
+  CalendarCheck,
   User as UserIcon,
   ChevronLeft,
   LifeBuoy,

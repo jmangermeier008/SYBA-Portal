@@ -22,9 +22,11 @@ service cloud.firestore {
     }
 
     function isCoach() {
-      return isSignedIn() && 
+      let data = getUserData();
+      return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             getUserData().role == 'Coach';
+             (data.role == 'Coach' ||
+              (data.role == 'Admin' && data.get('isAlsoCoach', false) == true));
     }
 
     // Support for collection group queries
@@ -46,7 +48,7 @@ service cloud.firestore {
 
     match /userProfiles/{userId} {
       allow get: if isSignedIn();
-      allow list: if isAdmin();
+      allow list: if isSignedIn();
       allow create: if isUser(userId) || isAdmin();
       allow update: if isUser(userId) || isAdmin();
       allow delete: if false;
@@ -68,7 +70,9 @@ service cloud.firestore {
       match /enrollments/{enrollmentId} {
         allow read: if isSignedIn();
         allow create: if isUser(userId) || isAdmin();
-        allow update: if isUser(userId) || isAdmin();
+        allow update: if isUser(userId) || isAdmin()
+          || request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['payment_status', 'paymentStatus', 'stripe_payment_id', 'updatedAt']);
         allow delete: if isUser(userId) || isAdmin();
       }
     }
@@ -81,6 +85,35 @@ service cloud.firestore {
         allow get, list: if isSignedIn();
         allow create, update, delete: if isAdmin();
       }
+    }
+
+    // Fields — admin manages, all signed-in users can read for schedule picker
+    match /fields/{fieldId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Concession slots — admin creates/deletes; signed-in users update signups array
+    match /concessionSlots/{slotId} {
+      allow get, list: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isSignedIn();
+    }
+
+    // Sponsors — admin only
+    match /sponsors/{sponsorId} {
+      allow read, write: if isAdmin();
+    }
+
+    // League Announcements — admin writes, all signed-in users read
+    match /announcements/{announcementId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Board Meetings — admin only
+    match /boardMeetings/{meetingId} {
+      allow read, write: if isAdmin();
     }
 
     match /teams/{teamId} {
@@ -103,11 +136,6 @@ service cloud.firestore {
         }
       }
 
-      match /messages/{messageId} {
-        allow get, list: if isSignedIn();
-        allow create: if isSignedIn();
-        allow update, delete: if isSignedIn() && request.auth.uid == resource.data.senderUserId;
-      }
     }
   }
 }

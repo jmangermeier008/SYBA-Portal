@@ -47,7 +47,7 @@ export default function RolesPage() {
       .then(() => {
         toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: userRef.path,
           operation: 'update',
@@ -68,12 +68,16 @@ export default function RolesPage() {
             : "Coach dashboard access has been removed.",
         });
       })
-      .catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: userRef.path,
-          operation: 'update',
-          requestResourceData: updateData
-        }));
+      .catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userRef.path,
+            operation: 'update',
+            requestResourceData: updateData
+          }));
+        } else {
+          console.error('[roles] Update error:', error);
+        }
       });
   };
 

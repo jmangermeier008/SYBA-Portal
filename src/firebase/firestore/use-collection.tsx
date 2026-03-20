@@ -59,7 +59,7 @@ export function useCollection<T = any>(
   type StateDataType = ResultItemType[] | null;
 
   const [data, setData] = useState<StateDataType>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<FirestoreError | Error | null>(null);
 
   useEffect(() => {
@@ -91,22 +91,44 @@ export function useCollection<T = any>(
         if (!auth.currentUser) return;
 
         // This logic extracts the path from either a ref or a query
-        const path: string =
-          memoizedTargetRefOrQuery.type === 'collection'
-            ? (memoizedTargetRefOrQuery as CollectionReference).path
-            : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString()
+        let parsedPath = 'unknown_path';
+        
+        if (memoizedTargetRefOrQuery.type === 'collection') {
+          parsedPath = (memoizedTargetRefOrQuery as CollectionReference).path;
+        } else {
+          // It's a query or collectionGroup
+          const intQuery = memoizedTargetRefOrQuery as unknown as InternalQuery;
+          if (intQuery && intQuery._query && intQuery._query.path) {
+            const canonical = intQuery._query.path.canonicalString();
+            // CollectionGroup queries return an empty canonical string natively
+            parsedPath = canonical === '' ? 'Collection Group Query' : canonical;
+          }
+        }
 
-        const contextualError = new FirestorePermissionError({
-          operation: 'list',
-          path,
-        })
+        // Only treat actual permission-denied errors as permission errors.
+        // Other errors (e.g. failed-precondition for missing indexes, network errors)
+        // should be logged but NOT crash the app.
+        if (error.code === 'permission-denied') {
+          const contextualError = new FirestorePermissionError({
+            operation: 'list',
+            path: parsedPath,
+          })
 
-        setError(contextualError)
-        setData(null)
-        setIsLoading(false)
+          setError(contextualError)
+          setData(null)
+          setIsLoading(false)
 
-        // trigger global error propagation
-        errorEmitter.emit('permission-error', contextualError);
+          // trigger global error propagation
+          errorEmitter.emit('permission-error', contextualError);
+        } else {
+          console.error(`[useCollection] Firestore error on "${parsedPath}" (code: ${error.code}):`, error.message);
+          if (error.code === 'failed-precondition') {
+            console.error(`[useCollection] This is likely a missing Firestore index. Check the Firebase Console under Firestore → Indexes, or check the browser console for a direct link to create the index.`);
+          }
+          setError(error)
+          setData(null)
+          setIsLoading(false)
+        }
       }
     );
 

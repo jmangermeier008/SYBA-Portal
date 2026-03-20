@@ -137,7 +137,7 @@ export default function AdminDashboard({
           <Card className="border-none shadow-md">
             <CardHeader>
               <CardTitle className="font-headline">System Logs</CardTitle>
-              <CardDescription>Recent administrative activity</CardDescription>
+              <CardDescription>Recent administrative activity (sample data)</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">

@@ -9,8 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -22,9 +25,14 @@ interface Enrollment {
   seasonId: string;
   divisionId: string;
   parentUserId: string;
-  paymentStatus: 'pending' | 'paid';
+  paymentStatus?: 'pending' | 'pending_payment' | 'paid' | 'waitlisted' | 'fee_waived';
+  payment_status?: 'pending' | 'pending_payment' | 'paid' | 'waitlisted' | 'fee_waived';
+  fee_waived?: boolean;
+  waiver_reason?: string;
   jerseySize: string;
+  shirtSize?: string;
   teamId?: string;
+  registrationFeeAmount?: number;
 }
 
 interface Player {
@@ -43,12 +51,25 @@ interface Team {
   player_ids?: string[];
 }
 
+function getPaymentStatus(e: Enrollment) {
+  return e.payment_status ?? e.paymentStatus ?? 'pending';
+}
+
 export default function MasterRosterPage() {
   const db = useFirestore();
   const { isAdmin, loading: loadingUser } = useUser();
   const { toast } = useToast();
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
+
+  // Waiver dialog state
+  const [waiverDialog, setWaiverDialog] = useState<{
+    open: boolean;
+    enrollment: Enrollment | null;
+    player: Player | null;
+    reason: string;
+    loading: boolean;
+  }>({ open: false, enrollment: null, player: null, reason: '', loading: false });
 
   // Guarded queries
   const seasonsQuery = useMemoFirebase(() => {
@@ -76,34 +97,42 @@ export default function MasterRosterPage() {
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: players } = useCollection<Player>(playersQuery);
 
-  const filteredEnrollments = enrollments?.filter(e => 
+  const filteredEnrollments = enrollments?.filter(e =>
     (!selectedSeason || selectedSeason === 'all-seasons' || e.seasonId === selectedSeason) &&
     (!selectedDivision || selectedDivision === 'all-divisions' || e.divisionId === selectedDivision)
   );
 
   const handleAssignTeam = (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
-    
-    updateDoc(enrollmentRef, { 
-      teamId: newTeamId === 'unassigned' ? null : newTeamId 
-    }).catch(async () => {
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: enrollmentRef.path,
-        operation: 'update',
-        requestResourceData: { teamId: newTeamId }
-      }));
+
+    updateDoc(enrollmentRef, {
+      teamId: newTeamId === 'unassigned' ? null : newTeamId
+    }).catch((error: any) => {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: enrollmentRef.path,
+          operation: 'update',
+          requestResourceData: { teamId: newTeamId }
+        }));
+      } else {
+        console.error('[roster] Assignment error:', error);
+      }
     });
 
     if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
       const oldTeamRef = doc(db, 'teams', oldTeamId);
       updateDoc(oldTeamRef, {
         player_ids: arrayRemove(playerId)
-      }).catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: oldTeamRef.path,
-          operation: 'update',
-          requestResourceData: { player_ids: 'arrayRemove' }
-        }));
+      }).catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: oldTeamRef.path,
+            operation: 'update',
+            requestResourceData: { player_ids: 'arrayRemove' }
+          }));
+        } else {
+          console.error('[roster] Remove player error:', error);
+        }
       });
     }
 
@@ -111,22 +140,64 @@ export default function MasterRosterPage() {
       const newTeamRef = doc(db, 'teams', newTeamId);
       updateDoc(newTeamRef, {
         player_ids: arrayUnion(playerId)
-      }).catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: newTeamRef.path,
-          operation: 'update',
-          requestResourceData: { player_ids: 'arrayUnion' }
-        }));
+      }).catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: newTeamRef.path,
+            operation: 'update',
+            requestResourceData: { player_ids: 'arrayUnion' }
+          }));
+        } else {
+          console.error('[roster] Add player error:', error);
+        }
       });
     }
 
     toast({ title: "Assignment Initiated", description: "Updating roster status in the background." });
   };
 
+  const handleConfirmWaiver = async () => {
+    const { enrollment, player } = waiverDialog;
+    if (!enrollment || !db) return;
+    setWaiverDialog(prev => ({ ...prev, loading: true }));
+
+    try {
+      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
+      await updateDoc(enrollmentRef, {
+        payment_status: 'fee_waived',
+        paymentStatus: 'fee_waived',
+        fee_waived: true,
+        waiver_reason: waiverDialog.reason.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Fire-and-forget email
+      fetch('/api/email/confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toEmail: '',
+          playerName: player ? `${player.firstName} ${player.lastName}` : '',
+          seasonName: enrollment.seasonId,
+          divisionName: enrollment.divisionId,
+          isWaitlisted: false,
+          feeWaived: true,
+        }),
+      }).catch(() => {});
+
+      toast({ title: "Fee Waiver Applied", description: `Registration marked as fee waived.` });
+      setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false });
+    } catch (error: any) {
+      console.error('[roster] Waiver error:', error);
+      toast({ title: "Error", description: error.message, variant: 'destructive' });
+      setWaiverDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
   const exportRosterCSV = () => {
     if (!filteredEnrollments || filteredEnrollments.length === 0) return;
 
-    const headers = ["First Name", "Last Name", "Team", "Division", "Jersey Size", "Paid", "Clearance"];
+    const headers = ["First Name", "Last Name", "Team", "Division", "Jersey Size", "Payment Status", "Clearance"];
     const rows = filteredEnrollments.map(e => {
       const p = players?.find(p => p.id === e.playerId);
       const t = teams?.find(t => t.id === e.teamId);
@@ -135,8 +206,8 @@ export default function MasterRosterPage() {
         p?.lastName || 'N/A',
         t?.name || 'Unassigned',
         e.divisionId,
-        e.jerseySize,
-        e.paymentStatus,
+        e.shirtSize ?? e.jerseySize,
+        getPaymentStatus(e),
         p?.clearanceUrl ? 'Yes' : 'No'
       ].join(",");
     });
@@ -220,10 +291,9 @@ export default function MasterRosterPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all-divisions">All Divisions</SelectItem>
-                    <SelectItem value="tball">T-Ball</SelectItem>
-                    <SelectItem value="coach-pitch">Coach Pitch</SelectItem>
-                    <SelectItem value="minors">Minor League</SelectItem>
-                    <SelectItem value="majors">Major League</SelectItem>
+                    {Array.from(new Set(enrollments?.map(e => e.divisionId) || [])).map(divId => (
+                      <SelectItem key={divId} value={divId}>{divId}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -262,20 +332,29 @@ export default function MasterRosterPage() {
                     <TableHead>Paid</TableHead>
                     <TableHead>Clearance</TableHead>
                     <TableHead>Assignment</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredEnrollments.map((e) => {
                     const p = players?.find(p => p.id === e.playerId);
+                    const status = getPaymentStatus(e);
+                    const canWaive = status !== 'paid' && !e.fee_waived;
                     return (
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
                         <TableCell className="pl-6 py-4">
                           <div className="font-semibold">{p ? `${p.firstName} ${p.lastName}` : 'Loading...'}</div>
-                          <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.jerseySize}</div>
+                          <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
                         </TableCell>
                         <TableCell>
-                          {e.paymentStatus === 'paid' ? (
+                          {status === 'paid' ? (
                             <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          ) : status === 'fee_waived' ? (
+                            <BadgeCheck className="h-5 w-5 text-emerald-500" />
+                          ) : status === 'pending_payment' ? (
+                            <Clock className="h-5 w-5 text-yellow-500" />
+                          ) : status === 'waitlisted' ? (
+                            <ListOrdered className="h-5 w-5 text-amber-500" />
                           ) : (
                             <XCircle className="h-5 w-5 text-destructive" />
                           )}
@@ -287,9 +366,9 @@ export default function MasterRosterPage() {
                             <AlertCircle className="h-5 w-5 text-yellow-500" />
                           )}
                         </TableCell>
-                        <TableCell className="pr-6">
+                        <TableCell>
                           <Select
-                            defaultValue={e.teamId || "unassigned"}
+                            value={e.teamId || "unassigned"}
                             onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
                           >
                             <SelectTrigger className={cn(
@@ -306,6 +385,31 @@ export default function MasterRosterPage() {
                             </SelectContent>
                           </Select>
                         </TableCell>
+                        <TableCell className="pr-4">
+                          {canWaive && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => setWaiverDialog({
+                                    open: true,
+                                    enrollment: e,
+                                    player: p ?? null,
+                                    reason: '',
+                                    loading: false,
+                                  })}
+                                >
+                                  <BadgeCheck className="mr-2 h-4 w-4 text-emerald-500" />
+                                  Mark as Fee Waived
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -315,6 +419,44 @@ export default function MasterRosterPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Fee Waiver Dialog */}
+      <Dialog open={waiverDialog.open} onOpenChange={(open) => !waiverDialog.loading && setWaiverDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Apply Fee Waiver</DialogTitle>
+            <DialogDescription>
+              {waiverDialog.player
+                ? `Mark ${waiverDialog.player.firstName} ${waiverDialog.player.lastName}'s registration as fee waived. A confirmation email will be sent to the parent.`
+                : 'Mark this registration as fee waived.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="waiver-reason">Reason (optional)</Label>
+              <Input
+                id="waiver-reason"
+                placeholder="e.g. Financial hardship, scholarship, board vote"
+                value={waiverDialog.reason}
+                onChange={e => setWaiverDialog(prev => ({ ...prev, reason: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false })}
+              disabled={waiverDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmWaiver} disabled={waiverDialog.loading} className="bg-emerald-600 hover:bg-emerald-700">
+              {waiverDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
+              Confirm Waiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -71,7 +72,7 @@ export default function FamilyPage() {
     if (!user || !db) return;
     setAdding(true);
 
-    const playerId = Math.random().toString(36).substring(7);
+    const playerId = crypto.randomUUID();
     const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
     const playerDoc = {
       id: playerId,
@@ -88,7 +89,7 @@ export default function FamilyPage() {
         setEmergencyContacts([{ name: '', phone: '', relationship: '' }]);
         setOpen(false);
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: playerRef.path,
           operation: 'create',
@@ -283,7 +284,7 @@ export default function FamilyPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xl">
-                        {player.firstName[0]}{player.lastName[0]}
+                        {player?.firstName?.[0] || '?'}{player?.lastName?.[0] || ''}
                       </div>
                       <div>
                         <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
@@ -353,15 +354,4 @@ export default function FamilyPage() {
   );
 }
 
-const Badge = ({ children, variant, className }: any) => {
-  const variants: any = {
-    default: "bg-primary text-primary-foreground",
-    destructive: "bg-destructive text-destructive-foreground",
-    outline: "border border-input bg-background",
-  };
-  return (
-    <div className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${variants[variant || 'default']} ${className}`}>
-      {children}
-    </div>
-  );
-};
+
