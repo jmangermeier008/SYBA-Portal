@@ -325,6 +325,7 @@ export default function MasterRosterPage() {
                 No matching registrations found.
               </div>
             ) : (
+              <div className="overflow-x-auto w-full">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
@@ -372,7 +373,7 @@ export default function MasterRosterPage() {
                             onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
                           >
                             <SelectTrigger className={cn(
-                              "w-[180px] rounded-xl",
+                              "w-full min-w-[140px] md:w-[180px] rounded-xl",
                               !e.teamId ? "border-dashed border-primary" : ""
                             )}>
                               <SelectValue />
@@ -415,6 +416,7 @@ export default function MasterRosterPage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>

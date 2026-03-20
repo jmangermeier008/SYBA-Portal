@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useUser, useAuth } from '@/firebase';
 import { cn } from '@/lib/utils';
@@ -130,7 +131,7 @@ export function Sidebar() {
     <aside className="w-64 border-r bg-white flex flex-col h-screen fixed left-0 top-0 z-40">
       <div className="p-6 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
-          <Trophy className="h-6 w-6 text-primary" />
+          <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={36} height={36} className="object-contain" />
           <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
         </Link>
         {isMobile && (
@@ -218,7 +219,7 @@ export function Sidebar() {
             <Menu className="h-5 w-5" />
           </button>
           <Link href="/" className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-primary" />
+            <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={30} height={30} className="object-contain" />
             <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
           </Link>
         </div>

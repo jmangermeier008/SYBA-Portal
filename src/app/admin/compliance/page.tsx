@@ -62,7 +62,7 @@ export default function AdminCompliancePage() {
   // Role-guarded queries to prevent permission errors for non-admins
   const usersQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'userProfiles'), where('role', 'in', ['Coach', 'Admin']));
+    return query(collection(db, 'userProfiles'), where('roles', 'array-contains-any', ['Coach', 'Board Member', 'Admin']));
   }, [db, isAdmin, isBoardMember]);
 
   const allClearancesQuery = useMemoFirebase(() => {
@@ -282,6 +282,7 @@ export default function AdminCompliancePage() {
                     <Loader2 className="h-10 w-10 animate-spin text-primary" />
                   </div>
                 ) : (
+                  <div className="overflow-x-auto w-full">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
@@ -378,6 +379,7 @@ export default function AdminCompliancePage() {
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -395,6 +397,7 @@ export default function AdminCompliancePage() {
                     <Loader2 className="h-10 w-10 animate-spin text-primary" />
                   </div>
                 ) : (
+                  <div className="overflow-x-auto w-full">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
@@ -453,6 +456,7 @@ export default function AdminCompliancePage() {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>

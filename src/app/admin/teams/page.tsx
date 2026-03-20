@@ -30,6 +30,7 @@ interface CoachProfile {
   displayName: string;
   email: string;
   role: string;
+  roles?: string[];
 }
 
 export default function TeamsAdminPage() {
@@ -66,7 +67,10 @@ export default function TeamsAdminPage() {
   const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: allUsers } = useCollection<CoachProfile>(usersQuery);
 
-  const coaches = allUsers?.filter(u => u.role === 'Coach' || u.role === 'Admin') || [];
+  const coaches = allUsers?.filter(u =>
+    u.roles?.includes('Coach') || u.roles?.includes('Admin') ||
+    u.role === 'Coach' || u.role === 'Admin'
+  ) || [];
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !formData.seasonId || (!isAdmin && !isBoardMember)) return null;
