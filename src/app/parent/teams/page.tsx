@@ -37,7 +37,7 @@ export default function ParentTeamsPage() {
 
   // Get all enrollments for this parent
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!user) return null;
+    if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user]);
 

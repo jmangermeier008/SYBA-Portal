@@ -47,7 +47,7 @@ export default function RolesPage() {
       .then(() => {
         toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: userRef.path,
           operation: 'update',

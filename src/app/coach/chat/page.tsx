@@ -84,7 +84,7 @@ export default function CoachChatPage() {
         setNewMessage('');
         setIsBroadcast(false);
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: messageRef.path,
           operation: 'create',

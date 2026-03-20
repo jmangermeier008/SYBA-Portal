@@ -88,7 +88,7 @@ export default function FamilyPage() {
         setEmergencyContacts([{ name: '', phone: '', relationship: '' }]);
         setOpen(false);
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: playerRef.path,
           operation: 'create',
@@ -283,7 +283,7 @@ export default function FamilyPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xl">
-                        {player.firstName[0]}{player.lastName[0]}
+                        {player?.firstName?.[0] || '?'}{player?.lastName?.[0] || ''}
                       </div>
                       <div>
                         <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>

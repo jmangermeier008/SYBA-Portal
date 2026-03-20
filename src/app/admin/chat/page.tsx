@@ -83,7 +83,7 @@ export default function AdminGlobalChatPage() {
       .then(() => {
         setNewMessage('');
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: messageRef.path,
           operation: 'create',

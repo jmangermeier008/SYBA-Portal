@@ -93,7 +93,7 @@ export default function TeamsAdminPage() {
         setOpen(false);
         setFormData({ name: '', seasonId: '', divisionId: '', coach_uid: '' });
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: teamRef.path,
           operation: 'create',

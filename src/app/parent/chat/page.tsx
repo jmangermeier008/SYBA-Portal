@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, limit, doc, setDoc, where, collectionGroup } from 'firebase/firestore';
+import { collection, query, orderBy, limit, doc, setDoc, where, collectionGroup, documentId } from 'firebase/firestore';
 import { Send, MessageSquare, Loader2, Users, ShieldAlert } from 'lucide-react';
 import { format } from 'date-fns';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -54,7 +54,7 @@ export default function ParentChatPage() {
   // Fetch full team data for the selector
   const teamsQuery = useMemoFirebase(() => {
     if (!db || teamIds.length === 0) return null;
-    return query(collection(db, 'teams'), where('id', 'in', teamIds));
+    return query(collection(db, 'teams'), where(documentId(), 'in', teamIds));
   }, [db, JSON.stringify(teamIds)]);
 
   const { data: teams } = useCollection<Team>(teamsQuery);
@@ -100,7 +100,7 @@ export default function ParentChatPage() {
 
     setDoc(messageRef, messageData)
       .then(() => setNewMessage(''))
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: messageRef.path,
           operation: 'create',

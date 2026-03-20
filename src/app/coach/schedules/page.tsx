@@ -141,7 +141,7 @@ export default function CoachSchedulesPage() {
         setOpen(false);
         setFormData({ type: 'Practice', opponentName: '', location: '', dateTime: '' });
       })
-      .catch(async (error) => {
+      .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: gameRef.path,
           operation: 'create',

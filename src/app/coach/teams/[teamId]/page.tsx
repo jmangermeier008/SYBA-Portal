@@ -153,7 +153,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl shadow-md">
-                          {enrollment.jerseyNumber || player.firstName[0]}
+                          {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
                         </div>
                         <div>
                           <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>
