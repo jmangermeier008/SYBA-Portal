@@ -249,16 +249,14 @@ export default function AdminDashboard({
     const clearancesByCoach: Record<string, Record<string, string>> = {};
 
     allClearances.forEach((c) => {
-      // The doc ref path is: userProfiles/{coachId}/clearances/{clearanceId}
-      // We can get coachId from _ref or the path stored in the doc
-      const path = (c as any)._ref?.path ?? '';
-      const parts = path.split('/');
-      // path: userProfiles/{uid}/clearances/{docId}
-      if (parts.length >= 4) {
-        const uid = parts[1];
-        if (!clearancesByCoach[uid]) clearancesByCoach[uid] = {};
-        clearancesByCoach[uid][c.type] = c.status;
-      }
+      // Prefer userId field stored on the document; fall back to path parsing for old docs
+      const uid: string | undefined = (c as any).userId ?? (() => {
+        const parts = ((c as any)._ref?.path ?? '').split('/');
+        return parts.length >= 4 ? parts[1] : undefined;
+      })();
+      if (!uid) return;
+      if (!clearancesByCoach[uid]) clearancesByCoach[uid] = {};
+      clearancesByCoach[uid][c.type] = c.status;
     });
 
     let cleared = 0;

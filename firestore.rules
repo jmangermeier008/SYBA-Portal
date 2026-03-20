@@ -44,13 +44,13 @@ service cloud.firestore {
                   (data.role == 'Admin' && data.get('isAlsoCoach', false) == true)));
     }
 
-    // Support for collection group queries
+    // Support for collection group queries (admin/board use only — individual access via direct path)
     match /{path=**}/players/{playerId} {
-      allow read: if isSignedIn();
+      allow read: if isBoardMember();
     }
 
     match /{path=**}/enrollments/{enrollmentId} {
-      allow read: if isSignedIn();
+      allow read: if isBoardMember();
     }
 
     match /{path=**}/clearances/{clearanceId} {
@@ -85,9 +85,7 @@ service cloud.firestore {
       match /enrollments/{enrollmentId} {
         allow read: if isSignedIn();
         allow create: if isUser(userId) || isAdmin();
-        allow update: if isUser(userId) || isAdmin()
-          || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['payment_status', 'paymentStatus', 'stripe_payment_id', 'updatedAt']);
+        allow update: if isUser(userId) || isAdmin();
         allow delete: if isUser(userId) || isAdmin();
       }
     }

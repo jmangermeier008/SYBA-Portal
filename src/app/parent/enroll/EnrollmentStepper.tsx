@@ -208,19 +208,26 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       await setDoc(enrollmentRef, enrollmentData);
 
       if (state.isWaitlisted) {
-        // Send confirmation email (fire-and-forget)
-        fetch('/api/email/confirmation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            toEmail: user.email,
-            playerName: selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Your player',
-            seasonName: selectedSeason?.name ?? '',
-            divisionName: selectedDivision.name,
-            isWaitlisted: true,
-            feeWaived: false,
-          }),
-        }).catch(err => console.error('[enroll] Email send error:', err));
+        // Send waitlist confirmation email
+        try {
+          const emailRes = await fetch('/api/email/confirmation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              toEmail: user.email,
+              playerName: selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Your player',
+              seasonName: selectedSeason?.name ?? '',
+              divisionName: selectedDivision.name,
+              isWaitlisted: true,
+              feeWaived: false,
+            }),
+          });
+          if (!emailRes.ok) {
+            toast({ variant: 'destructive', title: 'Added to Waitlist', description: "You've been waitlisted, but the confirmation email failed to send." });
+          }
+        } catch (err) {
+          console.error('[enroll] Email send error:', err);
+        }
 
         setSuccess(true);
         setSubmitting(false);
@@ -233,10 +240,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         console.error('[enroll] Count increment error:', err)
       );
 
-      // Start Stripe checkout
+      // Start Stripe checkout (send ID token for server-side auth verification)
+      const idToken = await user.getIdToken();
       const resp = await fetch('/api/stripe/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify({
           enrollmentId,
           userId: user.uid,

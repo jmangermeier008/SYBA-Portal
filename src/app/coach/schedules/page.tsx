@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, doc, setDoc, updateDoc, where, limit, getDocs, collectionGroup } from 'firebase/firestore';
+import { collection, query, orderBy, doc, setDoc, updateDoc, where, limit } from 'firebase/firestore';
 import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert, AlertTriangle, CloudRain, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -13,8 +13,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 
 interface GameEvent {
   id: string;
@@ -214,18 +212,12 @@ export default function CoachSchedulesPage() {
       : customLocation;
     const fieldId = selectedFieldId !== 'custom' ? selectedFieldId : null;
 
-    // Soft conflict detection — first click checks, second click saves
+    // Soft conflict detection — check only this team's own games (avoids league-wide collectionGroup read)
     if (fieldId && !conflictChecked) {
-      const conflictSnap = await getDocs(
-        query(collectionGroup(db, 'games'), where('fieldId', '==', fieldId))
-      );
       const eventDate = formData.dateTime.slice(0, 10);
-      const conflicts = conflictSnap.docs.filter(d => {
-        const data = d.data();
-        return data.dateTime?.slice(0, 10) === eventDate;
-      });
+      const conflicts = (games ?? []).filter(g => g.fieldId === fieldId && g.dateTime?.slice(0, 10) === eventDate);
       if (conflicts.length > 0) {
-        const conflictTitle = conflicts[0].data().title || 'another event';
+        const conflictTitle = (conflicts[0] as any).title || 'another event';
         setFieldConflict(`Field already has "${conflictTitle}" on this date. Save again to override.`);
         setConflictChecked(true);
         return;
@@ -251,20 +243,16 @@ export default function CoachSchedulesPage() {
       coachUserId: user.uid,
     };
 
-    setDoc(gameRef, gameData)
-      .then(() => {
-        toast({ title: "Event Added", description: "The team schedule has been updated." });
-        setOpen(false);
-        resetDialog();
-      })
-      .catch(() => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: gameRef.path,
-          operation: 'create',
-          requestResourceData: gameData
-        }));
-      })
-      .finally(() => setIsAdding(false));
+    try {
+      await setDoc(gameRef, gameData);
+      toast({ title: "Event Added", description: "The team schedule has been updated." });
+      setOpen(false);
+      resetDialog();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Could not save the event.", variant: "destructive" });
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   return (

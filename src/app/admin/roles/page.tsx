@@ -11,8 +11,6 @@ import { Loader2, ShieldCheck, User as UserIcon, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 import Link from 'next/link';
 
 const ALL_ROLES = ['Parent', 'Coach', 'Board Member', 'Admin'] as const;
@@ -67,12 +65,8 @@ export default function RolesPage() {
       .then(() => {
         toast({ title: "Roles Updated", description: `User roles updated to: ${newRoles.join(', ')}.` });
       })
-      .catch(() => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: userRef.path,
-          operation: 'update',
-          requestResourceData: updateData,
-        }));
+      .catch((error: any) => {
+        toast({ title: "Update Failed", description: error.message || "Could not update user roles.", variant: "destructive" });
       });
   };
 

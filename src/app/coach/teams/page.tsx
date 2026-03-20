@@ -4,11 +4,10 @@
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, Mail, ChevronRight, Loader2, Info } from 'lucide-react';
+import { Users, ChevronRight, Loader2, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, query, where } from 'firebase/firestore';
-import { useToast } from '@/hooks/use-toast';
 
 interface Team {
   id: string;
@@ -22,23 +21,13 @@ interface Team {
 export default function CoachTeamsPage() {
   const { user } = useUser();
   const db = useFirestore();
-  const { toast } = useToast();
-  
+
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return query(collection(db, 'teams'), where('coach_uid', '==', user.uid));
   }, [db, user?.uid]);
 
   const { data: teams, isLoading } = useCollection<Team>(teamsQuery);
-
-  const handleEmailAll = (e: React.MouseEvent, teamName: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toast({
-      title: "Feature Coming Soon",
-      description: `Bulk email for ${teamName} will be available in the next update. Use Team Chat for now!`,
-    });
-  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -70,21 +59,11 @@ export default function CoachTeamsPage() {
               <Link href={`/coach/teams/${team.id}`} key={team.id} className="block group">
                 <Card className="border-none shadow-lg overflow-hidden transition-all hover:shadow-xl hover:ring-2 hover:ring-primary/20">
                   <CardHeader className="bg-primary text-primary-foreground">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="text-2xl font-headline">{team.name}</CardTitle>
-                        <CardDescription className="text-primary-foreground/80 font-medium">
-                          {team.divisionId} Division • {team.seasonId}
-                        </CardDescription>
-                      </div>
-                      <Button 
-                        variant="secondary" 
-                        size="sm" 
-                        className="rounded-full shadow-md"
-                        onClick={(e) => handleEmailAll(e, team.name)}
-                      >
-                        <Mail className="mr-2 h-4 w-4" /> Email All Parents
-                      </Button>
+                    <div>
+                      <CardTitle className="text-2xl font-headline">{team.name}</CardTitle>
+                      <CardDescription className="text-primary-foreground/80 font-medium">
+                        {team.divisionId} Division • {team.seasonId}
+                      </CardDescription>
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">

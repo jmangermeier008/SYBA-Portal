@@ -15,8 +15,6 @@ import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { format, isBefore, addMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 
 const CLEARANCE_TYPES = [
   { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance', description: 'Mandatory state background check.' },
@@ -78,22 +76,13 @@ export default function CoachCompliancePage() {
         updatedAt: new Date().toISOString(),
       };
 
-      setDoc(clearanceRef, clearanceData)
-        .then(() => {
-          toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
-        })
-        .catch((error: any) => {
-          if (error?.code === 'permission-denied') {
-            errorEmitter.emit('permission-error', new FirestorePermissionError({
-              path: clearanceRef.path,
-              operation: 'create',
-              requestResourceData: clearanceData
-            }));
-          } else {
-            console.error('[coach-compliance] Upload error:', error);
-          }
-        });
-        
+      try {
+        await setDoc(clearanceRef, clearanceData);
+        toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
+      } catch (firestoreError: any) {
+        toast({ variant: "destructive", title: "Upload Failed", description: firestoreError.message || "Could not save clearance record." });
+      }
+
     } catch (error: any) {
       toast({ variant: "destructive", title: "Upload Failed", description: error.message });
     } finally {
