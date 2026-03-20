@@ -70,7 +70,9 @@ service cloud.firestore {
       match /enrollments/{enrollmentId} {
         allow read: if isSignedIn();
         allow create: if isUser(userId) || isAdmin();
-        allow update: if isUser(userId) || isAdmin();
+        allow update: if isUser(userId) || isAdmin()
+          || request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['payment_status', 'paymentStatus', 'stripe_payment_id', 'updatedAt']);
         allow delete: if isUser(userId) || isAdmin();
       }
     }

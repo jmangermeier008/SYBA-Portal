@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -21,8 +21,9 @@ interface Enrollment {
   seasonId: string;
   divisionId: string;
   parentUserId: string;
-  paymentStatus: 'pending' | 'paid';
+  paymentStatus: 'pending' | 'pending_payment' | 'paid' | 'waitlisted' | 'fee_waived';
   jerseySize: string;
+  shirtSize?: string;
   teamId?: string;
 }
 
@@ -281,11 +282,15 @@ export default function MasterRosterPage() {
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
                         <TableCell className="pl-6 py-4">
                           <div className="font-semibold">{p ? `${p.firstName} ${p.lastName}` : 'Loading...'}</div>
-                          <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.jerseySize}</div>
+                          <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
                         </TableCell>
                         <TableCell>
-                          {e.paymentStatus === 'paid' ? (
+                          {e.paymentStatus === 'paid' || e.paymentStatus === 'fee_waived' ? (
                             <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          ) : e.paymentStatus === 'pending_payment' ? (
+                            <Clock className="h-5 w-5 text-yellow-500" />
+                          ) : e.paymentStatus === 'waitlisted' ? (
+                            <ListOrdered className="h-5 w-5 text-amber-500" />
                           ) : (
                             <XCircle className="h-5 w-5 text-destructive" />
                           )}

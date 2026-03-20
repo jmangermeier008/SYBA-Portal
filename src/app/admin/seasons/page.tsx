@@ -58,10 +58,9 @@ export default function SeasonsAdminPage() {
       await setDoc(seasonRef, seasonData);
 
       const divisions = [
-        { id: 'tball', name: 'T-Ball', fee: 5000 },
-        { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
-        { id: 'minors', name: 'Minor League', fee: 10000 },
-        { id: 'majors', name: 'Major League', fee: 12500 },
+        { id: 'tball', name: 'T-Ball', fee: 5000, capacity: 20, waitlistEnabled: true, registeredCount: 0 },
+        { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500, capacity: 20, waitlistEnabled: true, registeredCount: 0 },
+        { id: 'kid-pitch', name: 'Kid Pitch', fee: 10000, capacity: 20, waitlistEnabled: true, registeredCount: 0 },
       ];
 
       await Promise.all(
