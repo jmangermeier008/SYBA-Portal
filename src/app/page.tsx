@@ -64,7 +64,7 @@ export default function Home({
               <div className="flex flex-col sm:flex-row gap-4 mt-8">
                 <Button size="lg" className="rounded-full px-8 h-12 text-lg shadow-lg shadow-primary/20" asChild>
                   <Link href="/signup">
-                    Sign Up for 2024 <ArrowRight className="ml-2 h-5 w-5" />
+                    Register for Spring 2026 <ArrowRight className="ml-2 h-5 w-5" />
                   </Link>
                 </Button>
                 <Button variant="outline" size="lg" className="rounded-full px-8 h-12 text-lg" asChild>
@@ -86,8 +86,8 @@ export default function Home({
                 <p className="text-muted-foreground">Manage multiple players under one family account. Upload clearances and birth certificates securely.</p>
               </div>
               <div className="flex flex-col items-center space-y-4 text-center group">
-                <div className="p-4 bg-accent/10 rounded-2xl group-hover:bg-accent/20 transition-all duration-300">
-                  <Calendar className="h-10 w-10 text-accent-foreground" />
+                <div className="p-4 bg-primary/10 rounded-2xl group-hover:bg-primary/20 transition-all duration-300">
+                  <Calendar className="h-10 w-10 text-primary" />
                 </div>
                 <h3 className="text-xl font-bold font-headline">Game Schedules</h3>
                 <p className="text-muted-foreground">Real-time access to practice times, game locations, and league-wide events for all divisions.</p>
@@ -109,7 +109,7 @@ export default function Home({
             <Trophy className="h-4 w-4 text-primary" />
             <p className="text-xs font-semibold text-muted-foreground">Sharpsville Youth Baseball Association</p>
           </div>
-          <p className="text-xs text-muted-foreground">© 2024 SYBA. All rights reserved. Sharpsville, PA.</p>
+          <p className="text-xs text-muted-foreground">© 2026 SYBA. All rights reserved. Sharpsville, PA.</p>
           <nav className="flex gap-4 sm:gap-6">
             <Link className="text-xs hover:underline underline-offset-4" href="#">Terms</Link>
             <Link className="text-xs hover:underline underline-offset-4" href="#">Privacy</Link>

@@ -8,8 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ShieldCheck, User as UserIcon, Lock, Button } from 'lucide-react';
+import { Loader2, ShieldCheck, User as UserIcon, Lock, UserCog } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import Link from 'next/link';
@@ -19,6 +21,7 @@ interface UserData {
   email: string;
   displayName: string;
   role: string;
+  isAlsoCoach?: boolean;
 }
 
 export default function RolesPage() {
@@ -35,7 +38,12 @@ export default function RolesPage() {
 
   const handleRoleChange = async (uid: string, newRole: string) => {
     const userRef = doc(db, 'userProfiles', uid);
-    updateDoc(userRef, { role: newRole })
+    const updateData: any = { role: newRole };
+    // Clear the isAlsoCoach flag if the user is no longer an Admin
+    if (newRole !== 'Admin') {
+      updateData.isAlsoCoach = false;
+    }
+    updateDoc(userRef, updateData)
       .then(() => {
         toast({ title: "Role Updated", description: `User role has been changed to ${newRole}.` });
       })
@@ -43,7 +51,28 @@ export default function RolesPage() {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: userRef.path,
           operation: 'update',
-          requestResourceData: { role: newRole }
+          requestResourceData: updateData
+        }));
+      });
+  };
+
+  const handleToggleAlsoCoach = async (uid: string, currentValue: boolean) => {
+    const userRef = doc(db, 'userProfiles', uid);
+    const updateData = { isAlsoCoach: !currentValue };
+    updateDoc(userRef, updateData)
+      .then(() => {
+        toast({
+          title: !currentValue ? "Coach Access Granted" : "Coach Access Removed",
+          description: !currentValue
+            ? "This admin can now access coach dashboards."
+            : "Coach dashboard access has been removed.",
+        });
+      })
+      .catch(async () => {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: userRef.path,
+          operation: 'update',
+          requestResourceData: updateData
         }));
       });
   };
@@ -60,7 +89,7 @@ export default function RolesPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar role="parent" />
-        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -81,7 +110,7 @@ export default function RolesPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="admin" />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">User Role Management</h1>
           <p className="text-muted-foreground">Manage system access levels for SYBA parents, coaches, and admins.</p>
@@ -113,9 +142,10 @@ export default function RolesPage() {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-6">User</TableHead>
-                    <TableHead>Email</TableHead>
+                    <TableHead className="hidden md:table-cell">Email</TableHead>
                     <TableHead>Current Role</TableHead>
-                    <TableHead className="pr-6 text-right">Actions</TableHead>
+                    <TableHead className="text-center hidden md:table-cell">Also Coach?</TableHead>
+                    <TableHead className="pr-6 text-right">Change Role</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -130,21 +160,43 @@ export default function RolesPage() {
                               <UserIcon className="h-5 w-5" />
                             )}
                           </div>
-                          <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
+                          <div>
+                            <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
+                            {user.isAlsoCoach && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <UserCog className="h-3 w-3 text-primary" />
+                                <span className="text-[10px] text-primary font-medium">Also Coach</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
-                      <TableCell>{user.email}</TableCell>
+                      <TableCell className="hidden md:table-cell">{user.email}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'Admin' ? 'default' : user.role === 'Coach' ? 'secondary' : 'outline'} className="rounded-full px-4">
+                        <Badge
+                          variant={user.role === 'Admin' ? 'default' : user.role === 'Coach' ? 'secondary' : 'outline'}
+                          className="rounded-full px-4"
+                        >
                           {user.role}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-center hidden md:table-cell">
+                        {user.role === 'Admin' ? (
+                          <Switch
+                            checked={!!user.isAlsoCoach}
+                            onCheckedChange={() => handleToggleAlsoCoach(user.id, !!user.isAlsoCoach)}
+                            title="Allow this admin to also access coach dashboards"
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="pr-6 text-right">
                         <Select
                           defaultValue={user.role}
                           onValueChange={(val) => handleRoleChange(user.id, val)}
                         >
-                          <SelectTrigger className="w-[140px] rounded-xl ml-auto">
+                          <SelectTrigger className="w-[130px] rounded-xl ml-auto">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>

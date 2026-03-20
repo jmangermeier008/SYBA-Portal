@@ -37,7 +37,7 @@ export default function DrillsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="coach" />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">AI Practice Drill Generator</h1>
           <p className="text-muted-foreground">Let AI help you design the perfect practice session for your team.</p>

@@ -45,19 +45,18 @@ export default function SeedPage() {
     setLoading(true);
     try {
       // 1. Seed Seasons & Divisions
-      const seasonId = 'spring-2024';
+      const seasonId = 'spring-2026';
       await setDoc(doc(db, 'seasons', seasonId), {
         id: seasonId,
-        name: 'Spring 2024',
-        registrationOpen: '2024-01-01',
-        registrationClose: '2024-03-31',
+        name: 'Spring 2026',
+        registrationOpen: '2026-01-15',
+        registrationClose: '2026-03-31',
       });
 
       const divisions = [
         { id: 'tball', name: 'T-Ball', fee: 5000 },
         { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
-        { id: 'minors', name: 'Minor League', fee: 10000 },
-        { id: 'majors', name: 'Major League', fee: 12500 },
+        { id: 'kid-pitch', name: 'Kid Pitch', fee: 10000 },
       ];
 
       for (const div of divisions) {
@@ -66,7 +65,9 @@ export default function SeedPage() {
 
       // 2. Seed Sample Users
       const demoCoachUid = assignMeAsCoach && user ? user.uid : 'demo-coach-uid';
+      const demoCoach2Uid = 'demo-coach-2-uid';
       const demoParentUid = 'demo-parent-uid';
+      const demoParent2Uid = 'demo-parent-2-uid';
 
       // Update current user to Coach if requested
       if (assignMeAsCoach && user) {
@@ -75,67 +76,239 @@ export default function SeedPage() {
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } else {
-        // Seed the default demo coach profile
         await setDoc(doc(db, 'userProfiles', 'demo-coach-uid'), {
           id: 'demo-coach-uid',
-          displayName: 'Coach Mike Smith',
-          email: 'coach@example.com',
+          displayName: 'Coach Mike Russo',
+          email: 'mrusso@example.com',
           role: 'Coach',
           createdAt: new Date().toISOString()
         });
       }
 
+      await setDoc(doc(db, 'userProfiles', demoCoach2Uid), {
+        id: demoCoach2Uid,
+        displayName: 'Coach Dave Kelley',
+        email: 'dkelley@example.com',
+        role: 'Coach',
+        createdAt: new Date().toISOString()
+      });
+
       await setDoc(doc(db, 'userProfiles', demoParentUid), {
         id: demoParentUid,
-        displayName: 'Jane Doe',
-        email: 'parent@example.com',
-        phoneNumber: '(555) 123-4567',
+        displayName: 'Sarah Mitchell',
+        email: 'smitchell@example.com',
+        phoneNumber: '(724) 555-0123',
         role: 'Parent',
         shareContactInfo: true,
         createdAt: new Date().toISOString()
       });
 
-      // 3. Seed Teams
-      const teamId = 'blue-jays-spring-2024';
-      const samplePlayerId = 'sample-player-1';
-
-      await setDoc(doc(db, 'teams', teamId), { 
-        id: teamId, 
-        name: 'Blue Jays', 
-        seasonId, 
-        divisionId: 'tball', 
-        coach_uid: demoCoachUid, 
-        player_ids: [samplePlayerId],
+      await setDoc(doc(db, 'userProfiles', demoParent2Uid), {
+        id: demoParent2Uid,
+        displayName: 'Tom Graziano',
+        email: 'tgraziano@example.com',
+        phoneNumber: '(724) 555-0456',
+        role: 'Parent',
+        shareContactInfo: true,
         createdAt: new Date().toISOString()
       });
 
-      // 4. Seed Players & Enrollments for the demo parent
-      await setDoc(doc(db, 'userProfiles', demoParentUid, 'players', samplePlayerId), {
-        id: samplePlayerId,
-        firstName: 'Tommy',
-        lastName: 'Doe',
-        dateOfBirth: '2018-05-15',
+      // 3. Seed Teams — one per division with Sharpsville-style names
+      const teamTBall = 'blue-jays-spring-2026';
+      const teamCoachPitch = 'cardinals-spring-2026';
+      const teamKidPitch = 'tigers-spring-2026';
+
+      const player1 = 'player-1';
+      const player2 = 'player-2';
+      const player3 = 'player-3';
+
+      await setDoc(doc(db, 'teams', teamTBall), {
+        id: teamTBall,
+        name: 'Blue Jays',
+        seasonId,
+        divisionId: 'tball',
+        coach_uid: demoCoachUid,
+        player_ids: [player1, player2],
+        createdAt: new Date().toISOString()
+      });
+
+      await setDoc(doc(db, 'teams', teamCoachPitch), {
+        id: teamCoachPitch,
+        name: 'Cardinals',
+        seasonId,
+        divisionId: 'coach-pitch',
+        coach_uid: demoCoach2Uid,
+        player_ids: [player3],
+        createdAt: new Date().toISOString()
+      });
+
+      await setDoc(doc(db, 'teams', teamKidPitch), {
+        id: teamKidPitch,
+        name: 'Tigers',
+        seasonId,
+        divisionId: 'kid-pitch',
+        coach_uid: demoCoachUid,
+        player_ids: [],
+        createdAt: new Date().toISOString()
+      });
+
+      // 4. Seed Players & Enrollments
+      await setDoc(doc(db, 'userProfiles', demoParentUid, 'players', player1), {
+        id: player1,
+        firstName: 'Owen',
+        lastName: 'Mitchell',
+        dateOfBirth: '2019-04-12',
         parentUserId: demoParentUid,
-        medicalNotes: 'Peanut Allergy',
+        medicalNotes: '',
         ageVerified: true,
         emergencyContacts: [
-          { name: 'John Doe', phone: '(555) 987-6543', relationship: 'Father' }
+          { name: 'Brian Mitchell', phone: '(724) 555-0124', relationship: 'Father' }
         ]
       });
 
-      await setDoc(doc(db, 'userProfiles', demoParentUid, 'enrollments', 'demo-enroll-1'), {
-        id: 'demo-enroll-1',
-        playerId: samplePlayerId,
+      await setDoc(doc(db, 'userProfiles', demoParentUid, 'enrollments', 'enroll-1'), {
+        id: 'enroll-1',
+        playerId: player1,
         seasonId,
         divisionId: 'tball',
         parentUserId: demoParentUid,
         paymentStatus: 'paid',
-        teamId: teamId,
+        teamId: teamTBall,
         jerseySize: 'Youth S',
-        jerseyNumber: '10'
+        jerseyNumber: '7'
       });
 
-      toast({ title: "Seed Successful", description: `POC data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : ''}` });
+      await setDoc(doc(db, 'userProfiles', demoParent2Uid, 'players', player2), {
+        id: player2,
+        firstName: 'Lena',
+        lastName: 'Graziano',
+        dateOfBirth: '2020-06-30',
+        parentUserId: demoParent2Uid,
+        medicalNotes: 'Asthma — inhaler in bag',
+        ageVerified: false,
+        birthCertificateUrl: 'https://placehold.co/1/1/png',
+        emergencyContacts: [
+          { name: 'Tom Graziano', phone: '(724) 555-0456', relationship: 'Father' }
+        ]
+      });
+
+      await setDoc(doc(db, 'userProfiles', demoParent2Uid, 'enrollments', 'enroll-2'), {
+        id: 'enroll-2',
+        playerId: player2,
+        seasonId,
+        divisionId: 'tball',
+        parentUserId: demoParent2Uid,
+        paymentStatus: 'paid',
+        teamId: teamTBall,
+        jerseySize: 'Youth XS',
+        jerseyNumber: '12'
+      });
+
+      await setDoc(doc(db, 'userProfiles', demoParent2Uid, 'players', player3), {
+        id: player3,
+        firstName: 'Marco',
+        lastName: 'Graziano',
+        dateOfBirth: '2017-09-05',
+        parentUserId: demoParent2Uid,
+        medicalNotes: '',
+        ageVerified: true,
+        emergencyContacts: [
+          { name: 'Tom Graziano', phone: '(724) 555-0456', relationship: 'Father' }
+        ]
+      });
+
+      await setDoc(doc(db, 'userProfiles', demoParent2Uid, 'enrollments', 'enroll-3'), {
+        id: 'enroll-3',
+        playerId: player3,
+        seasonId,
+        divisionId: 'coach-pitch',
+        parentUserId: demoParent2Uid,
+        paymentStatus: 'paid',
+        teamId: teamCoachPitch,
+        jerseySize: 'Youth M',
+        jerseyNumber: '5'
+      });
+
+      // 5. Seed clearances for demo coach
+      const clearanceTypes = ['ChildAbuse', 'CriminalRecord', 'FBI'];
+      for (const type of clearanceTypes) {
+        await setDoc(doc(db, 'userProfiles', demoCoach2Uid, 'clearances', type.toLowerCase()), {
+          id: type.toLowerCase(),
+          type,
+          userId: demoCoach2Uid,
+          status: 'Approved',
+          fileUrl: 'https://placehold.co/1/1/png',
+          expirationDate: '2027-01-01',
+          verifiedByName: 'Admin',
+          verifiedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        });
+      }
+      // Demo coach 1 has one pending clearance
+      await setDoc(doc(db, 'userProfiles', demoCoachUid, 'clearances', 'childabuse'), {
+        id: 'childabuse',
+        type: 'ChildAbuse',
+        userId: demoCoachUid,
+        status: 'Approved',
+        fileUrl: 'https://placehold.co/1/1/png',
+        expirationDate: '2027-01-01',
+        createdAt: new Date().toISOString(),
+      });
+      await setDoc(doc(db, 'userProfiles', demoCoachUid, 'clearances', 'criminalrecord'), {
+        id: 'criminalrecord',
+        type: 'CriminalRecord',
+        userId: demoCoachUid,
+        status: 'Pending',
+        fileUrl: 'https://placehold.co/1/1/png',
+        expirationDate: '2027-01-01',
+        createdAt: new Date().toISOString(),
+      });
+
+      // 6. Seed sample schedule events
+      const today = new Date();
+      const fmt = (d: Date) => d.toISOString().split('T')[0];
+      const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+      await setDoc(doc(db, 'schedules', 'game-1'), {
+        id: 'game-1',
+        title: 'Blue Jays vs. Cardinals',
+        type: 'Game',
+        teamId: teamTBall,
+        seasonId,
+        date: fmt(addDays(today, 5)),
+        time: '10:00 AM',
+        location: 'Sharpsville Community Park — Field 1',
+        notes: 'Home game. Parents please arrive 15 minutes early.',
+        createdAt: new Date().toISOString()
+      });
+
+      await setDoc(doc(db, 'schedules', 'practice-1'), {
+        id: 'practice-1',
+        title: 'Blue Jays Practice',
+        type: 'Practice',
+        teamId: teamTBall,
+        seasonId,
+        date: fmt(addDays(today, 2)),
+        time: '5:30 PM',
+        location: 'Sharpsville Community Park — Field 2',
+        notes: 'Bring water and gloves.',
+        createdAt: new Date().toISOString()
+      });
+
+      await setDoc(doc(db, 'schedules', 'game-2'), {
+        id: 'game-2',
+        title: 'Tigers vs. Riverside',
+        type: 'Game',
+        teamId: teamKidPitch,
+        seasonId,
+        date: fmt(addDays(today, 7)),
+        time: '1:00 PM',
+        location: 'Sharpsville Community Park — Field 1',
+        notes: 'Away uniforms.',
+        createdAt: new Date().toISOString()
+      });
+
+      toast({ title: "Seed Successful", description: `Spring 2026 SYBA data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : ''}` });
       setDone(true);
       if (assignMeAsCoach) {
         setTimeout(() => window.location.reload(), 1000);
@@ -150,7 +323,7 @@ export default function SeedPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role={profile?.role.toLowerCase() as any || 'parent'} />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">POC Management Utilities</h1>
           <p className="text-muted-foreground">Tools to initialize data and switch between roles for testing.</p>

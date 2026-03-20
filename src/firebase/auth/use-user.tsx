@@ -12,6 +12,7 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   role: 'Parent' | 'Coach' | 'Admin';
+  isAlsoCoach?: boolean;
   createdAt: string;
 }
 
@@ -69,7 +70,8 @@ export function useUser() {
     profile,
     loading,
     isAdmin: profile?.role === 'Admin',
-    isCoach: profile?.role === 'Coach',
+    // isCoach is true for Coach role, OR for Admins granted coach access
+    isCoach: profile?.role === 'Coach' || (profile?.role === 'Admin' && profile?.isAlsoCoach === true),
     isParent: profile?.role === 'Parent',
   };
 }
