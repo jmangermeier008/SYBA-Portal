@@ -46,7 +46,7 @@ service cloud.firestore {
 
     match /userProfiles/{userId} {
       allow get: if isSignedIn();
-      allow list: if isAdmin();
+      allow list: if isSignedIn();
       allow create: if isUser(userId) || isAdmin();
       allow update: if isUser(userId) || isAdmin();
       allow delete: if false;
