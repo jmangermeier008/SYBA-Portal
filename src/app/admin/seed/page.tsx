@@ -69,13 +69,15 @@ export default function SeedPage() {
       const demoParentUid = 'demo-parent-uid';
       const demoParent2Uid = 'demo-parent-2-uid';
 
-      // Update current user to Coach if requested
-      if (assignMeAsCoach && user) {
+      // Temporarily ensure current user is Admin so all subsequent operations succeed
+      if (user) {
         await setDoc(doc(db, 'userProfiles', user.uid), {
-          role: 'Coach',
+          role: 'Admin',
           updatedAt: new Date().toISOString()
         }, { merge: true });
-      } else {
+      }
+
+      if (!assignMeAsCoach || !user) {
         await setDoc(doc(db, 'userProfiles', 'demo-coach-uid'), {
           id: 'demo-coach-uid',
           displayName: 'Coach Mike Russo',
@@ -264,49 +266,56 @@ export default function SeedPage() {
         createdAt: new Date().toISOString(),
       });
 
-      // 6. Seed sample schedule events
+      // 6. Seed sample schedule events under teams/{teamId}/games
       const today = new Date();
       const fmt = (d: Date) => d.toISOString().split('T')[0];
       const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
-      await setDoc(doc(db, 'schedules', 'game-1'), {
+      await setDoc(doc(db, 'teams', teamTBall, 'games', 'game-1'), {
         id: 'game-1',
         title: 'Blue Jays vs. Cardinals',
+        opponentName: 'Cardinals',
         type: 'Game',
         teamId: teamTBall,
         seasonId,
-        date: fmt(addDays(today, 5)),
-        time: '10:00 AM',
+        dateTime: fmt(addDays(today, 5)) + 'T10:00:00Z',
         location: 'Sharpsville Community Park — Field 1',
         notes: 'Home game. Parents please arrive 15 minutes early.',
         createdAt: new Date().toISOString()
       });
 
-      await setDoc(doc(db, 'schedules', 'practice-1'), {
+      await setDoc(doc(db, 'teams', teamTBall, 'games', 'practice-1'), {
         id: 'practice-1',
         title: 'Blue Jays Practice',
         type: 'Practice',
         teamId: teamTBall,
         seasonId,
-        date: fmt(addDays(today, 2)),
-        time: '5:30 PM',
+        dateTime: fmt(addDays(today, 2)) + 'T17:30:00Z',
         location: 'Sharpsville Community Park — Field 2',
         notes: 'Bring water and gloves.',
         createdAt: new Date().toISOString()
       });
 
-      await setDoc(doc(db, 'schedules', 'game-2'), {
+      await setDoc(doc(db, 'teams', teamKidPitch, 'games', 'game-2'), {
         id: 'game-2',
         title: 'Tigers vs. Riverside',
+        opponentName: 'Riverside',
         type: 'Game',
         teamId: teamKidPitch,
         seasonId,
-        date: fmt(addDays(today, 7)),
-        time: '1:00 PM',
+        dateTime: fmt(addDays(today, 7)) + 'T13:00:00Z',
         location: 'Sharpsville Community Park — Field 1',
         notes: 'Away uniforms.',
         createdAt: new Date().toISOString()
       });
+
+      // Update current user to Coach AFTER all admin seeding is done
+      if (assignMeAsCoach && user) {
+        await updateDoc(doc(db, 'userProfiles', user.uid), {
+          role: 'Coach',
+          updatedAt: new Date().toISOString()
+        });
+      }
 
       toast({ title: "Seed Successful", description: `Spring 2026 SYBA data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : ''}` });
       setDone(true);
