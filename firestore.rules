@@ -136,11 +136,6 @@ service cloud.firestore {
         }
       }
 
-      match /messages/{messageId} {
-        allow get, list: if isSignedIn();
-        allow create: if isSignedIn();
-        allow update, delete: if isSignedIn() && request.auth.uid == resource.data.senderUserId;
-      }
     }
   }
 }
