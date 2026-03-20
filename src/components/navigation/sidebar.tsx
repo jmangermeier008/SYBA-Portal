@@ -21,7 +21,6 @@ import {
   Database,
   Menu,
   X,
-  UserCog,
   BarChart3,
   MapPin,
   ShoppingCart,
@@ -34,13 +33,85 @@ import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
-interface SidebarProps {
-  role: 'parent' | 'coach' | 'admin';
+const leagueAdminItems = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
+  { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
+  { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
+  { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
+  { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
+  { label: 'Teams', icon: Users, href: '/admin/teams' },
+  { label: 'Fields', icon: MapPin, href: '/admin/fields' },
+  { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
+  { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
+  { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
+  { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
+  { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
+];
+
+const adminOnlyItems = [
+  { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
+  { label: 'Seed Data', icon: Database, href: '/admin/seed' },
+  { label: 'Settings', icon: Settings, href: '/admin/settings' },
+];
+
+const coachItems = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: '/coach/dashboard' },
+  { label: 'My Teams', icon: Users, href: '/coach/teams' },
+  { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
+  { label: 'Practice Drills', icon: Dumbbell, href: '/coach/drills' },
+  { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
+];
+
+const parentItems = [
+  { label: 'Dashboard', icon: LayoutDashboard, href: '/parent/dashboard' },
+  { label: 'My Family', icon: UserIcon, href: '/parent/family' },
+  { label: 'Season Enrollment', icon: ClipboardList, href: '/parent/enroll' },
+  { label: 'My Teams', icon: Users, href: '/parent/teams' },
+  { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
+  { label: 'Announcements', icon: Bell, href: '/parent/announcements' },
+  { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
+  { label: 'Settings', icon: Settings, href: '/parent/settings' },
+];
+
+function NavSection({
+  label,
+  items,
+  pathname,
+  onNavigate,
+}: {
+  label: string;
+  items: { label: string; icon: React.ElementType; href: string }[];
+  pathname: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <>
+      <div className="pt-4 pb-1 px-3">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{label}</p>
+      </div>
+      {items.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          onClick={onNavigate}
+          className={cn(
+            "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+            pathname === item.href || pathname.startsWith(item.href + '/')
+              ? "bg-primary text-white shadow-md shadow-primary/20"
+              : "text-muted-foreground hover:bg-secondary hover:text-primary"
+          )}
+        >
+          <item.icon className="h-4 w-4 shrink-0" />
+          {item.label}
+        </Link>
+      ))}
+    </>
+  );
 }
 
-export function Sidebar({ role }: SidebarProps) {
+export function Sidebar() {
   const pathname = usePathname();
-  const { profile, isCoach } = useUser();
+  const { profile, roles, isAdmin, isBoardMember, isCoach, isParent } = useUser();
   const auth = useAuth();
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -51,57 +122,20 @@ export function Sidebar({ role }: SidebarProps) {
     router.push('/');
   };
 
-  const navItems = {
-    parent: [
-      { label: 'Dashboard', icon: LayoutDashboard, href: '/parent/dashboard' },
-      { label: 'My Family', icon: UserIcon, href: '/parent/family' },
-      { label: 'Season Enrollment', icon: ClipboardList, href: '/parent/enroll' },
-      { label: 'My Teams', icon: Users, href: '/parent/teams' },
-      { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
-      { label: 'Announcements', icon: Bell, href: '/parent/announcements' },
-      { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
-      { label: 'Settings', icon: Settings, href: '/parent/settings' },
-    ],
-    coach: [
-      { label: 'Dashboard', icon: LayoutDashboard, href: '/coach/dashboard' },
-      { label: 'My Teams', icon: Users, href: '/coach/teams' },
-      { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
-      { label: 'Practice Drills', icon: Dumbbell, href: '/coach/drills' },
-      { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
-    ],
-    admin: [
-      { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
-      { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
-      { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
-      { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
-      { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
-      { label: 'Teams', icon: Users, href: '/admin/teams' },
-      { label: 'Fields', icon: MapPin, href: '/admin/fields' },
-      { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
-      { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
-      { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
-      { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
-      { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
-      { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
-      { label: 'Seed Data', icon: Database, href: '/admin/seed' },
-      { label: 'Settings', icon: Settings, href: '/admin/settings' },
-    ],
-  };
+  const closeMenu = () => setMobileOpen(false);
 
-  const items = navItems[role];
-  // Show coach switch link for admins who also have coach access
-  const showCoachSwitch = role === 'admin' && isCoach;
+  const roleLabel = roles.join(' · ') || profile?.role || '';
 
   const sidebarInner = (
     <aside className="w-64 border-r bg-white flex flex-col h-screen fixed left-0 top-0 z-40">
       <div className="p-6 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+        <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
           <Trophy className="h-6 w-6 text-primary" />
           <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
         </Link>
         {isMobile && (
           <button
-            onClick={() => setMobileOpen(false)}
+            onClick={closeMenu}
             className="p-1 rounded-lg hover:bg-secondary text-muted-foreground"
             aria-label="Close menu"
           >
@@ -110,59 +144,42 @@ export function Sidebar({ role }: SidebarProps) {
         )}
       </div>
 
-      <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={() => setMobileOpen(false)}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              pathname === item.href
-                ? "bg-primary text-white shadow-md shadow-primary/20"
-                : "text-muted-foreground hover:bg-secondary hover:text-primary"
-            )}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {item.label}
-          </Link>
-        ))}
-
-        {showCoachSwitch && (
-          <>
-            <div className="pt-3 pb-1 px-3">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Coach View</p>
-            </div>
-            <Link
-              href="/coach/dashboard"
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                pathname.startsWith('/coach')
-                  ? "bg-primary text-white shadow-md shadow-primary/20"
-                  : "text-muted-foreground hover:bg-secondary hover:text-primary"
-              )}
-            >
-              <UserCog className="h-4 w-4 shrink-0" />
-              Switch to Coach View
-            </Link>
-          </>
+      <nav className="flex-1 px-4 overflow-y-auto space-y-1">
+        {isBoardMember && (
+          <NavSection
+            label="League Admin"
+            items={[
+              ...leagueAdminItems,
+              ...(isAdmin ? adminOnlyItems : []),
+            ]}
+            pathname={pathname}
+            onNavigate={closeMenu}
+          />
         )}
 
-        {role === 'coach' && profile?.role === 'Admin' && (
-          <>
-            <div className="pt-3 pb-1 px-3">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Admin View</p>
-            </div>
-            <Link
-              href="/admin/dashboard"
-              onClick={() => setMobileOpen(false)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-primary transition-colors"
-            >
-              <ShieldCheck className="h-4 w-4 shrink-0" />
-              Back to Admin
-            </Link>
-          </>
+        {isCoach && (
+          <NavSection
+            label="Coaching"
+            items={coachItems}
+            pathname={pathname}
+            onNavigate={closeMenu}
+          />
+        )}
+
+        {isParent && (
+          <NavSection
+            label="Family"
+            items={parentItems}
+            pathname={pathname}
+            onNavigate={closeMenu}
+          />
+        )}
+
+        {/* Fallback for users with no recognized role */}
+        {!isBoardMember && !isCoach && !isParent && (
+          <div className="px-3 py-4 text-sm text-muted-foreground">
+            No navigation available. Contact your administrator.
+          </div>
         )}
       </nav>
 
@@ -173,9 +190,7 @@ export function Sidebar({ role }: SidebarProps) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold truncate">{profile?.displayName}</p>
-            <p className="text-xs text-muted-foreground truncate">
-              {profile?.role}{profile?.isAlsoCoach ? ' · Coach' : ''}
-            </p>
+            <p className="text-xs text-muted-foreground truncate">{roleLabel}</p>
           </div>
         </div>
         <Button
@@ -213,7 +228,7 @@ export function Sidebar({ role }: SidebarProps) {
           <>
             <div
               className="fixed inset-0 bg-black/40 z-30"
-              onClick={() => setMobileOpen(false)}
+              onClick={closeMenu}
             />
             {sidebarInner}
           </>

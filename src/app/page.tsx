@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, use } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Trophy, Users, Calendar, ArrowRight } from 'lucide-react';
 
 export default function Home({
@@ -18,14 +19,20 @@ export default function Home({
   use(params);
   use(searchParams);
 
-  const { user, profile, loading } = useUser();
+  const { user, profile, loading, isAdmin, isBoardMember, isCoach } = useUser();
   const router = useRouter();
 
   useEffect(() => {
     if (!loading && user && profile) {
-      router.push(`/${profile.role.toLowerCase()}/dashboard`);
+      if (isAdmin || isBoardMember) {
+        router.push('/admin/dashboard');
+      } else if (isCoach) {
+        router.push('/coach/dashboard');
+      } else {
+        router.push('/parent/dashboard');
+      }
     }
-  }, [user, profile, loading, router]);
+  }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach]);
 
   if (loading) return null;
 
@@ -33,7 +40,17 @@ export default function Home({
     <div className="flex flex-col min-h-screen">
       <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
         <Link className="flex items-center justify-center gap-2" href="/">
-          <Trophy className="h-6 w-6 text-primary" />
+          <Image
+            src="/syba-logo.png"
+            alt="SYBA Logo"
+            width={40}
+            height={40}
+            className="object-contain"
+            onError={(e) => {
+              // Fallback to icon if logo not found
+              (e.target as HTMLImageElement).style.display = 'none';
+            }}
+          />
           <span className="text-xl font-bold font-headline tracking-tight text-primary">SYBA Portal</span>
         </Link>
         <nav className="ml-auto flex gap-4 sm:gap-6 items-center">
@@ -49,6 +66,18 @@ export default function Home({
         <section className="w-full py-12 md:py-24 lg:py-32 xl:py-48 bg-gradient-to-b from-blue-50 to-white">
           <div className="container px-4 md:px-6 mx-auto">
             <div className="flex flex-col items-center space-y-4 text-center">
+              <div className="mb-4">
+                <Image
+                  src="/syba-logo.png"
+                  alt="Sharpsville Youth Baseball Association"
+                  width={120}
+                  height={120}
+                  className="object-contain mx-auto"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
               <div className="space-y-2 max-w-3xl">
                 <div className="inline-block rounded-lg bg-primary/10 px-3 py-1 text-sm font-semibold text-primary mb-4">
                   Official Home of Sharpsville Youth Baseball

@@ -16,24 +16,39 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && 
+      let data = getUserData();
+      let roles = data.get('roles', []);
+      return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             getUserData().role == 'Admin';
+             (roles.size() > 0 ? roles.hasAny(['Admin']) : data.role == 'Admin');
+    }
+
+    function isBoardMember() {
+      let data = getUserData();
+      let roles = data.get('roles', []);
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+             (roles.size() > 0
+               ? roles.hasAny(['Board Member', 'Admin'])
+               : data.role == 'Admin');
     }
 
     function isCoach() {
       let data = getUserData();
+      let roles = data.get('roles', []);
       return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             (data.role == 'Coach' ||
-              (data.role == 'Admin' && data.get('isAlsoCoach', false) == true));
+             (roles.size() > 0
+               ? roles.hasAny(['Coach', 'Admin'])
+               : (data.role == 'Coach' ||
+                  (data.role == 'Admin' && data.get('isAlsoCoach', false) == true)));
     }
 
     // Support for collection group queries
     match /{path=**}/players/{playerId} {
       allow read: if isSignedIn();
     }
-    
+
     match /{path=**}/enrollments/{enrollmentId} {
       allow read: if isSignedIn();
     }
@@ -41,7 +56,7 @@ service cloud.firestore {
     match /{path=**}/clearances/{clearanceId} {
       allow read: if isSignedIn();
     }
-    
+
     match /{path=**}/rsvps/{rsvpId} {
       allow read, write: if isSignedIn();
     }
@@ -79,66 +94,66 @@ service cloud.firestore {
 
     match /seasons/{seasonId} {
       allow get, list: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isBoardMember();
 
       match /divisions/{divisionId} {
         allow get, list: if isSignedIn();
-        allow create, update, delete: if isAdmin();
+        allow create, update, delete: if isBoardMember();
       }
     }
 
-    // Fields — admin manages, all signed-in users can read for schedule picker
+    // Fields — board members manage, all signed-in users can read for schedule picker
     match /fields/{fieldId} {
       allow get, list: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isBoardMember();
     }
 
-    // Concession slots — admin creates/deletes; signed-in users update signups array
+    // Concession slots — board members create/delete; signed-in users update signups array
     match /concessionSlots/{slotId} {
       allow get, list: if isSignedIn();
-      allow create, delete: if isAdmin();
+      allow create, delete: if isBoardMember();
       allow update: if isSignedIn();
     }
 
-    // Sponsors — admin only
+    // Sponsors — board members only
     match /sponsors/{sponsorId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isBoardMember();
     }
 
-    // League Announcements — admin writes, all signed-in users read
+    // League Announcements — board members write, all signed-in users read
     match /announcements/{announcementId} {
       allow get, list: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isBoardMember();
     }
 
-    // Board Meetings — admin only
+    // Board Meetings — board members only
     match /boardMeetings/{meetingId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isBoardMember();
     }
 
-    // Games & Practices — admin creates/deletes; all signed-in users can read
+    // Games & Practices — board members create/delete; all signed-in users can read
     match /games/{gameId} {
       allow get, list: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isBoardMember();
     }
 
     match /teams/{teamId} {
-      allow get, list: if isSignedIn(); 
-      allow create: if isAdmin();
-      allow update: if isAdmin() || (resource != null && request.auth.uid == resource.data.coach_uid);
-      allow delete: if isAdmin();
+      allow get, list: if isSignedIn();
+      allow create: if isBoardMember();
+      allow update: if isBoardMember() || (resource != null && request.auth.uid == resource.data.coach_uid);
+      allow delete: if isBoardMember();
 
       match /games/{gameId} {
         allow get, list: if isSignedIn();
-        allow create: if isCoach() || isAdmin();
-        allow update: if isCoach() || isAdmin();
-        allow delete: if isCoach() || isAdmin();
+        allow create: if isCoach() || isBoardMember();
+        allow update: if isCoach() || isBoardMember();
+        allow delete: if isCoach() || isBoardMember();
 
         match /rsvps/{rsvpId} {
           allow get, list: if isSignedIn();
           allow create: if isSignedIn();
           allow update: if isSignedIn();
-          allow delete: if isSignedIn() || isAdmin();
+          allow delete: if isSignedIn() || isBoardMember();
         }
       }
 

@@ -33,7 +33,7 @@ export default function ParentAnnouncementsPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="parent" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 max-w-3xl">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">League Announcements</h1>

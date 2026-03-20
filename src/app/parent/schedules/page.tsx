@@ -112,7 +112,7 @@ export default function ParentSchedulesPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="parent" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

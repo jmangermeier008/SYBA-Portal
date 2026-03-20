@@ -52,7 +52,7 @@ interface Player {
 export default function AdminCompliancePage() {
   const db = useFirestore();
   const storage = useStorage();
-  const { user, profile, isAdmin, loading: loadingUser } = useUser();
+  const { user, profile, isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
   
   const [rejectionReason, setRejectionReason] = useState('');
@@ -61,19 +61,19 @@ export default function AdminCompliancePage() {
 
   // Role-guarded queries to prevent permission errors for non-admins
   const usersQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collection(db, 'userProfiles'), where('role', 'in', ['Coach', 'Admin']));
-  }, [db, isAdmin]);
-  
+  }, [db, isAdmin, isBoardMember]);
+
   const allClearancesQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collectionGroup(db, 'clearances');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const allPlayersQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collectionGroup(db, 'players');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const { data: users, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
   const { data: allClearances } = useCollection<any>(allClearancesQuery);
@@ -180,10 +180,10 @@ export default function AdminCompliancePage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -204,7 +204,7 @@ export default function AdminCompliancePage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">Compliance & Verification</h1>

@@ -42,7 +42,7 @@ const emptyClosure = { startDate: '', endDate: '', reason: '' };
 
 export default function FieldManagementPage() {
   const db = useFirestore();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);
@@ -57,9 +57,9 @@ export default function FieldManagementPage() {
   const [savingClosure, setSavingClosure] = useState(false);
 
   const fieldsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'fields');
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const { data: fields, isLoading } = useCollection<Field>(fieldsQuery);
 
@@ -137,10 +137,10 @@ export default function FieldManagementPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -155,7 +155,7 @@ export default function FieldManagementPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8 flex justify-between items-start">
           <div>

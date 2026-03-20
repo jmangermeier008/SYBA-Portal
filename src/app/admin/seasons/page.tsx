@@ -26,7 +26,7 @@ interface Season {
 export default function SeasonsAdminPage() {
   const db = useFirestore();
   const { toast } = useToast();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({
@@ -36,9 +36,9 @@ export default function SeasonsAdminPage() {
   });
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collection(db, 'seasons'), orderBy('name', 'desc'));
-  }, [db, isAdmin]);
+  }, [db, isAdmin, isBoardMember]);
 
   const { data: seasons, isLoading } = useCollection<Season>(seasonsQuery);
 
@@ -119,10 +119,10 @@ export default function SeasonsAdminPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="parent" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
@@ -143,7 +143,7 @@ export default function SeasonsAdminPage() {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="admin" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8 flex justify-between items-center">
           <div>

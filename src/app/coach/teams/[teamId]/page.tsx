@@ -105,7 +105,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   if (isLoading) {
     return (
       <div className="flex min-h-screen bg-background">
-        <Sidebar role="coach" />
+        <Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <div className="text-center space-y-4">
             <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
@@ -118,7 +118,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role="coach" />
+      <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <Button variant="ghost" asChild className="mb-4 -ml-2">
