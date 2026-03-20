@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { use } from 'react';
-import { collection, query, where, orderBy, collectionGroup, limit } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2 } from 'lucide-react';
+import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { format } from 'date-fns';
+import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 export default function ParentDashboard({
   params,
@@ -22,6 +25,8 @@ export default function ParentDashboard({
 
   const { profile, user } = useUser();
   const db = useFirestore();
+  const { toast } = useToast();
+  const [rsvpLoading, setRsvpLoading] = useState(false);
 
   // Real player count
   const playersQuery = useMemoFirebase(() => {
@@ -38,6 +43,7 @@ export default function ParentDashboard({
   const { data: enrollments } = useCollection<{ playerId: string; teamId?: string }>(enrollmentsQuery);
 
   const firstTeamId = enrollments?.find(e => e.teamId)?.teamId;
+  const firstPlayerId = players?.[0]?.id;
 
   // Next upcoming game for first assigned team
   const now = new Date().toISOString();
@@ -52,6 +58,39 @@ export default function ParentDashboard({
   }, [db, firstTeamId]);
   const { data: nextGames, isLoading: loadingGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(nextGameQuery);
   const nextGame = nextGames?.[0];
+
+  // Current RSVP for next game
+  const rsvpsQuery = useMemoFirebase(() => {
+    if (!db || !firstTeamId || !nextGame?.id) return null;
+    return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
+  }, [db, firstTeamId, nextGame?.id]);
+  const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string }>(rsvpsQuery);
+  const currentRsvp = firstPlayerId
+    ? rsvps?.find(r => r.id === `${firstPlayerId}_${nextGame?.id}` || r.playerId === firstPlayerId)
+    : undefined;
+
+  const handleDashboardRSVP = async (status: 'Attending' | 'Maybe' | 'Not Attending') => {
+    if (!user || !db || !firstTeamId || !firstPlayerId || !nextGame) return;
+    setRsvpLoading(true);
+    const rsvpId = `${firstPlayerId}_${nextGame.id}`;
+    const rsvpRef = doc(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps', rsvpId);
+    try {
+      await setDoc(rsvpRef, {
+        id: rsvpId,
+        gameId: nextGame.id,
+        playerId: firstPlayerId,
+        parentUserId: user.uid,
+        status,
+        timestamp: new Date().toISOString(),
+        teamId: firstTeamId,
+      }, { merge: true });
+      toast({ title: "RSVP Updated", description: `Marked as ${status}.` });
+    } catch (err: any) {
+      toast({ title: "RSVP Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setRsvpLoading(false);
+    }
+  };
 
   // Latest announcements
   const announcementsQuery = useMemoFirebase(() => {
@@ -105,9 +144,57 @@ export default function ParentDashboard({
               ) : nextGame ? (
                 <>
                   <div className="text-2xl font-bold">{format(new Date(nextGame.dateTime), 'MMM d')}</div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground mb-1">
                     {format(new Date(nextGame.dateTime), 'h:mm a')} · {nextGame.location}
                   </p>
+                  {nextGame.opponentName && (
+                    <p className="text-xs font-medium text-foreground mb-3">
+                      {nextGame.type === 'Game' ? `vs ${nextGame.opponentName}` : nextGame.type}
+                    </p>
+                  )}
+                  {firstTeamId && firstPlayerId && (
+                    <div className="flex gap-1.5 mt-2">
+                      {rsvpLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleDashboardRSVP('Attending')}
+                            className={cn(
+                              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                              currentRsvp?.status === 'Attending'
+                                ? "bg-green-500 text-white border-green-500"
+                                : "border-green-300 text-green-700 hover:bg-green-50"
+                            )}
+                          >
+                            <Check className="h-3 w-3" /> Yes
+                          </button>
+                          <button
+                            onClick={() => handleDashboardRSVP('Maybe')}
+                            className={cn(
+                              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                              currentRsvp?.status === 'Maybe'
+                                ? "bg-yellow-400 text-white border-yellow-400"
+                                : "border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                            )}
+                          >
+                            <HelpCircle className="h-3 w-3" /> Maybe
+                          </button>
+                          <button
+                            onClick={() => handleDashboardRSVP('Not Attending')}
+                            className={cn(
+                              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                              currentRsvp?.status === 'Not Attending'
+                                ? "bg-red-500 text-white border-red-500"
+                                : "border-red-300 text-red-700 hover:bg-red-50"
+                            )}
+                          >
+                            <X className="h-3 w-3" /> No
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>

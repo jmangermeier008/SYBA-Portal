@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useUser, useAuth } from '@/firebase';
+import { useUser, useAuth, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { collection, query, orderBy, limit } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -84,7 +85,7 @@ function NavSection({
   onToggle,
 }: {
   label: string;
-  items: { label: string; icon: React.ElementType; href: string }[];
+  items: { label: string; icon: React.ElementType; href: string; badge?: boolean }[];
   pathname: string;
   onNavigate: () => void;
   isOpen: boolean;
@@ -120,6 +121,9 @@ function NavSection({
           >
             <item.icon className="h-4 w-4 shrink-0" />
             {item.label}
+            {item.badge && (
+              <span className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
+            )}
           </Link>
         ))}
       </div>
@@ -131,9 +135,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const { profile, roles, isAdmin, isBoardMember, isCoach, isParent } = useUser();
   const auth = useAuth();
+  const db = useFirestore();
   const router = useRouter();
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({
     'League Admin': pathname.startsWith('/admin/'),
     'Coaching': pathname.startsWith('/coach/'),
@@ -147,6 +153,25 @@ export function Sidebar() {
       'Family': pathname.startsWith('/parent/'),
     });
   }, [pathname]);
+
+  // Unread announcements badge
+  const latestAnnouncementQuery = useMemoFirebase(() => {
+    if (!db || !isParent) return null;
+    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(1));
+  }, [db, isParent]);
+  const { data: latestAnnouncements } = useCollection<{ id: string; publishedAt: string }>(latestAnnouncementQuery);
+
+  useEffect(() => {
+    if (!latestAnnouncements || latestAnnouncements.length === 0) return;
+    const latest = latestAnnouncements[0];
+    if (!latest.publishedAt) return;
+    const lastRead = localStorage.getItem('syba_announcements_last_read');
+    if (!lastRead) {
+      setHasUnread(true);
+      return;
+    }
+    setHasUnread(new Date(latest.publishedAt).getTime() > parseInt(lastRead, 10));
+  }, [latestAnnouncements]);
 
   const toggleSection = (label: string) => {
     setOpenSections(prev => ({ ...prev, [label]: !prev[label] }));
@@ -162,7 +187,7 @@ export function Sidebar() {
   const roleLabel = roles.join(' · ') || profile?.role || '';
 
   const sidebarInner = (
-    <aside className="w-64 border-r bg-white flex flex-col h-screen fixed left-0 top-0 z-40">
+    <aside className="w-64 border-r bg-white flex flex-col h-[100dvh] fixed left-0 top-0 z-40">
       <div className="p-6 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
           <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={36} height={36} className="object-contain" />
@@ -208,7 +233,9 @@ export function Sidebar() {
         {isParent && (
           <NavSection
             label="Family"
-            items={parentItems}
+            items={parentItems.map(item =>
+              item.href === '/parent/announcements' ? { ...item, badge: hasUnread } : item
+            )}
             pathname={pathname}
             onNavigate={closeMenu}
             isOpen={openSections['Family']}

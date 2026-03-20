@@ -61,6 +61,7 @@ export default function MasterRosterPage() {
   const { toast } = useToast();
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Waiver dialog state
   const [waiverDialog, setWaiverDialog] = useState<{
@@ -97,10 +98,16 @@ export default function MasterRosterPage() {
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: players } = useCollection<Player>(playersQuery);
 
-  const filteredEnrollments = enrollments?.filter(e =>
-    (!selectedSeason || selectedSeason === 'all-seasons' || e.seasonId === selectedSeason) &&
-    (!selectedDivision || selectedDivision === 'all-divisions' || e.divisionId === selectedDivision)
-  );
+  const filteredEnrollments = enrollments?.filter(e => {
+    if (selectedSeason && selectedSeason !== 'all-seasons' && e.seasonId !== selectedSeason) return false;
+    if (selectedDivision && selectedDivision !== 'all-divisions' && e.divisionId !== selectedDivision) return false;
+    if (searchQuery.trim()) {
+      const p = players?.find(p => p.id === e.playerId);
+      const name = p ? `${p.firstName} ${p.lastName}`.toLowerCase() : '';
+      if (!name.includes(searchQuery.toLowerCase())) return false;
+    }
+    return true;
+  });
 
   const handleAssignTeam = (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
@@ -284,6 +291,15 @@ export default function MasterRosterPage() {
 
         <Card className="border-none shadow-md mb-8">
           <CardContent className="p-6">
+            <div className="mb-4 relative">
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
+              <Input
+                placeholder="Search by player name…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl"
+              />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase text-muted-foreground">Season</label>
@@ -404,7 +420,7 @@ export default function MasterRosterPage() {
                           {canWaive && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 group-hover:opacity-100 transition-opacity">
                                   <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>

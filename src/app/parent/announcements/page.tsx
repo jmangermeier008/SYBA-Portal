@@ -1,11 +1,13 @@
 "use client";
 
+import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy } from 'firebase/firestore';
-import { Megaphone, Loader2, Clock, Pin } from 'lucide-react';
+import { Megaphone, Loader2, Clock, Pin, Search } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface Announcement {
@@ -19,6 +21,11 @@ interface Announcement {
 
 export default function ParentAnnouncementsPage() {
   const db = useFirestore();
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    localStorage.setItem('syba_announcements_last_read', Date.now().toString());
+  }, []);
 
   const announcementsQuery = useMemoFirebase(() => {
     if (!db) return null;
@@ -31,6 +38,13 @@ export default function ParentAnnouncementsPage() {
     ? [...announcements].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
     : [];
 
+  const filtered = searchQuery.trim()
+    ? sorted.filter(a =>
+        a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.body.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : sorted;
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -40,21 +54,33 @@ export default function ParentAnnouncementsPage() {
           <p className="text-muted-foreground">Stay up to date with the latest news from SYBA.</p>
         </header>
 
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search announcements…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 rounded-xl"
+          />
+        </div>
+
         {isLoading ? (
           <div className="flex justify-center py-20">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
-        ) : sorted.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <Card className="border-none shadow-md">
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
               <Megaphone className="h-12 w-12 text-muted-foreground/40 mb-4" />
-              <p className="text-muted-foreground font-medium">No announcements yet</p>
-              <p className="text-sm text-muted-foreground">Check back soon for league updates.</p>
+              <p className="text-muted-foreground font-medium">No announcements found</p>
+              <p className="text-sm text-muted-foreground">
+                {searchQuery ? 'Try a different search term.' : 'Check back soon for league updates.'}
+              </p>
             </CardContent>
           </Card>
         ) : (
           <div className="space-y-4">
-            {sorted.map((ann) => (
+            {filtered.map((ann) => (
               <Card key={ann.id} className={`border-none shadow-md ${ann.pinned ? 'border-l-4 border-l-primary' : ''}`}>
                 <CardContent className="p-5">
                   <div className="flex items-center gap-2 mb-1">
