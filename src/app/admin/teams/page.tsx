@@ -38,6 +38,7 @@ export default function TeamsAdminPage() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     seasonId: '',
@@ -65,7 +66,7 @@ export default function TeamsAdminPage() {
   const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: allUsers } = useCollection<CoachProfile>(usersQuery);
 
-  const coaches = allUsers?.filter(u => u.role === 'Coach') || [];
+  const coaches = allUsers?.filter(u => u.role === 'Coach' || u.role === 'Admin') || [];
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !formData.seasonId || !isAdmin) return null;
@@ -107,11 +108,15 @@ export default function TeamsAdminPage() {
   const handleDeleteTeam = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm("Are you sure? This will permanently delete this team and its roster associations.")) return;
-    
-    const teamRef = doc(db, 'teams', id);
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return;
+    const teamRef = doc(db, 'teams', deleteConfirmId);
     deleteDocumentNonBlocking(teamRef);
-    toast({ title: "Deletion Initiated", description: "The team is being removed from the league." });
+    toast({ title: "Team Deleted", description: "The team has been removed from the league." });
+    setDeleteConfirmId(null);
   };
 
   if (loadingUser) {
@@ -126,7 +131,7 @@ export default function TeamsAdminPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar role="parent" />
-        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -147,7 +152,7 @@ export default function TeamsAdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="admin" />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">League Teams</h1>
@@ -288,6 +293,22 @@ export default function TeamsAdminPage() {
           )}
         </div>
       </main>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <DialogContent className="rounded-2xl max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-headline text-xl">Delete Team?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the team and all roster associations. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 mt-2">
+            <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDelete}>Delete Team</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

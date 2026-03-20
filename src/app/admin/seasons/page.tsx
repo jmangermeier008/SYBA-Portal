@@ -107,7 +107,7 @@ export default function SeasonsAdminPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar role="parent" />
-        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -128,7 +128,7 @@ export default function SeasonsAdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="admin" />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">Season Management</h1>

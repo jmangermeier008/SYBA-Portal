@@ -176,7 +176,7 @@ export default function AdminCompliancePage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar role="parent" />
-        <main className="flex-1 ml-64 p-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -197,11 +197,60 @@ export default function AdminCompliancePage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="admin" />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">Compliance & Verification</h1>
           <p className="text-muted-foreground">Audit volunteer clearances and redact sensitive player documents.</p>
         </header>
+
+        {/* Summary stats */}
+        {users && allClearances && (() => {
+          const fullyCleared = users.filter(u => {
+            const uc = allClearances.filter(c => c.userId === u.id);
+            return ['ChildAbuse', 'CriminalRecord', 'FBI'].every(t => uc.find(c => c.type === t)?.status === 'Approved');
+          }).length;
+          const pendingVerification = allPlayers?.filter(p => p.birthCertificateUrl && !p.ageVerified).length ?? 0;
+          const isReady = fullyCleared === users.length && users.length > 0;
+          return (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+              <Card className="border-none shadow-md">
+                <CardContent className="p-4 flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+                    <ShieldCheck className="h-6 w-6 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold font-headline">{fullyCleared} / {users.length}</p>
+                    <p className="text-sm text-muted-foreground">Coaches Fully Cleared</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-md">
+                <CardContent className="p-4 flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center shrink-0">
+                    <UserCheck className="h-6 w-6 text-yellow-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold font-headline">{pendingVerification}</p>
+                    <p className="text-sm text-muted-foreground">Birth Certs Pending</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className={`border-none shadow-md ${isReady ? 'bg-green-50' : 'bg-orange-50'}`}>
+                <CardContent className="p-4 flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isReady ? 'bg-green-100' : 'bg-orange-100'}`}>
+                    <CheckCircle2 className={`h-6 w-6 ${isReady ? 'text-green-600' : 'text-orange-500'}`} />
+                  </div>
+                  <div>
+                    <p className={`text-lg font-bold font-headline ${isReady ? 'text-green-700' : 'text-orange-600'}`}>
+                      {isReady ? 'All Clear' : 'Action Needed'}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Season Eligibility</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          );
+        })()}
 
         <Tabs defaultValue="volunteers" className="space-y-6">
           <TabsList className="bg-white p-1 rounded-xl shadow-sm border h-12">

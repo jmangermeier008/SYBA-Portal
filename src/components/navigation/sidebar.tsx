@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useUser, useAuth } from '@/firebase';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Trophy,
   LayoutDashboard,
@@ -18,7 +20,10 @@ import {
   ClipboardList,
   FileCheck,
   Database,
-  Megaphone
+  Megaphone,
+  Menu,
+  X,
+  UserCog,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -30,9 +35,11 @@ interface SidebarProps {
 
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
-  const { profile } = useUser();
+  const { profile, isCoach } = useUser();
   const auth = useAuth();
   const router = useRouter();
+  const isMobile = useIsMobile();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleSignOut = async () => {
     await signOut(auth);
@@ -70,14 +77,25 @@ export function Sidebar({ role }: SidebarProps) {
   };
 
   const items = navItems[role];
+  // Show coach switch link for admins who also have coach access
+  const showCoachSwitch = role === 'admin' && isCoach;
 
-  return (
+  const sidebarInner = (
     <aside className="w-64 border-r bg-white flex flex-col h-screen fixed left-0 top-0 z-40">
-      <div className="p-6">
-        <Link href="/" className="flex items-center gap-2">
+      <div className="p-6 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
           <Trophy className="h-6 w-6 text-primary" />
           <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
         </Link>
+        {isMobile && (
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="p-1 rounded-lg hover:bg-secondary text-muted-foreground"
+            aria-label="Close menu"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
@@ -85,17 +103,55 @@ export function Sidebar({ role }: SidebarProps) {
           <Link
             key={item.href}
             href={item.href}
+            onClick={() => setMobileOpen(false)}
             className={cn(
-              "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
               pathname === item.href
                 ? "bg-primary text-white shadow-md shadow-primary/20"
                 : "text-muted-foreground hover:bg-secondary hover:text-primary"
             )}
           >
-            <item.icon className="h-4 w-4" />
+            <item.icon className="h-4 w-4 shrink-0" />
             {item.label}
           </Link>
         ))}
+
+        {showCoachSwitch && (
+          <>
+            <div className="pt-3 pb-1 px-3">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Coach View</p>
+            </div>
+            <Link
+              href="/coach/dashboard"
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                pathname.startsWith('/coach')
+                  ? "bg-primary text-white shadow-md shadow-primary/20"
+                  : "text-muted-foreground hover:bg-secondary hover:text-primary"
+              )}
+            >
+              <UserCog className="h-4 w-4 shrink-0" />
+              Switch to Coach View
+            </Link>
+          </>
+        )}
+
+        {role === 'coach' && profile?.role === 'Admin' && (
+          <>
+            <div className="pt-3 pb-1 px-3">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Admin View</p>
+            </div>
+            <Link
+              href="/admin/dashboard"
+              onClick={() => setMobileOpen(false)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-primary transition-colors"
+            >
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              Back to Admin
+            </Link>
+          </>
+        )}
       </nav>
 
       <div className="p-4 border-t space-y-4">
@@ -105,7 +161,9 @@ export function Sidebar({ role }: SidebarProps) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold truncate">{profile?.displayName}</p>
-            <p className="text-xs text-muted-foreground truncate">{profile?.role}</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {profile?.role}{profile?.isAlsoCoach ? ' · Coach' : ''}
+            </p>
           </div>
         </div>
         <Button
@@ -119,4 +177,38 @@ export function Sidebar({ role }: SidebarProps) {
       </div>
     </aside>
   );
+
+  if (isMobile) {
+    return (
+      <>
+        {/* Fixed mobile top bar */}
+        <div className="fixed top-0 left-0 right-0 h-14 bg-white border-b z-30 flex items-center px-4 gap-3">
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground"
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <Link href="/" className="flex items-center gap-2">
+            <Trophy className="h-5 w-5 text-primary" />
+            <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+          </Link>
+        </div>
+
+        {/* Drawer overlay + sidebar */}
+        {mobileOpen && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/40 z-30"
+              onClick={() => setMobileOpen(false)}
+            />
+            {sidebarInner}
+          </>
+        )}
+      </>
+    );
+  }
+
+  return sidebarInner;
 }
