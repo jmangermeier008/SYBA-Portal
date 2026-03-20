@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, doc, setDoc, where, collectionGroup } from 'firebase/firestore';
 import { Calendar, MapPin, Clock, Check, X, HelpCircle, Loader2, Users, ShieldAlert } from 'lucide-react';
+import Link from 'next/link';
 import { format } from 'date-fns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -215,7 +216,15 @@ export default function ParentSchedulesPage() {
             <CardContent>
               <ShieldAlert className="h-16 w-16 text-muted mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline">Not Assigned to a Team</h3>
-              <p className="text-muted-foreground">Please contact your division coordinator for roster assignment.</p>
+              <p className="text-muted-foreground">Your player hasn't been assigned to a team yet.</p>
+              <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+                <Button asChild variant="outline" className="rounded-full px-8">
+                  <Link href="/parent/enroll">Go to Season Enrollment</Link>
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-4">
+                Already enrolled? Contact your league administrator for roster assignment.
+              </p>
             </CardContent>
           </Card>
         )}

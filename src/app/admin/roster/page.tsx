@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -171,21 +171,35 @@ export default function MasterRosterPage() {
         updatedAt: new Date().toISOString(),
       });
 
-      // Fire-and-forget email
-      fetch('/api/email/confirmation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toEmail: '',
-          playerName: player ? `${player.firstName} ${player.lastName}` : '',
-          seasonName: enrollment.seasonId,
-          divisionName: enrollment.divisionId,
-          isWaitlisted: false,
-          feeWaived: true,
-        }),
-      }).catch(() => {});
+      // Look up parent email from userProfiles
+      let parentEmail = '';
+      try {
+        const profileSnap = await getDoc(doc(db, 'userProfiles', enrollment.parentUserId));
+        parentEmail = profileSnap.data()?.email || '';
+      } catch {}
 
-      toast({ title: "Fee Waiver Applied", description: `Registration marked as fee waived.` });
+      // Send confirmation email
+      try {
+        const emailRes = await fetch('/api/email/confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toEmail: parentEmail,
+            playerName: player ? `${player.firstName} ${player.lastName}` : '',
+            seasonName: enrollment.seasonId,
+            divisionName: enrollment.divisionId,
+            isWaitlisted: false,
+            feeWaived: true,
+          }),
+        });
+        if (!emailRes.ok) {
+          toast({ title: "Fee Waiver Applied", description: "Marked as fee waived, but confirmation email failed to send.", variant: "destructive" });
+        } else {
+          toast({ title: "Fee Waiver Applied", description: `Registration marked as fee waived.` });
+        }
+      } catch {
+        toast({ title: "Fee Waiver Applied", description: "Marked as fee waived, but confirmation email failed to send.", variant: "destructive" });
+      }
       setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false });
     } catch (error: any) {
       console.error('[roster] Waiver error:', error);

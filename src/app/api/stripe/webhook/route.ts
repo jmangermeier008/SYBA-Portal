@@ -37,25 +37,37 @@ export async function POST(req: Request) {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
-    const { enrollmentId, userId } = session.metadata ?? {};
+    const enrollmentId = session.metadata?.enrollmentId;
+    const userId = session.metadata?.userId;
 
-    if (enrollmentId && userId) {
+    // Fix 1E: Guard against missing metadata — log and bail rather than silently dropping
+    if (!enrollmentId || !userId) {
+      console.error('[stripe/webhook] Missing enrollmentId or userId in session metadata', session.id);
+      return NextResponse.json({ received: true });
+    }
+
+    try {
+      const db = getDb();
+      const enrollmentRef = doc(db, 'userProfiles', userId, 'enrollments', enrollmentId);
+
+      // Fix 1E: Verify enrollment doc exists before updating
+      const enrollmentSnap = await getDoc(enrollmentRef);
+      if (!enrollmentSnap.exists()) {
+        console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId}`);
+        return NextResponse.json({ error: 'Enrollment not found' }, { status: 404 });
+      }
+
+      await updateDoc(enrollmentRef, {
+        payment_status: 'paid',
+        paymentStatus: 'paid',
+        stripe_payment_id: session.payment_intent ?? '',
+        updatedAt: new Date().toISOString(),
+      });
+
+      console.log(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
+
+      // Fetch enrollment, player, season, division to populate the confirmation email
       try {
-        const db = getDb();
-        const enrollmentRef = doc(db, 'userProfiles', userId, 'enrollments', enrollmentId);
-
-        await updateDoc(enrollmentRef, {
-          payment_status: 'paid',
-          paymentStatus: 'paid',
-          stripe_payment_id: session.payment_intent ?? '',
-          updatedAt: new Date().toISOString(),
-        });
-
-        console.log(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
-
-        // Fetch enrollment, player, season, division to populate the confirmation email
-        try {
-          const enrollmentSnap = await getDoc(enrollmentRef);
           const enrollment = enrollmentSnap.data() as any;
 
           const [playerSnap, userSnap, seasonSnap] = await Promise.all([
@@ -92,10 +104,9 @@ export async function POST(req: Request) {
         } catch (emailFetchErr: any) {
           console.error('[stripe/webhook] Failed to fetch data for email:', emailFetchErr.message);
         }
-      } catch (err: any) {
-        console.error('[stripe/webhook] Firestore update error:', err.message);
-        return NextResponse.json({ error: err.message }, { status: 500 });
-      }
+    } catch (err: any) {
+      console.error('[stripe/webhook] Firestore update error:', err.message);
+      return NextResponse.json({ error: err.message }, { status: 500 });
     }
   }
 

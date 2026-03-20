@@ -12,8 +12,6 @@ import { useUser, useFirestore } from '@/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 
 export default function ParentSettingsPage() {
   const { user, profile } = useUser();
@@ -46,18 +44,14 @@ export default function ParentSettingsPage() {
       updatedAt: new Date().toISOString(),
     };
 
-    updateDoc(userRef, updateData)
-      .then(() => {
-        toast({ title: "Settings Saved", description: "Your profile has been updated." });
-      })
-      .catch((error) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: userRef.path,
-          operation: 'update',
-          requestResourceData: updateData
-        }));
-      })
-      .finally(() => setLoading(false));
+    try {
+      await updateDoc(userRef, updateData);
+      toast({ title: "Settings Saved", description: "Your profile has been updated." });
+    } catch (error: any) {
+      toast({ title: "Save Failed", description: error.message || "Could not save your settings. Please try again.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

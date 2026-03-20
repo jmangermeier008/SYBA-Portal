@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -29,6 +29,7 @@ import {
   Bell,
   BookOpen,
   CalendarDays,
+  ChevronDown,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -79,33 +80,49 @@ function NavSection({
   items,
   pathname,
   onNavigate,
+  isOpen,
+  onToggle,
 }: {
   label: string;
   items: { label: string; icon: React.ElementType; href: string }[];
   pathname: string;
   onNavigate: () => void;
+  isOpen: boolean;
+  onToggle: () => void;
 }) {
   return (
     <>
-      <div className="pt-4 pb-1 px-3">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-3 py-2 mt-4 rounded-lg hover:bg-secondary/50 transition-colors"
+      >
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{label}</p>
+        <ChevronDown className={cn(
+          "h-3 w-3 text-muted-foreground transition-transform duration-200",
+          isOpen && "rotate-180"
+        )} />
+      </button>
+      <div className={cn(
+        "overflow-hidden transition-all duration-200",
+        isOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
+      )}>
+        {items.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onNavigate}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              pathname === item.href || pathname.startsWith(item.href + '/')
+                ? "bg-primary text-white shadow-md shadow-primary/20"
+                : "text-muted-foreground hover:bg-secondary hover:text-primary"
+            )}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            {item.label}
+          </Link>
+        ))}
       </div>
-      {items.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          onClick={onNavigate}
-          className={cn(
-            "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-            pathname === item.href || pathname.startsWith(item.href + '/')
-              ? "bg-primary text-white shadow-md shadow-primary/20"
-              : "text-muted-foreground hover:bg-secondary hover:text-primary"
-          )}
-        >
-          <item.icon className="h-4 w-4 shrink-0" />
-          {item.label}
-        </Link>
-      ))}
     </>
   );
 }
@@ -117,6 +134,23 @@ export function Sidebar() {
   const router = useRouter();
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({
+    'League Admin': pathname.startsWith('/admin/'),
+    'Coaching': pathname.startsWith('/coach/'),
+    'Family': pathname.startsWith('/parent/'),
+  }));
+
+  useEffect(() => {
+    setOpenSections({
+      'League Admin': pathname.startsWith('/admin/'),
+      'Coaching': pathname.startsWith('/coach/'),
+      'Family': pathname.startsWith('/parent/'),
+    });
+  }, [pathname]);
+
+  const toggleSection = (label: string) => {
+    setOpenSections(prev => ({ ...prev, [label]: !prev[label] }));
+  };
 
   const handleSignOut = async () => {
     await signOut(auth);
@@ -155,6 +189,8 @@ export function Sidebar() {
             ]}
             pathname={pathname}
             onNavigate={closeMenu}
+            isOpen={openSections['League Admin']}
+            onToggle={() => toggleSection('League Admin')}
           />
         )}
 
@@ -164,6 +200,8 @@ export function Sidebar() {
             items={coachItems}
             pathname={pathname}
             onNavigate={closeMenu}
+            isOpen={openSections['Coaching']}
+            onToggle={() => toggleSection('Coaching')}
           />
         )}
 
@@ -173,6 +211,8 @@ export function Sidebar() {
             items={parentItems}
             pathname={pathname}
             onNavigate={closeMenu}
+            isOpen={openSections['Family']}
+            onToggle={() => toggleSection('Family')}
           />
         )}
 

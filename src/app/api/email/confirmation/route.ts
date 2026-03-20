@@ -37,12 +37,12 @@ export async function POST(req: Request) {
     if (!response.ok) {
       const err = await response.text();
       console.error('[email] Resend error:', err);
+      return NextResponse.json({ ok: false, error: err }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
-    // Email failure must NOT throw — log only
     console.error('[email] Confirmation error:', error.message);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 }
