@@ -27,7 +27,7 @@ export async function POST(req: Request) {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'SYBA Portal <onboarding@resend.dev>',
+        from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <onboarding@resend.dev>',
         to: [toEmail],
         subject,
         text: body,

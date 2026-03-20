@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, updateDoc } from 'firebase/firestore';
+import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -53,19 +53,45 @@ export async function POST(req: Request) {
 
         console.log(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
 
-        // Fire-and-forget confirmation email
-        fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/email/confirmation`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            toEmail: session.customer_details?.email ?? '',
-            playerName: '',
-            seasonName: '',
-            divisionName: '',
-            isWaitlisted: false,
-            feeWaived: false,
-          }),
-        }).catch(err => console.error('[stripe/webhook] Email error:', err));
+        // Fetch enrollment, player, season, division to populate the confirmation email
+        try {
+          const enrollmentSnap = await getDoc(enrollmentRef);
+          const enrollment = enrollmentSnap.data() as any;
+
+          const [playerSnap, userSnap, seasonSnap] = await Promise.all([
+            getDoc(doc(db, 'userProfiles', userId, 'players', enrollment.playerId)),
+            getDoc(doc(db, 'userProfiles', userId)),
+            getDoc(doc(db, 'seasons', enrollment.seasonId)),
+          ]);
+          const divisionSnap = await getDoc(
+            doc(db, 'seasons', enrollment.seasonId, 'divisions', enrollment.divisionId)
+          );
+
+          const player = playerSnap.data() as any;
+          const user = userSnap.data() as any;
+          const season = seasonSnap.data() as any;
+          const division = divisionSnap.data() as any;
+
+          const toEmail = session.customer_details?.email ?? user?.email ?? '';
+          const playerName = player ? `${player.firstName} ${player.lastName}` : '';
+          const seasonName = season?.name ?? '';
+          const divisionName = division?.name ?? '';
+
+          fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/email/confirmation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              toEmail,
+              playerName,
+              seasonName,
+              divisionName,
+              isWaitlisted: false,
+              feeWaived: enrollment.fee_waived ?? false,
+            }),
+          }).catch(err => console.error('[stripe/webhook] Email send error:', err));
+        } catch (emailFetchErr: any) {
+          console.error('[stripe/webhook] Failed to fetch data for email:', emailFetchErr.message);
+        }
       } catch (err: any) {
         console.error('[stripe/webhook] Firestore update error:', err.message);
         return NextResponse.json({ error: err.message }, { status: 500 });

@@ -87,6 +87,24 @@ service cloud.firestore {
       }
     }
 
+    // Fields — admin manages, all signed-in users can read for schedule picker
+    match /fields/{fieldId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Concession slots — admin creates/deletes; signed-in users update signups array
+    match /concessionSlots/{slotId} {
+      allow get, list: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isSignedIn();
+    }
+
+    // Sponsors — admin only
+    match /sponsors/{sponsorId} {
+      allow read, write: if isAdmin();
+    }
+
     match /teams/{teamId} {
       allow get, list: if isSignedIn(); 
       allow create: if isAdmin();

@@ -24,6 +24,10 @@ import {
   Menu,
   X,
   UserCog,
+  BarChart3,
+  MapPin,
+  ShoppingCart,
+  Handshake,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -50,8 +54,10 @@ export function Sidebar({ role }: SidebarProps) {
     parent: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/parent/dashboard' },
       { label: 'My Family', icon: UserIcon, href: '/parent/family' },
+      { label: 'Season Enrollment', icon: ClipboardList, href: '/parent/enroll' },
       { label: 'My Teams', icon: Users, href: '/parent/teams' },
       { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
+      { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
       { label: 'Team Chat', icon: MessageSquare, href: '/parent/chat' },
       { label: 'Settings', icon: Settings, href: '/parent/settings' },
     ],
@@ -65,9 +71,13 @@ export function Sidebar({ role }: SidebarProps) {
     ],
     admin: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
-      { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
+      { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
       { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
+      { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
       { label: 'Teams', icon: Users, href: '/admin/teams' },
+      { label: 'Fields', icon: MapPin, href: '/admin/fields' },
+      { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
+      { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
       { label: 'Communications', icon: Megaphone, href: '/admin/chat' },
       { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
       { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
