@@ -28,6 +28,7 @@ import {
   Handshake,
   Bell,
   BookOpen,
+  CalendarDays,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -70,6 +71,7 @@ export function Sidebar({ role }: SidebarProps) {
     ],
     admin: [
       { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
+      { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
       { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
       { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
       { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
