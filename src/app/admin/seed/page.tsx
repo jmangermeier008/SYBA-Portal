@@ -26,6 +26,7 @@ export default function SeedPage() {
     try {
       await updateDoc(doc(db, 'userProfiles', user.uid), {
         role: newRole,
+        roles: [newRole],
         updatedAt: new Date().toISOString()
       });
       toast({ 
@@ -48,6 +49,7 @@ export default function SeedPage() {
       if (user) {
         await setDoc(doc(db, 'userProfiles', user.uid), {
           role: 'Admin',
+          roles: ['Admin'],
           updatedAt: new Date().toISOString()
         }, { merge: true });
       }

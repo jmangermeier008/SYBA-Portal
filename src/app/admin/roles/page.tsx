@@ -137,6 +137,7 @@ export default function RolesPage() {
                 No users found.
               </div>
             ) : (
+              <div className="overflow-x-auto w-full">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
@@ -193,6 +194,7 @@ export default function RolesPage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>

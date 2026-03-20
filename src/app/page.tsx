@@ -41,7 +41,7 @@ export default function Home({
       <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
         <Link className="flex items-center justify-center gap-2" href="/">
           <Image
-            src="/syba-logo.png"
+            src="/contentrotator637479479383661633.png"
             alt="SYBA Logo"
             width={40}
             height={40}
@@ -68,7 +68,7 @@ export default function Home({
             <div className="flex flex-col items-center space-y-4 text-center">
               <div className="mb-4">
                 <Image
-                  src="/syba-logo.png"
+                  src="/contentrotator637479479383661633.png"
                   alt="Sharpsville Youth Baseball Association"
                   width={120}
                   height={120}

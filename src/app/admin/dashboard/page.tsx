@@ -121,8 +121,8 @@ const QUICK_LINKS = [
   { label: 'Sponsorships', href: '/admin/sponsorships', icon: DollarSign },
   { label: 'Announcements', href: '/admin/announcements', icon: Megaphone },
   { label: 'Board Meetings', href: '/admin/board-meetings', icon: CalendarDays },
-  { label: 'User Roles', href: '/admin/users', icon: Settings },
-  { label: 'Seasons', href: '/admin/seed', icon: Trophy },
+  { label: 'User Roles', href: '/admin/roles', icon: Settings },
+  { label: 'Seasons', href: '/admin/seasons', icon: Trophy },
 ];
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ export default function AdminDashboard({
 
   const coachesQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'userProfiles'), where('role', 'in', ['Coach']));
+    return query(collection(db, 'userProfiles'), where('roles', 'array-contains', 'Coach'));
   }, [db, isAdmin, isBoardMember]);
 
   const allClearancesQuery = useMemoFirebase(() => {

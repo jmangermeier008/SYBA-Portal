@@ -326,6 +326,7 @@ export default function SponsorshipsPage() {
                     No sponsors yet. Add your first sponsor above.
                   </div>
                 ) : (
+                  <div className="overflow-x-auto w-full">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
@@ -384,6 +385,7 @@ export default function SponsorshipsPage() {
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
