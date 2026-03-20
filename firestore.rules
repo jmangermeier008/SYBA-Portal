@@ -44,13 +44,16 @@ service cloud.firestore {
                   (data.role == 'Admin' && data.get('isAlsoCoach', false) == true)));
     }
 
-    // Support for collection group queries (admin/board use only — individual access via direct path)
+    // Support for collection group queries
+    // Players: board members use collectionGroup for compliance; parents use direct path
     match /{path=**}/players/{playerId} {
       allow read: if isBoardMember();
     }
 
+    // Enrollments: board members can read all; parents can read their own (collectionGroup filtered by parentUserId)
     match /{path=**}/enrollments/{enrollmentId} {
-      allow read: if isBoardMember();
+      allow read: if isBoardMember() ||
+        (isSignedIn() && resource.data.parentUserId == request.auth.uid);
     }
 
     match /{path=**}/clearances/{clearanceId} {
@@ -76,16 +79,19 @@ service cloud.firestore {
       }
 
       match /players/{playerId} {
-        allow read: if isSignedIn();
+        allow read: if isUser(userId) || isBoardMember();
         allow create: if isUser(userId) || isAdmin();
         allow update: if isUser(userId) || isAdmin();
         allow delete: if isUser(userId) || isAdmin();
       }
 
       match /enrollments/{enrollmentId} {
-        allow read: if isSignedIn();
+        allow read: if isUser(userId) || isBoardMember();
         allow create: if isUser(userId) || isAdmin();
-        allow update: if isUser(userId) || isAdmin();
+        allow update: if (isUser(userId) &&
+          !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['payment_status', 'paymentStatus', 'stripe_payment_id'])
+          ) || isAdmin();
         allow delete: if isUser(userId) || isAdmin();
       }
     }

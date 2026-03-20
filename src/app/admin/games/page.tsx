@@ -86,6 +86,7 @@ export default function AdminGamesPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [showPast, setShowPast] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -216,8 +217,19 @@ export default function AdminGamesPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
-  const gameList = upcomingGames ?? [];
-  const pastList = pastGames ?? [];
+  const filterGames = (list: Game[]) => {
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter(g =>
+      (g.homeTeamName ?? '').toLowerCase().includes(q) ||
+      (g.awayTeamName ?? '').toLowerCase().includes(q) ||
+      (g.teamName ?? '').toLowerCase().includes(q) ||
+      (g.fieldName ?? '').toLowerCase().includes(q)
+    );
+  };
+
+  const gameList = filterGames(upcomingGames ?? []);
+  const pastList = filterGames(pastGames ?? []);
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -230,6 +242,17 @@ export default function AdminGamesPage() {
             <h1 className="text-3xl font-bold font-headline">Game Schedule</h1>
             <p className="text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
+
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
+              <Input
+                placeholder="Search games…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl w-48"
+              />
+            </div>
 
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -348,6 +371,7 @@ export default function AdminGamesPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
         </header>
 
         {/* Upcoming Games */}
