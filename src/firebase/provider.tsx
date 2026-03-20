@@ -133,8 +133,11 @@ export const useFirestore = (): Firestore => {
 };
 
 export const useStorage = (): FirebaseStorage => {
-  const { storage } = useFirebase();
-  return storage;
+  const context = useContext(FirebaseContext);
+  if (!context?.storage) {
+    throw new Error('Firebase Storage is not available. Ensure storage is passed to FirebaseProvider.');
+  }
+  return context.storage;
 };
 
 export const useFirebaseApp = (): FirebaseApp => {

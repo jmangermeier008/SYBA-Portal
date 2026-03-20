@@ -67,7 +67,7 @@ export default function AdminGlobalChatPage() {
     e.preventDefault();
     if (!newMessage.trim() || !user || !db || !selectedTeamId) return;
 
-    const messageId = Math.random().toString(36).substring(7);
+    const messageId = crypto.randomUUID();
     const messageRef = doc(db, 'teams', selectedTeamId, 'messages', messageId);
     const messageData = {
       id: messageId,

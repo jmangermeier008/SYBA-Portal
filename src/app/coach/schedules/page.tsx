@@ -121,7 +121,7 @@ export default function CoachSchedulesPage() {
     if (!user || !db || !activeTeam) return;
     setIsAdding(true);
 
-    const gameId = Math.random().toString(36).substring(7);
+    const gameId = crypto.randomUUID();
     const gameRef = doc(db, 'teams', activeTeam.id, 'games', gameId);
     
     const gameData = {

@@ -85,24 +85,32 @@ export default function MasterRosterPage() {
     
     updateDoc(enrollmentRef, { 
       teamId: newTeamId === 'unassigned' ? null : newTeamId 
-    }).catch(async () => {
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: enrollmentRef.path,
-        operation: 'update',
-        requestResourceData: { teamId: newTeamId }
-      }));
+    }).catch((error: any) => {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: enrollmentRef.path,
+          operation: 'update',
+          requestResourceData: { teamId: newTeamId }
+        }));
+      } else {
+        console.error('[roster] Assignment error:', error);
+      }
     });
 
     if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
       const oldTeamRef = doc(db, 'teams', oldTeamId);
       updateDoc(oldTeamRef, {
         player_ids: arrayRemove(playerId)
-      }).catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: oldTeamRef.path,
-          operation: 'update',
-          requestResourceData: { player_ids: 'arrayRemove' }
-        }));
+      }).catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: oldTeamRef.path,
+            operation: 'update',
+            requestResourceData: { player_ids: 'arrayRemove' }
+          }));
+        } else {
+          console.error('[roster] Remove player error:', error);
+        }
       });
     }
 
@@ -110,12 +118,16 @@ export default function MasterRosterPage() {
       const newTeamRef = doc(db, 'teams', newTeamId);
       updateDoc(newTeamRef, {
         player_ids: arrayUnion(playerId)
-      }).catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: newTeamRef.path,
-          operation: 'update',
-          requestResourceData: { player_ids: 'arrayUnion' }
-        }));
+      }).catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: newTeamRef.path,
+            operation: 'update',
+            requestResourceData: { player_ids: 'arrayUnion' }
+          }));
+        } else {
+          console.error('[roster] Add player error:', error);
+        }
       });
     }
 
@@ -287,7 +299,7 @@ export default function MasterRosterPage() {
                         </TableCell>
                         <TableCell className="pr-6">
                           <Select
-                            defaultValue={e.teamId || "unassigned"}
+                            value={e.teamId || "unassigned"}
                             onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
                           >
                             <SelectTrigger className={cn(

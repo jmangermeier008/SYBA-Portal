@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Trophy, Calendar, Loader2, Trash2, Lock } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -42,7 +42,7 @@ export default function SeasonsAdminPage() {
 
   const { data: seasons, isLoading } = useCollection<Season>(seasonsQuery);
 
-  const handleCreateSeason = (e: React.FormEvent) => {
+  const handleCreateSeason = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsAdding(true);
 
@@ -54,45 +54,62 @@ export default function SeasonsAdminPage() {
       ...formData,
     };
 
-    setDoc(seasonRef, seasonData)
-      .then(() => {
-        const divisions = [
-          { id: 'tball', name: 'T-Ball', fee: 5000 },
-          { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
-          { id: 'minors', name: 'Minor League', fee: 10000 },
-          { id: 'majors', name: 'Major League', fee: 12500 },
-        ];
+    try {
+      await setDoc(seasonRef, seasonData);
 
-        for (const div of divisions) {
-          setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div);
-        }
+      const divisions = [
+        { id: 'tball', name: 'T-Ball', fee: 5000 },
+        { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500 },
+        { id: 'minors', name: 'Minor League', fee: 10000 },
+        { id: 'majors', name: 'Major League', fee: 12500 },
+      ];
 
-        toast({ title: "Season Created", description: `${formData.name} is now active.` });
-        setOpen(false);
-        setFormData({ name: '', registrationOpen: '', registrationClose: '' });
-      })
-      .catch(async () => {
+      await Promise.all(
+        divisions.map(div =>
+          setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div)
+        )
+      );
+
+      toast({ title: "Season Created", description: `${formData.name} is now active.` });
+      setOpen(false);
+      setFormData({ name: '', registrationOpen: '', registrationClose: '' });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: seasonRef.path,
           operation: 'create',
           requestResourceData: seasonData
         }));
-      })
-      .finally(() => {
-        setIsAdding(false);
-      });
+      } else {
+        toast({ variant: "destructive", title: "Error", description: error.message });
+      }
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   const handleDeleteSeason = async (id: string) => {
     if (!confirm("Are you sure? This will delete the season and all its divisions.")) return;
-    const seasonRef = doc(db, 'seasons', id);
-    deleteDoc(seasonRef).catch(async () => {
-      errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: seasonRef.path,
-        operation: 'delete'
-      }));
-    });
-    toast({ title: "Season Deletion Initiated" });
+    try {
+      // Cascade-delete all division subcollection documents first
+      const divisionsSnapshot = await getDocs(collection(db, 'seasons', id, 'divisions'));
+      await Promise.all(
+        divisionsSnapshot.docs.map(divDoc => deleteDoc(divDoc.ref))
+      );
+
+      // Now delete the season document itself
+      await deleteDoc(doc(db, 'seasons', id));
+      toast({ title: "Season Deleted", description: "Season and all divisions have been removed." });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: `seasons/${id}`,
+          operation: 'delete'
+        }));
+      } else {
+        toast({ variant: "destructive", title: "Delete Failed", description: error.message });
+      }
+    }
   };
 
   if (loadingUser) {

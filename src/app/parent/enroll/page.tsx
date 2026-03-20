@@ -82,7 +82,7 @@ function EnrollmentForm({ initialPlayerId }: { initialPlayerId: string }) {
       return;
     }
 
-    const enrollmentId = Math.random().toString(36).substring(7);
+    const enrollmentId = crypto.randomUUID();
     const enrollmentRef = doc(db, 'userProfiles', user.uid, 'enrollments', enrollmentId);
     
     const enrollmentData = {
@@ -121,12 +121,16 @@ function EnrollmentForm({ initialPlayerId }: { initialPlayerId: string }) {
           toast({ variant: "destructive", title: "Checkout Error", description: "Could not initiate payment." });
         }
       })
-      .catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: enrollmentRef.path,
-          operation: 'create',
-          requestResourceData: enrollmentData
-        }));
+      .catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: enrollmentRef.path,
+            operation: 'create',
+            requestResourceData: enrollmentData
+          }));
+        } else {
+          console.error('[enroll] Enrollment error:', error);
+        }
       })
       .finally(() => {
         setSubmitting(false);

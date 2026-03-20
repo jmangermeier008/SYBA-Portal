@@ -68,12 +68,16 @@ export default function RolesPage() {
             : "Coach dashboard access has been removed.",
         });
       })
-      .catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: userRef.path,
-          operation: 'update',
-          requestResourceData: updateData
-        }));
+      .catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userRef.path,
+            operation: 'update',
+            requestResourceData: updateData
+          }));
+        } else {
+          console.error('[roles] Update error:', error);
+        }
       });
   };
 

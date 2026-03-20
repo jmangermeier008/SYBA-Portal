@@ -106,12 +106,16 @@ export default function AdminCompliancePage() {
         setRejectionReason('');
         setReviewingClearance(null);
       })
-      .catch(async () => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: clearanceRef.path,
-          operation: 'update',
-          requestResourceData: updateData
-        }));
+      .catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: clearanceRef.path,
+            operation: 'update',
+            requestResourceData: updateData
+          }));
+        } else {
+          console.error('[compliance] Update error:', error);
+        }
       })
       .finally(() => setIsProcessing(false));
   };
@@ -140,12 +144,16 @@ export default function AdminCompliancePage() {
         .then(() => {
           toast({ title: "Player Verified", description: "DOB confirmed and document redacted." });
         })
-        .catch(async () => {
-          errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: playerRef.path,
-            operation: 'update',
-            requestResourceData: updateData
-          }));
+        .catch((error: any) => {
+          if (error?.code === 'permission-denied') {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+              path: playerRef.path,
+              operation: 'update',
+              requestResourceData: updateData
+            }));
+          } else {
+            console.error('[compliance] Verify player error:', error);
+          }
         });
 
     } catch (error: any) {

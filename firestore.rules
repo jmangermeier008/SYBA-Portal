@@ -22,10 +22,11 @@ service cloud.firestore {
     }
 
     function isCoach() {
+      let data = getUserData();
       return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             (getUserData().role == 'Coach' ||
-              (getUserData().role == 'Admin' && getUserData().get('isAlsoCoach', false) == true));
+             (data.role == 'Coach' ||
+              (data.role == 'Admin' && data.get('isAlsoCoach', false) == true));
     }
 
     // Support for collection group queries

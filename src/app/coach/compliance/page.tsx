@@ -82,12 +82,16 @@ export default function CoachCompliancePage() {
         .then(() => {
           toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
         })
-        .catch(async () => {
-          errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: clearanceRef.path,
-            operation: 'create',
-            requestResourceData: clearanceData
-          }));
+        .catch((error: any) => {
+          if (error?.code === 'permission-denied') {
+            errorEmitter.emit('permission-error', new FirestorePermissionError({
+              path: clearanceRef.path,
+              operation: 'create',
+              requestResourceData: clearanceData
+            }));
+          } else {
+            console.error('[coach-compliance] Upload error:', error);
+          }
         });
         
     } catch (error: any) {
