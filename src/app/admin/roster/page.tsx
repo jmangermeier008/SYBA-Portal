@@ -220,10 +220,9 @@ export default function MasterRosterPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all-divisions">All Divisions</SelectItem>
-                    <SelectItem value="tball">T-Ball</SelectItem>
-                    <SelectItem value="coach-pitch">Coach Pitch</SelectItem>
-                    <SelectItem value="minors">Minor League</SelectItem>
-                    <SelectItem value="majors">Major League</SelectItem>
+                    {Array.from(new Set(enrollments?.map(e => e.divisionId) || [])).map(divId => (
+                      <SelectItem key={divId} value={divId}>{divId}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

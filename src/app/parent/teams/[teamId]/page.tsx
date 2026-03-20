@@ -54,12 +54,22 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
   const db = useFirestore();
 
   const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId));
-  }, [db, teamId]);
+  }, [db, teamId, user]);
 
-  const teamsQuery = useMemoFirebase(() => collection(db, 'teams'), [db]);
-  const playersQuery = useMemoFirebase(() => collectionGroup(db, 'players'), [db]);
-  const usersQuery = useMemoFirebase(() => collection(db, 'userProfiles'), [db]);
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'teams');
+  }, [db, user]);
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collectionGroup(db, 'players');
+  }, [db, user]);
+  const usersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles');
+  }, [db, user]);
 
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers } = useCollection<Player>(playersQuery);

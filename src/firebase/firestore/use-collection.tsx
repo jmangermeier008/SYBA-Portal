@@ -105,17 +105,30 @@ export function useCollection<T = any>(
           }
         }
 
-        const contextualError = new FirestorePermissionError({
-          operation: 'list',
-          path: parsedPath,
-        })
+        // Only treat actual permission-denied errors as permission errors.
+        // Other errors (e.g. failed-precondition for missing indexes, network errors)
+        // should be logged but NOT crash the app.
+        if (error.code === 'permission-denied') {
+          const contextualError = new FirestorePermissionError({
+            operation: 'list',
+            path: parsedPath,
+          })
 
-        setError(contextualError)
-        setData(null)
-        setIsLoading(false)
+          setError(contextualError)
+          setData(null)
+          setIsLoading(false)
 
-        // trigger global error propagation
-        errorEmitter.emit('permission-error', contextualError);
+          // trigger global error propagation
+          errorEmitter.emit('permission-error', contextualError);
+        } else {
+          console.error(`[useCollection] Firestore error on "${parsedPath}" (code: ${error.code}):`, error.message);
+          if (error.code === 'failed-precondition') {
+            console.error(`[useCollection] This is likely a missing Firestore index. Check the Firebase Console under Firestore → Indexes, or check the browser console for a direct link to create the index.`);
+          }
+          setError(error)
+          setData(null)
+          setIsLoading(false)
+        }
       }
     );
 

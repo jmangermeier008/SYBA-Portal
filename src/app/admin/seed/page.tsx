@@ -44,6 +44,14 @@ export default function SeedPage() {
   const handleSeed = async () => {
     setLoading(true);
     try {
+      // 0. Ensure current user is Admin FIRST so all subsequent writes succeed
+      if (user) {
+        await setDoc(doc(db, 'userProfiles', user.uid), {
+          role: 'Admin',
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+
       // 1. Seed Seasons & Divisions
       const seasonId = 'spring-2026';
       await setDoc(doc(db, 'seasons', seasonId), {
@@ -68,14 +76,6 @@ export default function SeedPage() {
       const demoCoach2Uid = 'demo-coach-2-uid';
       const demoParentUid = 'demo-parent-uid';
       const demoParent2Uid = 'demo-parent-2-uid';
-
-      // Temporarily ensure current user is Admin so all subsequent operations succeed
-      if (user) {
-        await setDoc(doc(db, 'userProfiles', user.uid), {
-          role: 'Admin',
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      }
 
       if (!assignMeAsCoach || !user) {
         await setDoc(doc(db, 'userProfiles', 'demo-coach-uid'), {

@@ -77,17 +77,25 @@ export function useDoc<T = any>(
         const auth = getAuth();
         if (!auth.currentUser) return;
 
-        const contextualError = new FirestorePermissionError({
-          operation: 'get',
-          path: memoizedDocRef.path,
-        })
+        // Only treat actual permission-denied errors as permission errors.
+        if (error.code === 'permission-denied') {
+          const contextualError = new FirestorePermissionError({
+            operation: 'get',
+            path: memoizedDocRef.path,
+          })
 
-        setError(contextualError)
-        setData(null)
-        setIsLoading(false)
+          setError(contextualError)
+          setData(null)
+          setIsLoading(false)
 
-        // trigger global error propagation
-        errorEmitter.emit('permission-error', contextualError);
+          // trigger global error propagation
+          errorEmitter.emit('permission-error', contextualError);
+        } else {
+          console.error(`[useDoc] Firestore error on "${memoizedDocRef.path}" (code: ${error.code}):`, error.message);
+          setError(error)
+          setData(null)
+          setIsLoading(false)
+        }
       }
     );
 

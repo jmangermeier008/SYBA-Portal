@@ -1,5 +1,10 @@
 {
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "bucket": "syba-bucket",
+    "rules": "storage.rules"
   }
 }

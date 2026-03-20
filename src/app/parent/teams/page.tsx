@@ -41,8 +41,14 @@ export default function ParentTeamsPage() {
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user]);
 
-  const teamsQuery = useMemoFirebase(() => collection(db, 'teams'), [db]);
-  const playersQuery = useMemoFirebase(() => collectionGroup(db, 'players'), [db]);
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'teams');
+  }, [db, user]);
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collectionGroup(db, 'players');
+  }, [db, user]);
 
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allTeams } = useCollection<Team>(teamsQuery);

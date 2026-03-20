@@ -27,6 +27,7 @@ interface GameEvent {
 interface Team {
   id: string;
   name: string;
+  seasonId?: string;
 }
 
 function EventCard({ game, teamId }: { game: GameEvent, teamId: string }) {
@@ -126,6 +127,10 @@ export default function CoachSchedulesPage() {
     const gameData = {
       id: gameId,
       teamId: activeTeam.id,
+      seasonId: activeTeam.seasonId ?? null,
+      title: formData.type === 'Game'
+        ? `${activeTeam.name} vs. ${formData.opponentName}`
+        : `${activeTeam.name} Practice`,
       ...formData,
       coachUserId: user.uid,
     };
