@@ -5,8 +5,8 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, doc, setDoc, where, limit } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert } from 'lucide-react';
+import { collection, query, orderBy, doc, setDoc, updateDoc, where, limit, getDocs, collectionGroup } from 'firebase/firestore';
+import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert, AlertTriangle, CloudRain, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,9 @@ interface GameEvent {
   opponentName?: string;
   location: string;
   dateTime: string;
+  fieldId?: string | null;
+  cancelled?: boolean;
+  cancellationReason?: string;
 }
 
 interface Team {
@@ -30,31 +33,66 @@ interface Team {
   seasonId?: string;
 }
 
+interface Field {
+  id: string;
+  name: string;
+  address?: string;
+}
+
 function EventCard({ game, teamId }: { game: GameEvent, teamId: string }) {
   const db = useFirestore();
+  const { toast } = useToast();
+  const [cancelling, setCancelling] = useState(false);
+
   const rsvpsQuery = useMemoFirebase(() => {
     if (!db || !teamId || !game.id) return null;
     return collection(db, 'teams', teamId, 'games', game.id, 'rsvps');
   }, [db, teamId, game.id]);
-  
+
   const { data: rsvps } = useCollection(rsvpsQuery);
 
   const attendingCount = rsvps?.filter(r => r.status === 'Attending').length || 0;
   const totalCount = rsvps?.length || 0;
 
+  const handleWeatherCancel = async () => {
+    if (!db || game.cancelled) return;
+    setCancelling(true);
+    try {
+      await updateDoc(doc(db, 'teams', teamId, 'games', game.id), {
+        cancelled: true,
+        cancellationReason: 'Weather',
+      });
+      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather.' });
+    } catch {
+      toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
-    <Card className="border-none shadow-lg overflow-hidden group">
+    <Card className={`border-none shadow-lg overflow-hidden group ${game.cancelled ? 'opacity-70' : ''}`}>
       <div className="flex flex-col md:flex-row">
-        <div className={`w-full md:w-48 p-6 flex flex-col items-center justify-center text-white ${game.type === 'Game' ? 'bg-primary' : 'bg-accent'}`}>
+        <div className={`w-full md:w-48 p-6 flex flex-col items-center justify-center text-white relative ${game.cancelled ? 'bg-muted-foreground' : game.type === 'Game' ? 'bg-primary' : 'bg-accent'}`}>
+          {game.cancelled && (
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-destructive/80 px-2 py-0.5 rounded-full mb-1">Cancelled</span>
+          )}
           <span className="text-sm font-bold uppercase tracking-wider">{game.type}</span>
           <span className="text-3xl font-bold mt-1">{format(new Date(game.dateTime), 'MMM d')}</span>
           <span className="text-sm opacity-90">{format(new Date(game.dateTime), 'EEEE')}</span>
         </div>
         <CardContent className="flex-1 p-6 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="space-y-2 text-center md:text-left">
-            <h3 className="text-xl font-bold font-headline">
-              {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
-            </h3>
+            <div className="flex items-center gap-2 flex-wrap justify-center md:justify-start">
+              <h3 className="text-xl font-bold font-headline">
+                {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
+              </h3>
+              {game.cancelled && game.cancellationReason === 'Weather' && (
+                <span className="flex items-center gap-1 text-xs text-destructive font-semibold bg-destructive/10 px-2 py-0.5 rounded-full">
+                  <CloudRain className="h-3 w-3" /> Weather Cancellation
+                </span>
+              )}
+            </div>
             <div className="flex flex-col gap-1 text-sm text-muted-foreground">
               <div className="flex items-center justify-center md:justify-start gap-2">
                 <Clock className="h-4 w-4" /> {format(new Date(game.dateTime), 'h:mm a')}
@@ -66,18 +104,38 @@ function EventCard({ game, teamId }: { game: GameEvent, teamId: string }) {
           </div>
 
           <div className="flex flex-col items-center gap-3">
-            <div className="flex items-center gap-2 bg-secondary/30 px-4 py-2 rounded-full">
-              <Users className="h-4 w-4 text-primary" />
-              <span className="text-sm font-bold">{attendingCount} Confirmed</span>
-              <span className="text-xs text-muted-foreground">/ {totalCount} RSVPs</span>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
-                Manage RSVPs
-              </Button>
-              <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
-                <Send className="h-3 w-3 mr-1" /> Alert Team
-              </Button>
+            {!game.cancelled && (
+              <div className="flex items-center gap-2 bg-secondary/30 px-4 py-2 rounded-full">
+                <Users className="h-4 w-4 text-primary" />
+                <span className="text-sm font-bold">{attendingCount} Confirmed</span>
+                <span className="text-xs text-muted-foreground">/ {totalCount} RSVPs</span>
+              </div>
+            )}
+            <div className="flex gap-2 flex-wrap justify-center">
+              {!game.cancelled && (
+                <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">
+                  Manage RSVPs
+                </Button>
+              )}
+              {!game.cancelled ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl border-destructive/30 text-destructive hover:bg-destructive/5"
+                  onClick={handleWeatherCancel}
+                  disabled={cancelling}
+                >
+                  {cancelling
+                    ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    : <CloudRain className="h-3 w-3 mr-1" />
+                  }
+                  Cancel — Weather
+                </Button>
+              ) : (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <XCircle className="h-4 w-4" /> Event cancelled
+                </span>
+              )}
             </div>
           </div>
         </CardContent>
@@ -92,7 +150,11 @@ export default function CoachSchedulesPage() {
   const { toast } = useToast();
   const [isAdding, setIsAdding] = useState(false);
   const [open, setOpen] = useState(false);
-  
+  const [selectedFieldId, setSelectedFieldId] = useState('');
+  const [customLocation, setCustomLocation] = useState('');
+  const [fieldConflict, setFieldConflict] = useState<string | null>(null);
+  const [conflictChecked, setConflictChecked] = useState(false);
+
   // Dynamically find the coach's team
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -102,10 +164,17 @@ export default function CoachSchedulesPage() {
   const { data: userTeams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const activeTeam = userTeams?.[0];
 
+  // Fetch fields for the location dropdown
+  const fieldsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, 'fields');
+  }, [db]);
+
+  const { data: fields } = useCollection<Field>(fieldsQuery);
+
   const [formData, setFormData] = useState({
     type: 'Practice',
     opponentName: '',
-    location: '',
     dateTime: '',
   });
 
@@ -116,14 +185,57 @@ export default function CoachSchedulesPage() {
 
   const { data: games, isLoading } = useCollection<GameEvent>(gamesQuery);
 
+  const resetDialog = () => {
+    setFormData({ type: 'Practice', opponentName: '', dateTime: '' });
+    setSelectedFieldId('');
+    setCustomLocation('');
+    setFieldConflict(null);
+    setConflictChecked(false);
+  };
+
+  const handleFieldChange = (value: string) => {
+    setSelectedFieldId(value);
+    setFieldConflict(null);
+    setConflictChecked(false);
+  };
+
+  const handleDateTimeChange = (value: string) => {
+    setFormData(f => ({ ...f, dateTime: value }));
+    setFieldConflict(null);
+    setConflictChecked(false);
+  };
+
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !db || !activeTeam) return;
-    setIsAdding(true);
 
+    const location = selectedFieldId !== 'custom'
+      ? (fields?.find(f => f.id === selectedFieldId)?.name ?? '')
+      : customLocation;
+    const fieldId = selectedFieldId !== 'custom' ? selectedFieldId : null;
+
+    // Soft conflict detection — first click checks, second click saves
+    if (fieldId && !conflictChecked) {
+      const conflictSnap = await getDocs(
+        query(collectionGroup(db, 'games'), where('fieldId', '==', fieldId))
+      );
+      const eventDate = formData.dateTime.slice(0, 10);
+      const conflicts = conflictSnap.docs.filter(d => {
+        const data = d.data();
+        return data.dateTime?.slice(0, 10) === eventDate;
+      });
+      if (conflicts.length > 0) {
+        const conflictTitle = conflicts[0].data().title || 'another event';
+        setFieldConflict(`Field already has "${conflictTitle}" on this date. Save again to override.`);
+        setConflictChecked(true);
+        return;
+      }
+    }
+
+    setIsAdding(true);
     const gameId = crypto.randomUUID();
     const gameRef = doc(db, 'teams', activeTeam.id, 'games', gameId);
-    
+
     const gameData = {
       id: gameId,
       teamId: activeTeam.id,
@@ -131,7 +243,11 @@ export default function CoachSchedulesPage() {
       title: formData.type === 'Game'
         ? `${activeTeam.name} vs. ${formData.opponentName}`
         : `${activeTeam.name} Practice`,
-      ...formData,
+      type: formData.type,
+      opponentName: formData.opponentName,
+      location,
+      fieldId,
+      dateTime: formData.dateTime,
       coachUserId: user.uid,
     };
 
@@ -139,9 +255,9 @@ export default function CoachSchedulesPage() {
       .then(() => {
         toast({ title: "Event Added", description: "The team schedule has been updated." });
         setOpen(false);
-        setFormData({ type: 'Practice', opponentName: '', location: '', dateTime: '' });
+        resetDialog();
       })
-      .catch((error) => {
+      .catch(() => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
           path: gameRef.path,
           operation: 'create',
@@ -160,9 +276,9 @@ export default function CoachSchedulesPage() {
             <h1 className="text-3xl font-bold font-headline">Team Schedule</h1>
             <p className="text-muted-foreground">Manage practices, games, and monitor attendance.</p>
           </div>
-          
+
           {activeTeam && (
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetDialog(); }}>
               <DialogTrigger asChild>
                 <Button className="rounded-full shadow-lg shadow-primary/20">
                   <Plus className="mr-2 h-4 w-4" /> Add Event
@@ -190,9 +306,9 @@ export default function CoachSchedulesPage() {
                     {formData.type === 'Game' && (
                       <div className="space-y-2">
                         <Label htmlFor="opponent">Opponent Name</Label>
-                        <Input 
-                          id="opponent" 
-                          placeholder="e.g. Tigers" 
+                        <Input
+                          id="opponent"
+                          placeholder="e.g. Tigers"
                           value={formData.opponentName}
                           onChange={(e) => setFormData({...formData, opponentName: e.target.value})}
                           required
@@ -200,30 +316,48 @@ export default function CoachSchedulesPage() {
                       </div>
                     )}
                     <div className="space-y-2">
-                      <Label htmlFor="location">Location</Label>
-                      <Input 
-                        id="location" 
-                        placeholder="e.g. Field 3" 
-                        value={formData.location}
-                        onChange={(e) => setFormData({...formData, location: e.target.value})}
-                        required
-                      />
+                      <Label>Location</Label>
+                      <Select value={selectedFieldId} onValueChange={handleFieldChange} required>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a field..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fields?.map(field => (
+                            <SelectItem key={field.id} value={field.id}>{field.name}</SelectItem>
+                          ))}
+                          <SelectItem value="custom">Custom / Other location</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {selectedFieldId === 'custom' && (
+                        <Input
+                          placeholder="Enter location..."
+                          value={customLocation}
+                          onChange={(e) => setCustomLocation(e.target.value)}
+                          required
+                        />
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dateTime">Date & Time</Label>
-                      <Input 
-                        id="dateTime" 
-                        type="datetime-local" 
+                      <Input
+                        id="dateTime"
+                        type="datetime-local"
                         value={formData.dateTime}
-                        onChange={(e) => setFormData({...formData, dateTime: e.target.value})}
+                        onChange={(e) => handleDateTimeChange(e.target.value)}
                         required
                       />
                     </div>
+                    {fieldConflict && (
+                      <div className="flex items-start gap-2 rounded-lg bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
+                        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-yellow-500" />
+                        <span>{fieldConflict}</span>
+                      </div>
+                    )}
                   </div>
                   <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                    <Button type="submit" disabled={isAdding}>
-                      {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Schedule Event"}
+                    <Button type="button" variant="outline" onClick={() => { setOpen(false); resetDialog(); }}>Cancel</Button>
+                    <Button type="submit" disabled={isAdding || !selectedFieldId}>
+                      {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : conflictChecked ? "Save Anyway" : "Schedule Event"}
                     </Button>
                   </DialogFooter>
                 </form>

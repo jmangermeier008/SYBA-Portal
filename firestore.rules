@@ -105,6 +105,17 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // League Announcements — admin writes, all signed-in users read
+    match /announcements/{announcementId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Board Meetings — admin only
+    match /boardMeetings/{meetingId} {
+      allow read, write: if isAdmin();
+    }
+
     match /teams/{teamId} {
       allow get, list: if isSignedIn(); 
       allow create: if isAdmin();

@@ -28,6 +28,8 @@ import {
   MapPin,
   ShoppingCart,
   Handshake,
+  Bell,
+  BookOpen,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -57,6 +59,7 @@ export function Sidebar({ role }: SidebarProps) {
       { label: 'Season Enrollment', icon: ClipboardList, href: '/parent/enroll' },
       { label: 'My Teams', icon: Users, href: '/parent/teams' },
       { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
+      { label: 'Announcements', icon: Bell, href: '/parent/announcements' },
       { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
       { label: 'Team Chat', icon: MessageSquare, href: '/parent/chat' },
       { label: 'Settings', icon: Settings, href: '/parent/settings' },
@@ -78,6 +81,8 @@ export function Sidebar({ role }: SidebarProps) {
       { label: 'Fields', icon: MapPin, href: '/admin/fields' },
       { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
       { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
+      { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
+      { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
       { label: 'Communications', icon: Megaphone, href: '/admin/chat' },
       { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
       { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
