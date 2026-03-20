@@ -116,6 +116,12 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Games & Practices — admin creates/deletes; all signed-in users can read
+    match /games/{gameId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /teams/{teamId} {
       allow get, list: if isSignedIn(); 
       allow create: if isAdmin();
