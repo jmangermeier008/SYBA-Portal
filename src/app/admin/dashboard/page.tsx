@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useFirestore, useCollection, useUser } from '@/firebase';
@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
 import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -140,6 +141,8 @@ export default function AdminDashboard({
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
 
+  const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
+
   const todayISO = format(new Date(), 'yyyy-MM-dd');
   const nextWeekISO = format(addDays(new Date(), 7), 'yyyy-MM-dd');
 
@@ -217,10 +220,16 @@ export default function AdminDashboard({
     return seasons.find((s) => s.isActive) ?? seasons[0];
   }, [seasons]);
 
+  const displaySeason = useMemo(() => {
+    if (!seasons?.length) return null;
+    if (selectedSeasonId) return seasons.find((s) => s.id === selectedSeasonId) ?? activeSeason;
+    return activeSeason;
+  }, [seasons, selectedSeasonId, activeSeason]);
+
   const seasonEnrollments = useMemo(() => {
-    if (!allEnrollments || !activeSeason) return [];
-    return allEnrollments.filter((e) => e.seasonId === activeSeason.id);
-  }, [allEnrollments, activeSeason]);
+    if (!allEnrollments || !displaySeason) return [];
+    return allEnrollments.filter((e) => e.seasonId === displaySeason.id);
+  }, [allEnrollments, displaySeason]);
 
   const paidEnrollments = useMemo(
     () => seasonEnrollments.filter((e) => ['paid', 'fee_waived'].includes(getEnrollmentStatus(e))),
@@ -377,11 +386,31 @@ export default function AdminDashboard({
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
 
         {/* Header */}
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">League Command Center</h1>
-          <p className="text-muted-foreground">
-            {activeSeason ? `${activeSeason.name}` : 'Loading season…'}
-          </p>
+        <header className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold font-headline">League Command Center</h1>
+            <p className="text-muted-foreground">
+              {displaySeason ? `Viewing: ${displaySeason.name}` : 'Loading season…'}
+            </p>
+          </div>
+          {seasons && seasons.length > 0 && (
+            <Select
+              value={selectedSeasonId ?? (activeSeason?.id ?? '')}
+              onValueChange={(v) => setSelectedSeasonId(v)}
+            >
+              <SelectTrigger className="w-[200px] rounded-xl border shadow-sm">
+                <SelectValue placeholder="Select season" />
+              </SelectTrigger>
+              <SelectContent>
+                {seasons.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                    {s.isActive && <span className="ml-2 text-[10px] text-primary font-semibold">Active</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </header>
 
         {/* Section 1 — Alerts */}

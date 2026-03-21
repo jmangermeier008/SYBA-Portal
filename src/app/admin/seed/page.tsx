@@ -18,7 +18,7 @@ export default function SeedPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
-  const [assignMeAsCoach, setAssignMeAsCoach] = useState(true);
+  const [assignMeAsCoach, setAssignMeAsCoach] = useState(false);
 
   const handleRoleSwitch = async (newRole: 'Admin' | 'Coach' | 'Parent') => {
     if (!user || !db) return;
@@ -29,9 +29,9 @@ export default function SeedPage() {
         roles: [newRole],
         updatedAt: new Date().toISOString()
       });
-      toast({ 
-        title: "Role Updated", 
-        description: `Your role is now ${newRole}. Please refresh or navigate to see changes.` 
+      toast({
+        title: "Role Updated",
+        description: `Your role is now ${newRole}. Please refresh or navigate to see changes.`
       });
       // Force a slight delay to allow Firestore to propagate
       setTimeout(() => window.location.reload(), 500);
@@ -125,6 +125,9 @@ export default function SeedPage() {
       const player1 = 'player-1';
       const player2 = 'player-2';
       const player3 = 'player-3';
+      const myPlayerId = 'my-player-1';
+
+      const firstName = profile?.displayName?.split(' ')[0] || 'Your Child';
 
       await setDoc(doc(db, 'teams', teamTBall), {
         id: teamTBall,
@@ -132,7 +135,7 @@ export default function SeedPage() {
         seasonId,
         divisionId: 'tball',
         coach_uid: demoCoachUid,
-        player_ids: [player1, player2],
+        player_ids: [player1, player2, myPlayerId],
         createdAt: new Date().toISOString()
       });
 
@@ -156,7 +159,7 @@ export default function SeedPage() {
         createdAt: new Date().toISOString()
       });
 
-      // 4. Seed Players & Enrollments
+      // 4. Seed Demo Players & Enrollments
       await setDoc(doc(db, 'userProfiles', demoParentUid, 'players', player1), {
         id: player1,
         firstName: 'Owen',
@@ -233,7 +236,33 @@ export default function SeedPage() {
         jerseyNumber: '5'
       });
 
-      // 5. Seed clearances for demo coach
+      // 5. Seed logged-in user's own player + enrollment (for Parent role experience)
+      if (user) {
+        await setDoc(doc(db, 'userProfiles', user.uid, 'players', myPlayerId), {
+          id: myPlayerId,
+          firstName,
+          lastName: 'Demo',
+          dateOfBirth: '2018-05-15',
+          parentUserId: user.uid,
+          medicalNotes: '',
+          ageVerified: true,
+          emergencyContacts: []
+        });
+
+        await setDoc(doc(db, 'userProfiles', user.uid, 'enrollments', 'my-enroll-1'), {
+          id: 'my-enroll-1',
+          playerId: myPlayerId,
+          seasonId,
+          divisionId: 'tball',
+          parentUserId: user.uid,
+          paymentStatus: 'paid',
+          teamId: teamTBall,
+          jerseySize: 'Youth S',
+          jerseyNumber: '10'
+        });
+      }
+
+      // 6. Seed clearances for demo coaches
       const clearanceTypes = ['ChildAbuse', 'CriminalRecord', 'FBI'];
       for (const type of clearanceTypes) {
         await setDoc(doc(db, 'userProfiles', demoCoach2Uid, 'clearances', type.toLowerCase()), {
@@ -268,7 +297,7 @@ export default function SeedPage() {
         createdAt: new Date().toISOString(),
       });
 
-      // 6. Seed sample schedule events under teams/{teamId}/games
+      // 7. Seed sample schedule events
       const today = new Date();
       const fmt = (d: Date) => d.toISOString().split('T')[0];
       const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -311,15 +340,116 @@ export default function SeedPage() {
         createdAt: new Date().toISOString()
       });
 
-      // Update current user to Coach AFTER all admin seeding is done
-      if (assignMeAsCoach && user) {
-        await updateDoc(doc(db, 'userProfiles', user.uid), {
-          role: 'Coach',
-          updatedAt: new Date().toISOString()
-        });
+      // 8. Seed announcements
+      const nowIso = new Date().toISOString();
+      const yesterdayIso = addDays(today, -1).toISOString();
+
+      await setDoc(doc(db, 'announcements', 'ann-1'), {
+        id: 'ann-1',
+        title: 'Spring 2026 Season Kickoff!',
+        body: 'We are thrilled to officially open the Spring 2026 SYBA season! Registration is open through March 31st. All returning and new players are welcome. Practice schedules will be posted by April 1st. Go Blue Jays, Cardinals, and Tigers!',
+        pinned: true,
+        publishedAt: nowIso,
+        createdAt: nowIso,
+        publishedBy: 'SYBA Board',
+      });
+
+      await setDoc(doc(db, 'announcements', 'ann-2'), {
+        id: 'ann-2',
+        title: 'Concession Volunteer Sign-Ups Open',
+        body: 'We need parent volunteers to staff the concession stand for home games. Sign up through the Concessions tab in the portal. Each shift is 4 hours and earns a $10 concession credit. Thank you for your support!',
+        pinned: false,
+        publishedAt: yesterdayIso,
+        createdAt: yesterdayIso,
+        publishedBy: 'SYBA Board',
+      });
+
+      // 9. Seed fields
+      await setDoc(doc(db, 'fields', 'field-1'), {
+        id: 'field-1',
+        name: 'Field 1 — Sharpsville Community Park',
+        address: '100 Community Dr, Sharpsville PA',
+        availabilityStart: '08:00',
+        availabilityEnd: '21:00',
+        maintenanceClosures: [],
+        createdAt: nowIso,
+      });
+
+      await setDoc(doc(db, 'fields', 'field-2'), {
+        id: 'field-2',
+        name: 'Field 2 — Sharpsville Community Park',
+        address: '100 Community Dr, Sharpsville PA',
+        availabilityStart: '08:00',
+        availabilityEnd: '21:00',
+        maintenanceClosures: [],
+        createdAt: nowIso,
+      });
+
+      await setDoc(doc(db, 'fields', 'field-3'), {
+        id: 'field-3',
+        name: 'Buhl Farm Diamond',
+        address: '11 Buhl Farm Dr, Hermitage PA',
+        availabilityStart: '08:00',
+        availabilityEnd: '20:00',
+        maintenanceClosures: [],
+        createdAt: nowIso,
+      });
+
+      // 10. Seed concession slots
+      await setDoc(doc(db, 'concessionSlots', 'slot-1'), {
+        id: 'slot-1',
+        gameDate: fmt(addDays(today, 5)),
+        startTime: '09:00',
+        endTime: '13:00',
+        capacity: 2,
+        cancelCutoffHours: 24,
+        description: 'Blue Jays home game vs. Cardinals',
+        signups: [],
+        createdAt: nowIso,
+      });
+
+      await setDoc(doc(db, 'concessionSlots', 'slot-2'), {
+        id: 'slot-2',
+        gameDate: fmt(addDays(today, 7)),
+        startTime: '12:00',
+        endTime: '16:00',
+        capacity: 2,
+        cancelCutoffHours: 24,
+        description: 'Tigers game vs. Riverside',
+        signups: [],
+        createdAt: nowIso,
+      });
+
+      // 11. Seed board meeting
+      await setDoc(doc(db, 'boardMeetings', 'meeting-1'), {
+        id: 'meeting-1',
+        title: 'Spring 2026 Pre-Season Board Meeting',
+        date: fmt(addDays(today, 10)),
+        time: '19:00',
+        location: 'Sharpsville Borough Hall',
+        agenda: [
+          { text: 'Field prep and maintenance review', addedBy: 'Board' },
+          { text: 'Umpire assignments for opening weekend', addedBy: 'Board' },
+          { text: 'Fundraising — concession schedule', addedBy: 'Board' },
+        ],
+        rsvps: [],
+        minutes: '',
+        createdAt: nowIso,
+      });
+
+      // 12. Update current user role at end (Admin by default, Coach only if checkbox checked)
+      if (user) {
+        if (assignMeAsCoach) {
+          await updateDoc(doc(db, 'userProfiles', user.uid), {
+            role: 'Coach',
+            roles: ['Coach'],
+            updatedAt: new Date().toISOString()
+          });
+        }
+        // If not assignMeAsCoach, user stays as Admin (already set in step 0)
       }
 
-      toast({ title: "Seed Successful", description: `Spring 2026 SYBA data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : ''}` });
+      toast({ title: "Seed Successful", description: `Spring 2026 SYBA data initialized. ${assignMeAsCoach ? 'Your role has been updated to Coach.' : 'You remain as Admin.'}` });
       setDone(true);
       if (assignMeAsCoach) {
         setTimeout(() => window.location.reload(), 1000);
@@ -347,7 +477,7 @@ export default function SeedPage() {
                 <Database className="h-5 w-5 text-primary" />
                 Initialize Environment
               </CardTitle>
-              <CardDescription>Setup seasons, teams, and sample enrollments.</CardDescription>
+              <CardDescription>Setup seasons, teams, fields, announcements, and sample enrollments.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
@@ -358,25 +488,45 @@ export default function SeedPage() {
               </div>
 
               <div className="flex items-center space-x-2 p-4 bg-secondary/20 rounded-xl border">
-                <Checkbox 
-                  id="assignMe" 
-                  checked={assignMeAsCoach} 
-                  onCheckedChange={(checked) => setAssignMeAsCoach(!!checked)} 
+                <Checkbox
+                  id="assignMe"
+                  checked={assignMeAsCoach}
+                  onCheckedChange={(checked) => setAssignMeAsCoach(!!checked)}
                 />
                 <div className="grid gap-1.5 leading-none">
                   <Label htmlFor="assignMe" className="text-sm font-bold flex items-center gap-2">
                     <UserCheck className="h-4 w-4 text-primary" /> Assign Me as Demo Coach
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    Your profile role will be changed to Coach for testing rosters.
+                    Check to switch your role to Coach after seeding. Leave unchecked to stay as Admin.
                   </p>
                 </div>
               </div>
-              
+
               {done ? (
-                <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <span className="text-sm font-medium">Data successfully seeded!</span>
+                <div className="space-y-3">
+                  <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    <span className="text-sm font-medium">Data successfully seeded!</span>
+                  </div>
+                  <div className="space-y-2 px-1">
+                    {[
+                      'Season: Spring 2026 (3 divisions)',
+                      'Teams: Blue Jays, Cardinals, Tigers',
+                      'Your player added to Blue Jays (T-Ball)',
+                      'Games & practices (3 events)',
+                      'Announcements (2)',
+                      'Fields (3)',
+                      'Concession slots (2)',
+                      'Board meeting (1)',
+                      'Clearances for demo coaches',
+                    ].map((item) => (
+                      <div key={item} className="flex items-center gap-2 text-xs text-green-700">
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        {item}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <Button onClick={handleSeed} className="w-full h-12 rounded-xl text-lg font-bold" disabled={loading}>
@@ -398,26 +548,26 @@ export default function SeedPage() {
             <CardContent className="space-y-4">
               <div className="p-4 rounded-xl border bg-primary/5 space-y-4">
                 <p className="text-sm text-muted-foreground">Current Role: <span className="font-bold text-primary">{profile?.role || 'Loading...'}</span></p>
-                
+
                 <div className="grid grid-cols-1 gap-3">
-                  <Button 
-                    variant={profile?.role === 'Admin' ? 'default' : 'outline'} 
+                  <Button
+                    variant={profile?.role === 'Admin' ? 'default' : 'outline'}
                     className="justify-start h-12 rounded-xl"
                     onClick={() => handleRoleSwitch('Admin')}
                     disabled={loading}
                   >
                     <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Admin
                   </Button>
-                  <Button 
-                    variant={profile?.role === 'Coach' ? 'default' : 'outline'} 
+                  <Button
+                    variant={profile?.role === 'Coach' ? 'default' : 'outline'}
                     className="justify-start h-12 rounded-xl"
                     onClick={() => handleRoleSwitch('Coach')}
                     disabled={loading}
                   >
-                    <Loader2 className="mr-2 h-5 w-5" /> Switch to Coach
+                    <UserCheck className="mr-2 h-5 w-5" /> Switch to Coach
                   </Button>
-                  <Button 
-                    variant={profile?.role === 'Parent' ? 'default' : 'outline'} 
+                  <Button
+                    variant={profile?.role === 'Parent' ? 'default' : 'outline'}
                     className="justify-start h-12 rounded-xl"
                     onClick={() => handleRoleSwitch('Parent')}
                     disabled={loading}

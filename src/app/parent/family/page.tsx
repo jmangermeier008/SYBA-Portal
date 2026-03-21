@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
@@ -45,10 +45,11 @@ export default function FamilyPage() {
   const db = useFirestore();
   const storage = useStorage();
   const { toast } = useToast();
-  
-  const [adding, setAdding] = useState(false);
+
+  const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -67,38 +68,72 @@ export default function FamilyPage() {
 
   const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
 
-  const handleAddPlayer = async (e: React.FormEvent) => {
+  const openAddDialog = () => {
+    setEditingPlayer(null);
+    setFormData({ firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' });
+    setEmergencyContacts([{ name: '', phone: '', relationship: '' }]);
+    setOpen(true);
+  };
+
+  const openEditDialog = (player: Player) => {
+    setEditingPlayer(player);
+    setFormData({
+      firstName: player.firstName,
+      lastName: player.lastName,
+      dateOfBirth: player.dateOfBirth,
+      medicalNotes: player.medicalNotes ?? '',
+    });
+    setEmergencyContacts(
+      player.emergencyContacts && player.emergencyContacts.length > 0
+        ? player.emergencyContacts
+        : [{ name: '', phone: '', relationship: '' }]
+    );
+    setOpen(true);
+  };
+
+  const handleSavePlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !db) return;
-    setAdding(true);
+    setSaving(true);
 
-    const playerId = crypto.randomUUID();
-    const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
     const playerDoc = {
-      id: playerId,
       ...formData,
       emergencyContacts: emergencyContacts.filter(c => c.name && c.phone),
       parentUserId: user.uid,
-      ageVerified: false
     };
 
-    setDoc(playerRef, playerDoc)
-      .then(() => {
-        toast({ title: "Player Added", description: `${formData.firstName} has been added to your family.` });
-        setFormData({ firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' });
-        setEmergencyContacts([{ name: '', phone: '', relationship: '' }]);
-        setOpen(false);
-      })
-      .catch((error) => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: playerRef.path,
-          operation: 'create',
-          requestResourceData: playerDoc
-        }));
-      })
-      .finally(() => {
-        setAdding(false);
-      });
+    if (editingPlayer) {
+      // Edit mode — updateDoc
+      const playerRef = doc(db, 'userProfiles', user.uid, 'players', editingPlayer.id);
+      updateDoc(playerRef, playerDoc)
+        .then(() => {
+          toast({ title: "Player Updated", description: `${formData.firstName}'s profile has been saved.` });
+          setOpen(false);
+        })
+        .catch((error) => {
+          toast({ variant: "destructive", title: "Update Failed", description: error.message });
+        })
+        .finally(() => setSaving(false));
+    } else {
+      // Add mode — setDoc
+      const playerId = crypto.randomUUID();
+      const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
+      const fullDoc = { id: playerId, ...playerDoc, ageVerified: false };
+
+      setDoc(playerRef, fullDoc)
+        .then(() => {
+          toast({ title: "Player Added", description: `${formData.firstName} has been added to your family.` });
+          setOpen(false);
+        })
+        .catch((error) => {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: playerRef.path,
+            operation: 'create',
+            requestResourceData: fullDoc
+          }));
+        })
+        .finally(() => setSaving(false));
+    }
   };
 
   const updateEmergencyContact = (index: number, field: keyof EmergencyContact, value: string) => {
@@ -115,7 +150,6 @@ export default function FamilyPage() {
     const file = e.target.files?.[0];
     if (!file || !user || !storage || !db) return;
 
-    // Technical Constraint Validation
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast({ variant: "destructive", title: "Invalid File Type", description: "Please upload a PDF, JPEG, or PNG." });
       return;
@@ -127,16 +161,15 @@ export default function FamilyPage() {
     }
 
     setUploading(playerId);
-    // Path: /compliance/{userId}/{docType}_{timestamp}
     const storageRef = ref(storage, `compliance/${user.uid}/birth_certificate_${playerId}_${Date.now()}`);
 
     try {
       const snapshot = await uploadBytes(storageRef, file);
       const url = await getDownloadURL(snapshot.ref);
-      
+
       const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
       await updateDoc(playerRef, { birthCertificateUrl: url });
-      
+
       toast({ title: "Birth Certificate Uploaded", description: "Identity verification document saved." });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Upload Failed", description: error.message });
@@ -154,18 +187,29 @@ export default function FamilyPage() {
             <h1 className="text-3xl font-bold font-headline">My Family</h1>
             <p className="text-muted-foreground">Manage player profiles and identity verification.</p>
           </div>
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={(v) => {
+            setOpen(v);
+            if (!v) {
+              setEditingPlayer(null);
+              setFormData({ firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' });
+              setEmergencyContacts([{ name: '', phone: '', relationship: '' }]);
+            }
+          }}>
             <DialogTrigger asChild>
-              <Button className="rounded-full shadow-lg shadow-primary/20">
+              <Button className="rounded-full shadow-lg shadow-primary/20" onClick={openAddDialog}>
                 <Plus className="mr-2 h-4 w-4" /> Add Player
               </Button>
             </DialogTrigger>
             <DialogContent className="rounded-2xl max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle className="font-headline text-2xl">Add New Player</DialogTitle>
-                <DialogDescription>Enter your child's information and emergency contacts.</DialogDescription>
+                <DialogTitle className="font-headline text-2xl">
+                  {editingPlayer ? `Edit ${editingPlayer.firstName}'s Profile` : 'Add New Player'}
+                </DialogTitle>
+                <DialogDescription>
+                  {editingPlayer ? 'Update your child\'s information and emergency contacts.' : 'Enter your child\'s information and emergency contacts.'}
+                </DialogDescription>
               </DialogHeader>
-              <form onSubmit={handleAddPlayer}>
+              <form onSubmit={handleSavePlayer}>
                 <div className="space-y-6 py-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -223,29 +267,29 @@ export default function FamilyPage() {
                       <div key={index} className="grid grid-cols-3 gap-3 p-3 rounded-xl bg-secondary/20 border">
                         <div className="space-y-1">
                           <Label className="text-[10px]">Name</Label>
-                          <Input 
-                            className="h-8 text-xs" 
-                            value={contact.name} 
-                            onChange={(e) => updateEmergencyContact(index, 'name', e.target.value)} 
+                          <Input
+                            className="h-8 text-xs"
+                            value={contact.name}
+                            onChange={(e) => updateEmergencyContact(index, 'name', e.target.value)}
                             required={index === 0}
                           />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-[10px]">Phone</Label>
-                          <Input 
-                            className="h-8 text-xs" 
-                            value={contact.phone} 
-                            onChange={(e) => updateEmergencyContact(index, 'phone', e.target.value)} 
+                          <Input
+                            className="h-8 text-xs"
+                            value={contact.phone}
+                            onChange={(e) => updateEmergencyContact(index, 'phone', e.target.value)}
                             required={index === 0}
                           />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-[10px]">Relation</Label>
-                          <Input 
-                            className="h-8 text-xs" 
+                          <Input
+                            className="h-8 text-xs"
                             placeholder="e.g. Mother"
-                            value={contact.relationship} 
-                            onChange={(e) => updateEmergencyContact(index, 'relationship', e.target.value)} 
+                            value={contact.relationship}
+                            onChange={(e) => updateEmergencyContact(index, 'relationship', e.target.value)}
                           />
                         </div>
                       </div>
@@ -254,8 +298,8 @@ export default function FamilyPage() {
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                  <Button type="submit" disabled={adding}>
-                    {adding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Save Profile"}
+                  <Button type="submit" disabled={saving}>
+                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : editingPlayer ? 'Save Changes' : 'Save Profile'}
                   </Button>
                 </DialogFooter>
               </form>
@@ -273,7 +317,7 @@ export default function FamilyPage() {
               <UserIcon className="h-16 w-16 text-muted mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline">No Players Registered</h3>
               <p className="text-muted-foreground mb-6">Start by adding your children to manage their SYBA activity.</p>
-              <Button onClick={() => setOpen(true)} className="rounded-full">Add Your First Player</Button>
+              <Button onClick={openAddDialog} className="rounded-full">Add Your First Player</Button>
             </CardContent>
           </Card>
         ) : (
@@ -293,11 +337,22 @@ export default function FamilyPage() {
                         </CardDescription>
                       </div>
                     </div>
-                    {player.ageVerified && (
-                      <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
-                        <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {player.ageVerified && (
+                        <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
+                          <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
+                        </Badge>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full hover:bg-primary/10"
+                        onClick={() => openEditDialog(player)}
+                        title="Edit player"
+                      >
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-6">
@@ -353,5 +408,3 @@ export default function FamilyPage() {
     </div>
   );
 }
-
-
