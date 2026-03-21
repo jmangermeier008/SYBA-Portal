@@ -135,6 +135,18 @@ service cloud.firestore {
       allow read, write: if isBoardMember();
     }
 
+    // Inquiries — parents/coaches create; board members read/update; admins delete
+    match /inquiries/{inquiryId} {
+      allow read: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid || isBoardMember()
+      );
+      allow create: if isSignedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.resource.data.status == 'open';
+      allow update: if isBoardMember();
+      allow delete: if isAdmin();
+    }
+
     // Games & Practices — board members create/delete; all signed-in users can read
     match /games/{gameId} {
       allow get, list: if isSignedIn();

@@ -31,6 +31,8 @@ import {
   BookOpen,
   CalendarDays,
   ChevronDown,
+  MessageSquare,
+  Inbox,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -48,6 +50,7 @@ const leagueAdminItems = [
   { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
   { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
   { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
+  { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
   { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
 ];
 
@@ -63,6 +66,7 @@ const coachItems = [
   { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
   { label: 'Practice Drills', icon: Dumbbell, href: '/coach/drills' },
   { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
+  { label: 'Contact Us', icon: MessageSquare, href: '/coach/contact' },
 ];
 
 const parentItems = [
@@ -73,6 +77,7 @@ const parentItems = [
   { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
   { label: 'Announcements', icon: Bell, href: '/parent/announcements' },
   { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
+  { label: 'Contact Us', icon: MessageSquare, href: '/parent/contact' },
   { label: 'Settings', icon: Settings, href: '/parent/settings' },
 ];
 

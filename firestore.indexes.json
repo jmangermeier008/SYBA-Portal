@@ -7,6 +7,14 @@
         { "fieldPath": "fieldId", "order": "ASCENDING" },
         { "fieldPath": "dateTime", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "inquiries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "senderId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

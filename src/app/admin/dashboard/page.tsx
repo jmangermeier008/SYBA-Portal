@@ -25,6 +25,7 @@ import {
   Megaphone,
   UserCheck,
   Layers,
+  Inbox,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -122,6 +123,7 @@ const QUICK_LINKS = [
   { label: 'Sponsorships', href: '/admin/sponsorships', icon: DollarSign },
   { label: 'Announcements', href: '/admin/announcements', icon: Megaphone },
   { label: 'Board Meetings', href: '/admin/board-meetings', icon: CalendarDays },
+  { label: 'Inquiries', href: '/admin/inquiries', icon: Inbox },
   { label: 'User Roles', href: '/admin/roles', icon: Settings },
   { label: 'Seasons', href: '/admin/seasons', icon: Trophy },
 ];
@@ -204,6 +206,11 @@ export default function AdminDashboard({
     );
   }, [db, isAdmin, isBoardMember, todayISO, nextWeekISO]);
 
+  const inquiriesQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'inquiries'), where('status', 'in', ['open', 'in_progress']));
+  }, [db, isAdmin, isBoardMember]);
+
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: coaches } = useCollection<any>(coachesQuery);
@@ -212,6 +219,7 @@ export default function AdminDashboard({
   const { data: fields } = useCollection<Field>(fieldsQuery);
   const { data: boardMeetings } = useCollection<BoardMeeting>(boardMeetingsQuery);
   const { data: thisWeekGames } = useCollection<Game>(gamesQuery);
+  const { data: openInquiries } = useCollection<{ id: string; status: string }>(inquiriesQuery);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -332,8 +340,16 @@ export default function AdminDashboard({
         href: '/admin/registration',
       });
     }
+    const openInquiryCount = openInquiries?.length ?? 0;
+    if (openInquiryCount > 0) {
+      items.push({
+        severity: 'blue',
+        message: `${openInquiryCount} open ${openInquiryCount === 1 ? 'inquiry needs' : 'inquiries need'} attention`,
+        href: '/admin/inquiries',
+      });
+    }
     return items;
-  }, [coachesWithIssues, undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount]);
+  }, [coachesWithIssues, undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries]);
 
   // ── Loading / access guard ────────────────────────────────────────────────────
 
