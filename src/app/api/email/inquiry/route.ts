@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 
-// Maps OfficerTitle → env var name for role-specific aliases (optional future use)
+// Maps topic → env var name for topic-specific email routing
+const TOPIC_EMAIL_MAP: Record<string, string> = {
+  'concessions': 'INQUIRY_EMAIL_CONCESSIONS',
+};
+
+// Maps OfficerTitle → env var name for role-specific aliases
 const ROLE_EMAIL_MAP: Record<string, string> = {
   'President': 'INQUIRY_EMAIL_PRESIDENT',
   'Vice President': 'INQUIRY_EMAIL_VICE_PRESIDENT',
@@ -12,11 +17,16 @@ const ROLE_EMAIL_MAP: Record<string, string> = {
   'Equipment Coordinator': 'INQUIRY_EMAIL_EQUIPMENT',
 };
 
-function getRecipientEmail(assignedToRole: string): string | null {
-  // Check for role-specific alias first
-  const envKey = ROLE_EMAIL_MAP[assignedToRole];
-  if (envKey && process.env[envKey]) {
-    return process.env[envKey]!;
+function getRecipientEmail(topic: string, assignedToRole: string): string | null {
+  // Check for topic-specific alias first (e.g. concessions@syba.blue)
+  const topicEnvKey = TOPIC_EMAIL_MAP[topic];
+  if (topicEnvKey && process.env[topicEnvKey]) {
+    return process.env[topicEnvKey]!;
+  }
+  // Then check role-specific alias
+  const roleEnvKey = ROLE_EMAIL_MAP[assignedToRole];
+  if (roleEnvKey && process.env[roleEnvKey]) {
+    return process.env[roleEnvKey]!;
   }
   // Fall back to catch-all
   return process.env.INQUIRY_NOTIFICATION_EMAIL || null;
@@ -26,10 +36,16 @@ export async function POST(req: Request) {
   try {
     const { senderName, topic, subject, message, assignedToRole } = await req.json();
 
-    const toEmail = getRecipientEmail(assignedToRole);
+    const toEmail = getRecipientEmail(topic, assignedToRole);
     if (!toEmail) {
       console.warn('[email] No INQUIRY_NOTIFICATION_EMAIL configured, skipping notification');
       return NextResponse.json({ ok: true, skipped: true });
+    }
+
+    const recipients = [toEmail];
+    const siteAdminEmail = process.env.INQUIRY_EMAIL_SITE_ADMIN;
+    if (siteAdminEmail && siteAdminEmail !== toEmail) {
+      recipients.push(siteAdminEmail);
     }
 
     const emailSubject = `[${topic}] New Inquiry: ${subject}`;
@@ -56,7 +72,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <onboarding@resend.dev>',
-        to: [toEmail],
+        to: recipients,
         subject: emailSubject,
         text: emailBody,
       }),

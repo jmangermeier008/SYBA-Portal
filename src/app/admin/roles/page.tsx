@@ -22,7 +22,7 @@ import { getAuth, createUserWithEmailAndPassword, signOut as firebaseSignOut, se
 import { firebaseConfig } from '@/firebase/config';
 import { OFFICER_TITLES } from '@/data/officers';
 
-const ALL_ROLES = ['Parent', 'Coach', 'Board Member', 'Admin'] as const;
+const ALL_ROLES = ['Parent', 'Coach', 'Board Member', 'Admin', 'Site Admin'] as const;
 type Role = typeof ALL_ROLES[number];
 
 interface UserData {

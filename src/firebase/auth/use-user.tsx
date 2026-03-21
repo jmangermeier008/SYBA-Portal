@@ -14,7 +14,7 @@ export interface UserProfile {
   // Legacy single-role field — kept for backward compatibility
   role: 'Parent' | 'Coach' | 'Admin';
   // New multi-role field — takes precedence when present
-  roles?: ('Parent' | 'Coach' | 'Board Member' | 'Admin')[];
+  roles?: ('Parent' | 'Coach' | 'Board Member' | 'Admin' | 'Site Admin')[];
   createdAt: string;
 }
 
@@ -76,7 +76,8 @@ export function useUser() {
   const roles = profile ? deriveRoles(profile) : [];
 
   const isAdmin = roles.includes('Admin');
-  const isBoardMember = roles.includes('Board Member') || isAdmin;
+  const isSiteAdmin = roles.includes('Site Admin') || isAdmin;
+  const isBoardMember = roles.includes('Board Member') || isAdmin || isSiteAdmin;
   const isCoach = roles.includes('Coach') || isAdmin;
   const isParent = roles.includes('Parent') || isAdmin;
 
@@ -86,6 +87,7 @@ export function useUser() {
     loading,
     roles,
     isAdmin,
+    isSiteAdmin,
     isBoardMember,
     isCoach,
     isParent,

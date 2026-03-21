@@ -10,7 +10,15 @@ const INBOUND_TOPIC_MAP: Record<string, InquiryTopic> = {
   'treasurer@syba.blue': 'general',
   'secretary@syba.blue': 'registration',
   'president@syba.blue': 'general',
+  'vicepresident@syba.blue': 'general',
+  'grounds@syba.blue': 'field_maintenance',
   'info@syba.blue': 'general',
+};
+
+// Override assignedToRole for specific inbound addresses (takes precedence over topic-derived role)
+const INBOUND_ROLE_OVERRIDE_MAP: Record<string, string> = {
+  'vicepresident@syba.blue': 'Secretary',
+  'grounds@syba.blue': 'Building/Grounds Committee Chair',
 };
 
 function parseEmailAddress(raw: string): { name: string; email: string } {
@@ -61,7 +69,7 @@ export async function POST(req: Request) {
       subject: subject.slice(0, 100),
       message: text.trim(),
       status: 'open',
-      assignedToRole: topicConfig.assignedToRole,
+      assignedToRole: INBOUND_ROLE_OVERRIDE_MAP[recipientEmail] ?? topicConfig.assignedToRole,
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
