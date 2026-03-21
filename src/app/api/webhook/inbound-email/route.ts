@@ -12,6 +12,7 @@ const INBOUND_TOPIC_MAP: Record<string, InquiryTopic> = {
   'president@syba.blue': 'general',
   'vicepresident@syba.blue': 'general',
   'grounds@syba.blue': 'field_maintenance',
+  'admin@syba.blue': 'general',
   'info@syba.blue': 'general',
 };
 
@@ -19,6 +20,7 @@ const INBOUND_TOPIC_MAP: Record<string, InquiryTopic> = {
 const INBOUND_ROLE_OVERRIDE_MAP: Record<string, string> = {
   'vicepresident@syba.blue': 'Secretary',
   'grounds@syba.blue': 'Building/Grounds Committee Chair',
+  'admin@syba.blue': 'Site Admin',
 };
 
 function parseEmailAddress(raw: string): { name: string; email: string } {
