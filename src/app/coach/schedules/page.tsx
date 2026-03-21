@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, doc, setDoc, updateDoc, where, limit } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert, AlertTriangle, CloudRain, XCircle } from 'lucide-react';
+import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert, AlertTriangle, CloudRain, XCircle, CalendarPlus } from 'lucide-react';
+import { generateICS, downloadICS } from '@/lib/ics';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -109,6 +110,21 @@ function EventCard({ game, teamId }: { game: GameEvent, teamId: string }) {
                 <span className="text-xs text-muted-foreground">/ {totalCount} RSVPs</span>
               </div>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-full h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                const ics = generateICS({
+                  title: game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice',
+                  start: new Date(game.dateTime),
+                  location: game.location,
+                });
+                downloadICS(ics, `syba-${game.type.toLowerCase()}-${game.id}.ics`);
+              }}
+            >
+              <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Add to Calendar
+            </Button>
             <div className="flex gap-2 flex-wrap justify-center">
               {!game.cancelled && (
                 <Button variant="outline" size="sm" className="rounded-xl border-primary/20 hover:bg-primary/5">

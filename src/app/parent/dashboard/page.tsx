@@ -1,17 +1,35 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle } from 'lucide-react';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+
+function useCountdown(targetDate: string | undefined) {
+  const [label, setLabel] = useState('');
+  useEffect(() => {
+    if (!targetDate) return;
+    const update = () => {
+      const diff = new Date(targetDate).getTime() - Date.now();
+      if (diff <= 0) { setLabel('Today!'); return; }
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      setLabel(days > 0 ? `In ${days}d ${hours}h` : `In ${hours}h`);
+    };
+    update();
+    const t = setInterval(update, 60000);
+    return () => clearInterval(t);
+  }, [targetDate]);
+  return label;
+}
 
 export default function ParentDashboard({
   params,
@@ -35,15 +53,21 @@ export default function ParentDashboard({
   }, [db, user?.uid]);
   const { data: players, isLoading: loadingPlayers } = useCollection<{ id: string }>(playersQuery);
 
-  // Enrollments to derive team assignment
+  // Enrollments to derive team assignment + payment status
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user?.uid]);
-  const { data: enrollments } = useCollection<{ playerId: string; teamId?: string }>(enrollmentsQuery);
+  const { data: enrollments } = useCollection<{ playerId: string; teamId?: string; paymentStatus?: string }>(enrollmentsQuery);
 
   const firstTeamId = enrollments?.find(e => e.teamId)?.teamId;
   const firstPlayerId = players?.[0]?.id;
+
+  // Enrollment status logic
+  const hasEnrollments = (enrollments?.length ?? 0) > 0;
+  const hasPendingPayment = enrollments?.some(e =>
+    ['pending', 'pending_payment'].includes(e.paymentStatus ?? '')
+  );
 
   // Next upcoming game for first assigned team
   const now = new Date().toISOString();
@@ -58,6 +82,8 @@ export default function ParentDashboard({
   }, [db, firstTeamId]);
   const { data: nextGames, isLoading: loadingGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(nextGameQuery);
   const nextGame = nextGames?.[0];
+
+  const countdown = useCountdown(nextGame?.dateTime);
 
   // Current RSVP for next game
   const rsvpsQuery = useMemoFirebase(() => {
@@ -95,9 +121,9 @@ export default function ParentDashboard({
   // Latest announcements
   const announcementsQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'announcements'), orderBy('createdAt', 'desc'), limit(2));
+    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(2));
   }, [db]);
-  const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; createdAt: string }>(announcementsQuery);
+  const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string }>(announcementsQuery);
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -143,13 +169,18 @@ export default function ParentDashboard({
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
               ) : nextGame ? (
                 <>
-                  <div className="text-2xl font-bold">{format(new Date(nextGame.dateTime), 'MMM d')}</div>
+                  <div className="text-2xl font-bold">{countdown || format(new Date(nextGame.dateTime), 'MMM d')}</div>
                   <p className="text-xs text-muted-foreground mb-1">
-                    {format(new Date(nextGame.dateTime), 'h:mm a')} · {nextGame.location}
+                    {format(new Date(nextGame.dateTime), 'EEE, MMM d')} · {format(new Date(nextGame.dateTime), 'h:mm a')}
                   </p>
                   {nextGame.opponentName && (
-                    <p className="text-xs font-medium text-foreground mb-3">
+                    <p className="text-xs font-medium text-foreground mb-1">
                       {nextGame.type === 'Game' ? `vs ${nextGame.opponentName}` : nextGame.type}
+                    </p>
+                  )}
+                  {rsvps && (
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {rsvps.filter(r => r.status === 'Attending').length} attending
                     </p>
                   )}
                   {firstTeamId && firstPlayerId && (
@@ -227,9 +258,9 @@ export default function ParentDashboard({
                       <div>
                         <p className="text-sm font-semibold">{a.title}</p>
                         <p className="text-xs text-muted-foreground line-clamp-2">{a.body}</p>
-                        {a.createdAt && (
+                        {(a.publishedAt || a.createdAt) && (
                           <p className="text-[10px] text-muted-foreground mt-1">
-                            {format(new Date(a.createdAt), 'MMM d')}
+                            {format(new Date(a.publishedAt || a.createdAt!), 'MMM d')}
                           </p>
                         )}
                       </div>
@@ -248,20 +279,53 @@ export default function ParentDashboard({
             </CardContent>
           </Card>
 
-          <Card className="border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="font-headline">Season Enrollment</CardTitle>
-              <CardDescription>Register for upcoming seasons</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-              <Trophy className="h-12 w-12 text-muted mb-4" />
-              <h3 className="font-semibold mb-2">Enrollment Open</h3>
-              <p className="text-sm text-muted-foreground mb-6">Register your players for the upcoming season.</p>
-              <Button asChild variant="outline" className="rounded-full px-8">
-                <Link href="/parent/enroll">Enroll Now</Link>
-              </Button>
-            </CardContent>
-          </Card>
+          {/* Dynamic enrollment status card */}
+          {hasEnrollments && !hasPendingPayment ? (
+            <Card className="border-none shadow-md">
+              <CardHeader>
+                <CardTitle className="font-headline">Season Enrollment</CardTitle>
+                <CardDescription>Your registration status</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+                <CheckCircle2 className="h-12 w-12 text-green-500 mb-4" />
+                <h3 className="font-semibold mb-1 text-green-700">Enrolled — Spring 2026</h3>
+                <p className="text-sm text-muted-foreground mb-6">Your player is registered and payment is confirmed.</p>
+                <Button asChild variant="outline" className="rounded-full px-8">
+                  <Link href="/parent/teams">View My Teams</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : hasPendingPayment ? (
+            <Card className="border-none shadow-md border-amber-200">
+              <CardHeader>
+                <CardTitle className="font-headline">Season Enrollment</CardTitle>
+                <CardDescription>Action required</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+                <AlertCircle className="h-12 w-12 text-amber-500 mb-4" />
+                <h3 className="font-semibold mb-1 text-amber-700">Payment Required</h3>
+                <p className="text-sm text-muted-foreground mb-6">You have an enrollment with a pending payment.</p>
+                <Button asChild className="rounded-full px-8 bg-amber-500 hover:bg-amber-600">
+                  <Link href="/parent/enroll">Complete Payment</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-none shadow-md">
+              <CardHeader>
+                <CardTitle className="font-headline">Season Enrollment</CardTitle>
+                <CardDescription>Register for upcoming seasons</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+                <Trophy className="h-12 w-12 text-muted mb-4" />
+                <h3 className="font-semibold mb-2">Enrollment Open</h3>
+                <p className="text-sm text-muted-foreground mb-6">Register your players for the upcoming season.</p>
+                <Button asChild variant="outline" className="rounded-full px-8">
+                  <Link href="/parent/enroll">Enroll Now</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </main>
     </div>

@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, doc, setDoc, where, collectionGroup } from 'firebase/firestore';
-import { Calendar, MapPin, Clock, Check, X, HelpCircle, Loader2, Users, ShieldAlert } from 'lucide-react';
+import { Calendar, MapPin, Clock, Check, X, HelpCircle, Loader2, Users, ShieldAlert, CalendarPlus } from 'lucide-react';
+import { generateICS, downloadICS } from '@/lib/ics';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -177,6 +178,21 @@ export default function ParentSchedulesPage() {
                       </div>
 
                       <div className="flex flex-col items-center gap-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-full h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            const ics = generateICS({
+                              title: game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice',
+                              start: new Date(game.dateTime),
+                              location: game.location,
+                            });
+                            downloadICS(ics, `syba-${game.type.toLowerCase()}-${game.id}.ics`);
+                          }}
+                        >
+                          <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Add to Calendar
+                        </Button>
                         <span className="text-xs font-bold text-muted-foreground uppercase">RSVP for {players?.find(p => p.id === selectedPlayerId)?.firstName || 'Player'}</span>
                         <div className="flex gap-2">
                           <Button

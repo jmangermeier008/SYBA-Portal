@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
-import { Dumbbell, Users, Calendar, Star, Loader2 } from 'lucide-react';
+import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -70,6 +70,16 @@ export default function CoachDashboard() {
   const nextGame = games?.[0];
   const playerCount = enrollments?.length ?? 0;
 
+  // RSVP attendance rate for the next game
+  const rsvpsQuery = useMemoFirebase(() => {
+    if (!db || !firstTeamId || !nextGame?.id) return null;
+    return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
+  }, [db, firstTeamId, nextGame?.id]);
+  const { data: rsvps } = useCollection(rsvpsQuery);
+  const attendingCount = rsvps?.filter((r: any) => r.status === 'Attending').length ?? 0;
+  const totalRsvpCount = rsvps?.length ?? 0;
+  const attendanceRate = totalRsvpCount > 0 ? Math.round((attendingCount / totalRsvpCount) * 100) : null;
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -82,7 +92,7 @@ export default function CoachDashboard() {
           <div className="flex gap-4">
             <Button variant="outline" asChild className="rounded-full">
               <Link href="/coach/drills">
-                <Dumbbell className="mr-2 h-4 w-4" /> AI Practice Generator
+                <Dumbbell className="mr-2 h-4 w-4" /> Drill Library
               </Link>
             </Button>
           </div>
@@ -134,12 +144,21 @@ export default function CoachDashboard() {
           </Card>
           <Card className="border-none shadow-md">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Teams Count</CardTitle>
-              <Users className="h-4 w-4 text-accent-foreground" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Attendance Rate</CardTitle>
+              <UserCheck className="h-4 w-4 text-accent-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{teams?.length ?? 0}</div>
-              <p className="text-xs text-muted-foreground">Active teams</p>
+              {attendanceRate !== null ? (
+                <>
+                  <div className="text-2xl font-bold">{attendanceRate}%</div>
+                  <p className="text-xs text-muted-foreground">{attendingCount}/{totalRsvpCount} confirmed</p>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold">—</div>
+                  <p className="text-xs text-muted-foreground">No RSVPs yet</p>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -203,8 +222,8 @@ export default function CoachDashboard() {
               <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
                 <Link href="/coach/drills">
                   <div className="text-left">
-                    <p className="font-semibold flex items-center gap-2"><Dumbbell className="h-4 w-4" /> AI Practice Builder</p>
-                    <p className="text-xs text-muted-foreground">Generate drills for today's session</p>
+                    <p className="font-semibold flex items-center gap-2"><Dumbbell className="h-4 w-4" /> Practice Drills</p>
+                    <p className="text-xs text-muted-foreground">Browse age-grouped baseball drills</p>
                   </div>
                 </Link>
               </Button>
