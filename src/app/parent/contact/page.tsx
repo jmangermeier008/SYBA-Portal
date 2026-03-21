@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useUser } from '@/firebase';
 import { Loader2, Lock, MessageSquare } from 'lucide-react';
@@ -10,6 +10,8 @@ import { InquiryHistory } from '@/components/inquiries/inquiry-history';
 
 export default function ParentContactPage() {
   const { isParent, loading: loadingUser } = useUser();
+  const [replyCount, setReplyCount] = useState(0);
+  const handleReplyCount = useCallback((count: number) => setReplyCount(count), []);
 
   if (loadingUser) {
     return (
@@ -53,13 +55,20 @@ export default function ParentContactPage() {
         <Tabs defaultValue="new">
           <TabsList className="mb-6">
             <TabsTrigger value="new">New Inquiry</TabsTrigger>
-            <TabsTrigger value="history">My Inquiries</TabsTrigger>
+            <TabsTrigger value="history" className="flex items-center gap-1.5">
+              My Inquiries
+              {replyCount > 0 && (
+                <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold bg-primary text-white rounded-full">
+                  {replyCount > 9 ? '9+' : replyCount}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="new">
             <InquiryForm senderRole="Parent" dashboardHref="/parent/dashboard" />
           </TabsContent>
           <TabsContent value="history">
-            <InquiryHistory />
+            <InquiryHistory onReplyCount={handleReplyCount} />
           </TabsContent>
         </Tabs>
       </main>

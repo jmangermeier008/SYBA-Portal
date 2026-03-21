@@ -67,10 +67,10 @@ export interface InquiryReply {
 
 export interface Inquiry {
   id: string;
-  senderId: string;
+  senderId: string | null;
   senderName: string;
   senderEmail: string;
-  senderRole: 'Parent' | 'Coach';
+  senderRole: 'Parent' | 'Coach' | 'Public' | 'Email';
   topic: InquiryTopic;
   subject: string;
   message: string;

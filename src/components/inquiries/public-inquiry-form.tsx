@@ -7,36 +7,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useUser, useFirestore } from '@/firebase';
+import { useFirestore } from '@/firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Send } from 'lucide-react';
+import { Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { INQUIRY_TOPICS, getTopicConfig } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
-import { InquirySuccess } from './inquiry-success';
 
-interface InquiryFormProps {
-  senderRole: 'Parent' | 'Coach';
-  dashboardHref: string;
-}
-
-export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
-  const { profile } = useUser();
+export function PublicInquiryForm() {
   const db = useFirestore();
   const { toast } = useToast();
 
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [topic, setTopic] = useState<InquiryTopic | ''>('');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [assignedRole, setAssignedRole] = useState('');
 
   const selectedTopicConfig = topic ? getTopicConfig(topic) : undefined;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!topic || !subject.trim() || !message.trim() || !db || !profile) return;
+    if (!topic || !subject.trim() || !message.trim() || !name.trim() || !email.trim() || !db) return;
 
     const topicConfig = getTopicConfig(topic);
     if (!topicConfig) return;
@@ -45,10 +39,10 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
     try {
       const now = new Date().toISOString();
       await addDoc(collection(db, 'inquiries'), {
-        senderId: profile.id,
-        senderName: profile.displayName || 'Unknown',
-        senderEmail: profile.email || '',
-        senderRole,
+        senderId: null,
+        senderName: name.trim(),
+        senderEmail: email.trim(),
+        senderRole: 'Public',
         topic,
         subject: subject.trim(),
         message: message.trim(),
@@ -65,7 +59,7 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          senderName: profile.displayName || 'Unknown',
+          senderName: name.trim(),
           topic: topicConfig.label,
           subject: subject.trim(),
           message: message.trim(),
@@ -73,35 +67,37 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
         }),
       }).catch(() => {});
 
-      setAssignedRole(topicConfig.assignedToRole);
       setSubmitted(true);
     } catch (error: any) {
-      console.error('[inquiry] Submit error:', error.message);
+      console.error('[inquiry] Public submit error:', error.message);
       toast({
         variant: 'destructive',
         title: 'Submission Failed',
-        description: 'Please try again. If the issue persists, contact an administrator.',
+        description: 'Please try again. If the issue persists, contact us directly.',
       });
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleReset = () => {
-    setTopic('');
-    setSubject('');
-    setMessage('');
-    setSubmitted(false);
-    setAssignedRole('');
-  };
-
   if (submitted) {
     return (
-      <InquirySuccess
-        assignedToRole={assignedRole}
-        onSubmitAnother={handleReset}
-        dashboardHref={dashboardHref}
-      />
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-16 text-center space-y-4">
+          <CheckCircle2 className="h-14 w-14 text-green-500" />
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold">Message Sent!</h2>
+            <p className="text-muted-foreground max-w-sm">
+              Your message has been sent to the {selectedTopicConfig?.assignedToRole ?? 'board'}. A board member will follow up with you soon.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => {
+            setName(''); setEmail(''); setTopic(''); setSubject(''); setMessage(''); setSubmitted(false);
+          }}>
+            Send Another Message
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -110,7 +106,7 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Send className="h-5 w-5" />
-          Submit an Inquiry
+          Send a Message
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           Have a question? Select a topic and we&apos;ll route it to the right board member.
@@ -118,10 +114,36 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="pub-name">Your Name *</Label>
+              <Input
+                id="pub-name"
+                placeholder="First Last"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={80}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pub-email">Email Address *</Label>
+              <Input
+                id="pub-email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                maxLength={120}
+                required
+              />
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <Label htmlFor="topic">Topic *</Label>
+            <Label htmlFor="pub-topic">Topic *</Label>
             <Select value={topic} onValueChange={(v) => setTopic(v as InquiryTopic)}>
-              <SelectTrigger id="topic">
+              <SelectTrigger id="pub-topic">
                 <SelectValue placeholder="Select a topic..." />
               </SelectTrigger>
               <SelectContent>
@@ -133,16 +155,14 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
               </SelectContent>
             </Select>
             {selectedTopicConfig && (
-              <p className="text-xs text-muted-foreground">
-                {selectedTopicConfig.description} — routed to <span className="font-medium text-foreground">{selectedTopicConfig.assignedToRole}</span>
-              </p>
+              <p className="text-xs text-muted-foreground">{selectedTopicConfig.description}</p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="subject">Subject *</Label>
+            <Label htmlFor="pub-subject">Subject *</Label>
             <Input
-              id="subject"
+              id="pub-subject"
               placeholder="Brief summary of your question"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -152,9 +172,9 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="message">Message *</Label>
+            <Label htmlFor="pub-message">Message *</Label>
             <Textarea
-              id="message"
+              id="pub-message"
               placeholder="Provide details about your question or concern..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -167,18 +187,18 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
 
           <Button
             type="submit"
-            disabled={!topic || !subject.trim() || !message.trim() || submitting}
+            disabled={!topic || !subject.trim() || !message.trim() || !name.trim() || !email.trim() || submitting}
             className="w-full sm:w-auto"
           >
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Submitting...
+                Sending...
               </>
             ) : (
               <>
                 <Send className="mr-2 h-4 w-4" />
-                Submit Inquiry
+                Send Message
               </>
             )}
           </Button>

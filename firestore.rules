@@ -139,16 +139,24 @@ service cloud.firestore {
       allow read, write: if isBoardMember();
     }
 
-    // Inquiries — parents/coaches create; board members read/update; admins delete
+    // Inquiries — anyone can create (public form supported); board members read/update; admins delete
     match /inquiries/{inquiryId} {
       allow read: if isSignedIn() && (
         resource.data.senderId == request.auth.uid || isBoardMember()
       );
-      allow create: if isSignedIn() &&
-        request.resource.data.senderId == request.auth.uid &&
-        request.resource.data.status == 'open';
+      allow create: if
+        request.resource.data.status == 'open' &&
+        (isSignedIn()
+          ? request.resource.data.senderId == request.auth.uid
+          : request.resource.data.senderId == null);
       allow update: if isBoardMember();
       allow delete: if isAdmin();
+    }
+
+    // Officers — public read (shown on homepage); board members write
+    match /officers/{officerId} {
+      allow read: if true;
+      allow write: if isBoardMember();
     }
 
     // Games & Practices — board members create/delete; all signed-in users can read

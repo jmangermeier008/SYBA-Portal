@@ -150,6 +150,11 @@ export default function AdminInquiriesPage() {
                         {topicConfig && (
                           <Badge variant="secondary">{topicConfig.label}</Badge>
                         )}
+                        {(inquiry.senderRole === 'Public' || inquiry.senderRole === 'Email') && (
+                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                            {inquiry.senderRole === 'Email' ? 'Email' : 'Public'}
+                          </Badge>
+                        )}
                       </div>
                       <span className="text-xs text-muted-foreground sm:ml-auto flex items-center gap-1">
                         <Clock className="h-3 w-3" />

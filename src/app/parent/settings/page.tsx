@@ -8,17 +8,31 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useUser, useFirestore } from '@/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { doc, updateDoc, collection, query, orderBy } from 'firebase/firestore';
 import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { OFFICERS } from '@/data/officers';
+
+interface OfficerRecord {
+  id: string;
+  title: string;
+  name: string | null;
+  email: string | null;
+  contactHint: string;
+  order: number;
+}
 
 export default function ParentSettingsPage() {
   const { user, profile } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+
+  const officersQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'officers'), orderBy('order'));
+  }, [db]);
+  const { data: officers } = useCollection<OfficerRecord>(officersQuery);
   const [formData, setFormData] = useState({
     displayName: '',
     phoneNumber: '',
@@ -121,22 +135,27 @@ export default function ParentSettingsPage() {
             </CardHeader>
             <CardContent>
               <div className="divide-y">
-                {OFFICERS.map((officer) => {
-                  const tips: Record<string, string> = {
-                    'Treasurer': 'Payment questions',
-                    'Secretary': 'Registration questions',
-                  };
-                  const tip = tips[officer.title];
-                  return (
-                    <div key={officer.title} className="flex items-center justify-between py-3">
-                      <div>
-                        <p className="text-sm text-muted-foreground">{officer.title}</p>
-                        {tip && <p className="text-[10px] text-muted-foreground/70">{tip}</p>}
-                      </div>
-                      <p className="text-sm font-semibold">{officer.name ? officer.name : <span className="text-muted-foreground italic font-normal">TBA</span>}</p>
+                {(officers ?? []).map((officer) => (
+                  <div key={officer.id} className="flex items-center justify-between py-3">
+                    <div>
+                      <p className="text-sm text-muted-foreground">{officer.title}</p>
+                      {officer.contactHint && (
+                        <p className="text-[10px] text-muted-foreground/70">{officer.contactHint}</p>
+                      )}
+                      {officer.email && (
+                        <a
+                          href={`mailto:${officer.email}`}
+                          className="text-[11px] text-primary hover:underline"
+                        >
+                          {officer.email}
+                        </a>
+                      )}
                     </div>
-                  );
-                })}
+                    <p className="text-sm font-semibold ml-4 text-right">
+                      {officer.name ? officer.name : <span className="text-muted-foreground italic font-normal">TBA</span>}
+                    </p>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>

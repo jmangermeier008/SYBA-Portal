@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useCollection } from '@/firebase';
@@ -18,7 +18,11 @@ const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }>
   resolved: { label: 'Resolved', className: 'bg-green-100 text-green-800' },
 };
 
-export function InquiryHistory() {
+interface InquiryHistoryProps {
+  onReplyCount?: (count: number) => void;
+}
+
+export function InquiryHistory({ onReplyCount }: InquiryHistoryProps = {}) {
   const { profile } = useUser();
   const db = useFirestore();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -33,6 +37,12 @@ export function InquiryHistory() {
   }, [db, profile?.id]);
 
   const { data: inquiries, isLoading } = useCollection<Inquiry>(inquiriesQuery);
+
+  useEffect(() => {
+    if (!inquiries || !onReplyCount) return;
+    const total = inquiries.reduce((sum, inq) => sum + (inq.replies?.length ?? 0), 0);
+    onReplyCount(total);
+  }, [inquiries, onReplyCount]);
 
   if (isLoading) {
     return (

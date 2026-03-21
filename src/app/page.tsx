@@ -1,17 +1,35 @@
 "use client";
 
-import { useUser } from '@/firebase';
+import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Trophy, Users, Calendar, ArrowRight, User as UserIcon } from 'lucide-react';
-import { OFFICERS, COORDINATORS } from '@/data/officers';
+import { collection, query, orderBy } from 'firebase/firestore';
+
+interface OfficerRecord {
+  id: string;
+  title: string;
+  name: string | null;
+  email: string | null;
+  order: number;
+}
 
 export default function Home() {
   const { user, profile, loading, isAdmin, isBoardMember, isCoach } = useUser();
   const router = useRouter();
+  const db = useFirestore();
+
+  const officersQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'officers'), orderBy('order'));
+  }, [db]);
+  const { data: allOfficers } = useCollection<OfficerRecord>(officersQuery);
+
+  const namedOfficers = (allOfficers ?? []).filter((o) => o.order <= 3);
+  const coordinators = (allOfficers ?? []).filter((o) => o.order > 3);
 
   useEffect(() => {
     if (!loading && user && profile) {
@@ -45,6 +63,9 @@ export default function Home() {
           <span className="text-xl font-bold font-headline tracking-tight text-primary">SYBA Portal</span>
         </Link>
         <nav className="ml-auto flex gap-4 sm:gap-6 items-center">
+          <Link className="text-sm font-medium hover:text-primary transition-colors" href="/contact">
+            Contact Us
+          </Link>
           <Link className="text-sm font-medium hover:text-primary transition-colors" href="/login">
             Login
           </Link>
@@ -130,12 +151,12 @@ export default function Home() {
 
             {/* Named Officers */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-              {OFFICERS.map((officer) => (
-                <div key={officer.title} className="flex flex-col items-center text-center p-5 bg-white rounded-2xl shadow-sm border border-primary/10">
+              {namedOfficers.map((officer) => (
+                <div key={officer.id} className="flex flex-col items-center text-center p-5 bg-white rounded-2xl shadow-sm border border-primary/10">
                   <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl mb-3">
                     {officer.name ? officer.name[0] : <UserIcon className="h-6 w-6" />}
                   </div>
-                  <p className="font-bold text-sm">{officer.name}</p>
+                  <p className="font-bold text-sm">{officer.name ?? <span className="italic text-muted-foreground font-normal">TBA</span>}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{officer.title}</p>
                 </div>
               ))}
@@ -143,8 +164,8 @@ export default function Home() {
 
             {/* Coordinators */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {COORDINATORS.map((coord) => (
-                <div key={coord.title} className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-slate-100 shadow-sm">
+              {coordinators.map((coord) => (
+                <div key={coord.id} className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-slate-100 shadow-sm">
                   <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
                     {coord.name ? (
                       <span className="text-sm font-bold text-slate-500">{coord.name[0]}</span>
