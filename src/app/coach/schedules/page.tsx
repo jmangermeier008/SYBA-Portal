@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, doc, setDoc, updateDoc, where, limit } from 'firebase/firestore';
+import { collection, collectionGroup, query, orderBy, doc, setDoc, updateDoc, getDocs, where, limit } from 'firebase/firestore';
 import { Calendar, MapPin, Clock, Plus, Users, Send, Loader2, ShieldAlert, AlertTriangle, CloudRain, XCircle, CalendarPlus } from 'lucide-react';
 import { generateICS, downloadICS } from '@/lib/ics';
 import { format } from 'date-fns';
@@ -228,15 +228,25 @@ export default function CoachSchedulesPage() {
       : customLocation;
     const fieldId = selectedFieldId !== 'custom' ? selectedFieldId : null;
 
-    // Soft conflict detection — check only this team's own games (avoids league-wide collectionGroup read)
+    // M17: Check for field conflicts across all teams using collectionGroup
     if (fieldId && !conflictChecked) {
       const eventDate = formData.dateTime.slice(0, 10);
-      const conflicts = (games ?? []).filter(g => g.fieldId === fieldId && g.dateTime?.slice(0, 10) === eventDate);
-      if (conflicts.length > 0) {
-        const conflictTitle = (conflicts[0] as any).title || 'another event';
-        setFieldConflict(`Field already has "${conflictTitle}" on this date. Save again to override.`);
-        setConflictChecked(true);
-        return;
+      try {
+        const conflictSnap = await getDocs(
+          query(collectionGroup(db, 'games'), where('fieldId', '==', fieldId))
+        );
+        const conflictsOnDate = conflictSnap.docs.filter(d => {
+          const data = d.data();
+          return data.dateTime?.slice(0, 10) === eventDate && d.id !== '';
+        });
+        if (conflictsOnDate.length > 0) {
+          const conflictTitle = conflictsOnDate[0].data().title || 'another event';
+          setFieldConflict(`Field already has "${conflictTitle}" on this date for another team. Save again to override.`);
+          setConflictChecked(true);
+          return;
+        }
+      } catch {
+        // If collectionGroup query fails (permissions), fall through silently
       }
     }
 
@@ -342,7 +352,7 @@ export default function CoachSchedulesPage() {
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="dateTime">Date & Time</Label>
+                      <Label htmlFor="dateTime">Date & Time <span className="text-muted-foreground font-normal text-xs">(Eastern Time)</span></Label>
                       <Input
                         id="dateTime"
                         type="datetime-local"

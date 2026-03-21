@@ -117,14 +117,20 @@ export default function RolesPage() {
         : newUser.roles.includes('Board Member') ? 'Admin'
         : 'Parent';
 
-      await setDoc(doc(db, 'userProfiles', user.uid), {
-        id: user.uid,
-        displayName: newUser.displayName.trim(),
-        email: newUser.email.trim().toLowerCase(),
-        role: primaryRole,
-        roles: newUser.roles,
-        createdAt: new Date().toISOString(),
-      });
+      try {
+        await setDoc(doc(db, 'userProfiles', user.uid), {
+          id: user.uid,
+          displayName: newUser.displayName.trim(),
+          email: newUser.email.trim().toLowerCase(),
+          role: primaryRole,
+          roles: newUser.roles,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (firestoreError: any) {
+        // H10: Firestore write failed — clean up orphaned Auth account
+        await secondaryAuth.currentUser?.delete().catch(() => {});
+        throw firestoreError;
+      }
 
       await firebaseSignOut(secondaryAuth);
       toast({ title: "User Created", description: "Share the temporary password with them." });
@@ -298,7 +304,7 @@ export default function RolesPage() {
                             )}
                           </TableCell>
                           <TableCell className="pr-4">
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -403,7 +409,7 @@ export default function RolesPage() {
           <DialogHeader>
             <DialogTitle className="font-headline">Remove User?</DialogTitle>
             <DialogDescription>
-              <strong>{removeTarget?.displayName || removeTarget?.email}</strong> will no longer be able to access the portal. Their Firebase Auth account will remain but all portal data will be deleted.
+              <strong>{removeTarget?.displayName || removeTarget?.email}</strong> will no longer be able to access the portal. Their Firebase Auth account will remain. Note: subcollection data (enrollments, players, clearances) may not be fully removed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

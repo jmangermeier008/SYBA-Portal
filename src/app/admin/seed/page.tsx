@@ -14,7 +14,17 @@ import { Label } from '@/components/ui/label';
 
 export default function SeedPage() {
   const db = useFirestore();
-  const { user, profile } = useUser();
+  const { user, profile, isAdmin } = useUser();
+
+  // C1: Block in production and for non-admins
+  if (process.env.NODE_ENV !== 'development') return null;
+  if (!isAdmin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-muted-foreground">Access denied.</p>
+      </div>
+    );
+  }
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);

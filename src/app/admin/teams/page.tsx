@@ -80,6 +80,13 @@ export default function TeamsAdminPage() {
 
   const handleCreateTeam = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // M14: Require a division to be selected before saving
+    if (!formData.divisionId) {
+      toast({ title: "Division Required", description: "Please select a division before creating the team.", variant: "destructive" });
+      return;
+    }
+
     setIsAdding(true);
 
     const teamId = `${formData.name.toLowerCase().replace(/\s+/g, '-')}-${formData.seasonId}`;

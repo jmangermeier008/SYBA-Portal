@@ -2,16 +2,10 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
+// L7: Import shared Firebase config rather than duplicating credentials here
+import { firebaseConfig } from '@/firebase/config';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
-const firebaseConfig = {
-  projectId: 'studio-7888518432-29b35',
-  appId: '1:642486687687:web:d563e62649ddd0f310ebe2',
-  apiKey: 'AIzaSyB7ryzr2dq6uUKV6uWnuWG7l-9bTX4BJcU',
-  authDomain: 'studio-7888518432-29b35.firebaseapp.com',
-  messagingSenderId: '642486687687',
-};
 
 function getDb() {
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
@@ -64,7 +58,7 @@ export async function POST(req: Request) {
         updatedAt: new Date().toISOString(),
       });
 
-      console.log(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
+      console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
 
       // Fetch enrollment, player, season, division to populate the confirmation email
       try {

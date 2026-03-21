@@ -53,6 +53,7 @@ function MeetingCard({ meeting, db, toast }: { meeting: BoardMeeting; db: any; t
   const [minutes, setMinutes] = useState(meeting.minutes || '');
   const [savingMinutes, setSavingMinutes] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const isPastMeeting = isPast(parseISO(`${meeting.date}T${meeting.time}`));
 
@@ -103,6 +104,7 @@ function MeetingCard({ meeting, db, toast }: { meeting: BoardMeeting; db: any; t
   const handleDelete = async () => {
     if (!db) return;
     setDeleting(true);
+    setDeleteConfirmOpen(false);
     try {
       await deleteDoc(doc(db, 'boardMeetings', meeting.id));
     } catch (err: any) {
@@ -152,7 +154,7 @@ function MeetingCard({ meeting, db, toast }: { meeting: BoardMeeting; db: any; t
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              onClick={handleDelete}
+              onClick={() => setDeleteConfirmOpen(true)}
               disabled={deleting}
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
@@ -162,6 +164,25 @@ function MeetingCard({ meeting, db, toast }: { meeting: BoardMeeting; db: any; t
       </div>
 
       {/* Expanded detail */}
+      {/* M12: Delete confirmation dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={(o) => { if (!deleting) setDeleteConfirmOpen(o); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-headline">Delete Meeting?</DialogTitle>
+            <DialogDescription>
+              <strong>{meeting.title}</strong> will be permanently removed. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {expanded && (
         <div className="border-t px-5 py-5 grid md:grid-cols-3 gap-6 bg-secondary/20">
           {/* Agenda */}

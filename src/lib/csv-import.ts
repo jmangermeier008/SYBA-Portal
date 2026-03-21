@@ -64,11 +64,21 @@ export function parseCSV(text: string): string[][] {
 }
 
 export function parseGameScheduleCSV(text: string): ParsedGame[] {
-  const rows = parseCSV(text);
+  // C6: Strip UTF-8 BOM if present
+  const cleanText = text.replace(/^\uFEFF/, '');
+  const rows = parseCSV(cleanText);
   if (rows.length < 2) return [];
 
   const headers = rows[0].map(h => h.toLowerCase().replace(/\s+/g, ''));
   const col = (name: string) => headers.indexOf(name);
+
+  // C7: Guard against missing required columns
+  const requiredCols = ['date', 'time', 'type', 'field'];
+  for (const colName of requiredCols) {
+    if (col(colName) === -1) {
+      throw new Error(`Missing required column: "${colName}". Check that your CSV header row includes Date, Time, Type, and Field.`);
+    }
+  }
 
   return rows.slice(1).map((row, i) => ({
     date: row[col('date')] ?? '',
@@ -99,8 +109,8 @@ export function validateGameRows(
       errors.push({ row: row._row, column: 'Date', message: 'Must be YYYY-MM-DD format' });
       rowErrors = true;
     }
-    if (!row.time || !/^\d{2}:\d{2}$/.test(row.time)) {
-      errors.push({ row: row._row, column: 'Time', message: 'Must be HH:MM (24-hour) format' });
+    if (!row.time || !/^\d{1,2}:\d{2}$/.test(row.time)) {
+      errors.push({ row: row._row, column: 'Time', message: 'Must be H:MM or HH:MM (24-hour) format' });
       rowErrors = true;
     }
     if (!row.type || !['game', 'practice'].includes(row.type.toLowerCase())) {
@@ -154,11 +164,21 @@ export function validateGameRows(
 // ─── Roster Assignment CSV ─────────────────────────────────────────────────────
 
 export function parseRosterCSV(text: string): ParsedRosterRow[] {
-  const rows = parseCSV(text);
+  // C6: Strip UTF-8 BOM if present
+  const cleanText = text.replace(/^\uFEFF/, '');
+  const rows = parseCSV(cleanText);
   if (rows.length < 2) return [];
 
   const headers = rows[0].map(h => h.toLowerCase().replace(/\s+/g, ''));
   const col = (name: string) => headers.indexOf(name);
+
+  // C7: Guard against missing required columns
+  const requiredCols = ['firstname', 'lastname', 'teamname'];
+  for (const colName of requiredCols) {
+    if (col(colName) === -1) {
+      throw new Error(`Missing required column: "${colName}". Check that your CSV header row includes FirstName, LastName, and TeamName.`);
+    }
+  }
 
   return rows.slice(1).map((row, i) => ({
     firstName: row[col('firstname')] ?? '',

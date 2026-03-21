@@ -2,7 +2,7 @@
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -73,12 +73,22 @@ export default function ParentConcessionsPage() {
     if (!db || !profile) return;
     try {
       const slotRef = doc(db, 'concessionSlots', slot.id);
-      await updateDoc(slotRef, {
-        signups: arrayUnion({
+      // H13: Use a Firestore transaction to prevent overbooking race condition
+      await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotRef);
+        if (!slotSnap.exists()) throw new Error('Slot no longer exists.');
+        const current = slotSnap.data() as ConcessionSlot;
+        if ((current.signups?.length ?? 0) >= current.capacity) {
+          throw new Error('This slot is now full. Please choose another time.');
+        }
+        const alreadySignedUp = current.signups?.some(s => s.parentUserId === profile.id);
+        if (alreadySignedUp) throw new Error('You are already signed up for this slot.');
+        const newSignup = {
           parentUserId: profile.id,
           displayName: profile.displayName ?? 'Parent',
           signedUpAt: new Date().toISOString(),
-        }),
+        };
+        transaction.update(slotRef, { signups: [...(current.signups ?? []), newSignup] });
       });
       toast({ title: 'Signed Up!', description: `You're volunteering for the ${slot.gameDate} shift.` });
     } catch (err: any) {

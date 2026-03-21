@@ -215,7 +215,11 @@ export default function AdminCompliancePage() {
         {users && allClearances && (() => {
           const fullyCleared = users.filter(u => {
             const uc = allClearances.filter(c => c.userId === u.id);
-            return ['ChildAbuse', 'CriminalRecord', 'FBI'].every(t => uc.find(c => c.type === t)?.status === 'Approved');
+            // H6: Normalize type matching
+            const hasCA = uc.some(c => ['ChildAbuse', 'child_abuse', 'childabuse'].includes(c.type) && c.status === 'Approved');
+            const hasCR = uc.some(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type) && c.status === 'Approved');
+            const hasFBI = uc.some(c => ['FBI', 'fbi'].includes(c.type) && c.status === 'Approved');
+            return hasCA && hasCR && hasFBI;
           }).length;
           const pendingVerification = allPlayers?.filter(p => p.birthCertificateUrl && !p.ageVerified).length ?? 0;
           const isReady = fullyCleared === users.length && users.length > 0;
@@ -297,9 +301,10 @@ export default function AdminCompliancePage() {
                     <TableBody>
                       {users?.map((user) => {
                         const userClearances = allClearances?.filter(c => c.userId === user.id) || [];
-                        const ca = userClearances.find(c => c.type === 'ChildAbuse');
-                        const cr = userClearances.find(c => c.type === 'CriminalRecord');
-                        const fbi = userClearances.find(c => c.type === 'FBI');
+                        // H6: Normalize type matching to handle both camelCase and snake_case stored values
+                        const ca = userClearances.find(c => ['ChildAbuse', 'child_abuse', 'childabuse'].includes(c.type));
+                        const cr = userClearances.find(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type));
+                        const fbi = userClearances.find(c => ['FBI', 'fbi'].includes(c.type));
                         const isFullyApproved = [ca, cr, fbi].every(c => c?.status === 'Approved');
                         return (
                           <TableRow key={user.id}>

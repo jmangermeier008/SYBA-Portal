@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Loader2, Upload, AlertCircle, Clock, ShieldAlert } from 'lucide-react';
+import { Loader2, Upload, AlertCircle, Clock, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { format, isBefore, addMonths } from 'date-fns';
@@ -108,6 +108,16 @@ export default function CoachCompliancePage() {
             </div>
           ) : (
             <>
+              {/* H7: Expired clearance warning banner */}
+              {clearances && clearances.some(c => c.expirationDate && isBefore(new Date(c.expirationDate), new Date())) && (
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive">
+                  <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-sm">Expired Clearance</p>
+                    <p className="text-sm">One or more of your clearances has expired. You may not be eligible to coach until renewed. Please upload updated documents.</p>
+                  </div>
+                </div>
+              )}
               <Card className="border-none shadow-md bg-primary/5">
                 <CardContent className="pt-6 flex items-start gap-4">
                   <ShieldAlert className="h-6 w-6 text-primary mt-1" />

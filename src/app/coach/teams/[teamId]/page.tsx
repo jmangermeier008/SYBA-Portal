@@ -4,7 +4,9 @@
 import { use, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { useDoc } from '@/firebase/firestore/use-doc';
+import { collection, collectionGroup, query, where, doc } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -62,10 +64,23 @@ interface UserProfile {
   email: string;
 }
 
+interface Team {
+  id: string;
+  coach_uid?: string;
+}
+
 export default function TeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
   const { teamId } = use(params);
   const db = useFirestore();
-  const { user } = useUser();
+  const { user, isAdmin } = useUser();
+  const router = useRouter();
+
+  // C2: Load the team doc to verify coach ownership
+  const teamDocRef = useMemoFirebase(() => {
+    if (!db || !teamId) return null;
+    return doc(db, 'teams', teamId);
+  }, [db, teamId]);
+  const { data: teamDoc, isLoading: loadingTeam } = useDoc<Team>(teamDocRef);
 
   // Query enrollments for this specific team
   const enrollmentsQuery = useMemoFirebase(() => {
@@ -100,7 +115,13 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
     }
   };
 
-  const isLoading = loadingEnrollments || loadingPlayers || loadingUsers;
+  const isLoading = loadingTeam || loadingEnrollments || loadingPlayers || loadingUsers;
+
+  // C2: Once team is loaded, verify the coach owns it
+  if (!loadingTeam && teamDoc && !isAdmin && teamDoc.coach_uid !== user?.uid) {
+    router.replace('/coach/dashboard');
+    return null;
+  }
 
   if (isLoading) {
     return (
@@ -227,26 +248,31 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                         <div className="bg-secondary/20 p-4 rounded-xl space-y-3 border border-secondary">
                           <p className="font-bold text-sm">{parent.displayName}</p>
                           <div className="flex gap-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
-                              asChild
-                            >
-                              <a href={`tel:${parent.phoneNumber}`}>
-                                <Phone className="mr-2 h-3 w-3 text-primary" /> Call
-                              </a>
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
-                              asChild
-                            >
-                              <a href={`sms:${parent.phoneNumber}`}>
-                                <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
-                              </a>
-                            </Button>
+                            {/* M7: Only render contact links if phoneNumber is non-null */}
+                            {parent.phoneNumber && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
+                                asChild
+                              >
+                                <a href={`tel:${parent.phoneNumber}`}>
+                                  <Phone className="mr-2 h-3 w-3 text-primary" /> Call
+                                </a>
+                              </Button>
+                            )}
+                            {parent.phoneNumber && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
+                                asChild
+                              >
+                                <a href={`sms:${parent.phoneNumber}`}>
+                                  <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
+                                </a>
+                              </Button>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -259,7 +285,8 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                     <div className="pt-4 border-t flex items-center justify-between">
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
                         <CalendarCheck className="h-3 w-3 text-primary" />
-                        <span>Verified Member</span>
+                        {/* L6: Show actual enrollment status rather than hardcoded "Verified Member" */}
+                        <span>Enrolled</span>
                       </div>
                       <Badge variant="outline" className="text-[10px] uppercase font-bold bg-secondary/30">
                         {enrollment.divisionId}

@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -235,39 +235,58 @@ export default function MasterRosterPage() {
     setIsImporting(true);
     let successCount = 0;
     let skipCount = 0;
+    let duplicateCount = 0;
 
     try {
+      // M5: Use writeBatch for atomic multi-document import
+      const batch = writeBatch(db);
+
       for (const row of importRows) {
         if (!row.firstName || !row.lastName || !row.teamName) { skipCount++; continue; }
 
         const matchedTeam = teams?.find((t) => t.name.toLowerCase() === row.teamName.toLowerCase());
         if (!matchedTeam) { skipCount++; continue; }
 
-        const matchedPlayer = players?.find(
+        // M2: Check for duplicate player names — skip ambiguous rows
+        const matchingPlayers = players?.filter(
           (p) =>
             p.firstName.toLowerCase() === row.firstName.toLowerCase() &&
             p.lastName.toLowerCase() === row.lastName.toLowerCase()
-        );
-        if (!matchedPlayer) { skipCount++; continue; }
+        ) ?? [];
+        if (matchingPlayers.length === 0) { skipCount++; continue; }
+        if (matchingPlayers.length > 1) { duplicateCount++; continue; } // M2: ambiguous match
 
-        const matchedEnrollment = enrollments?.find((e) => e.playerId === matchedPlayer.id);
+        const matchedPlayer = matchingPlayers[0];
+
+        // M3: Filter enrollments by the team's seasonId, not just any enrollment
+        const matchedEnrollment = enrollments?.find(
+          (e) => e.playerId === matchedPlayer.id && e.seasonId === matchedTeam.seasonId
+        );
         if (!matchedEnrollment) { skipCount++; continue; }
 
         const enrollmentRef = doc(db, 'userProfiles', matchedEnrollment.parentUserId, 'enrollments', matchedEnrollment.id);
         const updateData: Record<string, any> = { teamId: matchedTeam.id };
         if (row.jerseySize) updateData.jerseySize = row.jerseySize;
         if (row.jerseyNumber) updateData.jerseyNumber = row.jerseyNumber;
-        await updateDoc(enrollmentRef, updateData);
+        batch.update(enrollmentRef, updateData);
 
         // Sync team player_ids
         const teamRef = doc(db, 'teams', matchedTeam.id);
-        await updateDoc(teamRef, { player_ids: arrayUnion(matchedPlayer.id) });
+        batch.update(teamRef, { player_ids: arrayUnion(matchedPlayer.id) });
 
         successCount++;
       }
+
+      await batch.commit();
+
+      // M4: Show match rate summary
+      const parts: string[] = [`${successCount} of ${importRows.length} rows matched and assigned.`];
+      if (skipCount > 0) parts.push(`${skipCount} skipped (no match).`);
+      if (duplicateCount > 0) parts.push(`${duplicateCount} skipped (ambiguous duplicate name).`);
+
       toast({
         title: `Import Complete`,
-        description: `${successCount} player${successCount !== 1 ? 's' : ''} assigned.${skipCount > 0 ? ` ${skipCount} row${skipCount !== 1 ? 's' : ''} skipped (no match).` : ''}`,
+        description: parts.join(' '),
       });
       setImportOpen(false);
       setImportRows([]);

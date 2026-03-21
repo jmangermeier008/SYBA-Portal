@@ -133,7 +133,7 @@ export default function ParentSettingsPage() {
                         <p className="text-sm text-muted-foreground">{officer.title}</p>
                         {tip && <p className="text-[10px] text-muted-foreground/70">{tip}</p>}
                       </div>
-                      <p className="text-sm font-semibold">{officer.name ?? <span className="text-muted-foreground italic font-normal">TBA</span>}</p>
+                      <p className="text-sm font-semibold">{officer.name ? officer.name : <span className="text-muted-foreground italic font-normal">TBA</span>}</p>
                     </div>
                   );
                 })}

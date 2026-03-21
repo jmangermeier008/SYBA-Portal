@@ -5,6 +5,7 @@ import { use } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -78,10 +79,56 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
 
   const team = allTeams?.find(t => t.id === teamId);
 
-  if (loadingEnrollments) {
+  // C4: Only show the directory if the current user has an enrollment on this team
+  const userEnrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid), where('teamId', '==', teamId));
+  }, [db, user, teamId]);
+  const { data: userEnrollments, isLoading: loadingUserEnrollments } = useCollection<{ id: string }>(userEnrollmentsQuery);
+  const isAuthorized = (userEnrollments?.length ?? 0) > 0;
+
+  if (loadingEnrollments || loadingUserEnrollments) {
     return (
       <div className="flex min-h-screen bg-background items-center justify-center">
         <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // M19: Show "Team not found" when allTeams has loaded but this teamId doesn't exist
+  if (allTeams && !allTeams.find(t => t.id === teamId)) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <Users className="h-12 w-12 text-muted-foreground mx-auto" />
+            <h2 className="text-xl font-bold font-headline">Team Not Found</h2>
+            <p className="text-muted-foreground">This team link may be invalid or the team has been removed.</p>
+            <Button variant="outline" asChild>
+              <Link href="/parent/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Teams</Link>
+            </Button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // C4: Block access if user has no enrollment on this team
+  if (!isAuthorized) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <AlertTriangle className="h-12 w-12 text-destructive mx-auto" />
+            <h2 className="text-xl font-bold font-headline">Access Denied</h2>
+            <p className="text-muted-foreground">You do not have a player enrolled on this team.</p>
+            <Button variant="outline" asChild>
+              <Link href="/parent/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Teams</Link>
+            </Button>
+          </div>
+        </main>
       </div>
     );
   }
@@ -152,26 +199,31 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
                       
                       {(isOwnFamily || parent?.shareContactInfo) ? (
                         <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
-                            asChild
-                          >
-                            <a href={`tel:${parent?.phoneNumber}`}>
-                              <Phone className="mr-2 h-3 w-3 text-primary" /> Call
-                            </a>
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
-                            asChild
-                          >
-                            <a href={`mailto:${parent?.email}`}>
-                              <Mail className="mr-2 h-3 w-3 text-primary" /> Email
-                            </a>
-                          </Button>
+                          {/* M7: Only render contact links if the field is non-null */}
+                          {parent?.phoneNumber && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
+                              asChild
+                            >
+                              <a href={`tel:${parent.phoneNumber}`}>
+                                <Phone className="mr-2 h-3 w-3 text-primary" /> Call
+                              </a>
+                            </Button>
+                          )}
+                          {parent?.email && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
+                              asChild
+                            >
+                              <a href={`mailto:${parent.email}`}>
+                                <Mail className="mr-2 h-3 w-3 text-primary" /> Email
+                              </a>
+                            </Button>
+                          )}
                         </div>
                       ) : (
                         <div className="py-2 px-3 bg-muted/50 rounded-lg flex items-center justify-center gap-2">
