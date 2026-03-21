@@ -349,9 +349,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <SelectValue placeholder="Choose a child" />
                   </SelectTrigger>
                   <SelectContent>
-                    {players?.map(p => (
+                    {players && players.length > 0 ? players.map(p => (
                       <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>
-                    ))}
+                    )) : (
+                      <div className="px-3 py-2 text-sm text-muted-foreground italic">No players added yet. Add a player from your dashboard first.</div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -366,9 +368,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <SelectValue placeholder="Choose Season" />
                   </SelectTrigger>
                   <SelectContent>
-                    {seasons?.map(s => (
+                    {seasons && seasons.length > 0 ? seasons.map(s => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
+                    )) : (
+                      <div className="px-3 py-2 text-sm text-muted-foreground italic">No active seasons available. Check back soon.</div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -384,6 +388,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <SelectValue placeholder="Select Division" />
                   </SelectTrigger>
                   <SelectContent>
+                    {divisions && divisions.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground italic">No divisions available for this season.</div>
+                    )}
                     {divisions?.map(d => {
                       const isFull = d.capacity != null && (d.registeredCount ?? 0) >= d.capacity;
                       const isClosed = isFull && !d.waitlistEnabled;

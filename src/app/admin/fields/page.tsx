@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, addDoc, updateDoc, deleteDoc, arrayUnion } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, deleteDoc, arrayUnion, getDocs, query, where } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,6 +89,17 @@ export default function FieldManagementPage() {
     if (!deleteDialog.field || !db) return;
     setDeleting(true);
     try {
+      // H5: Check if any games reference this field before deleting
+      const gamesSnap = await getDocs(query(collection(db, 'games'), where('fieldId', '==', deleteDialog.field.id)));
+      if (!gamesSnap.empty) {
+        toast({
+          title: 'Cannot Delete Field',
+          description: `This field is used by ${gamesSnap.size} game${gamesSnap.size !== 1 ? 's' : ''}. Remove or reassign those games first.`,
+          variant: 'destructive',
+        });
+        setDeleting(false);
+        return;
+      }
       await deleteDoc(doc(db, 'fields', deleteDialog.field.id));
       toast({ title: 'Field Deleted', description: `${deleteDialog.field.name} has been removed.` });
       setDeleteDialog({ open: false, field: null });

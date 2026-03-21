@@ -6,6 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dumbbell, Clock, Users, ChevronDown, ChevronUp } from 'lucide-react';
 
+// L5: Drills are currently stored as a static array. When the library grows, consider
+// migrating to a Firestore 'drills' collection to support admin-managed content, custom drills,
+// and per-team favorites. Each document would mirror the shape of the objects below.
 const DRILLS = [
   {
     id: '1',

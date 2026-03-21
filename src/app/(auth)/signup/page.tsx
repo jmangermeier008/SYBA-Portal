@@ -16,6 +16,24 @@ import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 
+// H3: Map Firebase Auth error codes to user-friendly messages
+function getAuthErrorMessage(code: string): string {
+  switch (code) {
+    case 'auth/email-already-in-use':
+      return 'An account with this email already exists. Try logging in instead.';
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password must be at least 6 characters long.';
+    case 'auth/network-request-failed':
+      return 'Network error. Check your connection and try again.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a moment and try again.';
+    default:
+      return 'Sign up failed. Please try again.';
+  }
+}
+
 export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,22 +50,43 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
 
+    let createdUser: import('firebase/auth').User | null = null;
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
+      createdUser = userCredential.user;
 
       const profileData = {
-        id: user.uid,
-        email: user.email,
+        id: createdUser.uid,
+        email: createdUser.email,
         displayName: displayName,
-        role: role, // Now using the selected role
+        role: role,
+        roles: [role],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      const userRef = doc(db, 'userProfiles', user.uid);
-      
-      await setDoc(userRef, profileData);
+      const userRef = doc(db, 'userProfiles', createdUser.uid);
+
+      // H2: Wrap Firestore write so we can clean up the Auth user if it fails
+      try {
+        await setDoc(userRef, profileData);
+      } catch (firestoreError: any) {
+        // Firestore write failed — delete the Auth account to avoid orphaned auth
+        await createdUser.delete().catch(() => {});
+        if (firestoreError.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: userRef.path,
+            operation: 'create'
+          }));
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Account Creation Failed",
+            description: "Could not save your profile. Please try again.",
+          });
+        }
+        return;
+      }
 
       toast({
         title: "Account created!",
@@ -64,8 +103,8 @@ export default function SignupPage() {
       } else {
         toast({
           variant: "destructive",
-          title: "Error",
-          description: error.message,
+          title: "Sign Up Failed",
+          description: getAuthErrorMessage(error.code),
         });
       }
     } finally {

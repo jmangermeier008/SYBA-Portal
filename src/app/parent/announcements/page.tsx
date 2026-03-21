@@ -24,7 +24,12 @@ export default function ParentAnnouncementsPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    localStorage.setItem('syba_announcements_last_read', Date.now().toString());
+    // L4: Wrap in try/catch — localStorage may be unavailable in private browsing or restricted contexts
+    try {
+      localStorage.setItem('syba_announcements_last_read', Date.now().toString());
+    } catch {
+      // Silently ignore if localStorage is unavailable
+    }
   }, []);
 
   const announcementsQuery = useMemoFirebase(() => {
@@ -34,8 +39,12 @@ export default function ParentAnnouncementsPage() {
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 
+  // M6: Stable sort — pinned first, then by date descending
   const sorted = announcements
-    ? [...announcements].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
+    ? [...announcements].sort((a, b) => {
+        if (b.pinned !== a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+        return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+      })
     : [];
 
   const filtered = searchQuery.trim()

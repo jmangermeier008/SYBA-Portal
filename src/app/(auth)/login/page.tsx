@@ -15,6 +15,26 @@ import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 
+// H3: Map Firebase Auth error codes to user-friendly messages
+function getAuthErrorMessage(code: string): string {
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Invalid email or password. Please try again.';
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled. Contact support.';
+    case 'auth/too-many-requests':
+      return 'Too many failed attempts. Please wait a moment and try again.';
+    case 'auth/network-request-failed':
+      return 'Network error. Check your connection and try again.';
+    default:
+      return 'Login failed. Please try again.';
+  }
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,7 +57,9 @@ export default function LoginPage() {
 
       if (docSnap.exists()) {
         const userData = docSnap.data();
-        router.push(`/${userData.role.toLowerCase()}/dashboard`);
+        // H1: Support multi-role users — use first role from roles array, fall back to legacy role field
+        const primaryRole = (userData.roles?.[0] ?? userData.role) as string;
+        router.push(`/${primaryRole.toLowerCase().replace(/\s+/g, '-')}/dashboard`);
       } else {
         // If profile doesn't exist, we might be in an inconsistent state
         toast({
@@ -56,7 +78,7 @@ export default function LoginPage() {
         toast({
           variant: "destructive",
           title: "Login Failed",
-          description: error.message,
+          description: getAuthErrorMessage(error.code),
         });
       }
     } finally {

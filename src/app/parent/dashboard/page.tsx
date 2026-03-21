@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { format } from 'date-fns';
@@ -45,6 +45,7 @@ export default function ParentDashboard({
   const db = useFirestore();
   const { toast } = useToast();
   const [rsvpLoading, setRsvpLoading] = useState(false);
+  const [resumingPayment, setResumingPayment] = useState(false);
 
   // Real player count
   const playersQuery = useMemoFirebase(() => {
@@ -58,16 +59,47 @@ export default function ParentDashboard({
     if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user?.uid]);
-  const { data: enrollments } = useCollection<{ playerId: string; teamId?: string; paymentStatus?: string }>(enrollmentsQuery);
+  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number }>(enrollmentsQuery);
 
   const firstTeamId = enrollments?.find(e => e.teamId)?.teamId;
   const firstPlayerId = players?.[0]?.id;
 
   // Enrollment status logic
   const hasEnrollments = (enrollments?.length ?? 0) > 0;
-  const hasPendingPayment = enrollments?.some(e =>
-    ['pending', 'pending_payment'].includes(e.paymentStatus ?? '')
+  const pendingEnrollment = enrollments?.find(e =>
+    ['pending', 'pending_payment'].includes(e.paymentStatus ?? e.payment_status ?? '')
   );
+  const hasPendingPayment = !!pendingEnrollment;
+
+  // H9: Resume Payment — re-initiate Stripe checkout for a pending_payment enrollment
+  const handleResumePayment = async () => {
+    if (!user || !pendingEnrollment) return;
+    setResumingPayment(true);
+    try {
+      const idToken = await user.getIdToken();
+      const resp = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+        body: JSON.stringify({
+          enrollmentId: pendingEnrollment.id,
+          userId: user.uid,
+          fee: pendingEnrollment.registrationFeeAmount ?? 0,
+          divisionName: pendingEnrollment.divisionId ?? '',
+          playerName: players?.[0] ? `Player` : 'Player',
+        }),
+      });
+      const data = await resp.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast({ variant: 'destructive', title: 'Checkout Error', description: data.error || 'Could not resume payment.' });
+      }
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Error', description: err.message });
+    } finally {
+      setResumingPayment(false);
+    }
+  };
 
   // Next upcoming game for first assigned team
   const now = new Date().toISOString();
@@ -91,8 +123,12 @@ export default function ParentDashboard({
     return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
   }, [db, firstTeamId, nextGame?.id]);
   const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string }>(rsvpsQuery);
-  const currentRsvp = firstPlayerId
-    ? rsvps?.find(r => r.id === `${firstPlayerId}_${nextGame?.id}` || r.playerId === firstPlayerId)
+  // H12: Fix RSVP status — use && to ensure both conditions match, and guard on gameId
+  const currentRsvp = firstPlayerId && nextGame
+    ? rsvps?.find(r =>
+        (r.id === `${firstPlayerId}_${nextGame.id}` || r.playerId === firstPlayerId) &&
+        r.gameId === nextGame.id
+      )
     : undefined;
 
   const handleDashboardRSVP = async (status: 'Attending' | 'Maybe' | 'Not Attending') => {
@@ -304,9 +340,18 @@ export default function ParentDashboard({
               <CardContent className="flex flex-col items-center justify-center py-8 text-center">
                 <AlertCircle className="h-12 w-12 text-amber-500 mb-4" />
                 <h3 className="font-semibold mb-1 text-amber-700">Payment Required</h3>
-                <p className="text-sm text-muted-foreground mb-6">You have an enrollment with a pending payment.</p>
-                <Button asChild className="rounded-full px-8 bg-amber-500 hover:bg-amber-600">
-                  <Link href="/parent/enroll">Complete Payment</Link>
+                <p className="text-sm text-muted-foreground mb-6">You have an enrollment with a pending payment. Resume checkout to complete registration.</p>
+                {/* H9: Resume Payment — re-initiates Stripe checkout for the pending enrollment */}
+                <Button
+                  className="rounded-full px-8 bg-amber-500 hover:bg-amber-600"
+                  onClick={handleResumePayment}
+                  disabled={resumingPayment}
+                >
+                  {resumingPayment
+                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    : <CreditCard className="mr-2 h-4 w-4" />
+                  }
+                  Resume Payment
                 </Button>
               </CardContent>
             </Card>

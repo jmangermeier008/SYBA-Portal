@@ -1,22 +1,3 @@
-export const OFFICERS = [
-  { title: 'President', name: 'John Heutsche' },
-  { title: 'Vice President', name: 'Tom Roskos' },
-  { title: 'Treasurer', name: 'Don Nelson' },
-  { title: 'Secretary', name: 'Russ Adkins' },
-];
-
-export const COORDINATORS = [
-  { title: 'Building/Grounds Committee Chair', name: null },
-  { title: 'Competition Committee Chair', name: null },
-  { title: 'Finance Committee Chair', name: null },
-  { title: 'Equipment Coordinator', name: null },
-  { title: 'Umpire Coordinator', name: null },
-  { title: 'Tee Ball Coordinator', name: null },
-  { title: 'Coach Pitch Coordinator', name: null },
-  { title: 'Kid Pitch Coordinator', name: null },
-  { title: 'Senior Division Coordinator', name: null },
-];
-
 export const OFFICER_TITLES = [
   'President',
   'Vice President',
@@ -34,3 +15,27 @@ export const OFFICER_TITLES = [
 ] as const;
 
 export type OfficerTitle = typeof OFFICER_TITLES[number];
+
+export interface OfficerEntry {
+  title: OfficerTitle;
+  name: string | null;
+}
+
+export const OFFICERS: OfficerEntry[] = [
+  { title: 'President', name: 'John Heutsche' },
+  { title: 'Vice President', name: 'Tom Roskos' },
+  { title: 'Treasurer', name: 'Don Nelson' },
+  { title: 'Secretary', name: 'Russ Adkins' },
+];
+
+export const COORDINATORS: OfficerEntry[] = [
+  { title: 'Building/Grounds Committee Chair', name: null },
+  { title: 'Competition Committee Chair', name: null },
+  { title: 'Finance Committee Chair', name: null },
+  { title: 'Equipment Coordinator', name: null },
+  { title: 'Umpire Coordinator', name: null },
+  { title: 'Tee Ball Coordinator', name: null },
+  { title: 'Coach Pitch Coordinator', name: null },
+  { title: 'Kid Pitch Coordinator', name: null },
+  { title: 'Senior Division Coordinator', name: null },
+];

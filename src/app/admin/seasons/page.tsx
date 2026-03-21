@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Trophy, Calendar, Loader2, Trash2, Lock } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -45,6 +45,14 @@ export default function SeasonsAdminPage() {
   const handleCreateSeason = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsAdding(true);
+
+    // M13: Check for duplicate season names
+    const duplicate = seasons?.find(s => s.name.trim().toLowerCase() === formData.name.trim().toLowerCase());
+    if (duplicate) {
+      toast({ variant: "destructive", title: "Duplicate Season", description: `A season named "${formData.name}" already exists.` });
+      setIsAdding(false);
+      return;
+    }
 
     const seasonId = formData.name.toLowerCase().replace(/\s+/g, '-');
     const seasonRef = doc(db, 'seasons', seasonId);
@@ -90,6 +98,17 @@ export default function SeasonsAdminPage() {
   const handleDeleteSeason = async (id: string) => {
     if (!confirm("Are you sure? This will delete the season and all its divisions.")) return;
     try {
+      // H4: Check for enrollments referencing this season before deleting
+      const enrollmentsSnap = await getDocs(query(collectionGroup(db, 'enrollments'), where('seasonId', '==', id)));
+      if (!enrollmentsSnap.empty) {
+        toast({
+          variant: "destructive",
+          title: "Cannot Delete Season",
+          description: `This season has ${enrollmentsSnap.size} active enrollment${enrollmentsSnap.size !== 1 ? 's' : ''}. Remove all enrollments before deleting.`,
+        });
+        return;
+      }
+
       // Cascade-delete all division subcollection documents first
       const divisionsSnapshot = await getDocs(collection(db, 'seasons', id, 'divisions'));
       await Promise.all(

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where, Timestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import {
   Plus,
@@ -159,6 +159,10 @@ export default function AdminGamesPage() {
       toast({ title: 'Missing teams', description: 'Games require a home team and away team.', variant: 'destructive' });
       return;
     }
+    if (form.type === 'game' && form.homeTeamId === form.awayTeamId) {
+      toast({ title: 'Invalid teams', description: 'Home team and away team cannot be the same.', variant: 'destructive' });
+      return;
+    }
     if (form.type === 'practice' && !form.teamId) {
       toast({ title: 'Missing team', description: 'Practices require a team.', variant: 'destructive' });
       return;
@@ -215,6 +219,8 @@ export default function AdminGamesPage() {
     if (!db || importRows.length === 0) return;
     setIsImporting(true);
     try {
+      // M5: Use writeBatch for atomic multi-document import (max 500 writes per batch)
+      const batch = writeBatch(db);
       for (const row of importRows) {
         const id = crypto.randomUUID();
         const isGame = row.type.toLowerCase() === 'game';
@@ -240,8 +246,9 @@ export default function AdminGamesPage() {
           payload.teamId = team?.id ?? '';
           payload.teamName = team?.name ?? row.teamName ?? '';
         }
-        await setDoc(doc(db, 'games', id), payload);
+        batch.set(doc(db, 'games', id), payload);
       }
+      await batch.commit();
       toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}`, description: 'Schedule updated successfully.' });
       setImportOpen(false);
       setImportRows([]);

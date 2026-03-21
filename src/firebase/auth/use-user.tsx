@@ -78,7 +78,7 @@ export function useUser() {
   const isAdmin = roles.includes('Admin');
   const isBoardMember = roles.includes('Board Member') || isAdmin;
   const isCoach = roles.includes('Coach') || isAdmin;
-  const isParent = roles.includes('Parent');
+  const isParent = roles.includes('Parent') || isAdmin;
 
   return {
     user,

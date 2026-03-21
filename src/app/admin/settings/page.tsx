@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { Settings, Save, Bell, CreditCard, Lock } from 'lucide-react';
+import { Settings, Save, Bell, CreditCard, Lock, Construction } from 'lucide-react';
 
 export default function AdminSettingsPage() {
   return (
@@ -14,8 +14,13 @@ export default function AdminSettingsPage() {
       <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Global System Settings</h1>
-          <p className="text-muted-foreground">Configure association-wide parameters and security.</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold font-headline">Global System Settings</h1>
+            <span className="flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">
+              <Construction className="h-3 w-3" /> Coming Soon
+            </span>
+          </div>
+          <p className="text-muted-foreground">Configure association-wide parameters and security. Settings below are read-only previews.</p>
         </header>
 
         <div className="grid gap-8 max-w-4xl">
@@ -90,7 +95,7 @@ export default function AdminSettingsPage() {
                 </div>
                 <Switch defaultChecked />
               </div>
-              <Button className="w-full rounded-xl">
+              <Button className="w-full rounded-xl" disabled title="Settings management coming in a future release">
                 <Save className="mr-2 h-4 w-4" /> Save System Settings
               </Button>
             </CardContent>
