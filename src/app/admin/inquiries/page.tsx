@@ -182,7 +182,9 @@ export default function AdminInquiriesPage() {
         )}
 
         <InquiryDetailDialog
-          inquiry={selectedInquiry}
+          inquiry={selectedInquiry && inquiries
+            ? (inquiries.find(i => i.id === selectedInquiry.id) ?? selectedInquiry)
+            : selectedInquiry}
           open={dialogOpen}
           onOpenChange={setDialogOpen}
         />
