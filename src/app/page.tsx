@@ -6,7 +6,8 @@ import { useEffect, use } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Trophy, Users, Calendar, ArrowRight } from 'lucide-react';
+import { Trophy, Users, Calendar, ArrowRight, User as UserIcon } from 'lucide-react';
+import { OFFICERS, COORDINATORS } from '@/data/officers';
 
 export default function Home({
   params,
@@ -121,6 +122,54 @@ export default function Home({
                 <h3 className="text-xl font-bold font-headline">Game Schedules</h3>
                 <p className="text-muted-foreground">Real-time access to practice times, game locations, and league-wide events for all divisions.</p>
               </div>
+            </div>
+          </div>
+        </section>
+        {/* Our Leadership */}
+        <section className="w-full py-12 md:py-20 bg-gradient-to-b from-white to-blue-50">
+          <div className="container px-4 md:px-6 mx-auto">
+            <div className="text-center mb-10">
+              <div className="inline-block rounded-lg bg-primary/10 px-3 py-1 text-sm font-semibold text-primary mb-3">
+                Our Leadership
+              </div>
+              <h2 className="text-3xl font-bold font-headline tracking-tight">Meet the Board</h2>
+              <p className="text-muted-foreground mt-2 max-w-xl mx-auto">
+                SYBA is run by dedicated volunteers from the Sharpsville community.
+              </p>
+            </div>
+
+            {/* Named Officers */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+              {OFFICERS.map((officer) => (
+                <div key={officer.title} className="flex flex-col items-center text-center p-5 bg-white rounded-2xl shadow-sm border border-primary/10">
+                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl mb-3">
+                    {officer.name ? officer.name[0] : <UserIcon className="h-6 w-6" />}
+                  </div>
+                  <p className="font-bold text-sm">{officer.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{officer.title}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Coordinators */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {COORDINATORS.map((coord) => (
+                <div key={coord.title} className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-slate-100 shadow-sm">
+                  <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                    {coord.name ? (
+                      <span className="text-sm font-bold text-slate-500">{coord.name[0]}</span>
+                    ) : (
+                      <UserIcon className="h-4 w-4 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-700 truncate">{coord.title}</p>
+                    <p className={`text-xs truncate ${coord.name ? 'text-slate-600' : 'text-slate-400 italic'}`}>
+                      {coord.name ?? 'TBA'}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </section>

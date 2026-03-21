@@ -10,8 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useUser, useFirestore } from '@/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail } from 'lucide-react';
+import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { OFFICERS } from '@/data/officers';
 
 export default function ParentSettingsPage() {
   const { user, profile } = useUser();
@@ -105,6 +106,37 @@ export default function ParentSettingsPage() {
                     readOnly 
                   />
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* League Contacts */}
+          <Card className="border-none shadow-md">
+            <CardHeader>
+              <div className="flex items-center gap-2 text-primary">
+                <Users className="h-5 w-5" />
+                <CardTitle className="text-xl">League Leadership</CardTitle>
+              </div>
+              <CardDescription>Contact information for SYBA board members.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="divide-y">
+                {OFFICERS.map((officer) => {
+                  const tips: Record<string, string> = {
+                    'Treasurer': 'Payment questions',
+                    'Secretary': 'Registration questions',
+                  };
+                  const tip = tips[officer.title];
+                  return (
+                    <div key={officer.title} className="flex items-center justify-between py-3">
+                      <div>
+                        <p className="text-sm text-muted-foreground">{officer.title}</p>
+                        {tip && <p className="text-[10px] text-muted-foreground/70">{tip}</p>}
+                      </div>
+                      <p className="text-sm font-semibold">{officer.name ?? <span className="text-muted-foreground italic font-normal">TBA</span>}</p>
+                    </div>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

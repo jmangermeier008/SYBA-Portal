@@ -20,9 +20,20 @@ import {
   MapPin,
   Users,
   Trophy,
+  Upload,
+  Download,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
+import {
+  parseGameScheduleCSV,
+  validateGameRows,
+  downloadGameTemplate,
+  type ParsedGame,
+  type ValidationError,
+} from '@/lib/csv-import';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,6 +98,12 @@ export default function AdminGamesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [showPast, setShowPast] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // CSV Import state
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ParsedGame[]>([]);
+  const [importErrors, setImportErrors] = useState<ValidationError[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -181,6 +198,61 @@ export default function AdminGamesPage() {
     }
   };
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const parsed = parseGameScheduleCSV(text);
+    const teamNames = (teams ?? []).map((t) => t.name);
+    const fieldNames = (fields ?? []).map((f) => f.name);
+    const result = validateGameRows(parsed, teamNames, fieldNames);
+    setImportRows(result.valid);
+    setImportErrors(result.errors);
+    e.target.value = '';
+  };
+
+  const handleImport = async () => {
+    if (!db || importRows.length === 0) return;
+    setIsImporting(true);
+    try {
+      for (const row of importRows) {
+        const id = crypto.randomUUID();
+        const isGame = row.type.toLowerCase() === 'game';
+        const matchedField = (fields ?? []).find((f) => f.name.toLowerCase() === row.field.toLowerCase());
+        const payload: Record<string, any> = {
+          type: isGame ? 'game' : 'practice',
+          date: row.date,
+          time: row.time,
+          fieldId: matchedField?.id ?? '',
+          fieldName: matchedField?.name ?? row.field,
+          notes: row.notes ?? '',
+          createdAt: Timestamp.now(),
+        };
+        if (isGame) {
+          const home = (teams ?? []).find((t) => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
+          const away = (teams ?? []).find((t) => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
+          payload.homeTeamId = home?.id ?? '';
+          payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
+          payload.awayTeamId = away?.id ?? '';
+          payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
+        } else {
+          const team = (teams ?? []).find((t) => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
+          payload.teamId = team?.id ?? '';
+          payload.teamName = team?.name ?? row.teamName ?? '';
+        }
+        await setDoc(doc(db, 'games', id), payload);
+      }
+      toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}`, description: 'Schedule updated successfully.' });
+      setImportOpen(false);
+      setImportRows([]);
+      setImportErrors([]);
+    } catch (err: any) {
+      toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (!db) return;
     deleteDocumentNonBlocking(doc(db, 'games', id));
@@ -243,7 +315,7 @@ export default function AdminGamesPage() {
             <p className="text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="relative">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
               <Input
@@ -253,6 +325,10 @@ export default function AdminGamesPage() {
                 className="pl-9 rounded-xl w-48"
               />
             </div>
+
+            <Button variant="outline" className="rounded-full px-5" onClick={() => setImportOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" /> Import Schedule
+            </Button>
 
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -439,6 +515,91 @@ export default function AdminGamesPage() {
           </Card>
         )}
       </main>
+
+      {/* CSV Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={(o) => { if (!isImporting) { setImportOpen(o); if (!o) { setImportRows([]); setImportErrors([]); } } }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-headline">Import Game Schedule</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
+              <p className="text-sm text-muted-foreground">Download the CSV template to see the required format.</p>
+              <Button variant="outline" size="sm" className="rounded-xl" onClick={downloadGameTemplate}>
+                <Download className="mr-2 h-3 w-3" /> Template
+              </Button>
+            </div>
+
+            <div>
+              <Label className="text-sm font-medium">Upload CSV File</Label>
+              <label className="mt-2 flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
+                <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+                <span className="text-sm text-muted-foreground">Click to select a .csv file</span>
+                <input type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
+              </label>
+            </div>
+
+            {importErrors.length > 0 && (
+              <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 space-y-1 max-h-32 overflow-y-auto">
+                <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5" /> {importErrors.length} validation error{importErrors.length !== 1 ? 's' : ''}
+                </p>
+                {importErrors.map((err, i) => (
+                  <p key={i} className="text-xs text-destructive/80">Row {err.row} · {err.column}: {err.message}</p>
+                ))}
+              </div>
+            )}
+
+            {importRows.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> {importRows.length} valid row{importRows.length !== 1 ? 's' : ''} ready to import
+                </p>
+                <div className="rounded-xl border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-secondary/30">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold">Date</th>
+                        <th className="px-3 py-2 text-left font-semibold">Time</th>
+                        <th className="px-3 py-2 text-left font-semibold">Type</th>
+                        <th className="px-3 py-2 text-left font-semibold">Teams / Team</th>
+                        <th className="px-3 py-2 text-left font-semibold">Field</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importRows.slice(0, 5).map((row, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="px-3 py-1.5">{row.date}</td>
+                          <td className="px-3 py-1.5">{row.time}</td>
+                          <td className="px-3 py-1.5 capitalize">{row.type}</td>
+                          <td className="px-3 py-1.5">
+                            {row.type.toLowerCase() === 'game'
+                              ? `${row.homeTeam} vs ${row.awayTeam}`
+                              : row.teamName}
+                          </td>
+                          <td className="px-3 py-1.5">{row.field}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importRows.length > 5 && (
+                    <p className="text-xs text-muted-foreground text-center py-2 border-t">
+                      +{importRows.length - 5} more rows not shown
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={isImporting}>Cancel</Button>
+            <Button onClick={handleImport} disabled={isImporting || importRows.length === 0}>
+              {isImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+              Import {importRows.length > 0 ? `${importRows.length} Item${importRows.length !== 1 ? 's' : ''}` : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
