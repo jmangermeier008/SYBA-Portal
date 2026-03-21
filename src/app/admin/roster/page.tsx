@@ -13,11 +13,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { parseRosterCSV, downloadRosterTemplate, type ParsedRosterRow } from '@/lib/csv-import';
 
 interface Enrollment {
   id: string;
@@ -62,6 +63,11 @@ export default function MasterRosterPage() {
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Import roster state
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ParsedRosterRow[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Waiver dialog state
   const [waiverDialog, setWaiverDialog] = useState<{
@@ -215,6 +221,63 @@ export default function MasterRosterPage() {
     }
   };
 
+  const handleRosterFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const parsed = parseRosterCSV(text);
+    setImportRows(parsed);
+    e.target.value = '';
+  };
+
+  const handleRosterImport = async () => {
+    if (!db || importRows.length === 0) return;
+    setIsImporting(true);
+    let successCount = 0;
+    let skipCount = 0;
+
+    try {
+      for (const row of importRows) {
+        if (!row.firstName || !row.lastName || !row.teamName) { skipCount++; continue; }
+
+        const matchedTeam = teams?.find((t) => t.name.toLowerCase() === row.teamName.toLowerCase());
+        if (!matchedTeam) { skipCount++; continue; }
+
+        const matchedPlayer = players?.find(
+          (p) =>
+            p.firstName.toLowerCase() === row.firstName.toLowerCase() &&
+            p.lastName.toLowerCase() === row.lastName.toLowerCase()
+        );
+        if (!matchedPlayer) { skipCount++; continue; }
+
+        const matchedEnrollment = enrollments?.find((e) => e.playerId === matchedPlayer.id);
+        if (!matchedEnrollment) { skipCount++; continue; }
+
+        const enrollmentRef = doc(db, 'userProfiles', matchedEnrollment.parentUserId, 'enrollments', matchedEnrollment.id);
+        const updateData: Record<string, any> = { teamId: matchedTeam.id };
+        if (row.jerseySize) updateData.jerseySize = row.jerseySize;
+        if (row.jerseyNumber) updateData.jerseyNumber = row.jerseyNumber;
+        await updateDoc(enrollmentRef, updateData);
+
+        // Sync team player_ids
+        const teamRef = doc(db, 'teams', matchedTeam.id);
+        await updateDoc(teamRef, { player_ids: arrayUnion(matchedPlayer.id) });
+
+        successCount++;
+      }
+      toast({
+        title: `Import Complete`,
+        description: `${successCount} player${successCount !== 1 ? 's' : ''} assigned.${skipCount > 0 ? ` ${skipCount} row${skipCount !== 1 ? 's' : ''} skipped (no match).` : ''}`,
+      });
+      setImportOpen(false);
+      setImportRows([]);
+    } catch (err: any) {
+      toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const exportRosterCSV = () => {
     if (!filteredEnrollments || filteredEnrollments.length === 0) return;
 
@@ -284,9 +347,14 @@ export default function MasterRosterPage() {
             <h1 className="text-3xl font-bold font-headline">Master Roster Center</h1>
             <p className="text-muted-foreground">Manage league assignments and track registration compliance.</p>
           </div>
-          <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!filteredEnrollments?.length}>
-            <Download className="mr-2 h-4 w-4" /> Export for Uniforms
-          </Button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" /> Import Assignments
+            </Button>
+            <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!filteredEnrollments?.length}>
+              <Download className="mr-2 h-4 w-4" /> Export for Uniforms
+            </Button>
+          </div>
         </header>
 
         <Card className="border-none shadow-md mb-8">
@@ -485,6 +553,90 @@ export default function MasterRosterPage() {
             <Button onClick={handleConfirmWaiver} disabled={waiverDialog.loading} className="bg-emerald-600 hover:bg-emerald-700">
               {waiverDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
               Confirm Waiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Roster Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={(o) => { if (!isImporting) { setImportOpen(o); if (!o) setImportRows([]); } }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-headline">Import Team Assignments</DialogTitle>
+            <DialogDescription>
+              Upload a CSV matching players to teams by first and last name. Unmatched rows will be skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
+              <p className="text-sm text-muted-foreground">Download the template to see the required column format.</p>
+              <Button variant="outline" size="sm" className="rounded-xl" onClick={downloadRosterTemplate}>
+                <Download className="mr-2 h-3 w-3" /> Template
+              </Button>
+            </div>
+
+            <div>
+              <Label className="text-sm font-medium">Upload CSV File</Label>
+              <label className="mt-2 flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
+                <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+                <span className="text-sm text-muted-foreground">Click to select a .csv file</span>
+                <input type="file" accept=".csv" className="hidden" onChange={handleRosterFileSelect} />
+              </label>
+            </div>
+
+            {importRows.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-2">
+                  {importRows.length} row{importRows.length !== 1 ? 's' : ''} loaded — preview (first 5):
+                </p>
+                <div className="rounded-xl border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-secondary/30">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold">First Name</th>
+                        <th className="px-3 py-2 text-left font-semibold">Last Name</th>
+                        <th className="px-3 py-2 text-left font-semibold">Team</th>
+                        <th className="px-3 py-2 text-left font-semibold">Matched</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importRows.slice(0, 5).map((row, i) => {
+                        const matchedPlayer = players?.find(
+                          (p) =>
+                            p.firstName.toLowerCase() === row.firstName.toLowerCase() &&
+                            p.lastName.toLowerCase() === row.lastName.toLowerCase()
+                        );
+                        const matchedTeam = teams?.find((t) => t.name.toLowerCase() === row.teamName.toLowerCase());
+                        const matched = !!matchedPlayer && !!matchedTeam;
+                        return (
+                          <tr key={i} className="border-t">
+                            <td className="px-3 py-1.5">{row.firstName}</td>
+                            <td className="px-3 py-1.5">{row.lastName}</td>
+                            <td className="px-3 py-1.5">{row.teamName}</td>
+                            <td className="px-3 py-1.5">
+                              {matched
+                                ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                                : <AlertCircle className="h-3.5 w-3.5 text-yellow-500" />}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {importRows.length > 5 && (
+                    <p className="text-xs text-muted-foreground text-center py-2 border-t">
+                      +{importRows.length - 5} more rows not shown
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={isImporting}>Cancel</Button>
+            <Button onClick={handleRosterImport} disabled={isImporting || importRows.length === 0}>
+              {isImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+              Import Assignments
             </Button>
           </DialogFooter>
         </DialogContent>
