@@ -37,6 +37,26 @@ function normalizeEmail(raw: string): string {
   return email;
 }
 
+export async function GET() {
+  const keySet = !!process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  let firestoreOk = false;
+  let firestoreError = '';
+  if (keySet) {
+    try {
+      const db = getAdminFirestore();
+      await db.collection('inquiries').limit(1).get();
+      firestoreOk = true;
+    } catch (e: any) {
+      firestoreError = e.message;
+    }
+  }
+  return NextResponse.json({
+    ok: keySet && firestoreOk,
+    FIREBASE_SERVICE_ACCOUNT_KEY: keySet ? 'set' : 'MISSING',
+    firestore: firestoreOk ? 'connected' : `error: ${firestoreError}`,
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -46,6 +66,8 @@ export async function POST(req: Request) {
     const toRaw: string | string[] = body.to ?? '';
     const subject: string = body.subject ?? '(no subject)';
     const text: string = body.text ?? body.html ?? '(no message body)';
+
+    console.log('[inbound-email] Webhook called', { from: fromRaw, to: toRaw, subject });
 
     const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw);
 
