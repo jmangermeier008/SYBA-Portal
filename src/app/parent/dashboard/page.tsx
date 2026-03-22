@@ -12,6 +12,9 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
+import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import type { CalendarEvent } from '@/types/scheduling';
 
 function useCountdown(targetDate: string | undefined) {
   const [label, setLabel] = useState('');
@@ -46,6 +49,7 @@ export default function ParentDashboard({
   const { toast } = useToast();
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [resumingPayment, setResumingPayment] = useState(false);
+  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
 
   // Real player count
   const playersQuery = useMemoFirebase(() => {
@@ -115,6 +119,15 @@ export default function ParentDashboard({
   const { data: nextGames, isLoading: loadingGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(nextGameQuery);
   const nextGame = nextGames?.[0];
 
+  const allTeamGamesQuery = useMemoFirebase(() => {
+    if (!db || !firstTeamId) return null;
+    return query(
+      collection(db, 'teams', firstTeamId, 'games'),
+      orderBy('dateTime', 'asc')
+    );
+  }, [db, firstTeamId]);
+  const { data: allTeamGames, isLoading: loadingAllTeamGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(allTeamGamesQuery);
+
   const countdown = useCountdown(nextGame?.dateTime);
 
   // Current RSVP for next game
@@ -152,6 +165,29 @@ export default function ParentDashboard({
     } finally {
       setRsvpLoading(false);
     }
+  };
+
+  const teamCalendarEvents = useMemo((): CalendarEvent[] => {
+    if (!allTeamGames || !firstTeamId) return [];
+    return allTeamGames.map(g => {
+      const dateTime = g.dateTime ?? '';
+      return {
+        id: g.id,
+        eventType: g.type === 'Game' ? 'game' as const : 'practice' as const,
+        date: dateTime.slice(0, 10),
+        startTime: dateTime.slice(11, 16),
+        title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
+        status: 'scheduled' as const,
+        fieldName: g.location,
+        sourceType: 'team-game' as const,
+        sourceId: g.id,
+        teamId: firstTeamId,
+      };
+    });
+  }, [allTeamGames, firstTeamId]);
+
+  const handleCalendarRsvp = (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
+    handleDashboardRSVP(status);
   };
 
   // Latest announcements
@@ -372,6 +408,26 @@ export default function ParentDashboard({
             </Card>
           )}
         </div>
+
+        {/* Season Schedule */}
+        {firstTeamId && (
+          <Card className="border-none shadow-md mt-6">
+            <CardHeader>
+              <CardTitle className="font-headline">Season Schedule</CardTitle>
+              <CardDescription>Your team's full schedule for the season</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LeagueCalendar
+                events={teamCalendarEvents}
+                isLoading={loadingAllTeamGames}
+                filters={calendarFilters}
+                onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
+                visibleFilters={['games', 'practices']}
+                onRsvp={handleCalendarRsvp}
+              />
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );

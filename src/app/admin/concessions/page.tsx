@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, doc, addDoc, deleteDoc, getDocs, getDoc, query, where, collectionGroup } from 'firebase/firestore';
@@ -25,9 +25,13 @@ import {
   XCircle,
   Download,
   AlertCircle,
+  LayoutList,
+  CalendarIcon,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
+import { DayPicker } from 'react-day-picker';
+import { cn } from '@/lib/utils';
 
 interface ConcessionSignup {
   parentUserId: string;
@@ -104,6 +108,8 @@ export default function ConcessionsAdminPage() {
   const [families, setFamilies] = useState<FamilyCompliance[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
+  const [calMonth, setCalMonth] = useState<Date>(new Date());
 
   const slotsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -119,9 +125,54 @@ export default function ConcessionsAdminPage() {
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
 
+  const allGamesQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'games');
+  }, [db, isAdmin, isBoardMember]);
+
+  interface GameDate { id: string; date: string; }
+  const { data: allGames } = useCollection<GameDate>(allGamesQuery);
+
   const sortedSlots = slots
     ? [...slots].sort((a, b) => a.gameDate.localeCompare(b.gameDate))
     : [];
+
+  // Set of all game dates
+  const gameDateSet = useMemo(() => {
+    return new Set((allGames ?? []).map(g => g.date).filter(Boolean));
+  }, [allGames]);
+
+  // Per-date slot coverage: { totalCap, filled }
+  const coverageByDate = useMemo(() => {
+    const map = new Map<string, { totalCap: number; filled: number }>();
+    for (const slot of sortedSlots) {
+      const cur = map.get(slot.gameDate) ?? { totalCap: 0, filled: 0 };
+      map.set(slot.gameDate, {
+        totalCap: cur.totalCap + slot.capacity,
+        filled: cur.filled + (slot.signups?.length ?? 0),
+      });
+    }
+    return map;
+  }, [sortedSlots]);
+
+  // Derive colored date sets for react-day-picker modifiers
+  const redDates = useMemo(() =>
+    [...gameDateSet].filter(d => !coverageByDate.has(d)).map(d => parseISO(d)),
+  [gameDateSet, coverageByDate]);
+
+  const yellowDates = useMemo(() => {
+    return [...gameDateSet].filter(d => {
+      const cov = coverageByDate.get(d);
+      return cov && cov.filled < cov.totalCap;
+    }).map(d => parseISO(d));
+  }, [gameDateSet, coverageByDate]);
+
+  const greenDates = useMemo(() => {
+    return [...gameDateSet].filter(d => {
+      const cov = coverageByDate.get(d);
+      return cov && cov.filled >= cov.totalCap;
+    }).map(d => parseISO(d));
+  }, [gameDateSet, coverageByDate]);
 
   const handleAddSlot = async () => {
     if (!formData.gameDate || !db) return;
@@ -332,91 +383,135 @@ export default function ConcessionsAdminPage() {
 
           {/* ── Manage Slots Tab ── */}
           <TabsContent value="slots">
-            <div className="flex justify-end mb-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
+                <button
+                  onClick={() => setSlotView('list')}
+                  className={cn('px-3 py-1 rounded-full transition-colors flex items-center gap-1.5', slotView === 'list' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                >
+                  <LayoutList className="h-3.5 w-3.5" /> List
+                </button>
+                <button
+                  onClick={() => setSlotView('calendar')}
+                  className={cn('px-3 py-1 rounded-full transition-colors flex items-center gap-1.5', slotView === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                >
+                  <CalendarIcon className="h-3.5 w-3.5" /> Calendar
+                </button>
+              </div>
               <Button onClick={() => setAddDialog(true)} className="rounded-full shadow-lg">
                 <Plus className="mr-2 h-4 w-4" /> Add Slot
               </Button>
             </div>
 
-            {isLoading ? (
-              <div className="flex justify-center py-20">
-                <Loader2 className="h-10 w-10 animate-spin text-primary" />
-              </div>
-            ) : sortedSlots.length === 0 ? (
-              <Card className="border-none shadow-md border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                  <ShoppingCart className="h-12 w-12 text-muted-foreground/40 mb-4" />
-                  <p className="text-muted-foreground font-medium">No concession slots yet</p>
-                  <p className="text-sm text-muted-foreground mb-4">Add your first volunteer slot to get started.</p>
-                  <Button onClick={() => setAddDialog(true)} className="rounded-full">
-                    <Plus className="mr-2 h-4 w-4" /> Add Slot
-                  </Button>
+            {slotView === 'calendar' ? (
+              <Card className="border-none shadow-md">
+                <CardContent className="p-4">
+                  <DayPicker
+                    month={calMonth}
+                    onMonthChange={setCalMonth}
+                    modifiers={{ gameRed: redDates, gameYellow: yellowDates, gameGreen: greenDates }}
+                    modifiersStyles={{
+                      gameRed: { backgroundColor: '#fecaca', color: '#991b1b', borderRadius: '50%', fontWeight: 600 },
+                      gameYellow: { backgroundColor: '#fef08a', color: '#92400e', borderRadius: '50%', fontWeight: 600 },
+                      gameGreen: { backgroundColor: '#bbf7d0', color: '#14532d', borderRadius: '50%', fontWeight: 600 },
+                    }}
+                    onDayClick={(day) => {
+                      const iso = format(day, 'yyyy-MM-dd');
+                      if (gameDateSet.has(iso)) {
+                        setFormData(prev => ({ ...prev, gameDate: iso }));
+                        setAddDialog(true);
+                      }
+                    }}
+                    className="mx-auto"
+                  />
+                  <div className="flex items-center gap-4 justify-center mt-4 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-200 inline-block" /> No slots</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-200 inline-block" /> Partial</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-200 inline-block" /> Covered</span>
+                  </div>
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {sortedSlots.map(slot => {
-                  const signupCount = slot.signups?.length ?? 0;
-                  const spotsLeft = slot.capacity - signupCount;
-                  const isFull = spotsLeft <= 0;
-                  return (
-                    <Card key={slot.id} className="border-none shadow-md">
-                      <CardHeader className="pb-3">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <CalendarDays className="h-4 w-4 text-primary" />
-                              <CardTitle className="text-base font-headline">
-                                {slot.gameDate ? format(parseISO(slot.gameDate), 'EEE, MMM d, yyyy') : slot.gameDate}
-                              </CardTitle>
+              isLoading ? (
+                <div className="flex justify-center py-20">
+                  <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                </div>
+              ) : sortedSlots.length === 0 ? (
+                <Card className="border-none shadow-md border-dashed">
+                  <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                    <ShoppingCart className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                    <p className="text-muted-foreground font-medium">No concession slots yet</p>
+                    <p className="text-sm text-muted-foreground mb-4">Add your first volunteer slot to get started.</p>
+                    <Button onClick={() => setAddDialog(true)} className="rounded-full">
+                      <Plus className="mr-2 h-4 w-4" /> Add Slot
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {sortedSlots.map(slot => {
+                    const signupCount = slot.signups?.length ?? 0;
+                    const spotsLeft = slot.capacity - signupCount;
+                    const isFull = spotsLeft <= 0;
+                    return (
+                      <Card key={slot.id} className="border-none shadow-md">
+                        <CardHeader className="pb-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <CalendarDays className="h-4 w-4 text-primary" />
+                                <CardTitle className="text-base font-headline">
+                                  {slot.gameDate ? format(parseISO(slot.gameDate), 'EEE, MMM d, yyyy') : slot.gameDate}
+                                </CardTitle>
+                              </div>
+                              {slot.description && (
+                                <p className="text-xs text-muted-foreground">{slot.description}</p>
+                              )}
                             </div>
-                            {slot.description && (
-                              <p className="text-xs text-muted-foreground">{slot.description}</p>
-                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                              onClick={() => setDeleteDialog({ open: true, slot })}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-                            onClick={() => setDeleteDialog({ open: true, slot })}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <div className="flex items-center gap-2 text-sm">
-                          <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span>{formatTime(slot.startTime)} – {formatTime(slot.endTime)}</span>
-                        </div>
-
-                        <div className="flex items-center justify-between">
+                        </CardHeader>
+                        <CardContent className="space-y-3">
                           <div className="flex items-center gap-2 text-sm">
-                            <Users className="h-4 w-4 text-muted-foreground" />
-                            <span>{signupCount} / {slot.capacity} volunteers</span>
+                            <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <span>{formatTime(slot.startTime)} – {formatTime(slot.endTime)}</span>
                           </div>
-                          <Badge variant={isFull ? 'destructive' : 'secondary'} className="text-xs">
-                            {isFull ? 'Full' : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
-                          </Badge>
-                        </div>
 
-                        <p className="text-xs text-muted-foreground">
-                          Cancel cutoff: {slot.cancelCutoffHours}h before start
-                        </p>
-
-                        {slot.signups?.length > 0 && (
-                          <div className="space-y-1 pt-1 border-t">
-                            <p className="text-xs font-bold uppercase text-muted-foreground">Volunteers</p>
-                            {slot.signups.map((s, i) => (
-                              <p key={i} className="text-xs text-foreground">{s.displayName}</p>
-                            ))}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm">
+                              <Users className="h-4 w-4 text-muted-foreground" />
+                              <span>{signupCount} / {slot.capacity} volunteers</span>
+                            </div>
+                            <Badge variant={isFull ? 'destructive' : 'secondary'} className="text-xs">
+                              {isFull ? 'Full' : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
+                            </Badge>
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
+
+                          <p className="text-xs text-muted-foreground">
+                            Cancel cutoff: {slot.cancelCutoffHours}h before start
+                          </p>
+
+                          {slot.signups?.length > 0 && (
+                            <div className="space-y-1 pt-1 border-t">
+                              <p className="text-xs font-bold uppercase text-muted-foreground">Volunteers</p>
+                              {slot.signups.map((s, i) => (
+                                <p key={i} className="text-xs text-foreground">{s.displayName}</p>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )
             )}
           </TabsContent>
 

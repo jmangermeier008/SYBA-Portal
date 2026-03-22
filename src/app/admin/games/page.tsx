@@ -11,6 +11,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
+import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import type { CalendarEvent } from '@/types/scheduling';
 import {
   Plus, Trash2, CalendarDays, Loader2, Lock, MapPin, Users, Trophy,
   Upload, Download, AlertCircle, CheckCircle2, ShoppingCart, XCircle, Pencil,
@@ -80,6 +83,7 @@ export default function AdminGamesPage() {
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
+  const router = useRouter();
 
   const todayISO = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
@@ -109,6 +113,10 @@ export default function AdminGamesPage() {
     open: boolean; game: Game | null; linkedShiftCount: number; isDeleting: boolean;
   }>({ open: false, game: null, linkedShiftCount: 0, isDeleting: false });
 
+  // View toggle
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
+
   // CSV Import
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<ParsedGame[]>([]);
@@ -126,6 +134,12 @@ export default function AdminGamesPage() {
     if (!db || (!isAdmin && !isBoardMember) || !showPast) return null;
     return query(collection(db, 'games'), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
   }, [db, isAdmin, isBoardMember, showPast, todayISO]);
+
+  const allGamesQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember) || view !== 'calendar') return null;
+    return query(collection(db, 'games'), orderBy('date', 'asc'));
+  }, [db, isAdmin, isBoardMember, view]);
+  const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -493,6 +507,24 @@ export default function AdminGamesPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
+  const calendarEvents = useMemo((): CalendarEvent[] => {
+    if (!allGames) return [];
+    return allGames.map(g => ({
+      id: g.id,
+      eventType: g.type === 'game' ? 'game' as const : 'practice' as const,
+      date: g.date,
+      startTime: g.time,
+      title: g.type === 'game' && g.homeTeamName && g.awayTeamName
+        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+        : g.teamName ? `${g.teamName} Practice` : 'Practice',
+      status: g.status ?? 'scheduled',
+      fieldName: g.fieldName,
+      notes: g.notes,
+      sourceType: 'global-game' as const,
+      sourceId: g.id,
+    }));
+  }, [allGames]);
+
   const filterGames = (list: Game[]) => {
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
@@ -516,6 +548,17 @@ export default function AdminGamesPage() {
             <p className="text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            {/* List / Calendar toggle */}
+            <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
+              <button
+                onClick={() => setView('list')}
+                className={cn('px-3 py-1 rounded-full transition-colors', view === 'list' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+              >List</button>
+              <button
+                onClick={() => setView('calendar')}
+                className={cn('px-3 py-1 rounded-full transition-colors', view === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+              >Calendar</button>
+            </div>
             <div className="relative">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
               <Input placeholder="Search games…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 rounded-xl w-48" />
@@ -655,57 +698,70 @@ export default function AdminGamesPage() {
           </div>
         </header>
 
-        {/* Upcoming */}
-        <Card className="border-none shadow-md mb-6">
-          <CardHeader className="pb-2">
-            <CardTitle className="font-headline flex items-center gap-2"><CalendarDays className="h-5 w-5 text-primary" /> Upcoming</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingUpcoming ? (
-              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-            ) : filterGames(upcomingGames ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No upcoming games or practices.</p>
-            ) : (
-              <div className="space-y-2">
-                {filterGames(upcomingGames ?? []).map(g => (
-                  <GameRow key={g.id} game={g}
-                    onEdit={() => handleOpenEdit(g)}
-                    onCancel={() => handleInitiateCancel(g)}
-                    onDelete={() => handleInitiateDelete(g)} />
-                ))}
-              </div>
+        {view === 'calendar' ? (
+          <LeagueCalendar
+            events={calendarEvents}
+            isLoading={loadingAllGames}
+            filters={calendarFilters}
+            onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
+            visibleFilters={['games', 'practices']}
+            onViewRecord={(event) => router.push(`/admin/games/${event.id}`)}
+          />
+        ) : (
+          <>
+            {/* Upcoming */}
+            <Card className="border-none shadow-md mb-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="font-headline flex items-center gap-2"><CalendarDays className="h-5 w-5 text-primary" /> Upcoming</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingUpcoming ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                ) : filterGames(upcomingGames ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No upcoming games or practices.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {filterGames(upcomingGames ?? []).map(g => (
+                      <GameRow key={g.id} game={g}
+                        onEdit={() => handleOpenEdit(g)}
+                        onCancel={() => handleInitiateCancel(g)}
+                        onDelete={() => handleInitiateDelete(g)} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="mb-4">
+              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setShowPast(!showPast)}>
+                {showPast ? 'Hide' : 'Show'} past games
+              </Button>
+            </div>
+
+            {showPast && (
+              <Card className="border-none shadow-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="font-headline text-muted-foreground">Past</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {loadingPast ? (
+                    <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                  ) : filterGames(pastGames ?? []).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No past games on record.</p>
+                  ) : (
+                    <div className="space-y-2 opacity-60">
+                      {filterGames(pastGames ?? []).map(g => (
+                        <GameRow key={g.id} game={g}
+                          onEdit={() => handleOpenEdit(g)}
+                          onCancel={() => handleInitiateCancel(g)}
+                          onDelete={() => handleInitiateDelete(g)} />
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             )}
-          </CardContent>
-        </Card>
-
-        <div className="mb-4">
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setShowPast(!showPast)}>
-            {showPast ? 'Hide' : 'Show'} past games
-          </Button>
-        </div>
-
-        {showPast && (
-          <Card className="border-none shadow-md">
-            <CardHeader className="pb-2">
-              <CardTitle className="font-headline text-muted-foreground">Past</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingPast ? (
-                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-              ) : filterGames(pastGames ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">No past games on record.</p>
-              ) : (
-                <div className="space-y-2 opacity-60">
-                  {filterGames(pastGames ?? []).map(g => (
-                    <GameRow key={g.id} game={g}
-                      onEdit={() => handleOpenEdit(g)}
-                      onCancel={() => handleInitiateCancel(g)}
-                      onDelete={() => handleInitiateDelete(g)} />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          </>
         )}
       </main>
 

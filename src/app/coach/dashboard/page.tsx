@@ -1,6 +1,8 @@
 
 "use client";
 
+import { useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
@@ -10,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import type { CalendarEvent } from '@/types/scheduling';
 
 interface Team {
   id: string;
@@ -67,6 +71,19 @@ export default function CoachDashboard() {
 
   const { data: games, isLoading: loadingGames } = useCollection<GameEvent>(gamesQuery);
 
+  const [scheduleView, setScheduleView] = useState<'list' | 'calendar'>('list');
+  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
+  const router = useRouter();
+
+  const allGamesQuery = useMemoFirebase(() => {
+    if (!db || !firstTeamId || scheduleView !== 'calendar') return null;
+    return query(
+      collection(db, 'teams', firstTeamId, 'games'),
+      orderBy('dateTime', 'asc')
+    );
+  }, [db, firstTeamId, scheduleView]);
+  const { data: allGames, isLoading: loadingAllGames } = useCollection<GameEvent>(allGamesQuery);
+
   const nextGame = games?.[0];
   const playerCount = enrollments?.length ?? 0;
 
@@ -76,9 +93,29 @@ export default function CoachDashboard() {
     return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
   }, [db, firstTeamId, nextGame?.id]);
   const { data: rsvps } = useCollection(rsvpsQuery);
+
   const attendingCount = rsvps?.filter((r: any) => r.status === 'Attending').length ?? 0;
   const totalRsvpCount = rsvps?.length ?? 0;
   const attendanceRate = totalRsvpCount > 0 ? Math.round((attendingCount / totalRsvpCount) * 100) : null;
+
+  const calendarEvents = useMemo((): CalendarEvent[] => {
+    if (!allGames || !firstTeamId) return [];
+    return allGames.map(g => {
+      const dateTime = g.dateTime ?? '';
+      return {
+        id: g.id,
+        eventType: g.type === 'Game' ? 'game' as const : 'practice' as const,
+        date: dateTime.slice(0, 10),
+        startTime: dateTime.slice(11, 16),
+        title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
+        status: 'scheduled' as const,
+        fieldName: g.location,
+        sourceType: 'team-game' as const,
+        sourceId: g.id,
+        teamId: firstTeamId,
+      };
+    });
+  }, [allGames, firstTeamId]);
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -165,12 +202,32 @@ export default function CoachDashboard() {
 
         <div className="grid gap-6 md:grid-cols-3">
           <Card className="md:col-span-2 border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="font-headline">Team Schedule</CardTitle>
-              <CardDescription>Upcoming games and practices{teams?.[0] ? ` for ${teams[0].name}` : ''}</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle className="font-headline">Team Schedule</CardTitle>
+                <CardDescription>Upcoming games and practices{teams?.[0] ? ` for ${teams[0].name}` : ''}</CardDescription>
+              </div>
+              <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm shrink-0">
+                <button
+                  onClick={() => setScheduleView('list')}
+                  className={cn('px-3 py-1 rounded-full transition-colors', scheduleView === 'list' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                >List</button>
+                <button
+                  onClick={() => setScheduleView('calendar')}
+                  className={cn('px-3 py-1 rounded-full transition-colors', scheduleView === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                >Calendar</button>
+              </div>
             </CardHeader>
             <CardContent>
-              {loadingGames ? (
+              {scheduleView === 'calendar' ? (
+                <LeagueCalendar
+                  events={calendarEvents}
+                  isLoading={loadingAllGames}
+                  filters={calendarFilters}
+                  onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
+                  visibleFilters={['games', 'practices']}
+                />
+              ) : loadingGames ? (
                 <div className="flex justify-center py-10">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 </div>
