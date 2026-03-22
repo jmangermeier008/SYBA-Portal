@@ -33,6 +33,7 @@ export default function SeasonsAdminPage() {
     name: '',
     registrationOpen: '',
     registrationClose: '',
+    volunteerSlotsRequired: 1,
   });
 
   const seasonsQuery = useMemoFirebase(() => {
@@ -60,6 +61,7 @@ export default function SeasonsAdminPage() {
     const seasonData = {
       id: seasonId,
       ...formData,
+      volunteerSlotsRequired: Number(formData.volunteerSlotsRequired),
     };
 
     try {
@@ -79,7 +81,7 @@ export default function SeasonsAdminPage() {
 
       toast({ title: "Season Created", description: `${formData.name} is now active.` });
       setOpen(false);
-      setFormData({ name: '', registrationOpen: '', registrationClose: '' });
+      setFormData({ name: '', registrationOpen: '', registrationClose: '', volunteerSlotsRequired: 1 });
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -196,9 +198,9 @@ export default function SeasonsAdminPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="regOpen">Registration Open</Label>
-                      <Input 
-                        id="regOpen" 
-                        type="date" 
+                      <Input
+                        id="regOpen"
+                        type="date"
                         value={formData.registrationOpen}
                         onChange={(e) => setFormData({...formData, registrationOpen: e.target.value})}
                         required
@@ -206,14 +208,25 @@ export default function SeasonsAdminPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="regClose">Registration Close</Label>
-                      <Input 
-                        id="regClose" 
-                        type="date" 
+                      <Input
+                        id="regClose"
+                        type="date"
                         value={formData.registrationClose}
                         onChange={(e) => setFormData({...formData, registrationClose: e.target.value})}
                         required
                       />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="volunteerSlotsRequired">Volunteer Slots Required per Family</Label>
+                    <Input
+                      id="volunteerSlotsRequired"
+                      type="number"
+                      min={0}
+                      max={10}
+                      value={formData.volunteerSlotsRequired}
+                      onChange={(e) => setFormData({...formData, volunteerSlotsRequired: Number(e.target.value)})}
+                    />
                   </div>
                 </div>
                 <DialogFooter>

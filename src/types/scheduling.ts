@@ -30,6 +30,7 @@ export interface Season {
   endDate: string;   // YYYY-MM-DD
   createdBy: string;
   createdAt: string;
+  volunteerSlotsRequired?: number; // min concession slots required per family
 }
 
 // ---------------------------------------------------------------------------
