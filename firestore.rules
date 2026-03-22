@@ -15,6 +15,14 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data;
     }
 
+    function isSiteAdmin() {
+      let data = getUserData();
+      let roles = data.get('roles', []);
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+             roles.hasAny(['Site Admin']);
+    }
+
     function isAdmin() {
       let data = getUserData();
       let roles = data.get('roles', []);
@@ -29,7 +37,7 @@ service cloud.firestore {
       return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
              (roles.size() > 0
-               ? roles.hasAny(['Board Member', 'Admin'])
+               ? roles.hasAny(['Board Member', 'Admin', 'Site Admin'])
                : data.role == 'Admin');
     }
 
@@ -44,13 +52,16 @@ service cloud.firestore {
                   (data.role == 'Admin' && data.get('isAlsoCoach', false) == true)));
     }
 
-    // Support for collection group queries
+    // ---------------------------------------------------------------------------
+    // Collection group rules — must be at the top level
+    // ---------------------------------------------------------------------------
+
     // Players: board members use collectionGroup for compliance; parents use direct path
     match /{path=**}/players/{playerId} {
       allow read: if isBoardMember();
     }
 
-    // Enrollments: board members can read all; parents can read their own (collectionGroup filtered by parentUserId)
+    // Enrollments: board members can read all; parents can read their own (filtered by parentUserId)
     match /{path=**}/enrollments/{enrollmentId} {
       allow read: if isBoardMember() ||
         (isSignedIn() && resource.data.parentUserId == request.auth.uid);
@@ -62,17 +73,24 @@ service cloud.firestore {
 
     match /{path=**}/rsvps/{rsvpId} {
       allow read: if isSignedIn();
-      // M15: Only allow a user to create/update their own RSVP (parentUserId must match uid)
       allow create: if isSignedIn() && request.resource.data.parentUserId == request.auth.uid;
       allow update: if isSignedIn() && resource.data.parentUserId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.parentUserId == request.auth.uid;
     }
 
+    // ---------------------------------------------------------------------------
+    // User Profiles
+    // ---------------------------------------------------------------------------
+
     match /userProfiles/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
       allow create: if isUser(userId) || isAdmin();
-      allow update: if isUser(userId) || isAdmin();
+      // Users can update their own profile but cannot change their own role.
+      // Role changes require Site Admin.
+      allow update: if (isUser(userId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles'])
+        ) || isAdmin();
       allow delete: if false;
 
       match /clearances/{clearanceId} {
@@ -100,6 +118,10 @@ service cloud.firestore {
       }
     }
 
+    // ---------------------------------------------------------------------------
+    // Seasons & Divisions
+    // ---------------------------------------------------------------------------
+
     match /seasons/{seasonId} {
       allow get, list: if isSignedIn();
       allow create, update, delete: if isBoardMember();
@@ -110,56 +132,19 @@ service cloud.firestore {
       }
     }
 
-    // Fields — board members manage, all signed-in users can read for schedule picker
+    // ---------------------------------------------------------------------------
+    // Fields — Site Admin manages; all signed-in users read
+    // ---------------------------------------------------------------------------
+
     match /fields/{fieldId} {
       allow get, list: if isSignedIn();
       allow create, update, delete: if isBoardMember();
     }
 
-    // Concession slots — board members create/delete; signed-in users update signups array
-    match /concessionSlots/{slotId} {
-      allow get, list: if isSignedIn();
-      allow create, delete: if isBoardMember();
-      allow update: if isSignedIn();
-    }
+    // ---------------------------------------------------------------------------
+    // Games & Practices — board members manage; all signed-in users read
+    // ---------------------------------------------------------------------------
 
-    // Sponsors — board members only
-    match /sponsors/{sponsorId} {
-      allow read, write: if isBoardMember();
-    }
-
-    // League Announcements — board members write, all signed-in users read
-    match /announcements/{announcementId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isBoardMember();
-    }
-
-    // Board Meetings — board members only
-    match /boardMeetings/{meetingId} {
-      allow read, write: if isBoardMember();
-    }
-
-    // Inquiries — anyone can create (public form supported); board members read/update; admins delete
-    match /inquiries/{inquiryId} {
-      allow read: if isSignedIn() && (
-        resource.data.senderId == request.auth.uid || isBoardMember()
-      );
-      allow create: if
-        request.resource.data.status == 'open' &&
-        (isSignedIn()
-          ? request.resource.data.senderId == request.auth.uid
-          : request.resource.data.senderId == null);
-      allow update: if isBoardMember();
-      allow delete: if isAdmin();
-    }
-
-    // Officers — public read (shown on homepage); board members write
-    match /officers/{officerId} {
-      allow read: if true;
-      allow write: if isBoardMember();
-    }
-
-    // Games & Practices — board members create/delete; all signed-in users can read
     match /games/{gameId} {
       allow get, list: if isSignedIn();
       allow create, update, delete: if isBoardMember();
@@ -179,13 +164,113 @@ service cloud.firestore {
 
         match /rsvps/{rsvpId} {
           allow get, list: if isSignedIn();
-          // M15: Only allow a user to write their own RSVP
           allow create: if isSignedIn() && request.resource.data.parentUserId == request.auth.uid;
           allow update: if isSignedIn() && resource.data.parentUserId == request.auth.uid;
           allow delete: if (isSignedIn() && resource.data.parentUserId == request.auth.uid) || isBoardMember();
         }
       }
+    }
 
+    // ---------------------------------------------------------------------------
+    // Concession Slots
+    //
+    // Board members: full CRUD.
+    // Signed-in users: read all slots (to see availability).
+    // Parents: may only update the `signups` array field via transaction.
+    //   All other fields (capacity, dates, etc.) are board-member-only.
+    // ---------------------------------------------------------------------------
+
+    match /concessionSlots/{slotId} {
+      allow get, list: if isSignedIn();
+      allow create, delete: if isBoardMember();
+      allow update: if isBoardMember() ||
+        (isSignedIn() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['signups', 'claimedCount']));
+
+      // Private claim records — parents see only their own document.
+      // Board members see all. Used for future subcollection-based claiming.
+      match /claims/{claimId} {
+        allow read: if isBoardMember() ||
+          (isSignedIn() && resource.data.parentId == request.auth.uid);
+        allow create: if isSignedIn() &&
+          request.resource.data.parentId == request.auth.uid;
+        allow delete: if isSignedIn() &&
+          resource.data.parentId == request.auth.uid;
+        allow update: if false; // Claims are immutable — delete and recreate
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Practice Slots
+    //
+    // Board members: full CRUD.
+    // Signed-in users: read all (coaches need to browse available slots).
+    // Coaches: may claim an available slot by setting their own coachId.
+    //   They cannot change date, field, team, or time window.
+    // ---------------------------------------------------------------------------
+
+    match /practiceSlots/{slotId} {
+      allow get, list: if isSignedIn();
+      allow create, delete: if isBoardMember();
+      allow update: if isBoardMember() ||
+        (isCoach() &&
+         resource.data.status == 'available' &&
+         request.resource.data.coachId == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['coachId', 'coachName', 'status', 'claimedAt', 'updatedAt']));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Notifications
+    //
+    // Users: read their own notifications, and mark them as read.
+    // Board members: read all (operational oversight).
+    // Create/delete: board members only (system writes via Admin SDK in Cloud Functions).
+    // ---------------------------------------------------------------------------
+
+    match /notifications/{notificationId} {
+      allow read: if isBoardMember() ||
+        (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update: if isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if isBoardMember();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Other collections
+    // ---------------------------------------------------------------------------
+
+    match /sponsors/{sponsorId} {
+      allow read, write: if isBoardMember();
+    }
+
+    match /announcements/{announcementId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isBoardMember();
+    }
+
+    match /boardMeetings/{meetingId} {
+      allow read, write: if isBoardMember();
+    }
+
+    match /inquiries/{inquiryId} {
+      allow read: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid || isBoardMember()
+      );
+      allow create: if
+        request.resource.data.status == 'open' &&
+        (isSignedIn()
+          ? request.resource.data.senderId == request.auth.uid
+          : request.resource.data.senderId == null);
+      allow update: if isBoardMember();
+      allow delete: if isAdmin();
+    }
+
+    match /officers/{officerId} {
+      allow read: if true;
+      allow write: if isBoardMember();
     }
   }
 }
