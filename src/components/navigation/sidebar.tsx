@@ -66,6 +66,7 @@ const coachItems = [
   { label: 'My Teams', icon: Users, href: '/coach/teams' },
   { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
   { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
+  { label: 'Practice Slots', icon: Dumbbell, href: '/coach/practice-slots' },
   { label: 'Contact Us', icon: MessageSquare, href: '/coach/contact' },
 ];
 

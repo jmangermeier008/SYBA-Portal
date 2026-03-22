@@ -32,6 +32,7 @@ interface ConcessionSlot {
   cancelCutoffHours: number;
   description?: string;
   signups: ConcessionSignup[];
+  status?: 'active' | 'cancelled'; // undefined = active (backward compat)
   createdAt: string;
 }
 
@@ -62,10 +63,14 @@ export default function ParentConcessionsPage() {
 
   const { data: slots, isLoading } = useCollection<ConcessionSlot>(slotsQuery);
 
-  // Only show upcoming slots
+  // Only show upcoming, active slots (filter out cancelled shifts)
   const upcomingSlots = slots
     ? [...slots]
-        .filter(s => isAfter(getSlotStartDateTime(s), new Date()))
+        .filter(s => {
+          // Treat slots without a status field as active (backward compat with older data)
+          const isActive = !s.status || s.status === 'active';
+          return isActive && isAfter(getSlotStartDateTime(s), new Date());
+        })
         .sort((a, b) => a.gameDate.localeCompare(b.gameDate))
     : [];
 
