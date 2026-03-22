@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { useFirestore, useCollection, useUser } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
 import { use } from 'react';
@@ -23,12 +26,15 @@ import {
   ShoppingCart,
   UserCheck,
   Inbox,
+  FileText,
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
 import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
+import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType } from '@/types/scheduling';
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -72,13 +78,6 @@ interface BoardMeeting {
   rsvps: { name: string; status: string }[];
 }
 
-interface Clearance {
-  id: string;
-  type: string;
-  status: string;
-  _ref?: { parent?: { parent?: { id?: string } } };
-}
-
 interface Game {
   id: string;
   type: 'game' | 'practice';
@@ -88,7 +87,10 @@ interface Game {
   homeTeamName?: string;
   awayTeamName?: string;
   teamName?: string;
+  division?: string;
   notes?: string;
+  status?: string;
+  seasonId?: string;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -108,6 +110,63 @@ function formatTime(t: string) {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+// ─── Calendar event normalizers (mirrors /admin/calendar/page.tsx) ──────────────
+
+function normalizeGame(g: Game): CalendarEvent {
+  return {
+    id: g.id,
+    eventType: g.type === 'practice' ? 'practice' : 'game',
+    date: g.date,
+    startTime: g.time,
+    title:
+      g.homeTeamName && g.awayTeamName
+        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+        : g.teamName ?? 'Game',
+    status: g.status ?? 'scheduled',
+    fieldName: g.fieldName,
+    sourceType: 'global-game',
+    sourceId: g.id,
+    homeTeamName: g.homeTeamName,
+    awayTeamName: g.awayTeamName,
+    division: g.division,
+    notes: g.notes,
+  };
+}
+
+function normalizePracticeSlot(s: PracticeSlot): CalendarEvent {
+  return {
+    id: s.id,
+    eventType: 'practice',
+    date: s.date,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    title: `${s.teamName} Practice`,
+    status: s.status,
+    fieldName: s.fieldName,
+    sourceType: 'practice-slot',
+    sourceId: s.id,
+    teamId: s.teamId,
+    teamName: s.teamName,
+    notes: s.notes,
+  };
+}
+
+function normalizeConcessionSlot(s: ConcessionSlotType): CalendarEvent {
+  return {
+    id: s.id,
+    eventType: 'concession',
+    date: s.gameDate,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    title: s.description || 'Concession Shift',
+    status: s.status ?? 'active',
+    sourceType: 'concession-slot',
+    sourceId: s.id,
+    capacity: s.capacity,
+    claimedCount: s.signups?.length ?? s.claimedCount ?? 0,
+  };
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard({
@@ -121,9 +180,11 @@ export default function AdminDashboard({
   use(searchParams);
 
   const db = useFirestore();
+  const router = useRouter();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
+  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: true });
 
   const todayISO = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const nextWeekISO = useMemo(() => format(addDays(new Date(), 7), 'yyyy-MM-dd'), []);
@@ -150,6 +211,7 @@ export default function AdminDashboard({
     return collectionGroup(db, 'clearances');
   }, [db, isAdmin, isBoardMember]);
 
+  // This week's concession slots (for Concessions tab)
   const concessionSlotsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(
@@ -175,6 +237,7 @@ export default function AdminDashboard({
     );
   }, [db, isAdmin, isBoardMember, todayISO]);
 
+  // This week's games (for Games tab)
   const gamesQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(
@@ -191,6 +254,22 @@ export default function AdminDashboard({
     return query(collection(db, 'inquiries'), where('status', 'in', ['open', 'in_progress']));
   }, [db, isAdmin, isBoardMember]);
 
+  // All games, practice slots, all concession slots — for the Calendar tab
+  const allGamesQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'games');
+  }, [db, isAdmin, isBoardMember]);
+
+  const practiceSlotsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'practiceSlots');
+  }, [db, isAdmin, isBoardMember]);
+
+  const allConcessionSlotsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'concessionSlots');
+  }, [db, isAdmin, isBoardMember]);
+
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: coaches } = useCollection<any>(coachesQuery);
@@ -200,6 +279,9 @@ export default function AdminDashboard({
   const { data: boardMeetings } = useCollection<BoardMeeting>(boardMeetingsQuery);
   const { data: thisWeekGames } = useCollection<Game>(gamesQuery);
   const { data: openInquiries } = useCollection<{ id: string; status: string }>(inquiriesQuery);
+  const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
+  const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
+  const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -324,6 +406,17 @@ export default function AdminDashboard({
     }
     return items;
   }, [coachesWithIssues, undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries]);
+
+  // Calendar tab events
+  const calendarEvents = useMemo<CalendarEvent[]>(() => {
+    const events: CalendarEvent[] = [];
+    (allGames ?? []).forEach(g => events.push(normalizeGame(g)));
+    (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s)));
+    (allConcessionSlots ?? []).forEach(s => events.push(normalizeConcessionSlot(s)));
+    return events;
+  }, [allGames, practiceSlots, allConcessionSlots]);
+
+  const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
 
   // ── Loading / access guard ────────────────────────────────────────────────────
 
@@ -506,6 +599,10 @@ export default function AdminDashboard({
                   <Inbox className="h-3.5 w-3.5" />
                   Board Meetings
                 </TabsTrigger>
+                <TabsTrigger value="calendar" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                  <Trophy className="h-3.5 w-3.5" />
+                  Calendar
+                </TabsTrigger>
               </TabsList>
 
               {/* Tab: Games & Practices */}
@@ -517,23 +614,85 @@ export default function AdminDashboard({
                   </p>
                 ) : (
                   <div className="space-y-1.5">
-                    {thisWeekGames.map((g) => (
-                      <Link key={g.id} href="/admin/games">
-                        <div className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2.5 hover:bg-secondary/40 transition-colors cursor-pointer group">
-                          <div>
-                            <p className="text-sm font-medium">
-                              {g.type === 'game'
-                                ? `${g.homeTeamName} vs. ${g.awayTeamName}`
-                                : `${g.teamName} Practice`}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {format(parseISO(g.date), 'EEE, MMM d')} · {formatTime(g.time)} · <MapPin className="h-3 w-3 inline -mt-0.5" /> {g.fieldName}
-                            </p>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
-                        </div>
-                      </Link>
-                    ))}
+                    {thisWeekGames.map((g) => {
+                      const gameTitle =
+                        g.type === 'game'
+                          ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+                          : `${g.teamName} Practice`;
+                      const typeLabel = g.type === 'game' ? 'League Game' : 'Practice';
+                      const headerColor = g.type === 'game' ? 'bg-primary' : 'bg-green-600';
+
+                      return (
+                        <Popover key={g.id}>
+                          <PopoverTrigger asChild>
+                            <div
+                              className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2.5 hover:bg-secondary/40 transition-colors cursor-pointer group"
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium">{gameTitle}</p>
+                                  <Badge
+                                    variant="outline"
+                                    className={g.type === 'game'
+                                      ? 'border-blue-200 text-blue-700 text-[10px]'
+                                      : 'border-green-200 text-green-700 text-[10px]'}
+                                  >
+                                    {g.type === 'game' ? 'Game' : 'Practice'}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {format(parseISO(g.date), 'EEE, MMM d')} · {formatTime(g.time)} · <MapPin className="h-3 w-3 inline -mt-0.5" /> {g.fieldName}
+                                </p>
+                              </div>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+                            </div>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-72 p-0 shadow-lg" align="start">
+                            <div className="overflow-hidden rounded-lg">
+                              {/* Colored header */}
+                              <div className={cn('px-4 py-3 text-white', headerColor)}>
+                                <p className="font-semibold text-sm leading-tight">{gameTitle}</p>
+                                <p className="text-xs opacity-80 mt-0.5">{typeLabel}</p>
+                              </div>
+                              {/* Details */}
+                              <div className="px-4 py-3 space-y-1.5">
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{format(parseISO(g.date), 'EEE, MMM d')} · {formatTime(g.time)}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <MapPin className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{g.fieldName}</span>
+                                </div>
+                                {g.division && (
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <Trophy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                    <span className="text-primary/80 font-medium text-sm">{g.division}</span>
+                                  </div>
+                                )}
+                                {g.notes && (
+                                  <div className="flex items-start gap-2 text-sm">
+                                    <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />
+                                    <span className="text-muted-foreground italic">{g.notes}</span>
+                                  </div>
+                                )}
+                              </div>
+                              {/* Footer: view full record */}
+                              <div className="px-4 py-2.5 border-t">
+                                <Link
+                                  href={`/admin/games/${g.id}`}
+                                  className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+                                >
+                                  View full record <ChevronRight className="h-3 w-3" />
+                                </Link>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      );
+                    })}
                   </div>
                 )}
                 <div className="mt-3 pt-3 border-t">
@@ -621,6 +780,23 @@ export default function AdminDashboard({
                   </Link>
                 </div>
               </TabsContent>
+
+              {/* Tab: Calendar */}
+              <TabsContent value="calendar" className="mt-0">
+                <LeagueCalendar
+                  events={calendarEvents}
+                  isLoading={calendarLoading}
+                  filters={calendarFilters}
+                  onFilterChange={(key, val) => setCalendarFilters(f => ({ ...f, [key]: val }))}
+                  visibleFilters={['games', 'practices', 'concessions']}
+                  onViewRecord={(event) => {
+                    if (event.sourceType === 'global-game' || event.sourceType === 'practice-slot') {
+                      router.push(`/admin/games/${event.sourceId}`);
+                    }
+                  }}
+                />
+              </TabsContent>
+
             </Tabs>
           </CardContent>
         </Card>

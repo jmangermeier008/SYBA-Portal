@@ -26,6 +26,7 @@ import {
   CalendarPlus,
   CloudRain,
 } from 'lucide-react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -110,6 +111,8 @@ export interface LeagueCalendarProps {
   onAddEvent?: () => void;
   // Child selector slot (parent only)
   childSelector?: React.ReactNode;
+  // View full record link — board/admin use; undefined = hidden
+  onViewRecord?: (event: CalendarEvent) => void;
 }
 
 // ─── Event Popover Content ─────────────────────────────────────────────────────
@@ -120,7 +123,8 @@ function EventPopoverContent({
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel'> & {
+  onViewRecord,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
   event: CalendarEvent;
 }) {
   const typeLabel =
@@ -257,6 +261,18 @@ function EventPopoverContent({
           )}
         </div>
       )}
+
+      {/* View full record — always visible for games/practices when handler provided */}
+      {onViewRecord && (event.eventType === 'game' || event.eventType === 'practice') && (
+        <div className="px-4 py-2.5 border-t">
+          <button
+            className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+            onClick={() => onViewRecord(event)}
+          >
+            View full record <ChevronRight className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -269,7 +285,8 @@ function EventPill({
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel'> & {
+  onViewRecord,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
   event: CalendarEvent;
 }) {
   return (
@@ -292,6 +309,7 @@ function EventPill({
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
+          onViewRecord={onViewRecord}
         />
       </PopoverContent>
     </Popover>
@@ -310,6 +328,7 @@ function MonthGrid({
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
+  onViewRecord,
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
@@ -318,6 +337,7 @@ function MonthGrid({
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
+  onViewRecord?: LeagueCalendarProps['onViewRecord'];
 }) {
   const days = getMonthGridDays(focusDate);
   const MAX_PILLS = 3;
@@ -378,6 +398,7 @@ function MonthGrid({
                   onWeatherCancel={onWeatherCancel}
                   onConcessionSignup={onConcessionSignup}
                   onConcessionCancel={onConcessionCancel}
+                  onViewRecord={onViewRecord}
                 />
               ))}
 
@@ -407,6 +428,7 @@ function WeekStrip({
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
+  onViewRecord,
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
@@ -414,6 +436,7 @@ function WeekStrip({
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
+  onViewRecord?: LeagueCalendarProps['onViewRecord'];
 }) {
   const days = getWeekDays(focusDate);
 
@@ -466,6 +489,7 @@ function WeekStrip({
                       onWeatherCancel={onWeatherCancel}
                       onConcessionSignup={onConcessionSignup}
                       onConcessionCancel={onConcessionCancel}
+                      onViewRecord={onViewRecord}
                     />
                   ))
                 )}
@@ -492,6 +516,7 @@ export function LeagueCalendar({
   onConcessionCancel,
   onAddEvent,
   childSelector,
+  onViewRecord,
 }: LeagueCalendarProps) {
   const [view, setView] = useState<'month' | 'week'>('month');
   const [focusDate, setFocusDate] = useState<Date>(new Date());
@@ -617,6 +642,7 @@ export function LeagueCalendar({
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
+          onViewRecord={onViewRecord}
         />
       ) : (
         <WeekStrip
@@ -626,6 +652,7 @@ export function LeagueCalendar({
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
+          onViewRecord={onViewRecord}
         />
       )}
 
