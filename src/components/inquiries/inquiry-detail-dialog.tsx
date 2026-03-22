@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,14 +34,15 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
   const [replyMessage, setReplyMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [pendingResolved, setPendingResolved] = useState(false);
 
   if (!inquiry) return null;
 
   const topicConfig = getTopicConfig(inquiry.topic);
   const statusInfo = STATUS_CONFIG[inquiry.status];
 
-  const handleStatusChange = async (newStatus: InquiryStatus) => {
-    if (!db || newStatus === inquiry.status) return;
+  const doStatusChange = async (newStatus: InquiryStatus) => {
+    if (!db) return;
     setUpdatingStatus(true);
     try {
       const updates: Record<string, any> = {
@@ -57,7 +58,18 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
       toast({ variant: 'destructive', title: 'Update Failed', description: error.message });
     } finally {
       setUpdatingStatus(false);
+      setPendingResolved(false);
     }
+  };
+
+  const handleStatusChange = (newStatus: InquiryStatus) => {
+    if (!db || newStatus === inquiry.status) return;
+    // Require confirmation before marking resolved
+    if (newStatus === 'resolved') {
+      setPendingResolved(true);
+      return;
+    }
+    doStatusChange(newStatus);
   };
 
   const handleReply = async () => {
@@ -68,7 +80,7 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
         id: crypto.randomUUID(),
         authorId: profile.id,
         authorName: profile.displayName || 'Board Member',
-        authorRole: profile.roles?.includes('Admin') ? 'Admin' : 'Board Member',
+        authorRole: profile.roles?.[0] ?? 'Board Member',
         message: replyMessage.trim(),
         createdAt: new Date().toISOString(),
       };
@@ -153,7 +165,7 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
             <Select
               value={inquiry.status}
               onValueChange={(v) => handleStatusChange(v as InquiryStatus)}
-              disabled={updatingStatus}
+              disabled={updatingStatus || pendingResolved}
             >
               <SelectTrigger className="w-[160px]">
                 <SelectValue />
@@ -166,6 +178,13 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
             </Select>
             {updatingStatus && <Loader2 className="h-4 w-4 animate-spin" />}
           </div>
+          {pendingResolved && (
+            <div className="flex items-center gap-2 rounded-md bg-orange-50 border border-orange-200 px-3 py-2 text-sm text-orange-800">
+              <span className="flex-1">Mark this inquiry as resolved?</span>
+              <Button size="sm" variant="outline" onClick={() => setPendingResolved(false)} className="h-7 px-2 text-xs">Cancel</Button>
+              <Button size="sm" onClick={() => doStatusChange('resolved')} disabled={updatingStatus} className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700 text-white">Confirm</Button>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <Textarea

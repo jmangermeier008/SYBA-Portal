@@ -46,7 +46,8 @@ export default function AdminInquiriesPage() {
         const q = searchQuery.toLowerCase();
         if (
           !inq.subject.toLowerCase().includes(q) &&
-          !inq.senderName.toLowerCase().includes(q)
+          !inq.senderName.toLowerCase().includes(q) &&
+          !inq.senderEmail.toLowerCase().includes(q)
         ) return false;
       }
       return true;

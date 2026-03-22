@@ -48,7 +48,8 @@ export async function POST(req: Request) {
       const enrollmentSnap = await getDoc(enrollmentRef);
       if (!enrollmentSnap.exists()) {
         console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId}`);
-        return NextResponse.json({ error: 'Enrollment not found' }, { status: 404 });
+        // Return 200 so Stripe doesn't retry — enrollment may have been deleted
+        return NextResponse.json({ received: true });
       }
 
       await updateDoc(enrollmentRef, {

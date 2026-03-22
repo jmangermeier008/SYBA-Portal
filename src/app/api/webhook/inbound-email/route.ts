@@ -122,7 +122,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     console.error('[inbound-email] Error:', error.message);
-    // Return 200 so Mailgun doesn't retry indefinitely on misconfiguration
-    return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
+    // Return 500 for infrastructure errors (Firestore down, etc.) so Mailgun retries.
+    // Return 200 only for parse/mapping errors where retrying won't help.
+    const isInfraError = error.code && (
+      error.code === 'unavailable' ||
+      error.code === 'deadline-exceeded' ||
+      error.code === 'internal'
+    );
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: isInfraError ? 500 : 200 }
+    );
   }
 }
