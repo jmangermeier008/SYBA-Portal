@@ -62,58 +62,19 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    // Read raw body as text first so we can see exactly what Resend sends
-    const rawBody = await req.text();
-    const contentType = req.headers.get('content-type') ?? '';
-    console.log('[inbound-email] Content-Type', contentType);
-    console.log('[inbound-email] RAW BODY (first 1000 chars)', rawBody.slice(0, 1000));
+    // Mailgun sends multipart/form-data with full email content including body
+    const formData = await req.formData();
 
-    // Try JSON first, then URL-encoded form data
-    let body: any = {};
-    try {
-      body = JSON.parse(rawBody);
-    } catch {
-      try {
-        const params = new URLSearchParams(rawBody);
-        body = Object.fromEntries(params.entries());
-      } catch {
-        // Body stays as empty object — logs will reveal what was sent
-      }
-    }
+    const fromRaw: string = (formData.get('sender') as string) ?? '';
+    const toRaw: string = (formData.get('recipient') as string) ?? '';
+    const subject: string = (formData.get('subject') as string) ?? '(no subject)';
 
-    console.log('[inbound-email] PARSED BODY KEYS', JSON.stringify(Object.keys(body?.data ?? body)));
-    console.log('[inbound-email] PARSED BODY', JSON.stringify(body));
-
-    // Resend inbound email payload wraps fields inside body.data
-    // The webhook only contains metadata — body content must be fetched via the Resend API
-    const data = body.data ?? body;
-    const fromRaw: string = data.from ?? '';
-    const toRaw: string | string[] = data.to ?? '';
-    const subject: string = data.subject ?? '(no subject)';
-    const emailId: string = data.email_id ?? '';
-
-    // Fetch the full email content from Resend API using the email_id
-    let rawText = '';
-    let rawHtml = '';
-    if (emailId && process.env.RESEND_API_KEY) {
-      try {
-        const emailRes = await fetch(`https://api.resend.com/emails/${emailId}`, {
-          headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
-        });
-        if (emailRes.ok) {
-          const emailData = await emailRes.json();
-          rawText = emailData.text ?? '';
-          rawHtml = emailData.html ?? '';
-          console.log('[inbound-email] Fetched email body via API, textLength:', rawText.length, 'htmlLength:', rawHtml.length);
-        } else {
-          console.warn('[inbound-email] Resend API fetch failed:', emailRes.status, await emailRes.text());
-        }
-      } catch (fetchErr: any) {
-        console.warn('[inbound-email] Resend API fetch error:', fetchErr.message);
-      }
-    } else {
-      console.warn('[inbound-email] No email_id or RESEND_API_KEY — cannot fetch body');
-    }
+    // 'stripped-text' removes quoted reply chains — cleaner for portal display
+    const rawText: string =
+      (formData.get('stripped-text') as string) ||
+      (formData.get('body-plain') as string) ||
+      '';
+    const rawHtml: string = (formData.get('body-html') as string) || '';
 
     // Strip HTML tags to produce readable plain text when only HTML is available
     function stripHtml(html: string): string {
@@ -126,13 +87,10 @@ export async function POST(req: Request) {
       ? stripHtml(rawHtml)
       : '(no message body)';
 
-    console.log('[inbound-email] Webhook called', JSON.stringify({ from: fromRaw, to: toRaw, subject, textSnippet: text?.slice(0, 100) }));
+    console.log('[inbound-email] Webhook called', JSON.stringify({ from: fromRaw, to: toRaw, subject, textSnippet: text.slice(0, 100) }));
 
     const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw);
-
-    // Determine recipient — use first address in the "to" field
-    const recipientRaw = Array.isArray(toRaw) ? toRaw[0] : toRaw;
-    const recipientEmail = normalizeEmail(recipientRaw);
+    const recipientEmail = normalizeEmail(toRaw);
 
     const topic: InquiryTopic = INBOUND_TOPIC_MAP[recipientEmail] ?? 'general';
     const topicConfig = getTopicConfig(topic);
@@ -151,7 +109,7 @@ export async function POST(req: Request) {
       topic,
       subject: subject.slice(0, 100),
       message: text.trim(),
-      messageHtml: rawHtml ?? null,
+      messageHtml: rawHtml || null,
       status: 'open',
       assignedToRole: INBOUND_ROLE_OVERRIDE_MAP[recipientEmail] ?? topicConfig.assignedToRole,
       createdAt: now,
@@ -164,7 +122,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     console.error('[inbound-email] Error:', error.message);
-    // Return 200 so Resend doesn't retry indefinitely on misconfiguration
+    // Return 200 so Mailgun doesn't retry indefinitely on misconfiguration
     return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
   }
 }
