@@ -57,9 +57,15 @@ export default function LoginPage() {
 
       if (docSnap.exists()) {
         const userData = docSnap.data();
-        // H1: Support multi-role users — use first role from roles array, fall back to legacy role field
-        const primaryRole = (userData.roles?.[0] ?? userData.role) as string;
-        router.push(`/${primaryRole.toLowerCase().replace(/\s+/g, '-')}/dashboard`);
+        // H1: Support multi-role users — map roles to their correct dashboard paths
+        const roles: string[] = userData.roles ?? [userData.role];
+        if (roles.some((r: string) => ['Admin', 'Site Admin', 'Board Member'].includes(r))) {
+          router.push('/admin/dashboard');
+        } else if (roles.includes('Coach')) {
+          router.push('/coach/dashboard');
+        } else {
+          router.push('/parent/dashboard');
+        }
       } else {
         // If profile doesn't exist, we might be in an inconsistent state
         toast({

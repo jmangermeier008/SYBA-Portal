@@ -57,11 +57,11 @@ const leagueAdminItems = [
   { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
   { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
   { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
+  { label: 'Data Management', icon: Database, href: '/admin/import' },
 ];
 
 const adminOnlyItems = [
   { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
-  { label: 'Data Management', icon: Database, href: '/admin/import' },
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
 
