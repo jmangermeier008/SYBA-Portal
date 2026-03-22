@@ -67,7 +67,8 @@ export async function POST(req: Request) {
     const subject: string = body.subject ?? '(no subject)';
     const text: string = body.text ?? body.html ?? '(no message body)';
 
-    console.log('[inbound-email] Webhook called', { from: fromRaw, to: toRaw, subject });
+    console.log('[inbound-email] Full body keys:', Object.keys(body));
+    console.log('[inbound-email] Webhook called', JSON.stringify({ from: fromRaw, to: toRaw, subject, textSnippet: text?.slice(0, 100) }));
 
     const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw);
 
