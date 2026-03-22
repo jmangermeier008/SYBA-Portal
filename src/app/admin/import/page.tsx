@@ -44,7 +44,7 @@ interface BoardMeeting {
 
 export default function DataManagementPage() {
   const db = useFirestore();
-  const { user, profile } = useUser();
+  const { user, profile, isSiteAdmin } = useUser();
   const { toast } = useToast();
 
   // ── All hooks before early returns (Rules of Hooks) ──────────────────────
@@ -86,6 +86,22 @@ export default function DataManagementPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <p className="text-muted-foreground">Please sign in to continue.</p>
+      </div>
+    );
+  }
+
+  if (!isSiteAdmin) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
+              <CardDescription>You do not have the required permissions to access Data Management.</CardDescription>
+            </CardHeader>
+          </Card>
+        </main>
       </div>
     );
   }

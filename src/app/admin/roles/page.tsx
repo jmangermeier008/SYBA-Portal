@@ -49,7 +49,7 @@ const EMPTY_NEW_USER = {
 export default function RolesPage() {
   const db = useFirestore();
   const { toast } = useToast();
-  const { isAdmin, loading: loadingUser } = useUser();
+  const { isSiteAdmin, loading: loadingUser } = useUser();
 
   // Create user dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -61,9 +61,9 @@ export default function RolesPage() {
   const [removing, setRemoving] = useState(false);
 
   const usersQuery = useMemoFirebase(() => {
-    if (!db || !isAdmin) return null;
+    if (!db || !isSiteAdmin) return null;
     return collection(db, 'userProfiles');
-  }, [db, isAdmin]);
+  }, [db, isSiteAdmin]);
 
   const { data: users, isLoading } = useCollection<UserData>(usersQuery);
 
@@ -176,7 +176,7 @@ export default function RolesPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isSiteAdmin) {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />

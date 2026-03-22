@@ -468,7 +468,7 @@ export default function AdminDashboard({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6">
+      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
 
         {/* ── Zone 1: Header ── */}
         <header className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

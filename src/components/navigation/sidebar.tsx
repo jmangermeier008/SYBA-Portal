@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -40,6 +40,26 @@ import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+
+// ── Role context helpers ─────────────────────────────────────────────────────
+
+type RoleContext = 'admin' | 'coach' | 'parent';
+
+function getRoleContexts(roles: string[]): { context: RoleContext; label: string }[] {
+  const contexts: { context: RoleContext; label: string }[] = [];
+  if (roles.some(r => ['Board Member', 'Admin', 'Site Admin'].includes(r))) {
+    contexts.push({ context: 'admin', label: 'League Admin' });
+  }
+  if (roles.includes('Coach')) contexts.push({ context: 'coach', label: 'Coach' });
+  if (roles.includes('Parent')) contexts.push({ context: 'parent', label: 'Parent' });
+  return contexts;
+}
+
+function getDefaultContext(roles: string[]): RoleContext {
+  if (roles.some(r => ['Board Member', 'Admin', 'Site Admin'].includes(r))) return 'admin';
+  if (roles.includes('Coach')) return 'coach';
+  return 'parent';
+}
 
 const leagueAdminItems = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
@@ -183,6 +203,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
+  const [activeContext, setActiveContext] = useState<RoleContext | null>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({
     'League Admin': pathname.startsWith('/admin/'),
     'Coaching': pathname.startsWith('/coach/'),
@@ -219,6 +240,26 @@ export function Sidebar() {
       'Family': pathname.startsWith('/parent/'),
     });
   }, [pathname]);
+
+  // Initialize active role context from localStorage once roles are available
+  useEffect(() => {
+    if (roles.length === 0) return;
+    const availableContexts = getRoleContexts(roles).map(c => c.context);
+    const saved = localStorage.getItem('syba_active_role') as RoleContext | null;
+    if (saved && availableContexts.includes(saved)) {
+      setActiveContext(saved);
+    } else {
+      setActiveContext(getDefaultContext(roles));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roles.join(',')]);
+
+  const handleContextSwitch = useCallback((context: RoleContext) => {
+    setActiveContext(context);
+    localStorage.setItem('syba_active_role', context);
+    const sectionLabel = context === 'admin' ? 'League Admin' : context === 'coach' ? 'Coaching' : 'Family';
+    setOpenSections(prev => ({ ...prev, [sectionLabel]: true }));
+  }, []);
 
   // Unread in-app notifications badge (parents + coaches)
   const unreadNotifsQuery = useMemoFirebase(() => {
@@ -266,6 +307,7 @@ export function Sidebar() {
   const closeMenu = () => setMobileOpen(false);
 
   const roleLabel = roles.join(' · ') || profile?.role || '';
+  const roleContexts = getRoleContexts(roles);
 
   const sidebarInner = (
     <aside className={cn(
@@ -291,7 +333,23 @@ export function Sidebar() {
       </div>
 
       <nav className={cn("flex-1 overflow-y-auto space-y-1", collapsed && !isMobile ? "px-1" : "px-4")}>
-        {isBoardMember && (
+        {/* Role context switcher — only shown when user has multiple role contexts */}
+        {roleContexts.length > 1 && !(collapsed && !isMobile) && activeContext && (
+          <div className="pt-3 pb-1">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-1 mb-1.5">Acting as</p>
+            <select
+              value={activeContext}
+              onChange={(e) => handleContextSwitch(e.target.value as RoleContext)}
+              className="w-full text-sm bg-secondary rounded-lg px-3 py-2 text-primary font-medium cursor-pointer border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              {roleContexts.map(c => (
+                <option key={c.context} value={c.context}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {activeContext === 'admin' && isBoardMember && (
           <NavSection
             label="League Admin"
             items={[
@@ -306,7 +364,7 @@ export function Sidebar() {
           />
         )}
 
-        {isCoach && (
+        {activeContext === 'coach' && isCoach && (
           <NavSection
             label="Coaching"
             items={coachItems.map(item =>
@@ -320,7 +378,7 @@ export function Sidebar() {
           />
         )}
 
-        {isParent && (
+        {activeContext === 'parent' && isParent && (
           <NavSection
             label="Family"
             items={parentItems.map(item => {
@@ -424,6 +482,11 @@ export function Sidebar() {
             <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={30} height={30} className="object-contain" />
             <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
           </Link>
+          {activeContext && roleContexts.length > 1 && (
+            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium shrink-0">
+              {roleContexts.find(c => c.context === activeContext)?.label}
+            </span>
+          )}
         </div>
 
         {/* Drawer overlay + sidebar */}
