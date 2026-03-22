@@ -31,6 +31,8 @@ import {
   BookOpen,
   CalendarDays,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   MessageSquare,
   Inbox,
 } from 'lucide-react';
@@ -93,6 +95,7 @@ function NavSection({
   onNavigate,
   isOpen,
   onToggle,
+  collapsed,
 }: {
   label: string;
   items: { label: string; icon: React.ElementType; href: string; badge?: boolean }[];
@@ -100,7 +103,35 @@ function NavSection({
   onNavigate: () => void;
   isOpen: boolean;
   onToggle: () => void;
+  collapsed: boolean;
 }) {
+  if (collapsed) {
+    // Icon-only mode: just show the icons, no section header
+    return (
+      <div className="flex flex-col items-center gap-1 mt-2">
+        {items.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onNavigate}
+            title={item.label}
+            className={cn(
+              "relative flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
+              pathname === item.href || pathname.startsWith(item.href + '/')
+                ? "bg-primary text-white shadow-md shadow-primary/20"
+                : "text-muted-foreground hover:bg-secondary hover:text-primary"
+            )}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            {item.badge && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+            )}
+          </Link>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <>
       <button
@@ -149,6 +180,7 @@ export function Sidebar() {
   const router = useRouter();
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({
@@ -156,6 +188,29 @@ export function Sidebar() {
     'Coaching': pathname.startsWith('/coach/'),
     'Family': pathname.startsWith('/parent/'),
   }));
+
+  // Restore collapsed state from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('syba_sidebar_collapsed');
+    if (saved === 'true') setCollapsed(true);
+  }, []);
+
+  // Sync collapsed class on <html> for CSS variable override
+  useEffect(() => {
+    if (collapsed) {
+      document.documentElement.classList.add('sidebar-collapsed');
+    } else {
+      document.documentElement.classList.remove('sidebar-collapsed');
+    }
+  }, [collapsed]);
+
+  const toggleCollapsed = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('syba_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     setOpenSections({
@@ -176,7 +231,6 @@ export function Sidebar() {
     );
   }, [db, profile?.id, isParent, isCoach]);
   const { data: unreadNotifs } = useCollection<{ id: string }>(unreadNotifsQuery);
-  // Sync hasUnreadNotifs whenever the query result changes
   useEffect(() => {
     setHasUnreadNotifs((unreadNotifs?.length ?? 0) > 0);
   }, [unreadNotifs]);
@@ -214,11 +268,16 @@ export function Sidebar() {
   const roleLabel = roles.join(' · ') || profile?.role || '';
 
   const sidebarInner = (
-    <aside className="w-64 border-r bg-white flex flex-col h-[100dvh] fixed left-0 top-0 z-40">
-      <div className="p-6 flex items-center justify-between">
+    <aside className={cn(
+      "border-r bg-white flex flex-col h-[100dvh] fixed left-0 top-0 z-40 transition-all duration-300",
+      collapsed && !isMobile ? "w-16" : "w-64"
+    )}>
+      <div className={cn("p-4 flex items-center", collapsed && !isMobile ? "justify-center" : "justify-between px-6")}>
         <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
-          <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={36} height={36} className="object-contain" />
-          <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+          <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={36} height={36} className="object-contain shrink-0" />
+          {(!collapsed || isMobile) && (
+            <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+          )}
         </Link>
         {isMobile && (
           <button
@@ -231,7 +290,7 @@ export function Sidebar() {
         )}
       </div>
 
-      <nav className="flex-1 px-4 overflow-y-auto space-y-1">
+      <nav className={cn("flex-1 overflow-y-auto space-y-1", collapsed && !isMobile ? "px-1" : "px-4")}>
         {isBoardMember && (
           <NavSection
             label="League Admin"
@@ -243,6 +302,7 @@ export function Sidebar() {
             onNavigate={closeMenu}
             isOpen={openSections['League Admin']}
             onToggle={() => toggleSection('League Admin')}
+            collapsed={collapsed && !isMobile}
           />
         )}
 
@@ -256,6 +316,7 @@ export function Sidebar() {
             onNavigate={closeMenu}
             isOpen={openSections['Coaching']}
             onToggle={() => toggleSection('Coaching')}
+            collapsed={collapsed && !isMobile}
           />
         )}
 
@@ -271,35 +332,78 @@ export function Sidebar() {
             onNavigate={closeMenu}
             isOpen={openSections['Family']}
             onToggle={() => toggleSection('Family')}
+            collapsed={collapsed && !isMobile}
           />
         )}
 
-        {/* Fallback for users with no recognized role */}
         {!isBoardMember && !isCoach && !isParent && (
-          <div className="px-3 py-4 text-sm text-muted-foreground">
+          <div className={cn("py-4 text-sm text-muted-foreground", collapsed && !isMobile ? "hidden" : "px-3")}>
             No navigation available. Contact your administrator.
           </div>
         )}
       </nav>
 
-      <div className="p-4 border-t space-y-4">
-        <div className="px-3 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-primary font-bold">
-            {profile?.displayName?.[0] || 'U'}
+      <div className={cn("border-t space-y-2", collapsed && !isMobile ? "p-2" : "p-4")}>
+        {/* User info */}
+        {(!collapsed || isMobile) && (
+          <div className="px-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-primary font-bold shrink-0">
+              {profile?.displayName?.[0] || 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate">{profile?.displayName}</p>
+              <p className="text-xs text-muted-foreground truncate">{roleLabel}</p>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{profile?.displayName}</p>
-            <p className="text-xs text-muted-foreground truncate">{roleLabel}</p>
+        )}
+        {collapsed && !isMobile && (
+          <div className="flex justify-center">
+            <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-primary font-bold" title={profile?.displayName || 'User'}>
+              {profile?.displayName?.[0] || 'U'}
+            </div>
           </div>
-        </div>
-        <Button
-          variant="ghost"
-          className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          onClick={handleSignOut}
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          Sign Out
-        </Button>
+        )}
+
+        {/* Sign out */}
+        {collapsed && !isMobile ? (
+          <button
+            onClick={handleSignOut}
+            title="Sign Out"
+            className="w-full flex items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        ) : (
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            onClick={handleSignOut}
+          >
+            <LogOut className="mr-2 h-4 w-4" />
+            Sign Out
+          </Button>
+        )}
+
+        {/* Collapse toggle — desktop only */}
+        {!isMobile && (
+          <button
+            onClick={toggleCollapsed}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className={cn(
+              "w-full flex items-center p-2 rounded-lg text-muted-foreground hover:bg-secondary hover:text-primary transition-colors text-xs font-medium",
+              collapsed ? "justify-center" : "justify-start gap-2 px-3"
+            )}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <>
+                <ChevronLeft className="h-4 w-4" />
+                Collapse
+              </>
+            )}
+          </button>
+        )}
       </div>
     </aside>
   );

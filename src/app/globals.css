@@ -38,3 +38,17 @@
     @apply font-headline;
   }
 }
+
+/* Collapsible sidebar: dynamically adjust md:ml-64 offset */
+@media (min-width: 768px) {
+  :root {
+    --sidebar-width: 16rem;
+  }
+  :root.sidebar-collapsed {
+    --sidebar-width: 4rem;
+  }
+  .md\:ml-64 {
+    margin-left: var(--sidebar-width) !important;
+    transition: margin-left 0.3s ease;
+  }
+}
