@@ -41,6 +41,7 @@ import { Button } from '@/components/ui/button';
 const leagueAdminItems = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
   { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
+  { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
   { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
   { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
   { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
