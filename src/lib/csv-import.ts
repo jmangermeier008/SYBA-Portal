@@ -1,5 +1,6 @@
 // ─── CSV Import Utilities ──────────────────────────────────────────────────────
 
+/** Parsed row from a game schedule CSV, ready for validation. */
 export interface ParsedGame {
   date: string;
   time: string;
@@ -12,6 +13,7 @@ export interface ParsedGame {
   _row: number;
 }
 
+/** Parsed row from a roster assignment CSV, ready for validation. */
 export interface ParsedRosterRow {
   firstName: string;
   lastName: string;
@@ -21,6 +23,7 @@ export interface ParsedRosterRow {
   _row: number;
 }
 
+/** A single row-level validation error from CSV import. */
 export interface ValidationError {
   row: number;
   column: string;
@@ -63,6 +66,13 @@ export function parseCSV(text: string): string[][] {
     });
 }
 
+/**
+ * Parses a raw game schedule CSV string into an array of ParsedGame objects.
+ * Strips UTF-8 BOM, normalizes headers, and maps each data row.
+ * Throws if required columns (Date, Time, Type, Field) are missing.
+ * @param text - Raw CSV file content as a string
+ * @returns Array of parsed game rows (unvalidated)
+ */
 export function parseGameScheduleCSV(text: string): ParsedGame[] {
   // C6: Strip UTF-8 BOM if present
   const cleanText = text.replace(/^\uFEFF/, '');
@@ -93,6 +103,15 @@ export function parseGameScheduleCSV(text: string): ParsedGame[] {
   }));
 }
 
+/**
+ * Validates parsed game rows against known team and field names.
+ * Checks date format (YYYY-MM-DD), time format (HH:MM), type value,
+ * field existence, and team name existence for each row type.
+ * @param rows - Output of parseGameScheduleCSV()
+ * @param teamNames - Array of valid team names from Firestore
+ * @param fieldNames - Array of valid field names from Firestore
+ * @returns Object with valid rows array and validation errors array
+ */
 export function validateGameRows(
   rows: ParsedGame[],
   teamNames: string[],
@@ -163,6 +182,13 @@ export function validateGameRows(
 
 // ─── Roster Assignment CSV ─────────────────────────────────────────────────────
 
+/**
+ * Parses a raw roster CSV string into an array of ParsedRosterRow objects.
+ * Strips UTF-8 BOM, normalizes headers, and maps each data row.
+ * Throws if required columns (FirstName, LastName, TeamName) are missing.
+ * @param text - Raw CSV file content as a string
+ * @returns Array of parsed roster rows (unvalidated)
+ */
 export function parseRosterCSV(text: string): ParsedRosterRow[] {
   // C6: Strip UTF-8 BOM if present
   const cleanText = text.replace(/^\uFEFF/, '');
@@ -192,6 +218,10 @@ export function parseRosterCSV(text: string): ParsedRosterRow[] {
 
 // ─── Template Generators ───────────────────────────────────────────────────────
 
+/**
+ * Triggers a browser download of the game schedule CSV template
+ * with example rows showing the required column format.
+ */
 export function downloadGameTemplate() {
   const headers = 'Date,Time,Type,HomeTeam,AwayTeam,TeamName,Field,Notes';
   const example1 = '2026-05-01,18:00,Game,Tigers,Bears,,Field 1,';
@@ -200,6 +230,10 @@ export function downloadGameTemplate() {
   downloadCSV(csv, 'game_schedule_template.csv');
 }
 
+/**
+ * Triggers a browser download of the roster assignment CSV template
+ * with example rows showing the required column format.
+ */
 export function downloadRosterTemplate() {
   const headers = 'FirstName,LastName,TeamName,JerseySize,JerseyNumber';
   const example1 = 'John,Smith,Tigers,M,12';

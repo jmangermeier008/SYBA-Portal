@@ -1,0 +1,323 @@
+# SYBA Portal — Developer Reference
+
+## Project Overview
+
+Full-stack youth baseball league management portal for Sharpsville Youth Baseball Association. Built on Next.js 15 App Router + Firebase + Stripe + Google Genkit AI.
+
+**Dev server:** `npm run dev` → http://localhost:9002
+
+---
+
+## Tech Stack
+
+| | |
+|---|---|
+| Framework | Next.js 15.5 (App Router, React 19, TypeScript 5) |
+| Database | Firebase Firestore (real-time, rules-enforced) |
+| Auth | Firebase Authentication (email/password) |
+| Storage | Firebase Storage (clearance document uploads) |
+| Payments | Stripe Checkout (enrollment registration fees) |
+| AI | Google Genkit 1.16 + Gemini (AI drill generator) |
+| UI | shadcn/ui (Radix UI) + Tailwind CSS 3 |
+| Calendar | Custom LeagueCalendar + react-day-picker 9 |
+| Icons | lucide-react |
+
+---
+
+## Directory Structure
+
+```
+src/
+├── ai/                       Genkit AI flows (practice drill generator)
+├── app/
+│   ├── (auth)/               Login/signup pages (route group — no sidebar)
+│   ├── admin/                Board Member + Admin pages (20+ routes)
+│   ├── coach/                Coach pages (9 routes)
+│   ├── parent/               Parent pages (12 routes)
+│   ├── api/                  API routes (Stripe webhook, email, inbound webhook)
+│   ├── page.tsx              Public home page (login/signup + active season banner)
+│   └── globals.css           Global styles + collapsible sidebar CSS variables
+├── components/
+│   ├── calendar/
+│   │   └── LeagueCalendar.tsx  Unified calendar — games, practices, concessions
+│   ├── navigation/
+│   │   └── sidebar.tsx         Role-aware collapsible sidebar
+│   ├── inquiries/              Inquiry form + detail dialog components
+│   ├── notifications/          Notification inbox component
+│   ├── ui/                     shadcn/ui Radix wrappers (35 files)
+│   └── FirebaseErrorListener.tsx  Global Firestore permission error boundary
+├── data/                     Static data (officers list, inquiry topic config)
+├── firebase/
+│   ├── auth/use-user.tsx     useUser() — auth state + profile + role booleans
+│   ├── firestore/
+│   │   ├── use-collection.tsx  useCollection<T>() real-time subscription hook
+│   │   └── use-doc.tsx         useDoc<T>() real-time document hook
+│   ├── provider.tsx          FirebaseProvider context + useMemoFirebase()
+│   ├── config.ts             Firebase client config (reads NEXT_PUBLIC_ env vars)
+│   └── index.ts              Re-exports all hooks + initializeFirebase()
+├── hooks/
+│   ├── use-mobile.tsx        Responsive breakpoint detection
+│   └── use-toast.ts          Toast notification system
+├── lib/
+│   ├── csv-import.ts         CSV parse/validate utilities for games + roster bulk import
+│   ├── ics.ts                ICS calendar file generator for event export
+│   ├── utils.ts              cn() — Tailwind class merger (clsx + tailwind-merge)
+│   └── firebase-admin.ts     Firebase Admin SDK for server-side API routes
+└── types/
+    └── scheduling.ts         Canonical TypeScript types for all Firestore collections
+```
+
+---
+
+## Firestore Collections
+
+### Top-Level Collections
+
+**`userProfiles/{userId}`**
+- `email`, `displayName`
+- `roles: UserRole[]` — multi-role array (current field)
+- `role: UserRole` — legacy single-role (backward compat, still read)
+- `teamIds: string[]` — coach's assigned teams
+- `enrolledPlayerIds: string[]` — parent's enrolled players
+- `notificationPrefs: { email: boolean, inApp: boolean }`
+
+**`userProfiles/{userId}/players/{playerId}`** (subcollection)
+- `firstName`, `lastName`, `dateOfBirth`
+- `teamId`, `division`, `seasonId`
+- `parentIds: string[]` — supports two parents per child
+- `clearanceUrl` — Firebase Storage path (deleted after admin verification)
+
+**`userProfiles/{userId}/players/{playerId}/enrollments/{id}`** (subcollection)
+- `seasonId`, `teamId`, `divisionId`, `parentUserId`
+- `paymentStatus: 'pending' | 'pending_payment' | 'paid'`
+- `registrationFeeAmount: number`
+
+**`seasons/{seasonId}`**
+- `name`, `status: 'active' | 'archived'`
+- `startDate`, `endDate` (YYYY-MM-DD)
+- `volunteerSlotsRequired` — minimum concession shifts per family this season
+
+**`teams/{teamId}`**
+- `name`, `seasonId`, `divisionId`
+- `coachIds: string[]` — multi-coach support
+- `coach_uid` — legacy single-coach field (backward compat)
+
+**`teams/{teamId}/games/{gameId}`** (subcollection — team-specific)
+> **IMPORTANT:** Different shape from top-level `games` collection — see Two Game Data Models below.
+- `dateTime: string` — combined ISO datetime (e.g. `"2026-05-01T18:00:00Z"`)
+- `type: 'Game' | 'Practice'` (capitalized, unlike top-level)
+- `opponentName`, `location`, `fieldId`
+- `cancelled: boolean`, `cancellationReason: string`
+
+**`teams/{teamId}/games/{gameId}/rsvps/{rsvpId}`** (subcollection)
+- `rsvpId` format: `{playerId}_{gameId}`
+- `status: 'Attending' | 'Not Attending' | 'Maybe'`
+- `playerId`, `parentUserId`, `gameId`, `teamId`
+
+**`games/{gameId}`** (top-level — admin/league-wide)
+> **IMPORTANT:** Different shape from team subcollection — see Two Game Data Models below.
+- `type: 'game' | 'practice'` (lowercase)
+- `date: string` (YYYY-MM-DD) — separate from `time`
+- `time: string` (HH:MM 24-hour) — separate from `date`
+- `fieldId`, `fieldName`
+- `status: 'scheduled' | 'cancelled' | 'completed' | 'postponed'`
+- For games: `homeTeamId`, `homeTeamName`, `awayTeamId`, `awayTeamName`, `division`
+- For practices: `teamId`, `teamName`
+
+**`fields/{fieldId}`**
+- `name`, `address`, `type: 'game' | 'practice' | 'both'`
+- `isActive: boolean`
+- `availabilityStart`, `availabilityEnd` (HH:MM)
+- `maintenanceClosures: Array<{ date: string, reason?: string }>`
+
+**`concessionSlots/{slotId}`**
+- `gameDate: string` (YYYY-MM-DD), `startTime`, `endTime` (HH:MM)
+- `capacity: number`, `claimedCount: number` — always keep in sync via Firestore transaction
+- `cancelCutoffHours: number`
+- `signups: ConcessionSignup[]`
+- `gameId` — optional link to a `games` document
+- `status: 'active' | 'cancelled'`
+
+**`practiceSlots/{slotId}`**
+- `teamId`, `teamName` — pre-allotted by admin
+- `coachId`, `coachName` — populated when a coach claims the slot
+- `date`, `startTime`, `endTime`, `fieldId`, `fieldName`
+- `status: 'available' | 'claimed' | 'cancelled'`
+
+**`announcements/{id}`** — `title`, `body`, `publishedAt`, `pinned: boolean`
+
+**`notifications/{id}`** — `userId`, `type: NotificationType`, `title`, `body`, `read: boolean`, `createdAt`, `relatedDocId`, `relatedDocType`
+
+**`inquiries/{id}`** — `topic`, `name`, `email`, `message`, `status: 'open' | 'in_progress' | 'resolved'`
+
+**`sponsorships/{id}`** — `name`, `tier: 'Gold' | 'Silver' | 'Bronze' | 'In-Kind'`, `pledgeAmount`, `receivedAmount`, `status`
+
+**`boardMeetings/{id}`** — `title`, `date`, `location`, `agenda`, `notes`, `rsvps[]`
+
+---
+
+## Two Game Data Models
+
+This is the most critical architectural distinction in the codebase:
+
+| | `games/{id}` (top-level) | `teams/{teamId}/games/{id}` (subcollection) |
+|---|---|---|
+| Used by | Admin pages, league-wide calendar | Coach pages, parent pages |
+| Date | `date: "YYYY-MM-DD"` + `time: "HH:MM"` (separate fields) | `dateTime: "2026-05-01T18:00:00Z"` (single ISO string) |
+| Type values | `'game'` / `'practice'` (lowercase) | `'Game'` / `'Practice'` (capitalized) |
+| Normalizer | `normalizeGame(g)` | `normalizeTeamGame(g, teamId)` |
+
+Always use the right collection. Admin pages write and read `games/{id}`. Coach and parent pages query `teams/{teamId}/games`.
+
+---
+
+## Role System
+
+`useUser()` in `src/firebase/auth/use-user.tsx`:
+
+```ts
+const {
+  user,        // FirebaseUser | null
+  profile,     // UserProfile | null
+  loading,     // boolean
+  isAdmin,     // 'Admin' in profile.roles
+  isSiteAdmin, // 'Site Admin' in profile.roles
+  isBoardMember, // 'Board Member' in profile.roles
+  isCoach,     // 'Coach' in profile.roles
+  isParent,    // 'Parent' in profile.roles
+} = useUser();
+```
+
+Users can hold multiple roles simultaneously. Check the appropriate boolean before rendering role-specific content. All pages begin with `if (loadingUser) return <spinner>` followed by a role guard.
+
+---
+
+## Key Architectural Patterns
+
+### 1. useMemoFirebase() — Required for all Firestore queries
+
+`useCollection` and `useDoc` enforce that queries are memoized. Passing a new query object on every render causes an infinite subscription loop and a runtime error.
+
+```ts
+// CORRECT — useMemoFirebase wraps useMemo and stamps __memo: true
+const q = useMemoFirebase(() => {
+  if (!db || !userId) return null;
+  return collection(db, 'userProfiles', userId, 'players');
+}, [db, userId]);
+const { data } = useCollection(q);
+
+// WRONG — creates a new query object on every render
+const q = db ? collection(db, 'userProfiles', userId, 'players') : null;
+```
+
+Return `null` when dependencies aren't ready — `useCollection` safely skips subscription on null.
+
+### 2. useCollection<T> and useDoc<T>
+
+```ts
+const { data, isLoading } = useCollection<MyType>(memoizedQuery);
+// data: MyType[] with .id auto-injected from Firestore document ID
+// isLoading: true until first snapshot arrives
+
+const { data } = useDoc<MyType>(memoizedDocRef);
+// data: MyType | null
+```
+
+Permission-denied errors surface via `errorEmitter` and are displayed by `FirebaseErrorListener`.
+
+### 3. Hook placement — Rules of Hooks
+
+**All hooks must be called before any early return.** This is React's Rules of Hooks. The component structure must be:
+
+```tsx
+export default function MyPage() {
+  // 1. ALL hooks here (useState, useMemo, useMemoFirebase, useCollection, useRouter, etc.)
+  const [state, setState] = useState(...);
+  const query = useMemoFirebase(...);
+  const { data } = useCollection(query);
+  const derived = useMemo(...);  // ← must be here, NOT after guards
+
+  // 2. Guards AFTER all hooks
+  if (loadingUser) return <Spinner />;
+  if (!isAdmin) return <AccessDenied />;
+
+  // 3. JSX render
+  return ( ... );
+}
+```
+
+### 4. CalendarEvent — Unified Type
+
+All calendar views consume `CalendarEvent[]` (defined in `src/types/scheduling.ts`). Normalize raw Firestore data before passing to `LeagueCalendar`:
+
+```ts
+// Admin games (top-level collection — separate date + time)
+function normalizeGame(g: Game): CalendarEvent {
+  return {
+    id: g.id,
+    eventType: g.type === 'game' ? 'game' : 'practice',
+    date: g.date,
+    startTime: g.time,
+    title: g.homeTeamName ? `${g.homeTeamName} vs. ${g.awayTeamName}` : `${g.teamName} Practice`,
+    status: g.status ?? 'scheduled',
+    fieldName: g.fieldName,
+    sourceType: 'global-game',
+    sourceId: g.id,
+  };
+}
+
+// Team games (subcollection — combined dateTime ISO string)
+function normalizeTeamGame(g: GameEvent, teamId: string): CalendarEvent {
+  const dateTime = g.dateTime ?? '';
+  return {
+    id: g.id,
+    eventType: g.type === 'Game' ? 'game' : 'practice',
+    date: dateTime.slice(0, 10),
+    startTime: dateTime.slice(11, 16),
+    title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
+    status: g.cancelled ? 'cancelled' : 'scheduled',
+    fieldName: g.location,
+    sourceType: 'team-game',
+    sourceId: g.id,
+    teamId,
+  };
+}
+```
+
+### 5. LeagueCalendar Props (src/components/calendar/LeagueCalendar.tsx)
+
+Key props by role:
+- `onViewRecord` — Admin/Board: navigates to game detail record from popover
+- `onRsvp` — Parent: RSVP buttons in game event popovers
+- `onWeatherCancel` — Coach: cancel game with reason from popover
+- `visibleFilters` — limit which filter checkboxes appear (e.g. `['games', 'practices']`)
+
+---
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_FIREBASE_API_KEY` + 5 more | Firebase client SDK |
+| `FIREBASE_ADMIN_*` | Firebase Admin SDK (server API routes) |
+| `STRIPE_SECRET_KEY` | Stripe server-side |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe client-side |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature verification |
+| `EMAIL_GENERAL` | General inquiry routing email |
+| `EMAIL_REGISTRATION` | Registration topic email |
+| `EMAIL_SAFETY` | Safety/compliance topic email |
+| `EMAIL_FACILITIES` | Fields/facilities topic email |
+| `EMAIL_UMPIRES` | Umpiring topic email |
+| `EMAIL_SPONSORSHIPS` | Sponsorship topic email |
+
+---
+
+## Development Commands
+
+```bash
+npm run dev              # Dev server at http://localhost:9002 (Turbopack)
+npm run build            # Production build
+npm run typecheck        # npx tsc --noEmit --skipLibCheck
+npm run lint             # Next.js ESLint
+npm run genkit:dev       # Genkit AI dev server (drill generator feature)
+```

@@ -1,3 +1,9 @@
+/**
+ * Generates an ICS (iCalendar) string for a single calendar event.
+ * Defaults end time to 2 hours after start if not provided.
+ * @param event - title, start Date, optional end Date, location, description
+ * @returns ICS file content as a string (VCALENDAR format)
+ */
 export function generateICS(event: {
   title: string;
   start: Date;
@@ -23,6 +29,11 @@ export function generateICS(event: {
   ].filter(Boolean).join('\r\n');
 }
 
+/**
+ * Triggers a browser download of an ICS calendar file.
+ * @param ics - ICS file content string from generateICS()
+ * @param filename - Download filename (default: 'event.ics')
+ */
 export function downloadICS(ics: string, filename = 'event.ics') {
   const blob = new Blob([ics], { type: 'text/calendar' });
   const url = URL.createObjectURL(blob);

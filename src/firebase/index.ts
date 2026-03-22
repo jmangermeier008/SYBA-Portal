@@ -6,6 +6,12 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
+/**
+ * Initializes the Firebase app idempotently — safe to call multiple times.
+ * Attempts automatic initialization first (AppCheck/hosting config),
+ * then falls back to the explicit firebaseConfig from config.ts.
+ * @returns Firebase SDK instances: firebaseApp, auth, firestore, storage
+ */
 // IMPORTANT: DO NOT MODIFY THIS FUNCTION
 export function initializeFirebase() {
   if (!getApps().length) {
@@ -25,6 +31,11 @@ export function initializeFirebase() {
   return getSdks(getApp());
 }
 
+/**
+ * Returns Firebase service SDK instances for a given FirebaseApp.
+ * @param firebaseApp - An initialized FirebaseApp instance
+ * @returns Object with auth, firestore, and storage SDK instances
+ */
 export function getSdks(firebaseApp: FirebaseApp) {
   return {
     firebaseApp,

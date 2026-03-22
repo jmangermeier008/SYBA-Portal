@@ -9,6 +9,7 @@
 // Roles
 // ---------------------------------------------------------------------------
 
+/** All assignable user roles in the portal. Users can hold multiple roles simultaneously. */
 export type UserRole =
   | 'Parent'
   | 'Coach'
@@ -20,8 +21,10 @@ export type UserRole =
 // Seasons
 // ---------------------------------------------------------------------------
 
+/** Active seasons accept registrations; archived seasons are historical. */
 export type SeasonStatus = 'active' | 'archived';
 
+/** A league season — the top-level container for all scheduling and enrollment activity. */
 export interface Season {
   id: string;
   name: string;
@@ -44,6 +47,7 @@ export interface MaintenanceClosure {
   reason?: string;
 }
 
+/** A physical field or facility where games and practices are held. */
 export interface Field {
   id: string;
   name: string;
@@ -60,6 +64,7 @@ export interface Field {
 // Teams
 // ---------------------------------------------------------------------------
 
+/** A team within a season. Supports multiple coaches via coachIds array. */
 export interface Team {
   id: string;
   name: string;
@@ -77,6 +82,11 @@ export interface Team {
 export type GameStatus = 'scheduled' | 'cancelled' | 'completed' | 'postponed';
 export type GameType = 'game' | 'practice';
 
+/**
+ * A game or practice event in the top-level `games` collection (admin/league-wide).
+ * NOTE: The team-specific `teams/{teamId}/games` subcollection uses a different shape
+ * with a combined `dateTime: string` ISO field instead of separate `date` + `time`.
+ */
 export interface Game {
   id: string;
   seasonId: string;
@@ -111,6 +121,7 @@ export interface ConcessionSignup {
   signedUpAt: string;
 }
 
+/** A volunteer concession shift. claimedCount mirrors signups.length — keep in sync via transaction. */
 export interface ConcessionSlot {
   id: string;
   // --- Linking ---
@@ -155,6 +166,7 @@ export interface ConcessionClaim {
 
 export type PracticeSlotStatus = 'available' | 'claimed' | 'cancelled';
 
+/** A practice time slot pre-allotted to a team by an admin. Coaches claim available slots. */
 export interface PracticeSlot {
   id: string;
   seasonId: string;
@@ -193,6 +205,7 @@ export type NotificationRelatedDocType =
   | 'concessionSlot'
   | 'practiceSlot';
 
+/** An in-app notification written to the notifications collection when league events occur. */
 export interface Notification {
   id: string;
   userId: string;
@@ -214,6 +227,7 @@ export interface NotificationPrefs {
   inApp: boolean;
 }
 
+/** Firestore user profile (collection: userProfiles). Extends the Firebase Auth user record. */
 export interface UserProfile {
   id: string;
   email: string | null;
@@ -232,6 +246,7 @@ export interface UserProfile {
 // Players  (subcollection: userProfiles/{userId}/players)
 // ---------------------------------------------------------------------------
 
+/** A player profile stored as a subcollection under the parent's userProfile document. */
 export interface Player {
   id: string;
   firstName: string;
@@ -250,6 +265,11 @@ export interface Player {
 
 export type CalendarEventType = 'game' | 'practice' | 'concession';
 
+/**
+ * Normalized unified event type consumed by LeagueCalendar.
+ * Never stored in Firestore — computed client-side in useMemo from raw Firestore documents
+ * using normalizeGame() (for top-level games) or normalizeTeamGame() (for team subcollection games).
+ */
 export interface CalendarEvent {
   id: string;
   eventType: CalendarEventType;

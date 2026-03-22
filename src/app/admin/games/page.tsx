@@ -141,6 +141,24 @@ export default function AdminGamesPage() {
   }, [db, isAdmin, isBoardMember, view]);
   const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
 
+  const calendarEvents = useMemo((): CalendarEvent[] => {
+    if (!allGames) return [];
+    return allGames.map(g => ({
+      id: g.id,
+      eventType: g.type === 'game' ? 'game' as const : 'practice' as const,
+      date: g.date,
+      startTime: g.time,
+      title: g.type === 'game' && g.homeTeamName && g.awayTeamName
+        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+        : g.teamName ? `${g.teamName} Practice` : 'Practice',
+      status: g.status ?? 'scheduled',
+      fieldName: g.fieldName,
+      notes: g.notes,
+      sourceType: 'global-game' as const,
+      sourceId: g.id,
+    }));
+  }, [allGames]);
+
   const teamsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
     return query(collection(db, 'teams'), orderBy('name', 'asc'));
@@ -506,24 +524,6 @@ export default function AdminGamesPage() {
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
-
-  const calendarEvents = useMemo((): CalendarEvent[] => {
-    if (!allGames) return [];
-    return allGames.map(g => ({
-      id: g.id,
-      eventType: g.type === 'game' ? 'game' as const : 'practice' as const,
-      date: g.date,
-      startTime: g.time,
-      title: g.type === 'game' && g.homeTeamName && g.awayTeamName
-        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
-        : g.teamName ? `${g.teamName} Practice` : 'Practice',
-      status: g.status ?? 'scheduled',
-      fieldName: g.fieldName,
-      notes: g.notes,
-      sourceType: 'global-game' as const,
-      sourceId: g.id,
-    }));
-  }, [allGames]);
 
   const filterGames = (list: Game[]) => {
     if (!searchQuery.trim()) return list;
