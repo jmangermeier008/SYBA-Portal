@@ -62,11 +62,27 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    // Read raw body as text first so we can see exactly what Resend sends
+    const rawBody = await req.text();
+    const contentType = req.headers.get('content-type') ?? '';
+    console.log('[inbound-email] Content-Type', contentType);
+    console.log('[inbound-email] RAW BODY (first 1000 chars)', rawBody.slice(0, 1000));
 
-    // Log the full raw payload so we can inspect Resend's exact field names in Vercel logs
-    console.log('[inbound-email] RAW PAYLOAD KEYS', JSON.stringify(Object.keys(body?.data ?? body)));
-    console.log('[inbound-email] RAW PAYLOAD', JSON.stringify(body));
+    // Try JSON first, then URL-encoded form data
+    let body: any = {};
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      try {
+        const params = new URLSearchParams(rawBody);
+        body = Object.fromEntries(params.entries());
+      } catch {
+        // Body stays as empty object — logs will reveal what was sent
+      }
+    }
+
+    console.log('[inbound-email] PARSED BODY KEYS', JSON.stringify(Object.keys(body?.data ?? body)));
+    console.log('[inbound-email] PARSED BODY', JSON.stringify(body));
 
     // Resend inbound email payload wraps fields inside body.data
     const data = body.data ?? body;
