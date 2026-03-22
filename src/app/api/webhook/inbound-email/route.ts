@@ -85,21 +85,42 @@ export async function POST(req: Request) {
     console.log('[inbound-email] PARSED BODY', JSON.stringify(body));
 
     // Resend inbound email payload wraps fields inside body.data
+    // The webhook only contains metadata — body content must be fetched via the Resend API
     const data = body.data ?? body;
     const fromRaw: string = data.from ?? '';
     const toRaw: string | string[] = data.to ?? '';
     const subject: string = data.subject ?? '(no subject)';
+    const emailId: string = data.email_id ?? '';
 
-    // Try all common field names for the plain-text body
-    const rawText: string | undefined = data.text ?? data.plain ?? data.body ?? data.content;
-    const rawHtml: string | undefined = data.html;
+    // Fetch the full email content from Resend API using the email_id
+    let rawText = '';
+    let rawHtml = '';
+    if (emailId && process.env.RESEND_API_KEY) {
+      try {
+        const emailRes = await fetch(`https://api.resend.com/emails/${emailId}`, {
+          headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+        });
+        if (emailRes.ok) {
+          const emailData = await emailRes.json();
+          rawText = emailData.text ?? '';
+          rawHtml = emailData.html ?? '';
+          console.log('[inbound-email] Fetched email body via API, textLength:', rawText.length, 'htmlLength:', rawHtml.length);
+        } else {
+          console.warn('[inbound-email] Resend API fetch failed:', emailRes.status, await emailRes.text());
+        }
+      } catch (fetchErr: any) {
+        console.warn('[inbound-email] Resend API fetch error:', fetchErr.message);
+      }
+    } else {
+      console.warn('[inbound-email] No email_id or RESEND_API_KEY — cannot fetch body');
+    }
 
     // Strip HTML tags to produce readable plain text when only HTML is available
     function stripHtml(html: string): string {
       return html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
     }
 
-    const text: string = rawText?.trim()
+    const text: string = rawText.trim()
       ? rawText.trim()
       : rawHtml
       ? stripHtml(rawHtml)
