@@ -44,7 +44,7 @@ interface BoardMeeting {
 
 export default function DataManagementPage() {
   const db = useFirestore();
-  const { user, profile, isSiteAdmin } = useUser();
+  const { user, profile } = useUser();
   const { toast } = useToast();
 
   // ── All hooks before early returns (Rules of Hooks) ──────────────────────
@@ -82,10 +82,10 @@ export default function DataManagementPage() {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterDone, setRosterDone] = useState(false);
 
-  if (!isSiteAdmin) {
+  if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-muted-foreground">Access denied.</p>
+        <p className="text-muted-foreground">Please sign in to continue.</p>
       </div>
     );
   }
@@ -110,12 +110,14 @@ export default function DataManagementPage() {
     .filter(g => g.teams.length > 0);
 
   // ── Role Switcher ─────────────────────────────────────────────────────────
-  const handleRoleSwitch = async (newRole: 'Admin' | 'Coach' | 'Parent') => {
+  const handleRoleSwitch = async (newRole: 'Site Admin' | 'Admin' | 'Board Member' | 'Coach' | 'Parent') => {
     if (!user || !db) return;
     setRoleLoading(true);
     try {
+      // Legacy 'role' field only supports Parent/Coach/Admin — map higher roles to Admin
+      const legacyRole = (newRole === 'Site Admin' || newRole === 'Board Member') ? 'Admin' : newRole;
       await updateDoc(doc(db, 'userProfiles', user.uid), {
-        role: newRole,
+        role: legacyRole,
         roles: [newRole],
         updatedAt: new Date().toISOString(),
       });
@@ -681,12 +683,28 @@ export default function DataManagementPage() {
                 </p>
                 <div className="grid grid-cols-1 gap-3">
                   <Button
+                    variant={currentRole === 'Site Admin' ? 'default' : 'outline'}
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Site Admin')}
+                    disabled={roleLoading}
+                  >
+                    <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Site Admin
+                  </Button>
+                  <Button
                     variant={currentRole === 'Admin' ? 'default' : 'outline'}
                     className="justify-start h-12 rounded-xl"
                     onClick={() => handleRoleSwitch('Admin')}
                     disabled={roleLoading}
                   >
                     <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Admin
+                  </Button>
+                  <Button
+                    variant={currentRole === 'Board Member' ? 'default' : 'outline'}
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Board Member')}
+                    disabled={roleLoading}
+                  >
+                    <UserCheck className="mr-2 h-5 w-5" /> Switch to Board Member
                   </Button>
                   <Button
                     variant={currentRole === 'Coach' ? 'default' : 'outline'}
