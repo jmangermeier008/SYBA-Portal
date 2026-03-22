@@ -189,40 +189,24 @@ export default function ConcessionsAdminPage() {
         return;
       }
 
-      // Fetch user profiles for each parent (batched)
+      // Fetch user profiles for each parent via individual getDoc calls
       const parentIdArray = Array.from(parentIds);
       const profileMap = new Map<string, { displayName: string; email: string }>();
 
-      // Fetch in chunks of 10 for Firestore 'in' query limit
-      for (let i = 0; i < parentIdArray.length; i += 10) {
-        const chunk = parentIdArray.slice(i, i + 10);
-        const profileSnap = await getDocs(
-          query(collection(db, 'userProfiles'), where('id', 'in', chunk))
-        );
-        profileSnap.docs.forEach(d => {
-          const data = d.data();
-          profileMap.set(d.id, {
-            displayName: data.displayName || data.email || d.id,
-            email: data.email || '',
-          });
-        });
-        // For any not found via query, try direct getDoc
-        const found = new Set(profileSnap.docs.map(d => d.id));
-        for (const id of chunk) {
-          if (!found.has(id)) {
-            const single = await getDoc(doc(db, 'userProfiles', id));
-            if (single.exists()) {
-              const data = single.data();
-              profileMap.set(id, {
-                displayName: data.displayName || data.email || id,
-                email: data.email || '',
-              });
-            } else {
-              profileMap.set(id, { displayName: id, email: '' });
-            }
+      await Promise.all(
+        parentIdArray.map(async (parentId) => {
+          const profileDoc = await getDoc(doc(db, 'userProfiles', parentId));
+          if (profileDoc.exists()) {
+            const data = profileDoc.data();
+            profileMap.set(parentId, {
+              displayName: data.displayName || data.email || parentId,
+              email: data.email || '',
+            });
+          } else {
+            profileMap.set(parentId, { displayName: parentId, email: '' });
           }
-        }
-      }
+        })
+      );
 
       // Get concession slots within the season's registration date range
       // Filter client-side using registrationOpen / registrationClose
