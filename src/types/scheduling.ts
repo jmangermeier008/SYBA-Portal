@@ -242,3 +242,35 @@ export interface Player {
   dateOfBirth: string;
   clearanceUrl?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Calendar Events  (normalized type for the unified calendar view)
+// ---------------------------------------------------------------------------
+
+export type CalendarEventType = 'game' | 'practice' | 'concession';
+
+export interface CalendarEvent {
+  id: string;
+  eventType: CalendarEventType;
+  date: string;         // YYYY-MM-DD — primary grid placement key
+  startTime: string;    // HH:MM
+  endTime?: string;     // HH:MM — optional
+  title: string;        // pill label
+  status: string;       // 'scheduled' | 'cancelled' | 'completed' | 'claimed' | 'active' etc.
+  fieldName?: string;
+  sourceType: 'global-game' | 'team-game' | 'practice-slot' | 'concession-slot';
+  sourceId: string;     // Firestore doc ID
+  // Game-specific
+  homeTeamName?: string;
+  awayTeamName?: string;
+  teamId?: string;
+  teamName?: string;
+  division?: string;
+  notes?: string;
+  // Concession-specific
+  capacity?: number;
+  claimedCount?: number;
+  isSigned?: boolean;   // Whether the current parent has signed up
+  // Parent RSVP
+  myRsvpStatus?: 'Attending' | 'Not Attending' | 'Maybe' | null;
+}
