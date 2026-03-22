@@ -61,13 +61,13 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Resend inbound email payload fields
-    const fromRaw: string = body.from ?? '';
-    const toRaw: string | string[] = body.to ?? '';
-    const subject: string = body.subject ?? '(no subject)';
-    const text: string = body.text ?? body.html ?? '(no message body)';
+    // Resend inbound email payload wraps fields inside body.data
+    const data = body.data ?? body;
+    const fromRaw: string = data.from ?? '';
+    const toRaw: string | string[] = data.to ?? '';
+    const subject: string = data.subject ?? '(no subject)';
+    const text: string = data.text ?? data.html ?? '(no message body)';
 
-    console.log('[inbound-email] Full body keys:', Object.keys(body));
     console.log('[inbound-email] Webhook called', JSON.stringify({ from: fromRaw, to: toRaw, subject, textSnippet: text?.slice(0, 100) }));
 
     const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw);
