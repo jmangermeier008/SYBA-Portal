@@ -34,6 +34,7 @@ import {
   MessageSquare,
   Inbox,
 } from 'lucide-react';
+import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,7 @@ const coachItems = [
   { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
   { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/coach/practice-slots' },
+  { label: 'Notifications', icon: Bell, href: '/coach/notifications' },
   { label: 'Contact Us', icon: MessageSquare, href: '/coach/contact' },
 ];
 
@@ -78,6 +80,7 @@ const parentItems = [
   { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
   { label: 'Announcements', icon: Bell, href: '/parent/announcements' },
   { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
+  { label: 'Notifications', icon: Inbox, href: '/parent/notifications' },
   { label: 'Contact Us', icon: MessageSquare, href: '/parent/contact' },
   { label: 'Settings', icon: Settings, href: '/parent/settings' },
 ];
@@ -146,6 +149,7 @@ export function Sidebar() {
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
+  const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({
     'League Admin': pathname.startsWith('/admin/'),
     'Coaching': pathname.startsWith('/coach/'),
@@ -159,6 +163,22 @@ export function Sidebar() {
       'Family': pathname.startsWith('/parent/'),
     });
   }, [pathname]);
+
+  // Unread in-app notifications badge (parents + coaches)
+  const unreadNotifsQuery = useMemoFirebase(() => {
+    if (!db || !profile || (!isParent && !isCoach)) return null;
+    return query(
+      collection(db, 'notifications'),
+      where('userId', '==', profile.id),
+      where('read', '==', false),
+      firestoreLimit(1)
+    );
+  }, [db, profile?.id, isParent, isCoach]);
+  const { data: unreadNotifs } = useCollection<{ id: string }>(unreadNotifsQuery);
+  // Sync hasUnreadNotifs whenever the query result changes
+  if ((unreadNotifs?.length ?? 0) > 0 !== hasUnreadNotifs) {
+    setHasUnreadNotifs((unreadNotifs?.length ?? 0) > 0);
+  }
 
   // Unread announcements badge
   const latestAnnouncementQuery = useMemoFirebase(() => {
@@ -228,7 +248,9 @@ export function Sidebar() {
         {isCoach && (
           <NavSection
             label="Coaching"
-            items={coachItems}
+            items={coachItems.map(item =>
+              item.href === '/coach/notifications' ? { ...item, badge: hasUnreadNotifs } : item
+            )}
             pathname={pathname}
             onNavigate={closeMenu}
             isOpen={openSections['Coaching']}
@@ -239,9 +261,11 @@ export function Sidebar() {
         {isParent && (
           <NavSection
             label="Family"
-            items={parentItems.map(item =>
-              item.href === '/parent/announcements' ? { ...item, badge: hasUnread } : item
-            )}
+            items={parentItems.map(item => {
+              if (item.href === '/parent/announcements') return { ...item, badge: hasUnread };
+              if (item.href === '/parent/notifications') return { ...item, badge: hasUnreadNotifs };
+              return item;
+            })}
             pathname={pathname}
             onNavigate={closeMenu}
             isOpen={openSections['Family']}

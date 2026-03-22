@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,44 +8,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, deleteDoc } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Plus,
-  Trash2,
-  CalendarDays,
-  Loader2,
-  Lock,
-  MapPin,
-  Users,
-  Trophy,
-  Upload,
-  Download,
-  AlertCircle,
-  CheckCircle2,
-  ShoppingCart,
-  XCircle,
+  Plus, Trash2, CalendarDays, Loader2, Lock, MapPin, Users, Trophy,
+  Upload, Download, AlertCircle, CheckCircle2, ShoppingCart, XCircle, Pencil,
+  ArrowRight,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
-  parseGameScheduleCSV,
-  validateGameRows,
-  downloadGameTemplate,
-  type ParsedGame,
-  type ValidationError,
+  parseGameScheduleCSV, validateGameRows, downloadGameTemplate,
+  type ParsedGame, type ValidationError,
 } from '@/lib/csv-import';
 import type { ConcessionSlot } from '@/types/scheduling';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type GameStatus = 'scheduled' | 'cancelled' | 'completed' | 'postponed';
+type GameType = 'game' | 'practice';
 
 interface Game {
   id: string;
-  type: 'game' | 'practice';
+  type: GameType;
   date: string;
   time: string;
   fieldId: string;
@@ -73,22 +59,19 @@ function formatTime(t: string) {
 }
 
 const EMPTY_FORM = {
-  type: 'game' as 'game' | 'practice',
-  date: '',
-  time: '',
-  fieldId: '',
-  homeTeamId: '',
-  awayTeamId: '',
-  teamId: '',
-  notes: '',
+  type: 'game' as GameType,
+  date: '', time: '', fieldId: '',
+  homeTeamId: '', awayTeamId: '', teamId: '', notes: '',
 };
 
 const EMPTY_SHIFT_FORM = {
-  enabled: false,
-  startTime: '',
-  endTime: '',
-  capacity: 4,
-  description: '',
+  enabled: false, startTime: '', endTime: '', capacity: 4, description: '',
+};
+
+const STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  cancelled: { label: 'Cancelled', className: 'bg-red-100 text-red-700 border-red-200' },
+  postponed: { label: 'Postponed', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+  completed: { label: 'Completed', className: 'bg-gray-100 text-gray-500 border-gray-200' },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -100,24 +83,33 @@ export default function AdminGamesPage() {
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
 
+  // Dialog state
   const [open, setOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [shiftForm, setShiftForm] = useState(EMPTY_SHIFT_FORM);
+  const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Delete dialog
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; game: Game | null; linkedShiftCount: number; isDeleting: boolean }>({
-    open: false, game: null, linkedShiftCount: 0, isDeleting: false,
-  });
+  // Reschedule cascade confirmation
+  const pendingShiftsRef = useRef<any[]>([]);
+  const [rescheduleDialog, setRescheduleDialog] = useState<{
+    open: boolean; linkedShiftCount: number; affectedSignupCount: number;
+    oldDateLabel: string; newDateLabel: string; isRescheduling: boolean;
+  }>({ open: false, linkedShiftCount: 0, affectedSignupCount: 0, oldDateLabel: '', newDateLabel: '', isRescheduling: false });
 
   // Cancel dialog
-  const [cancelDialog, setCancelDialog] = useState<{ open: boolean; game: Game | null; linkedShiftCount: number; isCancelling: boolean }>({
-    open: false, game: null, linkedShiftCount: 0, isCancelling: false,
-  });
+  const [cancelDialog, setCancelDialog] = useState<{
+    open: boolean; game: Game | null; linkedShiftCount: number; isCancelling: boolean;
+  }>({ open: false, game: null, linkedShiftCount: 0, isCancelling: false });
 
-  // CSV Import state
+  // Delete dialog
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean; game: Game | null; linkedShiftCount: number; isDeleting: boolean;
+  }>({ open: false, game: null, linkedShiftCount: 0, isDeleting: false });
+
+  // CSV Import
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<ParsedGame[]>([]);
   const [importErrors, setImportErrors] = useState<ValidationError[]>([]);
@@ -127,22 +119,12 @@ export default function AdminGamesPage() {
 
   const upcomingQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(
-      collection(db, 'games'),
-      where('date', '>=', todayISO),
-      orderBy('date', 'asc'),
-      orderBy('time', 'asc')
-    );
+    return query(collection(db, 'games'), where('date', '>=', todayISO), orderBy('date', 'asc'), orderBy('time', 'asc'));
   }, [db, isAdmin, isBoardMember, todayISO]);
 
   const pastQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !showPast) return null;
-    return query(
-      collection(db, 'games'),
-      where('date', '<', todayISO),
-      orderBy('date', 'desc'),
-      orderBy('time', 'desc')
-    );
+    return query(collection(db, 'games'), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
   }, [db, isAdmin, isBoardMember, showPast, todayISO]);
 
   const teamsQuery = useMemoFirebase(() => {
@@ -163,7 +145,58 @@ export default function AdminGamesPage() {
   const fieldMap = Object.fromEntries((fields ?? []).map((f) => [f.id, f.name]));
   const teamMap = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name]));
 
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  const buildGamePayload = () => {
+    const payload: Record<string, any> = {
+      type: form.type,
+      date: form.date,
+      time: form.time,
+      fieldId: form.fieldId,
+      fieldName: fieldMap[form.fieldId] ?? '',
+      notes: form.notes,
+    };
+    if (form.type === 'game') {
+      payload.homeTeamId = form.homeTeamId;
+      payload.homeTeamName = teamMap[form.homeTeamId] ?? '';
+      payload.awayTeamId = form.awayTeamId;
+      payload.awayTeamName = teamMap[form.awayTeamId] ?? '';
+    } else {
+      payload.teamId = form.teamId;
+      payload.teamName = teamMap[form.teamId] ?? '';
+    }
+    return payload;
+  };
+
+  const closeDialog = () => {
+    setOpen(false);
+    setForm(EMPTY_FORM);
+    setShiftForm(EMPTY_SHIFT_FORM);
+    setEditingGame(null);
+  };
+
+  const gameLabel = (game: Game) =>
+    game.homeTeamName && game.awayTeamName
+      ? `${game.homeTeamName} vs. ${game.awayTeamName}`
+      : game.teamName ?? 'the game';
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
+
+  const handleOpenEdit = (game: Game) => {
+    setEditingGame(game);
+    setForm({
+      type: game.type,
+      date: game.date,
+      time: game.time,
+      fieldId: game.fieldId,
+      homeTeamId: game.homeTeamId ?? '',
+      awayTeamId: game.awayTeamId ?? '',
+      teamId: game.teamId ?? '',
+      notes: game.notes ?? '',
+    });
+    setShiftForm(EMPTY_SHIFT_FORM);
+    setOpen(true);
+  };
 
   const handleSave = async () => {
     if (!db) return;
@@ -172,74 +205,83 @@ export default function AdminGamesPage() {
       return;
     }
     if (form.type === 'game' && (!form.homeTeamId || !form.awayTeamId)) {
-      toast({ title: 'Missing teams', description: 'Games require a home team and away team.', variant: 'destructive' });
+      toast({ title: 'Missing teams', description: 'Games require a home and away team.', variant: 'destructive' });
       return;
     }
     if (form.type === 'game' && form.homeTeamId === form.awayTeamId) {
-      toast({ title: 'Invalid teams', description: 'Home team and away team cannot be the same.', variant: 'destructive' });
+      toast({ title: 'Invalid teams', description: 'Home and away team cannot be the same.', variant: 'destructive' });
       return;
     }
     if (form.type === 'practice' && !form.teamId) {
       toast({ title: 'Missing team', description: 'Practices require a team.', variant: 'destructive' });
       return;
     }
-    if (shiftForm.enabled && !shiftForm.endTime) {
+    if (!editingGame && shiftForm.enabled && !shiftForm.endTime) {
       toast({ title: 'Missing shift end time', description: 'Please set an end time for the concession shift.', variant: 'destructive' });
       return;
     }
 
     setIsSaving(true);
-    try {
-      const gameId = crypto.randomUUID();
-      const gamePayload: Record<string, any> = {
-        type: form.type,
-        date: form.date,
-        time: form.time,
-        fieldId: form.fieldId,
-        fieldName: fieldMap[form.fieldId] ?? '',
-        notes: form.notes,
-        status: 'scheduled',
-        createdAt: Timestamp.now(),
-      };
 
-      if (form.type === 'game') {
-        gamePayload.homeTeamId = form.homeTeamId;
-        gamePayload.homeTeamName = teamMap[form.homeTeamId] ?? '';
-        gamePayload.awayTeamId = form.awayTeamId;
-        gamePayload.awayTeamName = teamMap[form.awayTeamId] ?? '';
-      } else {
-        gamePayload.teamId = form.teamId;
-        gamePayload.teamName = teamMap[form.teamId] ?? '';
+    try {
+      // ── EDIT MODE ──────────────────────────────────────────────────────────
+      if (editingGame) {
+        const payload = { ...buildGamePayload(), updatedAt: Timestamp.now() };
+        const dateTimeChanged = form.date !== editingGame.date || form.time !== editingGame.time;
+
+        if (dateTimeChanged) {
+          // Check for linked concession shifts
+          const shiftsSnap = await getDocs(
+            query(collection(db, 'concessionSlots'), where('gameId', '==', editingGame.id))
+          );
+          const activeShifts = shiftsSnap.docs.filter(d => d.data().status !== 'cancelled');
+          if (activeShifts.length > 0) {
+            const affectedSignupCount = activeShifts.reduce(
+              (sum, d) => sum + ((d.data().signups as any[])?.length ?? 0), 0
+            );
+            pendingShiftsRef.current = activeShifts;
+            setRescheduleDialog({
+              open: true,
+              linkedShiftCount: activeShifts.length,
+              affectedSignupCount,
+              oldDateLabel: format(parseISO(editingGame.date), 'MMM d'),
+              newDateLabel: format(parseISO(form.date), 'MMM d'),
+              isRescheduling: false,
+            });
+            setIsSaving(false);
+            return; // Wait for user to confirm the cascade
+          }
+        }
+
+        // No cascade needed — just update the game
+        await updateDoc(doc(db, 'games', editingGame.id), payload);
+        toast({ title: 'Updated', description: 'Game details saved.' });
+        closeDialog();
+        return;
       }
 
+      // ── CREATE MODE ────────────────────────────────────────────────────────
+      const gameId = crypto.randomUUID();
+      const createPayload = { ...buildGamePayload(), status: 'scheduled', createdAt: Timestamp.now() };
+
       if (shiftForm.enabled && form.type === 'game') {
-        // Batch write: game + concession shift in one atomic operation
         const batch = writeBatch(db);
-        batch.set(doc(db, 'games', gameId), gamePayload);
+        batch.set(doc(db, 'games', gameId), createPayload);
         batch.set(doc(db, 'concessionSlots', crypto.randomUUID()), {
-          gameId,
-          isStandalone: false,
-          gameDate: form.date,
-          startTime: shiftForm.startTime || form.time,
-          endTime: shiftForm.endTime,
-          capacity: Number(shiftForm.capacity),
-          claimedCount: 0,
-          cancelCutoffHours: 24,
-          description: shiftForm.description.trim(),
-          status: 'active',
-          signups: [],
-          createdAt: Timestamp.now(),
+          gameId, isStandalone: false, gameDate: form.date,
+          startTime: shiftForm.startTime || form.time, endTime: shiftForm.endTime,
+          capacity: Number(shiftForm.capacity), claimedCount: 0,
+          cancelCutoffHours: 24, description: shiftForm.description.trim(),
+          status: 'active', signups: [], createdAt: Timestamp.now(),
         });
         await batch.commit();
         toast({ title: 'Saved', description: 'Game and concession shift added.' });
       } else {
-        await setDoc(doc(db, 'games', gameId), gamePayload);
-        toast({ title: 'Saved', description: `${form.type === 'game' ? 'Game' : 'Practice'} added successfully.` });
+        await setDoc(doc(db, 'games', gameId), createPayload);
+        toast({ title: 'Saved', description: `${form.type === 'game' ? 'Game' : 'Practice'} added.` });
       }
 
-      setForm(EMPTY_FORM);
-      setShiftForm(EMPTY_SHIFT_FORM);
-      setOpen(false);
+      closeDialog();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -247,12 +289,74 @@ export default function AdminGamesPage() {
     }
   };
 
-  // Opens cancel dialog — checks for linked shifts first
+  // Confirmed reschedule — batch update game + linked shifts + notifications + email
+  const handleConfirmReschedule = async () => {
+    if (!db || !editingGame) return;
+    setRescheduleDialog(prev => ({ ...prev, isRescheduling: true }));
+
+    try {
+      const payload = { ...buildGamePayload(), updatedAt: Timestamp.now() };
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'games', editingGame.id), payload);
+
+      const affectedParentIds = new Set<string>();
+      pendingShiftsRef.current.forEach(shiftDoc => {
+        batch.update(shiftDoc.ref, { gameDate: form.date, updatedAt: Timestamp.now() });
+        const shift = shiftDoc.data() as ConcessionSlot;
+        (shift.signups ?? []).forEach((s: any) => affectedParentIds.add(s.parentUserId));
+      });
+
+      const label = gameLabel(editingGame);
+      const oldDateLabel = format(parseISO(editingGame.date), 'MMM d');
+      const newDateLabel = format(parseISO(form.date), 'MMM d');
+
+      affectedParentIds.forEach(parentId => {
+        batch.set(doc(db, 'notifications', crypto.randomUUID()), {
+          userId: parentId,
+          type: 'shiftMoved',
+          title: 'Concession Shift Rescheduled',
+          body: `Your shift for ${label} has moved from ${oldDateLabel} to ${newDateLabel}.`,
+          relatedDocId: editingGame.id,
+          relatedDocType: 'game',
+          read: false,
+          createdAt: Timestamp.now(),
+        });
+      });
+
+      await batch.commit();
+
+      // Fire-and-forget email notifications
+      if (affectedParentIds.size > 0) {
+        fetch('/api/email/schedule-change', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'shiftMoved',
+            userIds: [...affectedParentIds],
+            gameLabel: label,
+            oldDateLabel,
+            newDateLabel,
+          }),
+        }).catch(err => console.error('[schedule-change email]', err));
+      }
+
+      toast({
+        title: 'Game Rescheduled',
+        description: `${pendingShiftsRef.current.length} shift${pendingShiftsRef.current.length !== 1 ? 's' : ''} moved.${affectedParentIds.size > 0 ? ` ${affectedParentIds.size} volunteer${affectedParentIds.size !== 1 ? 's' : ''} notified.` : ''}`,
+      });
+
+      setRescheduleDialog({ open: false, linkedShiftCount: 0, affectedSignupCount: 0, oldDateLabel: '', newDateLabel: '', isRescheduling: false });
+      pendingShiftsRef.current = [];
+      closeDialog();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      setRescheduleDialog(prev => ({ ...prev, isRescheduling: false }));
+    }
+  };
+
   const handleInitiateCancel = async (game: Game) => {
     if (!db) return;
-    const shiftsSnap = await getDocs(
-      query(collection(db, 'concessionSlots'), where('gameId', '==', game.id))
-    );
+    const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
     setCancelDialog({ open: true, game, linkedShiftCount: shiftsSnap.size, isCancelling: false });
   };
 
@@ -262,48 +366,37 @@ export default function AdminGamesPage() {
     setCancelDialog(prev => ({ ...prev, isCancelling: true }));
     try {
       const batch = writeBatch(db);
+      batch.update(doc(db, 'games', game.id), { status: 'cancelled', updatedAt: Timestamp.now() });
 
-      batch.update(doc(db, 'games', game.id), {
-        status: 'cancelled',
-        updatedAt: Timestamp.now(),
-      });
-
-      // Cancel linked concession shifts and collect parent IDs for notifications
-      const shiftsSnap = await getDocs(
-        query(collection(db, 'concessionSlots'), where('gameId', '==', game.id))
-      );
+      const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       const affectedParentIds = new Set<string>();
       shiftsSnap.forEach(shiftDoc => {
         batch.update(shiftDoc.ref, { status: 'cancelled', updatedAt: Timestamp.now() });
-        const shift = shiftDoc.data() as ConcessionSlot;
-        (shift.signups ?? []).forEach(s => affectedParentIds.add(s.parentUserId));
+        (shiftDoc.data().signups ?? []).forEach((s: any) => affectedParentIds.add(s.parentUserId));
       });
 
-      // Create in-app notifications for affected parents
-      const gameLabel = game.homeTeamName && game.awayTeamName
-        ? `${game.homeTeamName} vs. ${game.awayTeamName}`
-        : game.teamName ?? 'the game';
+      const label = gameLabel(game);
       const dateLabel = format(parseISO(game.date), 'MMM d');
       affectedParentIds.forEach(parentId => {
         batch.set(doc(db, 'notifications', crypto.randomUUID()), {
-          userId: parentId,
-          type: 'shiftCancelled',
+          userId: parentId, type: 'shiftCancelled',
           title: 'Concession Shift Cancelled',
-          body: `Your concession shift on ${dateLabel} (${gameLabel}) has been cancelled due to the game being cancelled.`,
-          relatedDocId: game.id,
-          relatedDocType: 'game',
-          read: false,
-          createdAt: Timestamp.now(),
+          body: `Your shift on ${dateLabel} (${label}) has been cancelled.`,
+          relatedDocId: game.id, relatedDocType: 'game', read: false, createdAt: Timestamp.now(),
         });
       });
 
       await batch.commit();
-      toast({
-        title: 'Game Cancelled',
-        description: shiftsSnap.size > 0
-          ? `${shiftsSnap.size} concession shift${shiftsSnap.size !== 1 ? 's' : ''} also cancelled.${affectedParentIds.size > 0 ? ` ${affectedParentIds.size} volunteer${affectedParentIds.size !== 1 ? 's' : ''} notified.` : ''}`
-          : undefined,
-      });
+
+      if (affectedParentIds.size > 0) {
+        fetch('/api/email/schedule-change', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'shiftCancelled', userIds: [...affectedParentIds], gameLabel: label, oldDateLabel: dateLabel }),
+        }).catch(err => console.error('[schedule-change email]', err));
+      }
+
+      toast({ title: 'Game Cancelled', description: shiftsSnap.size > 0 ? `${shiftsSnap.size} shift${shiftsSnap.size !== 1 ? 's' : ''} cancelled.${affectedParentIds.size > 0 ? ` ${affectedParentIds.size} volunteer${affectedParentIds.size !== 1 ? 's' : ''} notified.` : ''}` : undefined });
       setCancelDialog({ open: false, game: null, linkedShiftCount: 0, isCancelling: false });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -311,12 +404,9 @@ export default function AdminGamesPage() {
     }
   };
 
-  // Opens delete dialog — checks for linked shifts first
   const handleInitiateDelete = async (game: Game) => {
     if (!db) return;
-    const shiftsSnap = await getDocs(
-      query(collection(db, 'concessionSlots'), where('gameId', '==', game.id))
-    );
+    const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
     setDeleteDialog({ open: true, game, linkedShiftCount: shiftsSnap.size, isDeleting: false });
   };
 
@@ -327,15 +417,10 @@ export default function AdminGamesPage() {
     try {
       const batch = writeBatch(db);
       batch.delete(doc(db, 'games', game.id));
-
-      // Delete linked concession shifts
-      const shiftsSnap = await getDocs(
-        query(collection(db, 'concessionSlots'), where('gameId', '==', game.id))
-      );
+      const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       shiftsSnap.forEach(shiftDoc => batch.delete(shiftDoc.ref));
-
       await batch.commit();
-      toast({ title: 'Deleted', description: shiftsSnap.size > 0 ? `${shiftsSnap.size} linked concession shift${shiftsSnap.size !== 1 ? 's' : ''} also removed.` : undefined });
+      toast({ title: 'Deleted', description: shiftsSnap.size > 0 ? `${shiftsSnap.size} linked shift${shiftsSnap.size !== 1 ? 's' : ''} also removed.` : undefined });
       setDeleteDialog({ open: false, game: null, linkedShiftCount: 0, isDeleting: false });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -348,9 +433,7 @@ export default function AdminGamesPage() {
     if (!file) return;
     const text = await file.text();
     const parsed = parseGameScheduleCSV(text);
-    const teamNames = (teams ?? []).map((t) => t.name);
-    const fieldNames = (fields ?? []).map((f) => f.name);
-    const result = validateGameRows(parsed, teamNames, fieldNames);
+    const result = validateGameRows(parsed, (teams ?? []).map(t => t.name), (fields ?? []).map(f => f.name));
     setImportRows(result.valid);
     setImportErrors(result.errors);
     e.target.value = '';
@@ -364,36 +447,26 @@ export default function AdminGamesPage() {
       for (const row of importRows) {
         const id = crypto.randomUUID();
         const isGame = row.type.toLowerCase() === 'game';
-        const matchedField = (fields ?? []).find((f) => f.name.toLowerCase() === row.field.toLowerCase());
+        const matchedField = (fields ?? []).find(f => f.name.toLowerCase() === row.field.toLowerCase());
         const payload: Record<string, any> = {
-          type: isGame ? 'game' : 'practice',
-          date: row.date,
-          time: row.time,
-          fieldId: matchedField?.id ?? '',
-          fieldName: matchedField?.name ?? row.field,
-          notes: row.notes ?? '',
-          status: 'scheduled',
-          createdAt: Timestamp.now(),
+          type: isGame ? 'game' : 'practice', date: row.date, time: row.time,
+          fieldId: matchedField?.id ?? '', fieldName: matchedField?.name ?? row.field,
+          notes: row.notes ?? '', status: 'scheduled', createdAt: Timestamp.now(),
         };
         if (isGame) {
-          const home = (teams ?? []).find((t) => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
-          const away = (teams ?? []).find((t) => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
-          payload.homeTeamId = home?.id ?? '';
-          payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
-          payload.awayTeamId = away?.id ?? '';
-          payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
+          const home = (teams ?? []).find(t => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
+          const away = (teams ?? []).find(t => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
+          payload.homeTeamId = home?.id ?? ''; payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
+          payload.awayTeamId = away?.id ?? ''; payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
         } else {
-          const team = (teams ?? []).find((t) => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
-          payload.teamId = team?.id ?? '';
-          payload.teamName = team?.name ?? row.teamName ?? '';
+          const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
+          payload.teamId = team?.id ?? ''; payload.teamName = team?.name ?? row.teamName ?? '';
         }
         batch.set(doc(db, 'games', id), payload);
       }
       await batch.commit();
-      toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}`, description: 'Schedule updated successfully.' });
-      setImportOpen(false);
-      setImportRows([]);
-      setImportErrors([]);
+      toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}` });
+      setImportOpen(false); setImportRows([]); setImportErrors([]);
     } catch (err: any) {
       toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -401,27 +474,17 @@ export default function AdminGamesPage() {
     }
   };
 
-  // ── Access guard ──────────────────────────────────────────────────────────────
+  // ── Guards ────────────────────────────────────────────────────────────────────
 
-  if (loadingUser) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-      </div>
-    );
-  }
+  if (loadingUser) return <div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>;
 
   if (!isAdmin && !isBoardMember) {
     return (
-      <div className="flex min-h-screen bg-background">
-        <Sidebar />
+      <div className="flex min-h-screen bg-background"><Sidebar />
         <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
-            <CardHeader>
-              <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
-              <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
-              <p className="text-muted-foreground text-sm">Admins only.</p>
-            </CardHeader>
+            <CardContent className="py-12"><Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <p className="font-bold text-lg">Access Denied</p></CardContent>
           </Card>
         </main>
       </div>
@@ -441,9 +504,6 @@ export default function AdminGamesPage() {
     );
   };
 
-  const gameList = filterGames(upcomingGames ?? []);
-  const pastList = filterGames(pastGames ?? []);
-
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -455,38 +515,31 @@ export default function AdminGamesPage() {
             <h1 className="text-3xl font-bold font-headline">Game Schedule</h1>
             <p className="text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
-
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
-              <Input
-                placeholder="Search games…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 rounded-xl w-48"
-              />
+              <Input placeholder="Search games…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 rounded-xl w-48" />
             </div>
-
             <Button variant="outline" className="rounded-full px-5" onClick={() => setImportOpen(true)}>
               <Upload className="mr-2 h-4 w-4" /> Import Schedule
             </Button>
-
-            <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setForm(EMPTY_FORM); setShiftForm(EMPTY_SHIFT_FORM); } }}>
+            <Dialog open={open} onOpenChange={(o) => { if (!o) closeDialog(); else setOpen(true); }}>
               <DialogTrigger asChild>
-                <Button className="rounded-full px-6">
-                  <Plus className="mr-2 h-4 w-4" /> Add Game / Practice
-                </Button>
+                <Button className="rounded-full px-6"><Plus className="mr-2 h-4 w-4" /> Add Game / Practice</Button>
               </DialogTrigger>
               <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle className="font-headline">Add Game or Practice</DialogTitle>
+                  <DialogTitle className="font-headline">{editingGame ? 'Edit Game' : 'Add Game or Practice'}</DialogTitle>
+                  {editingGame && <p className="text-sm text-muted-foreground">Changes to date or time will move any linked concession shifts.</p>}
                 </DialogHeader>
                 <div className="space-y-4 py-2">
-
-                  {/* Type */}
                   <div className="space-y-1.5">
                     <Label>Type</Label>
-                    <Select value={form.type} onValueChange={(v: 'game' | 'practice') => setForm({ ...form, type: v, homeTeamId: '', awayTeamId: '', teamId: '' })}>
+                    <Select
+                      value={form.type}
+                      onValueChange={(v: GameType) => setForm({ ...form, type: v, homeTeamId: '', awayTeamId: '', teamId: '' })}
+                      disabled={!!editingGame}
+                    >
                       <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="game">Game</SelectItem>
@@ -495,131 +548,106 @@ export default function AdminGamesPage() {
                     </Select>
                   </div>
 
-                  {/* Date / Time */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label>Date</Label>
-                      <Input type="date" className="rounded-xl" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                      <Input type="date" className="rounded-xl" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Time</Label>
-                      <Input type="time" className="rounded-xl" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+                      <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
                     </div>
                   </div>
 
-                  {/* Field */}
                   <div className="space-y-1.5">
                     <Label>Field</Label>
-                    <Select value={form.fieldId} onValueChange={(v) => setForm({ ...form, fieldId: v })}>
+                    <Select value={form.fieldId} onValueChange={v => setForm({ ...form, fieldId: v })}>
                       <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select a field" /></SelectTrigger>
                       <SelectContent>
-                        {(fields ?? []).map((f) => (
-                          <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                        ))}
+                        {(fields ?? []).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {/* Teams — game */}
                   {form.type === 'game' && (
                     <>
                       <div className="space-y-1.5">
                         <Label>Home Team</Label>
-                        <Select value={form.homeTeamId} onValueChange={(v) => setForm({ ...form, homeTeamId: v })}>
+                        <Select value={form.homeTeamId} onValueChange={v => setForm({ ...form, homeTeamId: v })}>
                           <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select home team" /></SelectTrigger>
                           <SelectContent>
-                            {(teams ?? []).map((t) => (
-                              <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                            ))}
+                            {(teams ?? []).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-1.5">
                         <Label>Away Team</Label>
-                        <Select value={form.awayTeamId} onValueChange={(v) => setForm({ ...form, awayTeamId: v })}>
+                        <Select value={form.awayTeamId} onValueChange={v => setForm({ ...form, awayTeamId: v })}>
                           <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select away team" /></SelectTrigger>
                           <SelectContent>
-                            {(teams ?? []).filter((t) => t.id !== form.homeTeamId).map((t) => (
-                              <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                            ))}
+                            {(teams ?? []).filter(t => t.id !== form.homeTeamId).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
                     </>
                   )}
 
-                  {/* Team — practice */}
                   {form.type === 'practice' && (
                     <div className="space-y-1.5">
                       <Label>Team</Label>
-                      <Select value={form.teamId} onValueChange={(v) => setForm({ ...form, teamId: v })}>
+                      <Select value={form.teamId} onValueChange={v => setForm({ ...form, teamId: v })}>
                         <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select team" /></SelectTrigger>
                         <SelectContent>
-                          {(teams ?? []).map((t) => (
-                            <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                          ))}
+                          {(teams ?? []).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
                   )}
 
-                  {/* Notes */}
                   <div className="space-y-1.5">
                     <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                    <Input className="rounded-xl" placeholder="e.g. Rain makeup game" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                    <Input className="rounded-xl" placeholder="e.g. Rain makeup game" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                   </div>
 
-                  {/* Concession Shift — games only */}
-                  {form.type === 'game' && (
+                  {/* Concession shift — only when creating a game (not editing) */}
+                  {!editingGame && form.type === 'game' && (
                     <div className="rounded-xl border p-3 space-y-3">
                       <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={shiftForm.enabled}
-                          onChange={(e) => setShiftForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                          className="rounded"
-                        />
+                        <input type="checkbox" checked={shiftForm.enabled} onChange={e => setShiftForm(prev => ({ ...prev, enabled: e.target.checked }))} className="rounded" />
                         <span className="flex items-center gap-1.5 text-sm font-medium">
-                          <ShoppingCart className="h-3.5 w-3.5 text-muted-foreground" />
-                          Add a concession shift for this game
+                          <ShoppingCart className="h-3.5 w-3.5 text-muted-foreground" /> Add a concession shift
                         </span>
                       </label>
-
                       {shiftForm.enabled && (
                         <div className="space-y-3 pt-1">
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
                               <Label className="text-xs">Shift Start</Label>
-                              <Input type="time" value={shiftForm.startTime}
-                                onChange={(e) => setShiftForm(prev => ({ ...prev, startTime: e.target.value }))} />
+                              <Input type="time" value={shiftForm.startTime} onChange={e => setShiftForm(prev => ({ ...prev, startTime: e.target.value }))} />
                             </div>
                             <div className="space-y-1">
                               <Label className="text-xs">Shift End *</Label>
-                              <Input type="time" value={shiftForm.endTime}
-                                onChange={(e) => setShiftForm(prev => ({ ...prev, endTime: e.target.value }))} />
+                              <Input type="time" value={shiftForm.endTime} onChange={e => setShiftForm(prev => ({ ...prev, endTime: e.target.value }))} />
                             </div>
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs">Volunteers Needed</Label>
-                            <Input type="number" min={1} max={20} value={shiftForm.capacity}
-                              onChange={(e) => setShiftForm(prev => ({ ...prev, capacity: Number(e.target.value) }))} />
+                            <Input type="number" min={1} max={20} value={shiftForm.capacity} onChange={e => setShiftForm(prev => ({ ...prev, capacity: Number(e.target.value) }))} />
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs">Description <span className="text-muted-foreground">(optional)</span></Label>
-                            <Input placeholder="e.g. Opening shift" value={shiftForm.description}
-                              onChange={(e) => setShiftForm(prev => ({ ...prev, description: e.target.value }))} />
+                            <Input placeholder="e.g. Opening shift" value={shiftForm.description} onChange={e => setShiftForm(prev => ({ ...prev, description: e.target.value }))} />
                           </div>
                         </div>
                       )}
                     </div>
                   )}
                 </div>
-
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                  <Button variant="outline" onClick={closeDialog}>Cancel</Button>
                   <Button onClick={handleSave} disabled={isSaving}>
                     {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Save
+                    {editingGame ? 'Save Changes' : 'Save'}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -627,35 +655,29 @@ export default function AdminGamesPage() {
           </div>
         </header>
 
-        {/* Upcoming Games */}
+        {/* Upcoming */}
         <Card className="border-none shadow-md mb-6">
           <CardHeader className="pb-2">
-            <CardTitle className="font-headline flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-primary" />
-              Upcoming
-            </CardTitle>
+            <CardTitle className="font-headline flex items-center gap-2"><CalendarDays className="h-5 w-5 text-primary" /> Upcoming</CardTitle>
           </CardHeader>
           <CardContent>
             {loadingUpcoming ? (
               <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-            ) : gameList.length === 0 ? (
+            ) : filterGames(upcomingGames ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">No upcoming games or practices.</p>
             ) : (
               <div className="space-y-2">
-                {gameList.map((g) => (
-                  <GameRow
-                    key={g.id}
-                    game={g}
+                {filterGames(upcomingGames ?? []).map(g => (
+                  <GameRow key={g.id} game={g}
+                    onEdit={() => handleOpenEdit(g)}
                     onCancel={() => handleInitiateCancel(g)}
-                    onDelete={() => handleInitiateDelete(g)}
-                  />
+                    onDelete={() => handleInitiateDelete(g)} />
                 ))}
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Past Games */}
         <div className="mb-4">
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setShowPast(!showPast)}>
             {showPast ? 'Hide' : 'Show'} past games
@@ -670,17 +692,15 @@ export default function AdminGamesPage() {
             <CardContent>
               {loadingPast ? (
                 <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-              ) : pastList.length === 0 ? (
+              ) : filterGames(pastGames ?? []).length === 0 ? (
                 <p className="text-sm text-muted-foreground">No past games on record.</p>
               ) : (
                 <div className="space-y-2 opacity-60">
-                  {pastList.map((g) => (
-                    <GameRow
-                      key={g.id}
-                      game={g}
+                  {filterGames(pastGames ?? []).map(g => (
+                    <GameRow key={g.id} game={g}
+                      onEdit={() => handleOpenEdit(g)}
                       onCancel={() => handleInitiateCancel(g)}
-                      onDelete={() => handleInitiateDelete(g)}
-                    />
+                      onDelete={() => handleInitiateDelete(g)} />
                   ))}
                 </div>
               )}
@@ -689,20 +709,96 @@ export default function AdminGamesPage() {
         )}
       </main>
 
-      {/* CSV Import Dialog */}
-      <Dialog open={importOpen} onOpenChange={(o) => { if (!isImporting) { setImportOpen(o); if (!o) { setImportRows([]); setImportErrors([]); } } }}>
-        <DialogContent className="max-w-2xl">
+      {/* Reschedule Cascade Confirmation */}
+      <Dialog open={rescheduleDialog.open} onOpenChange={o => { if (!rescheduleDialog.isRescheduling) setRescheduleDialog(prev => ({ ...prev, open: o })); }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-headline">Import Game Schedule</DialogTitle>
+            <DialogTitle className="font-headline">Confirm Reschedule</DialogTitle>
+            <DialogDescription>
+              Moving from <strong>{rescheduleDialog.oldDateLabel}</strong>{' '}
+              <ArrowRight className="inline h-3.5 w-3.5 mx-1" />{' '}
+              <strong>{rescheduleDialog.newDateLabel}</strong>
+            </DialogDescription>
           </DialogHeader>
+          <div className="py-2 space-y-3">
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800 space-y-1">
+              <p className="font-medium">{rescheduleDialog.linkedShiftCount} concession shift{rescheduleDialog.linkedShiftCount !== 1 ? 's' : ''} will be moved to {rescheduleDialog.newDateLabel}.</p>
+              {rescheduleDialog.affectedSignupCount > 0 && (
+                <p className="text-amber-700">{rescheduleDialog.affectedSignupCount} signed-up volunteer{rescheduleDialog.affectedSignupCount !== 1 ? 's' : ''} will be notified by in-app notification and email.</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRescheduleDialog(prev => ({ ...prev, open: false }))} disabled={rescheduleDialog.isRescheduling}>
+              Go Back
+            </Button>
+            <Button onClick={handleConfirmReschedule} disabled={rescheduleDialog.isRescheduling}>
+              {rescheduleDialog.isRescheduling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirm Reschedule
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Game Dialog */}
+      <Dialog open={cancelDialog.open} onOpenChange={o => { if (!cancelDialog.isCancelling) setCancelDialog(prev => ({ ...prev, open: o })); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-headline flex items-center gap-2"><XCircle className="h-5 w-5 text-destructive" /> Cancel Game</DialogTitle>
+            <DialogDescription>{cancelDialog.game && <><strong>{gameLabel(cancelDialog.game)}</strong> on {format(parseISO(cancelDialog.game.date), 'EEE, MMM d')}</>}</DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            {cancelDialog.linkedShiftCount > 0 ? (
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                <p className="font-medium">{cancelDialog.linkedShiftCount} linked shift{cancelDialog.linkedShiftCount !== 1 ? 's' : ''} will be cancelled.</p>
+                <p className="mt-1 text-amber-700">Signed-up volunteers will be notified by in-app notification and email.</p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No linked concession shifts.</p>
+            )}
+            <p className="text-sm text-muted-foreground">The game will be marked cancelled but remain in history.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelDialog({ open: false, game: null, linkedShiftCount: 0, isCancelling: false })} disabled={cancelDialog.isCancelling}>Go Back</Button>
+            <Button variant="destructive" onClick={handleConfirmCancel} disabled={cancelDialog.isCancelling}>
+              {cancelDialog.isCancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Cancel Game
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Game Dialog */}
+      <Dialog open={deleteDialog.open} onOpenChange={o => { if (!deleteDialog.isDeleting) setDeleteDialog(prev => ({ ...prev, open: o })); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-headline">Delete Game</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            {deleteDialog.linkedShiftCount > 0 && (
+              <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
+                <p className="font-medium">{deleteDialog.linkedShiftCount} linked shift{deleteDialog.linkedShiftCount !== 1 ? 's' : ''} will also be deleted.</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialog({ open: false, game: null, linkedShiftCount: 0, isDeleting: false })} disabled={deleteDialog.isDeleting}>Cancel</Button>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleteDialog.isDeleting}>
+              {deleteDialog.isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={o => { if (!isImporting) { setImportOpen(o); if (!o) { setImportRows([]); setImportErrors([]); } } }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle className="font-headline">Import Game Schedule</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
               <p className="text-sm text-muted-foreground">Download the CSV template to see the required format.</p>
-              <Button variant="outline" size="sm" className="rounded-xl" onClick={downloadGameTemplate}>
-                <Download className="mr-2 h-3 w-3" /> Template
-              </Button>
+              <Button variant="outline" size="sm" className="rounded-xl" onClick={downloadGameTemplate}><Download className="mr-2 h-3 w-3" /> Template</Button>
             </div>
-
             <div>
               <Label className="text-sm font-medium">Upload CSV File</Label>
               <label className="mt-2 flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors">
@@ -711,33 +807,19 @@ export default function AdminGamesPage() {
                 <input type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
               </label>
             </div>
-
             {importErrors.length > 0 && (
               <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 space-y-1 max-h-32 overflow-y-auto">
-                <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
-                  <AlertCircle className="h-3.5 w-3.5" /> {importErrors.length} validation error{importErrors.length !== 1 ? 's' : ''}
-                </p>
-                {importErrors.map((err, i) => (
-                  <p key={i} className="text-xs text-destructive/80">Row {err.row} · {err.column}: {err.message}</p>
-                ))}
+                <p className="text-xs font-semibold text-destructive flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5" /> {importErrors.length} error{importErrors.length !== 1 ? 's' : ''}</p>
+                {importErrors.map((err, i) => <p key={i} className="text-xs text-destructive/80">Row {err.row} · {err.column}: {err.message}</p>)}
               </div>
             )}
-
             {importRows.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> {importRows.length} valid row{importRows.length !== 1 ? 's' : ''} ready to import
-                </p>
+                <p className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> {importRows.length} valid row{importRows.length !== 1 ? 's' : ''} ready</p>
                 <div className="rounded-xl border overflow-hidden">
                   <table className="w-full text-xs">
                     <thead className="bg-secondary/30">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-semibold">Date</th>
-                        <th className="px-3 py-2 text-left font-semibold">Time</th>
-                        <th className="px-3 py-2 text-left font-semibold">Type</th>
-                        <th className="px-3 py-2 text-left font-semibold">Teams / Team</th>
-                        <th className="px-3 py-2 text-left font-semibold">Field</th>
-                      </tr>
+                      <tr>{['Date', 'Time', 'Type', 'Teams / Team', 'Field'].map(h => <th key={h} className="px-3 py-2 text-left font-semibold">{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {importRows.slice(0, 5).map((row, i) => (
@@ -745,21 +827,13 @@ export default function AdminGamesPage() {
                           <td className="px-3 py-1.5">{row.date}</td>
                           <td className="px-3 py-1.5">{row.time}</td>
                           <td className="px-3 py-1.5 capitalize">{row.type}</td>
-                          <td className="px-3 py-1.5">
-                            {row.type.toLowerCase() === 'game'
-                              ? `${row.homeTeam} vs ${row.awayTeam}`
-                              : row.teamName}
-                          </td>
+                          <td className="px-3 py-1.5">{row.type.toLowerCase() === 'game' ? `${row.homeTeam} vs ${row.awayTeam}` : row.teamName}</td>
                           <td className="px-3 py-1.5">{row.field}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  {importRows.length > 5 && (
-                    <p className="text-xs text-muted-foreground text-center py-2 border-t">
-                      +{importRows.length - 5} more rows not shown
-                    </p>
-                  )}
+                  {importRows.length > 5 && <p className="text-xs text-muted-foreground text-center py-2 border-t">+{importRows.length - 5} more rows</p>}
                 </div>
               </div>
             )}
@@ -773,96 +847,14 @@ export default function AdminGamesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Cancel Game Dialog */}
-      <Dialog open={cancelDialog.open} onOpenChange={(o) => { if (!cancelDialog.isCancelling) setCancelDialog(prev => ({ ...prev, open: o })); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-headline flex items-center gap-2">
-              <XCircle className="h-5 w-5 text-destructive" />
-              Cancel Game
-            </DialogTitle>
-            <DialogDescription>
-              {cancelDialog.game && (
-                <>
-                  <strong>
-                    {cancelDialog.game.homeTeamName} vs. {cancelDialog.game.awayTeamName}
-                  </strong>{' '}
-                  on {cancelDialog.game.date ? format(parseISO(cancelDialog.game.date), 'EEE, MMM d') : ''}
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-2 space-y-3">
-            {cancelDialog.linkedShiftCount > 0 ? (
-              <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-                <p className="font-medium">This game has {cancelDialog.linkedShiftCount} linked concession shift{cancelDialog.linkedShiftCount !== 1 ? 's' : ''}.</p>
-                <p className="mt-1 text-amber-700">Those shifts will also be cancelled and any signed-up volunteers will be notified.</p>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">This game has no linked concession shifts.</p>
-            )}
-            <p className="text-sm text-muted-foreground">The game will be marked as cancelled but remain visible in the schedule history.</p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelDialog({ open: false, game: null, linkedShiftCount: 0, isCancelling: false })} disabled={cancelDialog.isCancelling}>
-              Go Back
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmCancel} disabled={cancelDialog.isCancelling}>
-              {cancelDialog.isCancelling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Cancel Game
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Game Dialog */}
-      <Dialog open={deleteDialog.open} onOpenChange={(o) => { if (!deleteDialog.isDeleting) setDeleteDialog(prev => ({ ...prev, open: o })); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-headline">Delete Game</DialogTitle>
-            <DialogDescription>
-              This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-2">
-            {deleteDialog.linkedShiftCount > 0 && (
-              <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
-                <p className="font-medium">{deleteDialog.linkedShiftCount} linked concession shift{deleteDialog.linkedShiftCount !== 1 ? 's' : ''} will also be deleted.</p>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialog({ open: false, game: null, linkedShiftCount: 0, isDeleting: false })} disabled={deleteDialog.isDeleting}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleteDialog.isDeleting}>
-              {deleteDialog.isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
 
 // ─── Game Row ─────────────────────────────────────────────────────────────────
 
-const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  cancelled:  { label: 'Cancelled',  className: 'bg-red-100 text-red-700 border-red-200' },
-  postponed:  { label: 'Postponed',  className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-  completed:  { label: 'Completed',  className: 'bg-gray-100 text-gray-500 border-gray-200' },
-};
-
-function GameRow({
-  game,
-  onCancel,
-  onDelete,
-}: {
-  game: Game;
-  onCancel: () => void;
-  onDelete: () => void;
+function GameRow({ game, onEdit, onCancel, onDelete }: {
+  game: Game; onEdit: () => void; onCancel: () => void; onDelete: () => void;
 }) {
   const isGame = game.type === 'game';
   const isCancelled = game.status === 'cancelled';
@@ -870,17 +862,13 @@ function GameRow({
 
   return (
     <div className={cn(
-      'flex items-center justify-between rounded-xl px-4 py-3 gap-3',
-      isCancelled
-        ? 'bg-gray-50 border border-gray-200 opacity-60'
-        : isGame
-          ? 'bg-blue-50 border border-blue-100'
-          : 'bg-green-50 border border-green-100'
+      'flex items-center justify-between rounded-xl px-4 py-3 gap-3 border',
+      isCancelled ? 'bg-gray-50 border-gray-200 opacity-60'
+        : isGame ? 'bg-blue-50 border-blue-100'
+        : 'bg-green-50 border-green-100'
     )}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className={cn('p-2 rounded-lg shrink-0',
-          isCancelled ? 'bg-gray-100' : isGame ? 'bg-blue-100' : 'bg-green-100'
-        )}>
+        <div className={cn('p-2 rounded-lg shrink-0', isCancelled ? 'bg-gray-100' : isGame ? 'bg-blue-100' : 'bg-green-100')}>
           {isGame
             ? <Trophy className={cn('h-4 w-4', isCancelled ? 'text-gray-400' : 'text-blue-600')} />
             : <Users className={cn('h-4 w-4', isCancelled ? 'text-gray-400' : 'text-green-600')} />
@@ -889,62 +877,38 @@ function GameRow({
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold truncate">
-              {isGame
-                ? `${game.homeTeamName} vs. ${game.awayTeamName}`
-                : `${game.teamName} Practice`}
+              {isGame ? `${game.homeTeamName} vs. ${game.awayTeamName}` : `${game.teamName} Practice`}
             </p>
             {statusBadge && (
-              <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', statusBadge.className)}>
-                {statusBadge.label}
-              </span>
+              <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', statusBadge.className)}>{statusBadge.label}</span>
             )}
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-            <span className="text-xs text-muted-foreground">
-              {format(parseISO(game.date), 'EEE, MMM d')} · {formatTime(game.time)}
-            </span>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3" /> {game.fieldName}
-            </span>
+            <span className="text-xs text-muted-foreground">{format(parseISO(game.date), 'EEE, MMM d')} · {formatTime(game.time)}</span>
+            <span className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {game.fieldName}</span>
             {game.notes && <span className="text-xs text-muted-foreground italic truncate">{game.notes}</span>}
           </div>
         </div>
       </div>
 
-      {!isCancelled && (
-        <div className="flex items-center gap-1 shrink-0">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onCancel}
-            className="text-muted-foreground hover:text-amber-600 h-8 px-2 text-xs"
-            title="Cancel game"
-          >
-            <XCircle className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onDelete}
-            className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
-            title="Delete game"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-
-      {isCancelled && (
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onDelete}
-          className="text-muted-foreground hover:text-destructive h-8 w-8 p-0 shrink-0"
-          title="Delete game"
-        >
+      <div className="flex items-center gap-1 shrink-0">
+        {!isCancelled && (
+          <>
+            <Button size="sm" variant="ghost" onClick={onEdit}
+              className="text-muted-foreground hover:text-primary h-8 w-8 p-0" title="Edit game">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onCancel}
+              className="text-muted-foreground hover:text-amber-600 h-8 w-8 p-0" title="Cancel game">
+              <XCircle className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+        <Button size="sm" variant="ghost" onClick={onDelete}
+          className="text-muted-foreground hover:text-destructive h-8 w-8 p-0" title="Delete game">
           <Trash2 className="h-4 w-4" />
         </Button>
-      )}
+      </div>
     </div>
   );
 }
