@@ -61,29 +61,52 @@ function getDefaultContext(roles: string[]): RoleContext {
   return 'parent';
 }
 
-const leagueAdminItems = [
+// ── Admin nav groups ──────────────────────────────────────────────────────────
+
+const adminSchedulingItems = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
   { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
-  { label: 'League Calendar', icon: CalendarDays, href: '/admin/calendar' },
+  { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
+  { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
+];
+
+const adminPeopleItems = [
   { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
   { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
   { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
   { label: 'Teams', icon: Users, href: '/admin/teams' },
+];
+
+const adminVenueItems = [
   { label: 'Fields', icon: MapPin, href: '/admin/fields' },
   { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
   { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
+];
+
+const adminCommsItems = [
   { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
   { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
   { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
-  { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
+];
+
+const adminSystemBaseItems = [
   { label: 'Data Management', icon: Database, href: '/admin/import' },
 ];
 
-const adminOnlyItems = [
+const adminSystemAdminItems = [
   { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
+
+function getAdminSectionForPath(p: string): string | null {
+  if (['/admin/dashboard', '/admin/games', '/admin/calendar', '/admin/practice-slots', '/admin/seasons'].some(r => p === r || p.startsWith(r + '/'))) return 'Scheduling';
+  if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams'].some(r => p === r || p.startsWith(r + '/'))) return 'People';
+  if (['/admin/fields', '/admin/concessions', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Venue & Finance';
+  if (['/admin/announcements', '/admin/board-meetings', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Communications';
+  if (['/admin/import', '/admin/roles', '/admin/settings'].some(r => p === r || p.startsWith(r + '/'))) return 'System';
+  return null;
+}
 
 const coachItems = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/coach/dashboard' },
@@ -166,7 +189,7 @@ function NavSection({
       </button>
       <div className={cn(
         "overflow-hidden transition-all duration-200",
-        isOpen ? "max-h-[1200px] opacity-100" : "max-h-0 opacity-0"
+        isOpen ? "max-h-[400px] opacity-100" : "max-h-0 opacity-0"
       )}>
         {items.map((item) => (
           <Link
@@ -204,11 +227,18 @@ export function Sidebar() {
   const [hasUnread, setHasUnread] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
   const [activeContext, setActiveContext] = useState<RoleContext | null>(null);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => ({
-    'League Admin': pathname.startsWith('/admin/'),
-    'Coaching': pathname.startsWith('/coach/'),
-    'Family': pathname.startsWith('/parent/'),
-  }));
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const adminSection = getAdminSectionForPath(pathname);
+    return {
+      'Scheduling': adminSection === 'Scheduling',
+      'People': adminSection === 'People',
+      'Venue & Finance': adminSection === 'Venue & Finance',
+      'Communications': adminSection === 'Communications',
+      'System': adminSection === 'System',
+      'Coaching': pathname.startsWith('/coach/'),
+      'Family': pathname.startsWith('/parent/'),
+    };
+  });
 
   // Restore collapsed state from localStorage
   useEffect(() => {
@@ -234,8 +264,13 @@ export function Sidebar() {
   };
 
   useEffect(() => {
+    const adminSection = getAdminSectionForPath(pathname);
     setOpenSections({
-      'League Admin': pathname.startsWith('/admin/'),
+      'Scheduling': adminSection === 'Scheduling',
+      'People': adminSection === 'People',
+      'Venue & Finance': adminSection === 'Venue & Finance',
+      'Communications': adminSection === 'Communications',
+      'System': adminSection === 'System',
       'Coaching': pathname.startsWith('/coach/'),
       'Family': pathname.startsWith('/parent/'),
     });
@@ -257,9 +292,14 @@ export function Sidebar() {
   const handleContextSwitch = useCallback((context: RoleContext) => {
     setActiveContext(context);
     localStorage.setItem('syba_active_role', context);
-    const sectionLabel = context === 'admin' ? 'League Admin' : context === 'coach' ? 'Coaching' : 'Family';
-    setOpenSections(prev => ({ ...prev, [sectionLabel]: true }));
-  }, []);
+    if (context === 'admin') {
+      const activeAdminSection = getAdminSectionForPath(pathname) ?? 'Scheduling';
+      setOpenSections(prev => ({ ...prev, [activeAdminSection]: true }));
+    } else {
+      const sectionLabel = context === 'coach' ? 'Coaching' : 'Family';
+      setOpenSections(prev => ({ ...prev, [sectionLabel]: true }));
+    }
+  }, [pathname]);
 
   // Unread in-app notifications badge (parents + coaches)
   const unreadNotifsQuery = useMemoFirebase(() => {
@@ -350,18 +390,53 @@ export function Sidebar() {
         )}
 
         {activeContext === 'admin' && isBoardMember && (
-          <NavSection
-            label="League Admin"
-            items={[
-              ...leagueAdminItems,
-              ...(isSiteAdmin ? adminOnlyItems : []),
-            ]}
-            pathname={pathname}
-            onNavigate={closeMenu}
-            isOpen={openSections['League Admin']}
-            onToggle={() => toggleSection('League Admin')}
-            collapsed={collapsed && !isMobile}
-          />
+          <>
+            <NavSection
+              label="Scheduling"
+              items={adminSchedulingItems}
+              pathname={pathname}
+              onNavigate={closeMenu}
+              isOpen={openSections['Scheduling']}
+              onToggle={() => toggleSection('Scheduling')}
+              collapsed={collapsed && !isMobile}
+            />
+            <NavSection
+              label="People"
+              items={adminPeopleItems}
+              pathname={pathname}
+              onNavigate={closeMenu}
+              isOpen={openSections['People']}
+              onToggle={() => toggleSection('People')}
+              collapsed={collapsed && !isMobile}
+            />
+            <NavSection
+              label="Venue & Finance"
+              items={adminVenueItems}
+              pathname={pathname}
+              onNavigate={closeMenu}
+              isOpen={openSections['Venue & Finance']}
+              onToggle={() => toggleSection('Venue & Finance')}
+              collapsed={collapsed && !isMobile}
+            />
+            <NavSection
+              label="Communications"
+              items={adminCommsItems}
+              pathname={pathname}
+              onNavigate={closeMenu}
+              isOpen={openSections['Communications']}
+              onToggle={() => toggleSection('Communications')}
+              collapsed={collapsed && !isMobile}
+            />
+            <NavSection
+              label="System"
+              items={[...adminSystemBaseItems, ...(isSiteAdmin ? adminSystemAdminItems : [])]}
+              pathname={pathname}
+              onNavigate={closeMenu}
+              isOpen={openSections['System']}
+              onToggle={() => toggleSection('System')}
+              collapsed={collapsed && !isMobile}
+            />
+          </>
         )}
 
         {activeContext === 'coach' && isCoach && (
