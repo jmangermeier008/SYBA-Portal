@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useFirestore, useCollection, useUser } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
 import { use } from 'react';
@@ -20,14 +21,9 @@ import {
   Loader2,
   Lock,
   ShoppingCart,
-  ClipboardList,
-  Settings,
-  Megaphone,
   UserCheck,
-  Layers,
   Inbox,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
@@ -111,22 +107,6 @@ function formatTime(t: string) {
   const ampm = h >= 12 ? 'PM' : 'AM';
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
-
-const QUICK_LINKS = [
-  { label: 'Game Schedule', href: '/admin/games', icon: CalendarDays },
-  { label: 'Registrations', href: '/admin/registration', icon: ClipboardList },
-  { label: 'Master Roster', href: '/admin/roster', icon: Users },
-  { label: 'Compliance', href: '/admin/compliance', icon: UserCheck },
-  { label: 'Teams', href: '/admin/teams', icon: Layers },
-  { label: 'Fields', href: '/admin/fields', icon: MapPin },
-  { label: 'Concessions', href: '/admin/concessions', icon: ShoppingCart },
-  { label: 'Sponsorships', href: '/admin/sponsorships', icon: DollarSign },
-  { label: 'Announcements', href: '/admin/announcements', icon: Megaphone },
-  { label: 'Board Meetings', href: '/admin/board-meetings', icon: CalendarDays },
-  { label: 'Inquiries', href: '/admin/inquiries', icon: Inbox },
-  { label: 'User Roles', href: '/admin/roles', icon: Settings },
-  { label: 'Seasons', href: '/admin/seasons', icon: Trophy },
-];
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 
@@ -259,14 +239,12 @@ export default function AdminDashboard({
     [paidEnrollments]
   );
 
-  // Clearance stats: group clearances by coach userId
   const { clearedCoachCount, totalCoachCount, coachesWithIssues } = useMemo(() => {
     if (!coaches || !allClearances) return { clearedCoachCount: 0, totalCoachCount: 0, coachesWithIssues: false };
     const REQUIRED = ['child_abuse', 'criminal', 'fbi'];
     const clearancesByCoach: Record<string, Record<string, string>> = {};
 
     allClearances.forEach((c) => {
-      // Prefer userId field stored on the document; fall back to path parsing for old docs
       const uid: string | undefined = (c as any).userId ?? (() => {
         const parts = ((c as any)._ref?.path ?? '').split('/');
         return parts.length >= 4 ? parts[1] : undefined;
@@ -288,7 +266,6 @@ export default function AdminDashboard({
     return { clearedCoachCount: cleared, totalCoachCount: coaches.length, coachesWithIssues: issues };
   }, [coaches, allClearances]);
 
-  // Field closure alerts (next 7 days)
   const fieldsWithClosures = useMemo(() => {
     if (!fields) return [];
     return fields.filter((f) =>
@@ -298,45 +275,42 @@ export default function AdminDashboard({
     );
   }, [fields, todayISO, nextWeekISO]);
 
-  // Concession slots that are not fully covered
   const undercoveredSlots = useMemo(
     () => (concessionSlots ?? []).filter((s) => (s.signups?.length ?? 0) < s.capacity),
     [concessionSlots]
   );
 
-  // ── Alert items ───────────────────────────────────────────────────────────────
-
   const alerts = useMemo(() => {
     const items: { severity: 'red' | 'orange' | 'blue'; message: string; href: string }[] = [];
 
     if (coachesWithIssues) {
-      items.push({ severity: 'red', message: 'One or more coaches are missing clearance approvals', href: '/admin/compliance' });
+      items.push({ severity: 'red', message: 'Coaches missing clearance approvals', href: '/admin/compliance' });
     }
     if (undercoveredSlots.length > 0) {
       items.push({
         severity: 'orange',
-        message: `${undercoveredSlots.length} concession slot${undercoveredSlots.length > 1 ? 's' : ''} this week ${undercoveredSlots.length > 1 ? 'need' : 'needs'} more volunteers`,
+        message: `${undercoveredSlots.length} concession slot${undercoveredSlots.length > 1 ? 's' : ''} need more volunteers`,
         href: '/admin/concessions',
       });
     }
     if (fieldsWithClosures.length > 0) {
       items.push({
         severity: 'orange',
-        message: `${fieldsWithClosures.length} field${fieldsWithClosures.length > 1 ? 's have' : ' has'} a maintenance closure in the next 7 days`,
+        message: `${fieldsWithClosures.length} field${fieldsWithClosures.length > 1 ? 's' : ''} closed this week`,
         href: '/admin/fields',
       });
     }
     if (pendingPaymentCount > 0) {
       items.push({
         severity: 'blue',
-        message: `${pendingPaymentCount} enrollment${pendingPaymentCount > 1 ? 's' : ''} with pending payment`,
+        message: `${pendingPaymentCount} pending payment${pendingPaymentCount > 1 ? 's' : ''}`,
         href: '/admin/registration',
       });
     }
     if (waitlistedCount > 0) {
       items.push({
         severity: 'blue',
-        message: `${waitlistedCount} player${waitlistedCount > 1 ? 's' : ''} on the waitlist`,
+        message: `${waitlistedCount} on waitlist`,
         href: '/admin/registration',
       });
     }
@@ -344,7 +318,7 @@ export default function AdminDashboard({
     if (openInquiryCount > 0) {
       items.push({
         severity: 'blue',
-        message: `${openInquiryCount} open ${openInquiryCount === 1 ? 'inquiry needs' : 'inquiries need'} attention`,
+        message: `${openInquiryCount} open ${openInquiryCount === 1 ? 'inquiry' : 'inquiries'}`,
         href: '/admin/inquiries',
       });
     }
@@ -383,30 +357,32 @@ export default function AdminDashboard({
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Alert styles ──────────────────────────────────────────────────────────────
 
-  const alertBg: Record<string, string> = {
-    red: 'bg-red-50 border-red-200 text-red-800',
-    orange: 'bg-orange-50 border-orange-200 text-orange-800',
-    blue: 'bg-blue-50 border-blue-200 text-blue-800',
+  const chipBg: Record<string, string> = {
+    red: 'bg-red-50 border-red-200 text-red-800 hover:bg-red-100',
+    orange: 'bg-orange-50 border-orange-200 text-orange-800 hover:bg-orange-100',
+    blue: 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100',
   };
-  const alertIcon: Record<string, React.ReactNode> = {
-    red: <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />,
-    orange: <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0 mt-0.5" />,
-    blue: <Clock className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />,
+  const chipIcon: Record<string, React.ReactNode> = {
+    red: <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />,
+    orange: <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />,
+    blue: <Clock className="h-3.5 w-3.5 text-blue-500 shrink-0" />,
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6">
 
-        {/* Header */}
-        <header className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* ── Zone 1: Header ── */}
+        <header className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold font-headline">League Command Center</h1>
-            <p className="text-muted-foreground">
-              {displaySeason ? `Viewing: ${displaySeason.name}` : 'Loading season…'}
+            <h1 className="text-2xl font-bold font-headline">League Command Center</h1>
+            <p className="text-muted-foreground text-sm">
+              {displaySeason ? displaySeason.name : 'Loading season…'}
             </p>
           </div>
           {seasons && seasons.length > 0 && (
@@ -414,7 +390,7 @@ export default function AdminDashboard({
               value={selectedSeasonId ?? (activeSeason?.id ?? '')}
               onValueChange={(v) => setSelectedSeasonId(v)}
             >
-              <SelectTrigger className="w-[200px] rounded-xl border shadow-sm">
+              <SelectTrigger className="w-[180px] rounded-xl border shadow-sm text-sm">
                 <SelectValue placeholder="Select season" />
               </SelectTrigger>
               <SelectContent>
@@ -429,240 +405,226 @@ export default function AdminDashboard({
           )}
         </header>
 
-        {/* Section 1 — Alerts */}
-        <div className="mb-8 space-y-2">
+        {/* ── Zone 1: Alerts ── */}
+        <div className="mb-4">
           {alerts.length === 0 ? (
-            <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-800 text-sm font-medium">
+            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 text-green-800 text-sm font-medium">
               <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
               All clear — nothing needs attention right now
             </div>
           ) : (
-            alerts.map((alert, i) => (
-              <Link key={i} href={alert.href}>
-                <div className={cn(
-                  'flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium hover:opacity-80 transition-opacity cursor-pointer',
-                  alertBg[alert.severity]
-                )}>
-                  {alertIcon[alert.severity]}
-                  <span className="flex-1">{alert.message}</span>
-                  <ChevronRight className="h-4 w-4 shrink-0 mt-0.5 opacity-60" />
-                </div>
-              </Link>
-            ))
+            <div className="flex flex-wrap gap-2">
+              {alerts.map((alert, i) => (
+                <Link key={i} href={alert.href}>
+                  <div className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                    chipBg[alert.severity]
+                  )}>
+                    {chipIcon[alert.severity]}
+                    <span>{alert.message}</span>
+                    <ChevronRight className="h-3 w-3 opacity-60" />
+                  </div>
+                </Link>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Section 2 — Stat Cards */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
+        {/* ── Zone 2: Season Pulse — compact stat row ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <Link href="/admin/registration">
-            <Card className="border-none shadow-md hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Players Enrolled</CardTitle>
-                <div className="bg-blue-100 p-2 rounded-lg">
-                  <Users className="h-4 w-4 text-blue-600" />
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="px-4 py-3 flex items-center gap-3">
+                <Users className="h-4 w-4 text-blue-500 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Enrolled</p>
+                  <p className="text-xl font-bold leading-none">{paidEnrollments.length}</p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{paidEnrollments.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">paid or fee waived</p>
               </CardContent>
             </Card>
           </Link>
 
           <Link href="/admin/registration">
-            <Card className="border-none shadow-md hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Revenue Collected</CardTitle>
-                <div className="bg-green-100 p-2 rounded-lg">
-                  <DollarSign className="h-4 w-4 text-green-600" />
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="px-4 py-3 flex items-center gap-3">
+                <DollarSign className="h-4 w-4 text-green-500 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Revenue</p>
+                  <p className="text-xl font-bold leading-none">{formatCents(revenueCollected)}</p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatCents(revenueCollected)}</div>
-                <p className="text-xs text-muted-foreground mt-1">this season</p>
               </CardContent>
             </Card>
           </Link>
 
           <Link href="/admin/compliance">
-            <Card className="border-none shadow-md hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Coaches Cleared</CardTitle>
-                <div className="bg-purple-100 p-2 rounded-lg">
-                  <UserCheck className="h-4 w-4 text-purple-600" />
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="px-4 py-3 flex items-center gap-3">
+                <UserCheck className="h-4 w-4 text-purple-500 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Coaches Cleared</p>
+                  <p className="text-xl font-bold leading-none">
+                    {clearedCoachCount}<span className="text-sm font-normal text-muted-foreground"> / {totalCoachCount}</span>
+                  </p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {clearedCoachCount} <span className="text-base font-normal text-muted-foreground">/ {totalCoachCount}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">all clearances approved</p>
               </CardContent>
             </Card>
           </Link>
 
           <Link href="/admin/registration">
-            <Card className="border-none shadow-md hover:shadow-lg transition-shadow cursor-pointer">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Pending Payments</CardTitle>
-                <div className="bg-orange-100 p-2 rounded-lg">
-                  <Clock className="h-4 w-4 text-orange-600" />
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="px-4 py-3 flex items-center gap-3">
+                <Clock className="h-4 w-4 text-orange-500 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Pending Payments</p>
+                  <p className="text-xl font-bold leading-none">{pendingPaymentCount}</p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{pendingPaymentCount}</div>
-                <p className="text-xs text-muted-foreground mt-1">awaiting payment</p>
               </CardContent>
             </Card>
           </Link>
         </div>
 
-        {/* Section 3 — Two Column */}
-        <div className="grid gap-6 lg:grid-cols-3">
+        {/* ── Zone 3: This Week — tabbed card ── */}
+        <Card className="border-none shadow-md">
+          <CardHeader className="pb-0 pt-4 px-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="font-headline text-base">This Week</CardTitle>
+              <span className="text-xs text-muted-foreground">Next 7 days</span>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-3">
+            <Tabs defaultValue="games">
+              <TabsList className="mb-3 h-8">
+                <TabsTrigger value="games" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  Games & Practices
+                </TabsTrigger>
+                <TabsTrigger value="concessions" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  Concessions
+                </TabsTrigger>
+                <TabsTrigger value="meetings" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                  <Inbox className="h-3.5 w-3.5" />
+                  Board Meetings
+                </TabsTrigger>
+              </TabsList>
 
-          {/* Left: This Week */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Games */}
-            <Card className="border-none shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <div>
-                  <CardTitle className="font-headline">This Week — Games & Practices</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">Next 7 days</p>
-                </div>
-                <Link href="/admin/games" className="text-sm text-primary hover:underline flex items-center gap-1">
-                  Manage <ChevronRight className="h-3 w-3" />
-                </Link>
-              </CardHeader>
-              <CardContent>
+              {/* Tab: Games & Practices */}
+              <TabsContent value="games" className="mt-0">
                 {!thisWeekGames || thisWeekGames.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No games or practices scheduled in the next 7 days. <Link href="/admin/games" className="text-primary hover:underline">Add one →</Link></p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    No games or practices in the next 7 days.{' '}
+                    <Link href="/admin/games" className="text-primary hover:underline">Add one →</Link>
+                  </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {thisWeekGames.map((g) => (
-                      <div key={g.id} className="flex items-center justify-between rounded-lg bg-secondary/20 px-4 py-3">
-                        <div>
-                          <div className="flex items-center gap-2">
+                      <Link key={g.id} href="/admin/games">
+                        <div className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2.5 hover:bg-secondary/40 transition-colors cursor-pointer group">
+                          <div>
                             <p className="text-sm font-medium">
                               {g.type === 'game'
                                 ? `${g.homeTeamName} vs. ${g.awayTeamName}`
                                 : `${g.teamName} Practice`}
                             </p>
-                            <Badge variant="outline" className={g.type === 'game' ? 'border-blue-200 text-blue-700 text-[10px]' : 'border-green-200 text-green-700 text-[10px]'}>
-                              {g.type === 'game' ? 'Game' : 'Practice'}
-                            </Badge>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {format(parseISO(g.date), 'EEE, MMM d')} · {formatTime(g.time)} · <MapPin className="h-3 w-3 inline -mt-0.5" /> {g.fieldName}
+                            </p>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {format(parseISO(g.date), 'EEE, MMM d')} · {formatTime(g.time)} · {g.fieldName}
-                          </p>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
                         </div>
-                      </div>
+                      </Link>
                     ))}
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            {/* Concession Slots */}
-            <Card className="border-none shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <div>
-                  <CardTitle className="font-headline">This Week — Concessions</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">Next 7 days of concession coverage</p>
+                <div className="mt-3 pt-3 border-t">
+                  <Link href="/admin/games" className="text-xs text-primary hover:underline flex items-center gap-1">
+                    Manage game schedule <ChevronRight className="h-3 w-3" />
+                  </Link>
                 </div>
-                <Link href="/admin/concessions" className="text-sm text-primary hover:underline flex items-center gap-1">
-                  Manage <ChevronRight className="h-3 w-3" />
-                </Link>
-              </CardHeader>
-              <CardContent>
+              </TabsContent>
+
+              {/* Tab: Concessions */}
+              <TabsContent value="concessions" className="mt-0">
                 {!concessionSlots || concessionSlots.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No concession slots scheduled in the next 7 days.</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    No concession slots in the next 7 days.
+                  </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {concessionSlots.map((slot) => {
                       const filled = slot.signups?.length ?? 0;
                       const cap = slot.capacity;
                       const pct = cap > 0 ? filled / cap : 0;
                       const colorClass = pct >= 1 ? 'bg-green-100 text-green-800' : pct > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800';
                       return (
-                        <div key={slot.id} className="flex items-center justify-between rounded-lg bg-secondary/20 px-4 py-3">
-                          <div>
-                            <p className="text-sm font-medium">
-                              {format(parseISO(slot.gameDate), 'EEE, MMM d')} · {formatTime(slot.startTime)}
-                            </p>
-                            {slot.description && (
-                              <p className="text-xs text-muted-foreground">{slot.description}</p>
-                            )}
+                        <Link key={slot.id} href="/admin/concessions">
+                          <div className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2.5 hover:bg-secondary/40 transition-colors cursor-pointer group">
+                            <div>
+                              <p className="text-sm font-medium">
+                                {format(parseISO(slot.gameDate), 'EEE, MMM d')} · {formatTime(slot.startTime)}
+                              </p>
+                              {slot.description && (
+                                <p className="text-xs text-muted-foreground">{slot.description}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', colorClass)}>
+                                {filled} / {cap}
+                              </span>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+                            </div>
                           </div>
-                          <span className={cn('text-xs font-semibold px-2 py-1 rounded-full', colorClass)}>
-                            {filled} / {cap} spots
-                          </span>
-                        </div>
+                        </Link>
                       );
                     })}
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            {/* Board Meetings */}
-            <Card className="border-none shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <div>
-                  <CardTitle className="font-headline">This Week — Board Meetings</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">Upcoming in the next 7 days</p>
+                <div className="mt-3 pt-3 border-t">
+                  <Link href="/admin/concessions" className="text-xs text-primary hover:underline flex items-center gap-1">
+                    Manage concessions <ChevronRight className="h-3 w-3" />
+                  </Link>
                 </div>
-                <Link href="/admin/board-meetings" className="text-sm text-primary hover:underline flex items-center gap-1">
-                  Manage <ChevronRight className="h-3 w-3" />
-                </Link>
-              </CardHeader>
-              <CardContent>
+              </TabsContent>
+
+              {/* Tab: Board Meetings */}
+              <TabsContent value="meetings" className="mt-0">
                 {!boardMeetings || boardMeetings.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No board meetings scheduled in the next 7 days.</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    No board meetings scheduled in the next 7 days.
+                  </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {boardMeetings.map((meeting) => {
                       const attending = (meeting.rsvps ?? []).filter((r) => r.status === 'Attending').length;
                       return (
-                        <div key={meeting.id} className="flex items-center justify-between rounded-lg bg-secondary/20 px-4 py-3">
-                          <div>
-                            <p className="text-sm font-medium">{meeting.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {format(parseISO(meeting.date), 'EEE, MMM d')} · {meeting.time}
-                            </p>
+                        <Link key={meeting.id} href="/admin/board-meetings">
+                          <div className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2.5 hover:bg-secondary/40 transition-colors cursor-pointer group">
+                            <div>
+                              <p className="text-sm font-medium">{meeting.title}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {format(parseISO(meeting.date), 'EEE, MMM d')} · {meeting.time}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">{attending} attending</span>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+                            </div>
                           </div>
-                          <span className="text-xs text-muted-foreground">{attending} attending</span>
-                        </div>
+                        </Link>
                       );
                     })}
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Right: Quick Links */}
-          <div>
-            <Card className="border-none shadow-md">
-              <CardHeader className="pb-2">
-                <CardTitle className="font-headline">Quick Links</CardTitle>
-                <p className="text-sm text-muted-foreground">Jump to any management page</p>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-2">
-                  {QUICK_LINKS.map(({ label, href, icon: Icon }) => (
-                    <Link key={href} href={href}>
-                      <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-secondary/20 px-3 py-4 text-center hover:bg-secondary/40 transition-colors cursor-pointer">
-                        <Icon className="h-5 w-5 text-primary" />
-                        <span className="text-xs font-medium leading-tight">{label}</span>
-                      </div>
-                    </Link>
-                  ))}
+                <div className="mt-3 pt-3 border-t">
+                  <Link href="/admin/board-meetings" className="text-xs text-primary hover:underline flex items-center gap-1">
+                    Manage board meetings <ChevronRight className="h-3 w-3" />
+                  </Link>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
 
-        </div>
       </main>
     </div>
   );
