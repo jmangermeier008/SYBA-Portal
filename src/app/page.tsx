@@ -1,24 +1,53 @@
 "use client";
 
-import { useUser } from '@/firebase';
+import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
+import { collection, query, where, limit } from 'firebase/firestore';
 
 // Add your sponsor image files to public/sponsors/
 // Supported filenames: sponsor1.png, sponsor2.png, sponsor3.png (etc.)
 // Images will be hidden automatically if the file doesn't exist yet.
 const SPONSOR_IMAGES = [
-  '/sponsors/sponsor1.png',
-  '/sponsors/sponsor2.png',
-  '/sponsors/sponsor3.png',
+  '/sponsors/IMG_20250306_144313.png',
+  '/sponsors/Screenshot 2026-03-21 at 5.02.42 PM.png',
 ];
+
+interface ActiveSeason {
+  id: string;
+  name: string;
+  registrationOpen: string;
+  registrationClose: string;
+  isActive?: boolean;
+}
 
 export default function Home() {
   const { user, profile, loading, isAdmin, isBoardMember, isCoach } = useUser();
   const router = useRouter();
+  const db = useFirestore();
+
+  const activeSeasonQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'seasons'), where('isActive', '==', true), limit(1));
+  }, [db]);
+
+  const { data: activeSeasons } = useCollection<ActiveSeason>(activeSeasonQuery);
+  const activeSeason = activeSeasons?.[0] ?? null;
+
+  const registrationBanner = (() => {
+    if (!activeSeason) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (today < activeSeason.registrationOpen) {
+      return `Registration opens ${activeSeason.registrationOpen} for ${activeSeason.name}`;
+    }
+    if (today <= activeSeason.registrationClose) {
+      return `Registration open for ${activeSeason.name} — closes ${activeSeason.registrationClose}`;
+    }
+    return null;
+  })();
 
   useEffect(() => {
     if (!loading && user && profile) {
@@ -66,6 +95,13 @@ export default function Home() {
             <Link href="/signup">Register Player</Link>
           </Button>
         </div>
+
+        {/* Registration banner */}
+        {registrationBanner && (
+          <div className="w-full rounded-xl bg-primary/10 border border-primary/20 px-4 py-2.5 text-sm text-primary font-medium text-center">
+            {registrationBanner}
+          </div>
+        )}
       </div>
 
       {/* Sponsors */}

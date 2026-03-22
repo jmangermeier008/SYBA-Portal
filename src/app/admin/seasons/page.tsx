@@ -7,9 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trophy, Calendar, Loader2, Trash2, Lock } from 'lucide-react';
+import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -21,6 +21,7 @@ interface Season {
   name: string;
   registrationOpen: string;
   registrationClose: string;
+  isActive?: boolean;
 }
 
 export default function SeasonsAdminPage() {
@@ -129,6 +130,20 @@ export default function SeasonsAdminPage() {
       } else {
         toast({ variant: "destructive", title: "Delete Failed", description: error.message });
       }
+    }
+  };
+
+  const handleSetActive = async (id: string) => {
+    if (!seasons) return;
+    try {
+      const batch = writeBatch(db);
+      seasons.forEach((s) => {
+        batch.update(doc(db, 'seasons', s.id), { isActive: s.id === id });
+      });
+      await batch.commit();
+      toast({ title: "Active Season Updated", description: `Season set as active.` });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error", description: error.message });
     }
   };
 
@@ -270,6 +285,15 @@ export default function SeasonsAdminPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {season.isActive ? (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-full">
+                          <Star className="h-3 w-3 fill-green-600 text-green-600" /> Active
+                        </span>
+                      ) : (
+                        <Button variant="outline" size="sm" className="text-xs rounded-full" onClick={() => handleSetActive(season.id)}>
+                          Set as Active
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => handleDeleteSeason(season.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>

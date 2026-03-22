@@ -152,7 +152,7 @@ export default function AdminDashboard({
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
+    return query(collection(db, 'seasons'), orderBy('name', 'desc'));
   }, [db, isAdmin, isBoardMember]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
