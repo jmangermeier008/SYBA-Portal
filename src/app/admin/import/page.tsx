@@ -4,11 +4,16 @@ import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { useFirestore, useUser, useMemoFirebase, useCollection } from '@/firebase';
-import { doc, setDoc, deleteDoc, updateDoc, collection } from 'firebase/firestore';
+import {
+  doc, setDoc, deleteDoc, updateDoc, collection, query, orderBy,
+  collectionGroup, where, getDocs,
+} from 'firebase/firestore';
 import {
   Loader2, Database, CheckCircle2, AlertTriangle, Trash2, Users, UserPlus,
-  ShieldCheck, User as UserIcon, UserCheck, Activity,
+  ShieldCheck, User as UserIcon, UserCheck, Activity, Calendar, Megaphone,
+  BookOpen,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -19,16 +24,57 @@ interface Team {
   player_ids?: string[];
 }
 
+interface Season {
+  id: string;
+  name: string;
+  status?: string;
+}
+
+interface Announcement {
+  id: string;
+  title: string;
+  publishedAt?: string;
+}
+
+interface BoardMeeting {
+  id: string;
+  title: string;
+  date?: string;
+}
+
 export default function DataManagementPage() {
   const db = useFirestore();
-  const { user, profile, isAdmin } = useUser();
+  const { user, profile, isSiteAdmin } = useUser();
   const { toast } = useToast();
 
-  // Live data status — must be before early returns (Rules of Hooks)
+  // ── All hooks before early returns (Rules of Hooks) ──────────────────────
   const teamsQuery = useMemoFirebase(() => db ? collection(db, 'teams') : null, [db]);
-  const { data: teams } = useCollection<Team>(teamsQuery);
+  const seasonsQuery = useMemoFirebase(() => db ? collection(db, 'seasons') : null, [db]);
+  const announcementsQuery = useMemoFirebase(
+    () => db ? query(collection(db, 'announcements'), orderBy('publishedAt', 'desc')) : null,
+    [db]
+  );
+  const boardMeetingsQuery = useMemoFirebase(
+    () => db ? query(collection(db, 'boardMeetings'), orderBy('date', 'desc')) : null,
+    [db]
+  );
 
+  const { data: teams } = useCollection<Team>(teamsQuery);
+  const { data: seasons } = useCollection<Season>(seasonsQuery);
+  const { data: announcements } = useCollection<Announcement>(announcementsQuery);
+  const { data: boardMeetings } = useCollection<BoardMeeting>(boardMeetingsQuery);
+
+  // Role switcher state
   const [roleLoading, setRoleLoading] = useState(false);
+
+  // Delete confirm state (inline — no modals)
+  const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState<string | null>(null);
+  const [confirmDeleteSeasonId, setConfirmDeleteSeasonId] = useState<string | null>(null);
+  const [confirmDeleteAnnouncementId, setConfirmDeleteAnnouncementId] = useState<string | null>(null);
+  const [confirmDeleteMeetingId, setConfirmDeleteMeetingId] = useState<string | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
+
+  // Import operation state
   const [clearLoading, setClearLoading] = useState(false);
   const [clearDone, setClearDone] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
@@ -36,7 +82,7 @@ export default function DataManagementPage() {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterDone, setRosterDone] = useState(false);
 
-  if (!isAdmin) {
+  if (!isSiteAdmin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <p className="text-muted-foreground">Access denied.</p>
@@ -44,14 +90,26 @@ export default function DataManagementPage() {
     );
   }
 
-  // Derived stats
+  // ── Derived stats ─────────────────────────────────────────────────────────
   const totalTeams = teams?.length ?? 0;
   const kidPitchCount = teams?.filter(t => t.divisionId === 'kid-pitch').length ?? 0;
   const coachPitchCount = teams?.filter(t => t.divisionId === 'coach-pitch').length ?? 0;
   const yankeesPlayerCount = teams?.find(t => t.id === 'yankees-spring-2026')?.player_ids?.length ?? 0;
 
-  // ─── Role Switcher ─────────────────────────────────────────────────────────
+  // ── Division grouping ─────────────────────────────────────────────────────
+  const divisionLabels: Record<string, string> = {
+    'kid-pitch': 'Kid Pitch',
+    'coach-pitch': 'Coach Pitch',
+    'tball': 'T-Ball',
+  };
+  const groupedTeams = ['kid-pitch', 'coach-pitch', 'tball']
+    .map(divId => ({
+      label: divisionLabels[divId],
+      teams: teams?.filter(t => t.divisionId === divId) ?? [],
+    }))
+    .filter(g => g.teams.length > 0);
 
+  // ── Role Switcher ─────────────────────────────────────────────────────────
   const handleRoleSwitch = async (newRole: 'Admin' | 'Coach' | 'Parent') => {
     if (!user || !db) return;
     setRoleLoading(true);
@@ -70,54 +128,120 @@ export default function DataManagementPage() {
     }
   };
 
-  // ─── Clear Demo Data ────────────────────────────────────────────────────────
+  // ── Delete Season ─────────────────────────────────────────────────────────
+  const handleDeleteSeason = async (seasonId: string) => {
+    if (!db) return;
+    setDeleteLoadingId(seasonId);
+    try {
+      // Check for enrollment dependencies
+      const enrollSnap = await getDocs(
+        query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
+      );
+      if (!enrollSnap.empty) {
+        toast({
+          variant: "destructive",
+          title: "Cannot Delete Season",
+          description: `${enrollSnap.size} enrollment record(s) reference this season. Remove enrollments first.`,
+        });
+        setConfirmDeleteSeasonId(null);
+        return;
+      }
 
+      // Delete all divisions under the season
+      const divsSnap = await getDocs(collection(db, 'seasons', seasonId, 'divisions'));
+      await Promise.all(divsSnap.docs.map(d => deleteDoc(d.ref)));
+
+      // Delete the season itself
+      await deleteDoc(doc(db, 'seasons', seasonId));
+      setConfirmDeleteSeasonId(null);
+      toast({ title: "Season Deleted" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Delete Failed", description: e.message });
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  // ── Delete Team ───────────────────────────────────────────────────────────
+  const handleDeleteTeam = async (teamId: string) => {
+    if (!db) return;
+    setDeleteLoadingId(teamId);
+    try {
+      await deleteDoc(doc(db, 'teams', teamId));
+      setConfirmDeleteTeamId(null);
+      toast({ title: "Team Deleted" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Delete Failed", description: e.message });
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  // ── Delete Announcement ───────────────────────────────────────────────────
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!db) return;
+    setDeleteLoadingId(id);
+    try {
+      await deleteDoc(doc(db, 'announcements', id));
+      setConfirmDeleteAnnouncementId(null);
+      toast({ title: "Announcement Deleted" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Delete Failed", description: e.message });
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  // ── Delete Board Meeting ──────────────────────────────────────────────────
+  const handleDeleteMeeting = async (id: string) => {
+    if (!db) return;
+    setDeleteLoadingId(id);
+    try {
+      await deleteDoc(doc(db, 'boardMeetings', id));
+      setConfirmDeleteMeetingId(null);
+      toast({ title: "Board Meeting Deleted" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Delete Failed", description: e.message });
+    } finally {
+      setDeleteLoadingId(null);
+    }
+  };
+
+  // ── Clear Demo Data ───────────────────────────────────────────────────────
   const handleClearDemo = async () => {
     if (!db) return;
     setClearLoading(true);
     try {
       const deletes: Promise<void>[] = [];
 
-      // Demo team games (subcollections)
       deletes.push(deleteDoc(doc(db, 'teams', 'blue-jays-spring-2026', 'games', 'game-1')));
       deletes.push(deleteDoc(doc(db, 'teams', 'blue-jays-spring-2026', 'games', 'practice-1')));
       deletes.push(deleteDoc(doc(db, 'teams', 'tigers-spring-2026', 'games', 'game-2')));
-
-      // Demo teams
       deletes.push(deleteDoc(doc(db, 'teams', 'blue-jays-spring-2026')));
       deletes.push(deleteDoc(doc(db, 'teams', 'cardinals-spring-2026')));
       deletes.push(deleteDoc(doc(db, 'teams', 'tigers-spring-2026')));
 
-      // Demo coach 1 subcollections + profile
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-uid', 'clearances', 'childabuse')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-uid', 'clearances', 'criminalrecord')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-uid')));
-
-      // Demo coach 2 subcollections + profile
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-2-uid', 'clearances', 'childabuse')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-2-uid', 'clearances', 'criminalrecord')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-2-uid', 'clearances', 'fbi')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-coach-2-uid')));
-
-      // Demo parent 1 subcollections + profile
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-uid', 'players', 'player-1')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-uid', 'enrollments', 'enroll-1')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-uid')));
-
-      // Demo parent 2 subcollections + profile
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid', 'players', 'player-2')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid', 'players', 'player-3')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid', 'enrollments', 'enroll-2')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid', 'enrollments', 'enroll-3')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid')));
 
-      // Current user's demo player/enrollment
       if (user) {
         deletes.push(deleteDoc(doc(db, 'userProfiles', user.uid, 'players', 'my-player-1')));
         deletes.push(deleteDoc(doc(db, 'userProfiles', user.uid, 'enrollments', 'my-enroll-1')));
       }
 
-      // Demo announcements, concession slots, board meetings
       deletes.push(deleteDoc(doc(db, 'announcements', 'ann-1')));
       deletes.push(deleteDoc(doc(db, 'announcements', 'ann-2')));
       deletes.push(deleteDoc(doc(db, 'concessionSlots', 'slot-1')));
@@ -125,7 +249,6 @@ export default function DataManagementPage() {
       deletes.push(deleteDoc(doc(db, 'boardMeetings', 'meeting-1')));
 
       await Promise.allSettled(deletes);
-
       toast({ title: "Demo Data Cleared", description: "All placeholder data removed." });
       setClearDone(true);
     } catch (e: any) {
@@ -135,8 +258,7 @@ export default function DataManagementPage() {
     }
   };
 
-  // ─── Create All 11 Teams ────────────────────────────────────────────────────
-
+  // ── Create Teams ──────────────────────────────────────────────────────────
   const handleCreateTeams = async () => {
     if (!db) return;
     setTeamsLoading(true);
@@ -152,7 +274,6 @@ export default function DataManagementPage() {
         { id: 'dodgers-spring-2026', name: 'Dodgers' },
         { id: 'pirates-spring-2026', name: 'Pirates' },
       ];
-
       const coachPitchTeams = [
         { id: 'braves-spring-2026', name: 'Braves' },
         { id: 'yankees-spring-2026', name: 'Yankees' },
@@ -162,33 +283,19 @@ export default function DataManagementPage() {
       ];
 
       const writes: Promise<void>[] = [];
-
       for (const team of kidPitchTeams) {
         writes.push(setDoc(doc(db, 'teams', team.id), {
-          id: team.id,
-          name: team.name,
-          seasonId,
-          divisionId: 'kid-pitch',
-          coachIds: [],
-          player_ids: [],
-          createdAt: now,
+          id: team.id, name: team.name, seasonId, divisionId: 'kid-pitch',
+          coachIds: [], player_ids: [], createdAt: now,
         }));
       }
-
       for (const team of coachPitchTeams) {
         writes.push(setDoc(doc(db, 'teams', team.id), {
-          id: team.id,
-          name: team.name,
-          seasonId,
-          divisionId: 'coach-pitch',
-          coachIds: [],
-          player_ids: [],
-          createdAt: now,
+          id: team.id, name: team.name, seasonId, divisionId: 'coach-pitch',
+          coachIds: [], player_ids: [], createdAt: now,
         }));
       }
-
       await Promise.all(writes);
-
       toast({ title: "Teams Created", description: "11 teams created — 6 Kid Pitch, 5 Coach Pitch." });
       setTeamsDone(true);
     } catch (e: any) {
@@ -198,8 +305,7 @@ export default function DataManagementPage() {
     }
   };
 
-  // ─── Import Yankees Roster ──────────────────────────────────────────────────
-
+  // ── Import Yankees Roster ─────────────────────────────────────────────────
   const handleImportRoster = async () => {
     if (!db) return;
     setRosterLoading(true);
@@ -239,53 +345,26 @@ export default function DataManagementPage() {
       ];
 
       const writes: Promise<void>[] = [];
-
       for (const parent of parents) {
         writes.push(setDoc(doc(db, 'userProfiles', parent.uid), {
-          id: parent.uid,
-          displayName: parent.displayName,
-          email: parent.email,
-          phoneNumber: parent.phoneNumber,
-          role: 'Parent',
-          roles: ['Parent'],
-          shareContactInfo: true,
-          createdAt: now,
+          id: parent.uid, displayName: parent.displayName, email: parent.email,
+          phoneNumber: parent.phoneNumber, role: 'Parent', roles: ['Parent'],
+          shareContactInfo: true, createdAt: now,
         }));
       }
-
       for (const player of players) {
         writes.push(setDoc(doc(db, 'userProfiles', player.parentUid, 'players', player.id), {
-          id: player.id,
-          firstName: player.firstName,
-          lastName: player.lastName,
-          parentUserId: player.parentUid,
-          teamId,
-          division: divisionId,
-          seasonId,
-          medicalNotes: '',
-          ageVerified: false,
-          emergencyContacts: [],
-          createdAt: now,
+          id: player.id, firstName: player.firstName, lastName: player.lastName,
+          parentUserId: player.parentUid, teamId, division: divisionId, seasonId,
+          medicalNotes: '', ageVerified: false, emergencyContacts: [], createdAt: now,
         }));
-
         writes.push(setDoc(doc(db, 'userProfiles', player.parentUid, 'enrollments', `enroll-${player.id}`), {
-          id: `enroll-${player.id}`,
-          playerId: player.id,
-          seasonId,
-          divisionId,
-          parentUserId: player.parentUid,
-          paymentStatus: 'paid',
-          teamId,
-          createdAt: now,
+          id: `enroll-${player.id}`, playerId: player.id, seasonId, divisionId,
+          parentUserId: player.parentUid, paymentStatus: 'paid', teamId, createdAt: now,
         }));
       }
-
       await Promise.all(writes);
-
-      await setDoc(doc(db, 'teams', teamId), {
-        player_ids: players.map(p => p.id),
-      }, { merge: true });
-
+      await setDoc(doc(db, 'teams', teamId), { player_ids: players.map(p => p.id) }, { merge: true });
       toast({ title: "Roster Imported", description: "12 Yankees players and 11 parent profiles created." });
       setRosterDone(true);
     } catch (e: any) {
@@ -295,8 +374,7 @@ export default function DataManagementPage() {
     }
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
-
+  // ── Shared inline-confirm row renderer ────────────────────────────────────
   const currentRole = profile?.roles?.[0] ?? profile?.role ?? '—';
 
   return (
@@ -305,12 +383,12 @@ export default function DataManagementPage() {
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold font-headline">Data Management</h1>
-          <p className="text-muted-foreground">Monitor league data health, switch roles for demo testing, and run data imports.</p>
+          <p className="text-muted-foreground">Monitor data health, manage league records, switch roles for demo testing, and run imports.</p>
         </header>
 
         <div className="grid gap-8 max-w-3xl">
 
-          {/* Data Status */}
+          {/* ── Data Status ── */}
           <Card className="border-none shadow-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -341,7 +419,253 @@ export default function DataManagementPage() {
             </CardContent>
           </Card>
 
-          {/* Role Switcher */}
+          {/* ── Manage Seasons ── */}
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-primary" />
+                Manage Seasons
+              </CardTitle>
+              <CardDescription>
+                Delete a season and its divisions. Blocked if enrollment records exist for that season.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!seasons || seasons.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No seasons found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {seasons.map(season => (
+                    <div key={season.id} className="rounded-xl border p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{season.name}</span>
+                          {season.status && (
+                            <Badge variant={season.status === 'active' ? 'default' : 'secondary'} className="text-xs">
+                              {season.status}
+                            </Badge>
+                          )}
+                        </div>
+                        {confirmDeleteSeasonId === season.id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-destructive font-medium">Delete this season?</span>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 text-xs"
+                              onClick={() => handleDeleteSeason(season.id)}
+                              disabled={deleteLoadingId === season.id}
+                            >
+                              {deleteLoadingId === season.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setConfirmDeleteSeasonId(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setConfirmDeleteSeasonId(season.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                          </Button>
+                        )}
+                      </div>
+                      {confirmDeleteSeasonId === season.id && (
+                        <p className="text-xs text-muted-foreground pl-1">
+                          This will also delete all divisions under this season. Seasons with enrollment records cannot be deleted.
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Manage Teams ── */}
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Manage Teams
+              </CardTitle>
+              <CardDescription>
+                Delete individual teams. Enrollment records for players are not affected.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!teams || teams.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No teams found.</p>
+              ) : (
+                <div className="space-y-4">
+                  {groupedTeams.map(group => (
+                    <div key={group.label}>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{group.label}</p>
+                      <div className="space-y-2">
+                        {group.teams.map(team => (
+                          <div key={team.id} className="rounded-xl border p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-sm">{team.name}</span>
+                                <span className="text-xs text-muted-foreground">{team.player_ids?.length ?? 0} players</span>
+                              </div>
+                              {confirmDeleteTeamId === team.id ? (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-destructive font-medium">Delete this team?</span>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-7 text-xs"
+                                    onClick={() => handleDeleteTeam(team.id)}
+                                    disabled={deleteLoadingId === team.id}
+                                  >
+                                    {deleteLoadingId === team.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setConfirmDeleteTeamId(null)}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => setConfirmDeleteTeamId(team.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Manage Announcements ── */}
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Manage Announcements
+              </CardTitle>
+              <CardDescription>Delete individual announcements.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!announcements || announcements.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No announcements found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {announcements.map(ann => (
+                    <div key={ann.id} className="rounded-xl border p-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-medium text-sm">{ann.title}</span>
+                          {ann.publishedAt && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              {new Date(ann.publishedAt).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                        {confirmDeleteAnnouncementId === ann.id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-destructive font-medium">Delete?</span>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 text-xs"
+                              onClick={() => handleDeleteAnnouncement(ann.id)}
+                              disabled={deleteLoadingId === ann.id}
+                            >
+                              {deleteLoadingId === ann.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setConfirmDeleteAnnouncementId(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setConfirmDeleteAnnouncementId(ann.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Manage Board Meetings ── */}
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5 text-primary" />
+                Manage Board Meetings
+              </CardTitle>
+              <CardDescription>Delete individual board meeting records.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!boardMeetings || boardMeetings.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No board meetings found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {boardMeetings.map(meeting => (
+                    <div key={meeting.id} className="rounded-xl border p-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-medium text-sm">{meeting.title}</span>
+                          {meeting.date && (
+                            <span className="text-xs text-muted-foreground ml-2">{meeting.date}</span>
+                          )}
+                        </div>
+                        {confirmDeleteMeetingId === meeting.id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-destructive font-medium">Delete?</span>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 text-xs"
+                              onClick={() => handleDeleteMeeting(meeting.id)}
+                              disabled={deleteLoadingId === meeting.id}
+                            >
+                              {deleteLoadingId === meeting.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setConfirmDeleteMeetingId(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setConfirmDeleteMeetingId(meeting.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Role Switcher ── */}
           <Card className="border-none shadow-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -385,7 +709,7 @@ export default function DataManagementPage() {
             </CardContent>
           </Card>
 
-          {/* Step 1: Clear Demo Data */}
+          {/* ── Step 1: Clear Demo Data ── */}
           <Card className="border-none shadow-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -393,7 +717,7 @@ export default function DataManagementPage() {
                 Step 1 — Clear Demo Data
               </CardTitle>
               <CardDescription>
-                Deletes the placeholder Blue Jays, Cardinals, and Tigers teams, all demo user profiles, and sample announcements/concessions/board meetings. Season, divisions, and fields are preserved.
+                Deletes placeholder Blue Jays, Cardinals, Tigers teams, all demo user profiles, and sample announcements/concessions/board meetings. Season, divisions, and fields are preserved.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -403,12 +727,7 @@ export default function DataManagementPage() {
                   <span className="text-sm font-medium">Demo data cleared.</span>
                 </div>
               ) : (
-                <Button
-                  variant="destructive"
-                  onClick={handleClearDemo}
-                  className="w-full h-12 rounded-xl text-base font-bold"
-                  disabled={clearLoading}
-                >
+                <Button variant="destructive" onClick={handleClearDemo} className="w-full h-12 rounded-xl text-base font-bold" disabled={clearLoading}>
                   {clearLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Trash2 className="mr-2 h-5 w-5" />}
                   Clear All Demo Data
                 </Button>
@@ -416,7 +735,7 @@ export default function DataManagementPage() {
             </CardContent>
           </Card>
 
-          {/* Step 2: Create Teams */}
+          {/* ── Step 2: Create Teams ── */}
           <Card className="border-none shadow-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -424,7 +743,7 @@ export default function DataManagementPage() {
                 Step 2 — Create Season Teams
               </CardTitle>
               <CardDescription>
-                Creates all 11 real SYBA teams for Spring 2026 — 6 Kid Pitch (Mariners, Rays, Phillies, Athletics, Dodgers, Pirates) and 5 Coach Pitch (Braves, Yankees, Cubs, Reds, Brewers).
+                Creates all 11 real SYBA teams for Spring 2026 — 6 Kid Pitch and 5 Coach Pitch.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -435,7 +754,7 @@ export default function DataManagementPage() {
                     <span className="text-sm font-medium">11 teams created.</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 px-1">
-                    {['Mariners', 'Rays', 'Phillies', 'Athletics', 'Dodgers', 'Pirates', 'Braves', 'Yankees', 'Cubs', 'Reds', 'Brewers'].map(name => (
+                    {['Mariners','Rays','Phillies','Athletics','Dodgers','Pirates','Braves','Yankees','Cubs','Reds','Brewers'].map(name => (
                       <div key={name} className="flex items-center gap-2 text-xs text-green-700">
                         <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> {name}
                       </div>
@@ -443,11 +762,7 @@ export default function DataManagementPage() {
                   </div>
                 </div>
               ) : (
-                <Button
-                  onClick={handleCreateTeams}
-                  className="w-full h-12 rounded-xl text-base font-bold"
-                  disabled={teamsLoading}
-                >
+                <Button onClick={handleCreateTeams} className="w-full h-12 rounded-xl text-base font-bold" disabled={teamsLoading}>
                   {teamsLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Users className="mr-2 h-5 w-5" />}
                   Create All 11 Teams
                 </Button>
@@ -455,7 +770,7 @@ export default function DataManagementPage() {
             </CardContent>
           </Card>
 
-          {/* Step 3: Import Yankees Roster */}
+          {/* ── Step 3: Import Yankees Roster ── */}
           <Card className="border-none shadow-xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -463,14 +778,14 @@ export default function DataManagementPage() {
                 Step 3 — Import Yankees Roster
               </CardTitle>
               <CardDescription>
-                Creates 11 parent profiles and 12 player records for the Coach Pitch Yankees. Siblings Tanner and Gunnar Schreckenghost share one parent. Maxwell Dudzinski's parent is Carolyn Janosko; Ryan Laskowitz's parent is Susan Stigliano.
+                Creates 11 parent profiles and 12 player records for the Coach Pitch Yankees.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
                 <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
                 <p className="text-xs text-yellow-700">
-                  Run Step 2 first. Parent profiles are Firestore-only — contact info is visible in admin views but parents cannot log in to the portal.
+                  Run Step 2 first. Parent profiles are Firestore-only — contact info visible in admin but parents cannot log in to the portal.
                 </p>
               </div>
               {rosterDone ? (
@@ -481,9 +796,9 @@ export default function DataManagementPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-2 px-1">
                     {[
-                      'Severide Anderson', 'Roman Angermeier', 'Matthew Bagzis', 'Ezra Blakeman',
-                      'Maxwell Dudzinski', 'Ryan Laskowitz', 'Ezra Moon', 'Jett Oris',
-                      'Winston Pokrant', 'Tanner Schreckenghost', 'Gunnar Schreckenghost', 'Carter Skladanek',
+                      'Severide Anderson','Roman Angermeier','Matthew Bagzis','Ezra Blakeman',
+                      'Maxwell Dudzinski','Ryan Laskowitz','Ezra Moon','Jett Oris',
+                      'Winston Pokrant','Tanner Schreckenghost','Gunnar Schreckenghost','Carter Skladanek',
                     ].map(name => (
                       <div key={name} className="flex items-center gap-2 text-xs text-green-700">
                         <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> {name}
@@ -492,11 +807,7 @@ export default function DataManagementPage() {
                   </div>
                 </div>
               ) : (
-                <Button
-                  onClick={handleImportRoster}
-                  className="w-full h-12 rounded-xl text-base font-bold"
-                  disabled={rosterLoading}
-                >
+                <Button onClick={handleImportRoster} className="w-full h-12 rounded-xl text-base font-bold" disabled={rosterLoading}>
                   {rosterLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
                   Import Yankees Roster
                 </Button>

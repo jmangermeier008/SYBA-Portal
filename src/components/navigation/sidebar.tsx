@@ -174,7 +174,7 @@ function NavSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { profile, roles, isAdmin, isBoardMember, isCoach, isParent } = useUser();
+  const { profile, roles, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent } = useUser();
   const auth = useAuth();
   const db = useFirestore();
   const router = useRouter();
@@ -296,7 +296,7 @@ export function Sidebar() {
             label="League Admin"
             items={[
               ...leagueAdminItems,
-              ...(isAdmin ? adminOnlyItems : []),
+              ...(isSiteAdmin ? adminOnlyItems : []),
             ]}
             pathname={pathname}
             onNavigate={closeMenu}
