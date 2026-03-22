@@ -60,6 +60,9 @@ export default function RolesPage() {
   const [removeTarget, setRemoveTarget] = useState<UserData | null>(null);
   const [removing, setRemoving] = useState(false);
 
+  // Mobile edit roles dialog
+  const [editTarget, setEditTarget] = useState<UserData | null>(null);
+
   const usersQuery = useMemoFirebase(() => {
     if (!db || !isSiteAdmin) return null;
     return collection(db, 'userProfiles');
@@ -305,6 +308,16 @@ export default function RolesPage() {
                           </TableCell>
                           <TableCell className="pr-4">
                             <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                              {/* Mobile-only: open edit roles dialog */}
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="md:hidden h-8 w-8 text-muted-foreground hover:text-primary"
+                                title="Edit roles"
+                                onClick={() => setEditTarget(user)}
+                              >
+                                <ShieldCheck className="h-4 w-4" />
+                              </Button>
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -402,6 +415,57 @@ export default function RolesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Edit Roles Dialog */}
+      {(() => {
+        const liveEditUser = editTarget ? (users?.find(u => u.id === editTarget.id) ?? editTarget) : null;
+        const editRoles = liveEditUser ? getUserRoles(liveEditUser) : [];
+        return (
+          <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="font-headline">Edit Roles</DialogTitle>
+                <DialogDescription>{liveEditUser?.displayName || liveEditUser?.email}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                {ALL_ROLES.map((role) => (
+                  <label key={role} className="flex items-center gap-3 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={editRoles.includes(role)}
+                      onCheckedChange={(checked) =>
+                        liveEditUser && handleRoleToggle(liveEditUser.id, role, editRoles, !!checked)
+                      }
+                    />
+                    {role}
+                  </label>
+                ))}
+              </div>
+              {editRoles.includes('Board Member') && liveEditUser && (
+                <div className="space-y-1.5 pt-2 border-t">
+                  <Label className="text-xs text-muted-foreground">Officer Title</Label>
+                  <Select
+                    value={liveEditUser.officerTitle || 'none'}
+                    onValueChange={(val) => handleOfficerTitleChange(liveEditUser.id, val)}
+                  >
+                    <SelectTrigger className="rounded-xl text-xs h-8">
+                      <SelectValue placeholder="Assign title…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— No Title —</SelectItem>
+                      {OFFICER_TITLES.map((t) => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <DialogFooter>
+                <Button className="w-full rounded-full" onClick={() => setEditTarget(null)}>Done</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       {/* Remove User Dialog */}
       <Dialog open={!!removeTarget} onOpenChange={(o) => { if (!removing && !o) setRemoveTarget(null); }}>

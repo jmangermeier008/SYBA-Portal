@@ -84,13 +84,13 @@ service cloud.firestore {
     match /userProfiles/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
-      allow create: if isUser(userId) || isAdmin();
+      allow create: if isUser(userId) || isAdmin() || isSiteAdmin();
       // Users can update their own profile but cannot change their own role.
-      // Role changes require Site Admin.
+      // Role changes require Admin or Site Admin.
       allow update: if (isUser(userId) &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles'])
-        ) || isAdmin();
-      allow delete: if false;
+        ) || isAdmin() || isSiteAdmin();
+      allow delete: if isAdmin() || isSiteAdmin();
 
       match /clearances/{clearanceId} {
         allow read: if isUser(userId) || isAdmin();
