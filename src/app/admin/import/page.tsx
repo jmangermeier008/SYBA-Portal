@@ -4,16 +4,31 @@ import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useFirestore, useUser } from '@/firebase';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { Loader2, Upload, CheckCircle2, AlertTriangle, Trash2, Users, UserPlus } from 'lucide-react';
+import { useFirestore, useUser, useMemoFirebase, useCollection } from '@/firebase';
+import { doc, setDoc, deleteDoc, updateDoc, collection } from 'firebase/firestore';
+import {
+  Loader2, Database, CheckCircle2, AlertTriangle, Trash2, Users, UserPlus,
+  ShieldCheck, User as UserIcon, UserCheck, Activity,
+} from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-export default function ImportPage() {
+interface Team {
+  id: string;
+  name: string;
+  divisionId: string;
+  player_ids?: string[];
+}
+
+export default function DataManagementPage() {
   const db = useFirestore();
-  const { user, isAdmin } = useUser();
+  const { user, profile, isAdmin } = useUser();
   const { toast } = useToast();
 
+  // Live data status — must be before early returns (Rules of Hooks)
+  const teamsQuery = useMemoFirebase(() => db ? collection(db, 'teams') : null, [db]);
+  const { data: teams } = useCollection<Team>(teamsQuery);
+
+  const [roleLoading, setRoleLoading] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
   const [clearDone, setClearDone] = useState(false);
   const [teamsLoading, setTeamsLoading] = useState(false);
@@ -29,7 +44,33 @@ export default function ImportPage() {
     );
   }
 
-  // ─── Section 1: Clear Demo Data ────────────────────────────────────────────
+  // Derived stats
+  const totalTeams = teams?.length ?? 0;
+  const kidPitchCount = teams?.filter(t => t.divisionId === 'kid-pitch').length ?? 0;
+  const coachPitchCount = teams?.filter(t => t.divisionId === 'coach-pitch').length ?? 0;
+  const yankeesPlayerCount = teams?.find(t => t.id === 'yankees-spring-2026')?.player_ids?.length ?? 0;
+
+  // ─── Role Switcher ─────────────────────────────────────────────────────────
+
+  const handleRoleSwitch = async (newRole: 'Admin' | 'Coach' | 'Parent') => {
+    if (!user || !db) return;
+    setRoleLoading(true);
+    try {
+      await updateDoc(doc(db, 'userProfiles', user.uid), {
+        role: newRole,
+        roles: [newRole],
+        updatedAt: new Date().toISOString(),
+      });
+      toast({ title: "Role Updated", description: `Switched to ${newRole}. Reloading…` });
+      setTimeout(() => window.location.reload(), 500);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Update Failed", description: e.message });
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  // ─── Clear Demo Data ────────────────────────────────────────────────────────
 
   const handleClearDemo = async () => {
     if (!db) return;
@@ -70,7 +111,7 @@ export default function ImportPage() {
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid', 'enrollments', 'enroll-3')));
       deletes.push(deleteDoc(doc(db, 'userProfiles', 'demo-parent-2-uid')));
 
-      // Current user's demo player/enrollment (from "Assign Me as Demo Coach" seed option)
+      // Current user's demo player/enrollment
       if (user) {
         deletes.push(deleteDoc(doc(db, 'userProfiles', user.uid, 'players', 'my-player-1')));
         deletes.push(deleteDoc(doc(db, 'userProfiles', user.uid, 'enrollments', 'my-enroll-1')));
@@ -83,9 +124,9 @@ export default function ImportPage() {
       deletes.push(deleteDoc(doc(db, 'concessionSlots', 'slot-2')));
       deletes.push(deleteDoc(doc(db, 'boardMeetings', 'meeting-1')));
 
-      await Promise.allSettled(deletes); // allSettled — don't fail if doc didn't exist
+      await Promise.allSettled(deletes);
 
-      toast({ title: "Demo Data Cleared", description: "All seed/demo data has been removed." });
+      toast({ title: "Demo Data Cleared", description: "All placeholder data removed." });
       setClearDone(true);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Clear Failed", description: e.message });
@@ -94,7 +135,7 @@ export default function ImportPage() {
     }
   };
 
-  // ─── Section 2: Create All 11 Teams ────────────────────────────────────────
+  // ─── Create All 11 Teams ────────────────────────────────────────────────────
 
   const handleCreateTeams = async () => {
     if (!db) return;
@@ -148,7 +189,7 @@ export default function ImportPage() {
 
       await Promise.all(writes);
 
-      toast({ title: "Teams Created", description: "11 teams created across Kid Pitch and Coach Pitch divisions." });
+      toast({ title: "Teams Created", description: "11 teams created — 6 Kid Pitch, 5 Coach Pitch." });
       setTeamsDone(true);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Team Creation Failed", description: e.message });
@@ -157,7 +198,7 @@ export default function ImportPage() {
     }
   };
 
-  // ─── Section 3: Import Yankees Roster ──────────────────────────────────────
+  // ─── Import Yankees Roster ──────────────────────────────────────────────────
 
   const handleImportRoster = async () => {
     if (!db) return;
@@ -168,7 +209,6 @@ export default function ImportPage() {
       const divisionId = 'coach-pitch';
       const teamId = 'yankees-spring-2026';
 
-      // 11 unique parents
       const parents = [
         { uid: 'parent-melissa-anderson', displayName: 'Melissa Anderson', email: 'jambo0621@hotmail.com', phoneNumber: '724-813-1748' },
         { uid: 'parent-justin-angermeier', displayName: 'Justin Angermeier', email: 'jmangermeier008@gmail.com', phoneNumber: '724-699-1282' },
@@ -183,7 +223,6 @@ export default function ImportPage() {
         { uid: 'parent-stephanie-skladanek', displayName: 'Stephanie Skladanek', email: 'steph_ms04@yahoo.com', phoneNumber: '724-651-7723' },
       ];
 
-      // 12 players mapped to parent UIDs
       const players = [
         { id: 'player-severide-anderson', firstName: 'Severide', lastName: 'Anderson', parentUid: 'parent-melissa-anderson' },
         { id: 'player-roman-angermeier', firstName: 'Roman', lastName: 'Angermeier', parentUid: 'parent-justin-angermeier' },
@@ -201,7 +240,6 @@ export default function ImportPage() {
 
       const writes: Promise<void>[] = [];
 
-      // Write parent profiles
       for (const parent of parents) {
         writes.push(setDoc(doc(db, 'userProfiles', parent.uid), {
           id: parent.uid,
@@ -215,7 +253,6 @@ export default function ImportPage() {
         }));
       }
 
-      // Write players + enrollments
       for (const player of players) {
         writes.push(setDoc(doc(db, 'userProfiles', player.parentUid, 'players', player.id), {
           id: player.id,
@@ -245,7 +282,6 @@ export default function ImportPage() {
 
       await Promise.all(writes);
 
-      // Update Yankees team player_ids
       await setDoc(doc(db, 'teams', teamId), {
         player_ids: players.map(p => p.id),
       }, { merge: true });
@@ -261,16 +297,93 @@ export default function ImportPage() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  const currentRole = profile?.roles?.[0] ?? profile?.role ?? '—';
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Demo Data Import</h1>
-          <p className="text-muted-foreground">Run each step in order to prepare the app for the board member demo.</p>
+          <h1 className="text-3xl font-bold font-headline">Data Management</h1>
+          <p className="text-muted-foreground">Monitor league data health, switch roles for demo testing, and run data imports.</p>
         </header>
 
         <div className="grid gap-8 max-w-3xl">
+
+          {/* Data Status */}
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-primary" />
+                League Data Status
+              </CardTitle>
+              <CardDescription>Live snapshot of data currently in Firestore.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="rounded-xl border bg-secondary/20 p-4 text-center">
+                  <p className="text-3xl font-bold text-primary">{totalTeams}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Total Teams</p>
+                </div>
+                <div className="rounded-xl border bg-secondary/20 p-4 text-center">
+                  <p className="text-3xl font-bold text-primary">{kidPitchCount}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Kid Pitch</p>
+                </div>
+                <div className="rounded-xl border bg-secondary/20 p-4 text-center">
+                  <p className="text-3xl font-bold text-primary">{coachPitchCount}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Coach Pitch</p>
+                </div>
+                <div className="rounded-xl border bg-secondary/20 p-4 text-center">
+                  <p className="text-3xl font-bold text-primary">{yankeesPlayerCount}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Yankees Players</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Role Switcher */}
+          <Card className="border-none shadow-xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+                Role Switcher
+              </CardTitle>
+              <CardDescription>Instantly switch your account's role to preview different dashboards during the demo.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="p-4 rounded-xl border bg-primary/5 space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Current role: <span className="font-bold text-primary">{currentRole}</span>
+                </p>
+                <div className="grid grid-cols-1 gap-3">
+                  <Button
+                    variant={currentRole === 'Admin' ? 'default' : 'outline'}
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Admin')}
+                    disabled={roleLoading}
+                  >
+                    <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Admin
+                  </Button>
+                  <Button
+                    variant={currentRole === 'Coach' ? 'default' : 'outline'}
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Coach')}
+                    disabled={roleLoading}
+                  >
+                    <UserCheck className="mr-2 h-5 w-5" /> Switch to Coach
+                  </Button>
+                  <Button
+                    variant={currentRole === 'Parent' ? 'default' : 'outline'}
+                    className="justify-start h-12 rounded-xl"
+                    onClick={() => handleRoleSwitch('Parent')}
+                    disabled={roleLoading}
+                  >
+                    <UserIcon className="mr-2 h-5 w-5" /> Switch to Parent
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Step 1: Clear Demo Data */}
           <Card className="border-none shadow-xl">
@@ -280,14 +393,14 @@ export default function ImportPage() {
                 Step 1 — Clear Demo Data
               </CardTitle>
               <CardDescription>
-                Deletes the placeholder Blue Jays, Cardinals, and Tigers teams, all demo user profiles, and sample announcements/concessions/board meetings. Season, divisions, and fields are kept.
+                Deletes the placeholder Blue Jays, Cardinals, and Tigers teams, all demo user profiles, and sample announcements/concessions/board meetings. Season, divisions, and fields are preserved.
               </CardDescription>
             </CardHeader>
             <CardContent>
               {clearDone ? (
                 <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
                   <CheckCircle2 className="h-5 w-5 shrink-0" />
-                  <span className="text-sm font-medium">Demo data cleared successfully.</span>
+                  <span className="text-sm font-medium">Demo data cleared.</span>
                 </div>
               ) : (
                 <Button
@@ -311,7 +424,7 @@ export default function ImportPage() {
                 Step 2 — Create Season Teams
               </CardTitle>
               <CardDescription>
-                Creates all 11 real SYBA teams for Spring 2026: 6 Kid Pitch teams (Mariners, Rays, Phillies, Athletics, Dodgers, Pirates) and 5 Coach Pitch teams (Braves, Yankees, Cubs, Reds, Brewers).
+                Creates all 11 real SYBA teams for Spring 2026 — 6 Kid Pitch (Mariners, Rays, Phillies, Athletics, Dodgers, Pirates) and 5 Coach Pitch (Braves, Yankees, Cubs, Reds, Brewers).
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -319,13 +432,12 @@ export default function ImportPage() {
                 <div className="space-y-3">
                   <div className="bg-green-100 text-green-700 p-4 rounded-xl flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 shrink-0" />
-                    <span className="text-sm font-medium">11 teams created successfully.</span>
+                    <span className="text-sm font-medium">11 teams created.</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 px-1">
                     {['Mariners', 'Rays', 'Phillies', 'Athletics', 'Dodgers', 'Pirates', 'Braves', 'Yankees', 'Cubs', 'Reds', 'Brewers'].map(name => (
                       <div key={name} className="flex items-center gap-2 text-xs text-green-700">
-                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                        {name}
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> {name}
                       </div>
                     ))}
                   </div>
@@ -351,14 +463,14 @@ export default function ImportPage() {
                 Step 3 — Import Yankees Roster
               </CardTitle>
               <CardDescription>
-                Creates 11 parent profiles and 12 player records for the Coach Pitch Yankees. Siblings Tanner and Gunnar Schreckenghost share one parent contact. Maxwell Dudzinski's parent is Carolyn Janosko; Ryan Laskowitz's parent is Susan Stigliano.
+                Creates 11 parent profiles and 12 player records for the Coach Pitch Yankees. Siblings Tanner and Gunnar Schreckenghost share one parent. Maxwell Dudzinski's parent is Carolyn Janosko; Ryan Laskowitz's parent is Susan Stigliano.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
                 <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
                 <p className="text-xs text-yellow-700">
-                  Run Step 2 first. Parent accounts are created as Firestore-only profiles — they cannot log in to the portal, but all contact info will be visible in admin views.
+                  Run Step 2 first. Parent profiles are Firestore-only — contact info is visible in admin views but parents cannot log in to the portal.
                 </p>
               </div>
               {rosterDone ? (
@@ -374,8 +486,7 @@ export default function ImportPage() {
                       'Winston Pokrant', 'Tanner Schreckenghost', 'Gunnar Schreckenghost', 'Carter Skladanek',
                     ].map(name => (
                       <div key={name} className="flex items-center gap-2 text-xs text-green-700">
-                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                        {name}
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> {name}
                       </div>
                     ))}
                   </div>

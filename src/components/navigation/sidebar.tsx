@@ -35,7 +35,6 @@ import {
   ChevronRight,
   MessageSquare,
   Inbox,
-  Upload,
 } from 'lucide-react';
 import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -62,8 +61,7 @@ const leagueAdminItems = [
 
 const adminOnlyItems = [
   { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
-  { label: 'Seed Data', icon: Database, href: '/admin/seed' },
-  { label: 'Demo Import', icon: Upload, href: '/admin/import' },
+  { label: 'Data Management', icon: Database, href: '/admin/import' },
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
 
