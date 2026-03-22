@@ -145,8 +145,8 @@ export default function AdminDashboard({
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
 
-  const todayISO = format(new Date(), 'yyyy-MM-dd');
-  const nextWeekISO = format(addDays(new Date(), 7), 'yyyy-MM-dd');
+  const todayISO = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+  const nextWeekISO = useMemo(() => format(addDays(new Date(), 7), 'yyyy-MM-dd'), []);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 

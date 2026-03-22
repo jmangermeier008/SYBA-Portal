@@ -177,9 +177,9 @@ export function Sidebar() {
   }, [db, profile?.id, isParent, isCoach]);
   const { data: unreadNotifs } = useCollection<{ id: string }>(unreadNotifsQuery);
   // Sync hasUnreadNotifs whenever the query result changes
-  if ((unreadNotifs?.length ?? 0) > 0 !== hasUnreadNotifs) {
+  useEffect(() => {
     setHasUnreadNotifs((unreadNotifs?.length ?? 0) > 0);
-  }
+  }, [unreadNotifs]);
 
   // Unread announcements badge
   const latestAnnouncementQuery = useMemoFirebase(() => {

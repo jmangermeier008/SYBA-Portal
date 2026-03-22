@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
@@ -102,7 +102,7 @@ export default function ParentDashboard({
   };
 
   // Next upcoming game for first assigned team
-  const now = new Date().toISOString();
+  const now = useMemo(() => new Date().toISOString(), []);
   const nextGameQuery = useMemoFirebase(() => {
     if (!db || !firstTeamId) return null;
     return query(
@@ -122,7 +122,7 @@ export default function ParentDashboard({
     if (!db || !firstTeamId || !nextGame?.id) return null;
     return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
   }, [db, firstTeamId, nextGame?.id]);
-  const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string }>(rsvpsQuery);
+  const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string; gameId?: string }>(rsvpsQuery);
   // H12: Fix RSVP status — use && to ensure both conditions match, and guard on gameId
   const currentRsvp = firstPlayerId && nextGame
     ? rsvps?.find(r =>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -81,7 +81,7 @@ export default function AdminGamesPage() {
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
 
-  const todayISO = format(new Date(), 'yyyy-MM-dd');
+  const todayISO = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
   // Dialog state
   const [open, setOpen] = useState(false);
