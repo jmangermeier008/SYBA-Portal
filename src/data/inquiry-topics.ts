@@ -74,6 +74,7 @@ export interface Inquiry {
   topic: InquiryTopic;
   subject: string;
   message: string;
+  messageHtml?: string | null;
   status: InquiryStatus;
   assignedToRole: string;
   createdAt: string;

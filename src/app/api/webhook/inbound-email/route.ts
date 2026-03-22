@@ -18,7 +18,8 @@ const INBOUND_TOPIC_MAP: Record<string, InquiryTopic> = {
 
 // Override assignedToRole for specific inbound addresses (takes precedence over topic-derived role)
 const INBOUND_ROLE_OVERRIDE_MAP: Record<string, string> = {
-  'vicepresident@syba.blue': 'Secretary',
+  'vicepresident@syba.blue': 'Vice President',
+  'treasurer@syba.blue': 'Finance Committee Chair',
   'grounds@syba.blue': 'Building/Grounds Committee Chair',
   'admin@syba.blue': 'Site Admin',
 };
@@ -54,6 +55,8 @@ export async function GET() {
     ok: keySet && firestoreOk,
     FIREBASE_SERVICE_ACCOUNT_KEY: keySet ? 'set' : 'MISSING',
     firestore: firestoreOk ? 'connected' : `error: ${firestoreError}`,
+    topicMap: INBOUND_TOPIC_MAP,
+    roleOverrideMap: INBOUND_ROLE_OVERRIDE_MAP,
   });
 }
 
@@ -61,12 +64,30 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
+    // Log the full raw payload so we can inspect Resend's exact field names in Vercel logs
+    console.log('[inbound-email] RAW PAYLOAD KEYS', JSON.stringify(Object.keys(body?.data ?? body)));
+    console.log('[inbound-email] RAW PAYLOAD', JSON.stringify(body));
+
     // Resend inbound email payload wraps fields inside body.data
     const data = body.data ?? body;
     const fromRaw: string = data.from ?? '';
     const toRaw: string | string[] = data.to ?? '';
     const subject: string = data.subject ?? '(no subject)';
-    const text: string = data.text ?? data.html ?? '(no message body)';
+
+    // Try all common field names for the plain-text body
+    const rawText: string | undefined = data.text ?? data.plain ?? data.body ?? data.content;
+    const rawHtml: string | undefined = data.html;
+
+    // Strip HTML tags to produce readable plain text when only HTML is available
+    function stripHtml(html: string): string {
+      return html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    }
+
+    const text: string = rawText?.trim()
+      ? rawText.trim()
+      : rawHtml
+      ? stripHtml(rawHtml)
+      : '(no message body)';
 
     console.log('[inbound-email] Webhook called', JSON.stringify({ from: fromRaw, to: toRaw, subject, textSnippet: text?.slice(0, 100) }));
 
@@ -93,6 +114,7 @@ export async function POST(req: Request) {
       topic,
       subject: subject.slice(0, 100),
       message: text.trim(),
+      messageHtml: rawHtml ?? null,
       status: 'open',
       assignedToRole: INBOUND_ROLE_OVERRIDE_MAP[recipientEmail] ?? topicConfig.assignedToRole,
       createdAt: now,
