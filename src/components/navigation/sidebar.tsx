@@ -166,7 +166,7 @@ function NavSection({
       </button>
       <div className={cn(
         "overflow-hidden transition-all duration-200",
-        isOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
+        isOpen ? "max-h-[1200px] opacity-100" : "max-h-0 opacity-0"
       )}>
         {items.map((item) => (
           <Link
