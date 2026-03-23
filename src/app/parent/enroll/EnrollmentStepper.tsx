@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { collection, doc, setDoc, query, where, getDocs, collectionGroup, increment, updateDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, query, where, getDocs, collectionGroup } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -233,12 +233,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         setSubmitting(false);
         return;
       }
-
-      // Increment registeredCount on division
-      const divRef = doc(db, 'seasons', state.seasonId, 'divisions', state.divisionId);
-      updateDoc(divRef, { registeredCount: increment(1) }).catch(err =>
-        console.error('[enroll] Count increment error:', err)
-      );
 
       // Start Stripe checkout (send ID token for server-side auth verification)
       const idToken = await user.getIdToken();

@@ -94,6 +94,7 @@ export default function TeamsAdminPage() {
     const teamData = {
       id: teamId,
       ...formData,
+      coachIds: formData.coach_uid ? [formData.coach_uid] : [],
       player_ids: [],
       createdAt: new Date().toISOString()
     };

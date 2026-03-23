@@ -44,7 +44,7 @@ interface BoardMeeting {
 
 export default function DataManagementPage() {
   const db = useFirestore();
-  const { user, profile, isSiteAdmin } = useUser();
+  const { user, profile, isSiteAdmin, loading: loadingUser } = useUser();
   const { toast } = useToast();
 
   // ── All hooks before early returns (Rules of Hooks) ──────────────────────
@@ -81,6 +81,14 @@ export default function DataManagementPage() {
   const [teamsDone, setTeamsDone] = useState(false);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterDone, setRosterDone] = useState(false);
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (

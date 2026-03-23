@@ -2,7 +2,7 @@
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO, isAfter, subHours } from 'date-fns';
+import { useMemo } from 'react';
 
 interface ConcessionSignup {
   parentUserId: string;
@@ -56,23 +57,31 @@ export default function ParentConcessionsPage() {
   const { profile, loading: loadingUser } = useUser();
   const { toast } = useToast();
 
+  const todayISO = format(new Date(), 'yyyy-MM-dd');
+
   const slotsQuery = useMemoFirebase(() => {
     if (!db || !profile) return null;
-    return collection(db, 'concessionSlots');
-  }, [db, profile]);
+    return query(
+      collection(db, 'concessionSlots'),
+      where('gameDate', '>=', todayISO),
+      where('status', '!=', 'cancelled'),
+    );
+  }, [db, profile, todayISO]);
 
   const { data: slots, isLoading } = useCollection<ConcessionSlot>(slotsQuery);
 
   // Only show upcoming, active slots (filter out cancelled shifts)
-  const upcomingSlots = slots
-    ? [...slots]
-        .filter(s => {
-          // Treat slots without a status field as active (backward compat with older data)
-          const isActive = !s.status || s.status === 'active';
-          return isActive && isAfter(getSlotStartDateTime(s), new Date());
-        })
-        .sort((a, b) => a.gameDate.localeCompare(b.gameDate))
-    : [];
+  const upcomingSlots = useMemo(() =>
+    slots
+      ? [...slots]
+          .filter(s => {
+            // Treat slots without a status field as active (backward compat with older data)
+            const isActive = !s.status || s.status === 'active';
+            return isActive && isAfter(getSlotStartDateTime(s), new Date());
+          })
+          .sort((a, b) => a.gameDate.localeCompare(b.gameDate))
+      : [],
+  [slots]);
 
   const handleSignUp = async (slot: ConcessionSlot) => {
     if (!db || !profile) return;

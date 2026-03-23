@@ -52,7 +52,7 @@ function normalizeTeamGame(g: TeamGame, teamId: string): CalendarEvent {
   const dateTime = g.dateTime ?? '';
   return {
     id: g.id,
-    eventType: 'game',
+    eventType: g.type === 'Game' ? 'game' : 'practice',
     date: dateTime.slice(0, 10),
     startTime: dateTime.slice(11, 16),
     title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
@@ -189,8 +189,12 @@ export default function ParentSchedulesPage() {
   // ── Concession slots ────────────────────────────────────────────────────────
   const concessionsQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return collection(db, 'concessionSlots');
-  }, [db]);
+    return query(
+      collection(db, 'concessionSlots'),
+      where('gameDate', '>=', todayISO),
+      where('status', '!=', 'cancelled'),
+    );
+  }, [db, todayISO]);
 
   const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionsQuery);
 

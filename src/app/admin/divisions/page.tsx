@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Layers, Loader2, Trash2, Pencil, Lock, Check, X, Users } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, doc, addDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -81,10 +81,8 @@ export default function DivisionsAdminPage() {
     if (!selectedSeasonId || !formData.name.trim()) return;
     setIsAdding(true);
 
-    const divId = formData.name.toLowerCase().replace(/\s+/g, '-');
     try {
-      await setDoc(doc(db, 'seasons', selectedSeasonId, 'divisions', divId), {
-        id: divId,
+      const ref = await addDoc(collection(db, 'seasons', selectedSeasonId, 'divisions'), {
         name: formData.name.trim(),
         ageGroup: formData.ageGroup.trim(),
         fee: formData.fee ? Math.round(Number(formData.fee) * 100) : 0,
@@ -92,6 +90,8 @@ export default function DivisionsAdminPage() {
         waitlistEnabled: true,
         registeredCount: 0,
       });
+      // Store the auto-generated id inside the document for easy reference
+      await updateDoc(ref, { id: ref.id });
       toast({ title: 'Division Created', description: `${formData.name} has been added.` });
       setOpen(false);
       setFormData({ name: '', ageGroup: '', fee: '', capacity: '' });

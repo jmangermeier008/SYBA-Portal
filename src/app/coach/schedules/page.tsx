@@ -46,7 +46,7 @@ function normalizeTeamGame(g: GameEvent, teamId: string): CalendarEvent {
   const dateTime = g.dateTime ?? '';
   return {
     id: g.id,
-    eventType: 'game',
+    eventType: g.type === 'Game' ? 'game' : 'practice',
     date: dateTime.slice(0, 10),
     startTime: dateTime.slice(11, 16),
     title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
@@ -62,7 +62,7 @@ function normalizeTeamGame(g: GameEvent, teamId: string): CalendarEvent {
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CoachSchedulesPage() {
-  const { user } = useUser();
+  const { user, loading: loadingUser } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
 
@@ -81,7 +81,7 @@ export default function CoachSchedulesPage() {
   // ── Data queries ────────────────────────────────────────────────────────────
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
-    return query(collection(db, 'teams'), where('coach_uid', '==', user.uid), limit(1));
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), limit(1));
   }, [db, user?.uid]);
 
   const { data: userTeams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
@@ -89,7 +89,7 @@ export default function CoachSchedulesPage() {
 
   const fieldsQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return collection(db, 'fields');
+    return query(collection(db, 'fields'), where('isActive', '==', true));
   }, [db]);
 
   const { data: fields } = useCollection<Field>(fieldsQuery);
@@ -211,6 +211,14 @@ export default function CoachSchedulesPage() {
   };
 
   const isLoading = loadingTeams || loadingGames;
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">

@@ -24,7 +24,7 @@ export default function CoachTeamsPage() {
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
-    return query(collection(db, 'teams'), where('coach_uid', '==', user.uid));
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid));
   }, [db, user?.uid]);
 
   const { data: teams, isLoading } = useCollection<Team>(teamsQuery);

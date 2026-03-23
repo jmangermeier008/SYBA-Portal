@@ -1,16 +1,9 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
-// L7: Import shared Firebase config rather than duplicating credentials here
-import { firebaseConfig } from '@/firebase/config';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminFirestore } from '@/lib/firebase-admin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
-function getDb() {
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  return getFirestore(app);
-}
 
 export async function POST(req: Request) {
   // CRITICAL: Use req.text() — raw body required for signature verification
@@ -34,25 +27,23 @@ export async function POST(req: Request) {
     const enrollmentId = session.metadata?.enrollmentId;
     const userId = session.metadata?.userId;
 
-    // Fix 1E: Guard against missing metadata — log and bail rather than silently dropping
     if (!enrollmentId || !userId) {
       console.error('[stripe/webhook] Missing enrollmentId or userId in session metadata', session.id);
       return NextResponse.json({ received: true });
     }
 
     try {
-      const db = getDb();
-      const enrollmentRef = doc(db, 'userProfiles', userId, 'enrollments', enrollmentId);
+      const db = getAdminFirestore();
+      const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
 
-      // Fix 1E: Verify enrollment doc exists before updating
-      const enrollmentSnap = await getDoc(enrollmentRef);
-      if (!enrollmentSnap.exists()) {
+      const enrollmentSnap = await enrollmentRef.get();
+      if (!enrollmentSnap.exists) {
         console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId}`);
         // Return 200 so Stripe doesn't retry — enrollment may have been deleted
         return NextResponse.json({ received: true });
       }
 
-      await updateDoc(enrollmentRef, {
+      await enrollmentRef.update({
         payment_status: 'paid',
         paymentStatus: 'paid',
         stripe_payment_id: session.payment_intent ?? '',
@@ -61,44 +52,46 @@ export async function POST(req: Request) {
 
       console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
 
-      // Fetch enrollment, player, season, division to populate the confirmation email
+      // Increment registeredCount on the division now that payment is confirmed
+      const enrollment = enrollmentSnap.data() as any;
+      if (enrollment.seasonId && enrollment.divisionId) {
+        const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
+        divRef.update({ registeredCount: FieldValue.increment(1) })
+          .catch((err: any) => console.error('[stripe/webhook] registeredCount increment error:', err.message));
+      }
+
+      // Fetch data for confirmation email
       try {
-          const enrollment = enrollmentSnap.data() as any;
+        const [playerSnap, userSnap, seasonSnap] = await Promise.all([
+          db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get(),
+          db.doc(`userProfiles/${userId}`).get(),
+          db.doc(`seasons/${enrollment.seasonId}`).get(),
+        ]);
+        const divisionSnap = await db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`).get();
 
-          const [playerSnap, userSnap, seasonSnap] = await Promise.all([
-            getDoc(doc(db, 'userProfiles', userId, 'players', enrollment.playerId)),
-            getDoc(doc(db, 'userProfiles', userId)),
-            getDoc(doc(db, 'seasons', enrollment.seasonId)),
-          ]);
-          const divisionSnap = await getDoc(
-            doc(db, 'seasons', enrollment.seasonId, 'divisions', enrollment.divisionId)
-          );
+        const player = playerSnap.data() as any;
+        const user = userSnap.data() as any;
+        const season = seasonSnap.data() as any;
+        const division = divisionSnap.data() as any;
 
-          const player = playerSnap.data() as any;
-          const user = userSnap.data() as any;
-          const season = seasonSnap.data() as any;
-          const division = divisionSnap.data() as any;
+        const toEmail = session.customer_details?.email ?? user?.email ?? '';
+        const playerName = player ? `${player.firstName} ${player.lastName}` : '';
 
-          const toEmail = session.customer_details?.email ?? user?.email ?? '';
-          const playerName = player ? `${player.firstName} ${player.lastName}` : '';
-          const seasonName = season?.name ?? '';
-          const divisionName = division?.name ?? '';
-
-          fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/email/confirmation`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              toEmail,
-              playerName,
-              seasonName,
-              divisionName,
-              isWaitlisted: false,
-              feeWaived: enrollment.fee_waived ?? false,
-            }),
-          }).catch(err => console.error('[stripe/webhook] Email send error:', err));
-        } catch (emailFetchErr: any) {
-          console.error('[stripe/webhook] Failed to fetch data for email:', emailFetchErr.message);
-        }
+        fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/email/confirmation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toEmail,
+            playerName,
+            seasonName: season?.name ?? '',
+            divisionName: division?.name ?? '',
+            isWaitlisted: false,
+            feeWaived: enrollment.fee_waived ?? false,
+          }),
+        }).catch(err => console.error('[stripe/webhook] Email send error:', err));
+      } catch (emailFetchErr: any) {
+        console.error('[stripe/webhook] Failed to fetch data for email:', emailFetchErr.message);
+      }
     } catch (err: any) {
       console.error('[stripe/webhook] Firestore update error:', err.message);
       return NextResponse.json({ error: err.message }, { status: 500 });
