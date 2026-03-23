@@ -35,6 +35,7 @@ import {
   ChevronRight,
   MessageSquare,
   Inbox,
+  Layers,
 } from 'lucide-react';
 import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -66,6 +67,7 @@ function getDefaultContext(roles: string[]): RoleContext {
 const adminSchedulingItems = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
   { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
+  { label: 'Standings', icon: BarChart3, href: '/admin/standings' },
   { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
   { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
@@ -76,6 +78,7 @@ const adminPeopleItems = [
   { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
   { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
   { label: 'Teams', icon: Users, href: '/admin/teams' },
+  { label: 'Divisions', icon: Layers, href: '/admin/divisions' },
 ];
 
 const adminVenueItems = [
@@ -100,8 +103,8 @@ const adminSystemAdminItems = [
 ];
 
 function getAdminSectionForPath(p: string): string | null {
-  if (['/admin/dashboard', '/admin/games', '/admin/calendar', '/admin/practice-slots', '/admin/seasons'].some(r => p === r || p.startsWith(r + '/'))) return 'Scheduling';
-  if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams'].some(r => p === r || p.startsWith(r + '/'))) return 'People';
+  if (['/admin/dashboard', '/admin/games', '/admin/standings', '/admin/calendar', '/admin/practice-slots', '/admin/seasons'].some(r => p === r || p.startsWith(r + '/'))) return 'Scheduling';
+  if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams', '/admin/divisions'].some(r => p === r || p.startsWith(r + '/'))) return 'People';
   if (['/admin/fields', '/admin/concessions', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Venue & Finance';
   if (['/admin/announcements', '/admin/board-meetings', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Communications';
   if (['/admin/import', '/admin/roles', '/admin/settings'].some(r => p === r || p.startsWith(r + '/'))) return 'System';

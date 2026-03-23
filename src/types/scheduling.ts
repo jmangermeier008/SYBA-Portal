@@ -106,6 +106,9 @@ export interface Game {
   teamId?: string;
   teamName?: string;
   notes?: string;
+  // Final scores (populated when status = 'completed'):
+  homeScore?: number;
+  awayScore?: number;
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;

@@ -47,6 +47,8 @@ interface Game {
   teamName?: string;
   notes?: string;
   status?: GameStatus;
+  homeScore?: number;
+  awayScore?: number;
 }
 
 interface Team { id: string; name: string; }
@@ -112,6 +114,13 @@ export default function AdminGamesPage() {
   const [deleteDialog, setDeleteDialog] = useState<{
     open: boolean; game: Game | null; linkedShiftCount: number; isDeleting: boolean;
   }>({ open: false, game: null, linkedShiftCount: 0, isDeleting: false });
+
+  // Score dialog
+  const [scoreDialog, setScoreDialog] = useState<{ open: boolean; game: Game | null; isSaving: boolean }>({
+    open: false, game: null, isSaving: false,
+  });
+  const [scoreHomeInput, setScoreHomeInput] = useState('');
+  const [scoreAwayInput, setScoreAwayInput] = useState('');
 
   // View toggle
   const [view, setView] = useState<'list' | 'calendar'>('list');
@@ -460,6 +469,37 @@ export default function AdminGamesPage() {
     }
   };
 
+  const handleOpenScoreDialog = (game: Game) => {
+    setScoreHomeInput(game.homeScore != null ? String(game.homeScore) : '');
+    setScoreAwayInput(game.awayScore != null ? String(game.awayScore) : '');
+    setScoreDialog({ open: true, game, isSaving: false });
+  };
+
+  const handleSaveScore = async () => {
+    const { game } = scoreDialog;
+    if (!db || !game || scoreHomeInput === '' || scoreAwayInput === '') return;
+    const homeScore = Number(scoreHomeInput);
+    const awayScore = Number(scoreAwayInput);
+    if (isNaN(homeScore) || isNaN(awayScore) || homeScore < 0 || awayScore < 0) {
+      toast({ title: 'Invalid Score', description: 'Scores must be non-negative numbers.', variant: 'destructive' });
+      return;
+    }
+    setScoreDialog(prev => ({ ...prev, isSaving: true }));
+    try {
+      await updateDoc(doc(db, 'games', game.id), {
+        homeScore,
+        awayScore,
+        status: 'completed',
+        updatedAt: Timestamp.now(),
+      });
+      toast({ title: 'Score Saved', description: 'Game marked complete with final score.' });
+      setScoreDialog({ open: false, game: null, isSaving: false });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      setScoreDialog(prev => ({ ...prev, isSaving: false }));
+    }
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -725,7 +765,8 @@ export default function AdminGamesPage() {
                       <GameRow key={g.id} game={g}
                         onEdit={() => handleOpenEdit(g)}
                         onCancel={() => handleInitiateCancel(g)}
-                        onDelete={() => handleInitiateDelete(g)} />
+                        onDelete={() => handleInitiateDelete(g)}
+                        onScore={() => handleOpenScoreDialog(g)} />
                     ))}
                   </div>
                 )}
@@ -754,7 +795,8 @@ export default function AdminGamesPage() {
                         <GameRow key={g.id} game={g}
                           onEdit={() => handleOpenEdit(g)}
                           onCancel={() => handleInitiateCancel(g)}
-                          onDelete={() => handleInitiateDelete(g)} />
+                          onDelete={() => handleInitiateDelete(g)}
+                          onScore={() => handleOpenScoreDialog(g)} />
                       ))}
                     </div>
                   )}
@@ -846,6 +888,60 @@ export default function AdminGamesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Record Score Dialog */}
+      <Dialog open={scoreDialog.open} onOpenChange={o => { if (!scoreDialog.isSaving) setScoreDialog(prev => ({ ...prev, open: o })); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-headline">Record Final Score</DialogTitle>
+            {scoreDialog.game && (
+              <DialogDescription>
+                {scoreDialog.game.homeTeamName} vs. {scoreDialog.game.awayTeamName}
+                {' · '}{format(parseISO(scoreDialog.game.date), 'MMM d')}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {scoreDialog.game && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5 text-center">
+                  <Label className="text-xs text-muted-foreground">{scoreDialog.game.homeTeamName || 'Home'}</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={scoreHomeInput}
+                    onChange={e => setScoreHomeInput(e.target.value)}
+                    className="text-2xl font-bold h-14 text-center"
+                    autoFocus
+                  />
+                </div>
+                <div className="space-y-1.5 text-center">
+                  <Label className="text-xs text-muted-foreground">{scoreDialog.game.awayTeamName || 'Away'}</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={scoreAwayInput}
+                    onChange={e => setScoreAwayInput(e.target.value)}
+                    className="text-2xl font-bold h-14 text-center"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">Saving will mark this game as Completed.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScoreDialog({ open: false, game: null, isSaving: false })} disabled={scoreDialog.isSaving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveScore} disabled={scoreDialog.isSaving || scoreHomeInput === '' || scoreAwayInput === ''}>
+              {scoreDialog.isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Score
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* CSV Import Dialog */}
       <Dialog open={importOpen} onOpenChange={o => { if (!isImporting) { setImportOpen(o); if (!o) { setImportRows([]); setImportErrors([]); } } }}>
         <DialogContent className="max-w-2xl">
@@ -909,11 +1005,17 @@ export default function AdminGamesPage() {
 
 // ─── Game Row ─────────────────────────────────────────────────────────────────
 
-function GameRow({ game, onEdit, onCancel, onDelete }: {
-  game: Game; onEdit: () => void; onCancel: () => void; onDelete: () => void;
+function GameRow({ game, onEdit, onCancel, onDelete, onScore }: {
+  game: Game;
+  onEdit: () => void;
+  onCancel: () => void;
+  onDelete: () => void;
+  onScore: () => void;
 }) {
   const isGame = game.type === 'game';
   const isCancelled = game.status === 'cancelled';
+  const isCompleted = game.status === 'completed';
+  const hasScore = game.homeScore != null && game.awayScore != null;
   const statusBadge = game.status ? STATUS_BADGE[game.status] : null;
 
   return (
@@ -938,6 +1040,11 @@ function GameRow({ game, onEdit, onCancel, onDelete }: {
             {statusBadge && (
               <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', statusBadge.className)}>{statusBadge.label}</span>
             )}
+            {isGame && hasScore && (
+              <span className="text-xs px-2 py-0.5 rounded-full border font-bold bg-white border-gray-200 text-gray-700 tabular-nums">
+                {game.homeScore} – {game.awayScore}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className="text-xs text-muted-foreground">{format(parseISO(game.date), 'EEE, MMM d')} · {formatTime(game.time)}</span>
@@ -948,6 +1055,21 @@ function GameRow({ game, onEdit, onCancel, onDelete }: {
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
+        {/* Score button — league games only, not cancelled */}
+        {isGame && !isCancelled && (
+          <Button size="sm" variant="ghost" onClick={onScore}
+            className={cn(
+              'h-8 px-2 text-xs gap-1 font-medium',
+              hasScore
+                ? 'text-primary hover:text-primary hover:bg-primary/10'
+                : 'text-muted-foreground hover:text-primary'
+            )}
+            title={hasScore ? 'Edit score' : 'Record score'}
+          >
+            <Trophy className="h-3.5 w-3.5" />
+            {hasScore ? 'Score' : 'Score'}
+          </Button>
+        )}
         {!isCancelled && (
           <>
             <Button size="sm" variant="ghost" onClick={onEdit}

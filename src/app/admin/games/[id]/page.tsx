@@ -1,12 +1,14 @@
 "use client";
 
-import { use, useMemo } from 'react';
+import { use, useMemo, useEffect, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { doc, collection, query, where, getDoc } from 'firebase/firestore';
+import { doc, collection, query, where, getDoc, updateDoc } from 'firebase/firestore';
 import {
   CalendarDays,
   MapPin,
@@ -18,12 +20,15 @@ import {
   Lock,
   ShoppingCart,
   Users,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
 import type { Game, ConcessionSlot } from '@/types/scheduling';
+import { useToast } from '@/hooks/use-toast';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,10 +56,18 @@ export default function GameDetailPage({
   const { id } = use(params);
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { toast } = useToast();
 
   const [game, setGame] = useState<Game | null>(null);
   const [loadingGame, setLoadingGame] = useState(true);
   const [notFound, setNotFound] = useState(false);
+
+  // Score editing state
+  const [editingScore, setEditingScore] = useState(false);
+  const [homeScoreInput, setHomeScoreInput] = useState('');
+  const [awayScoreInput, setAwayScoreInput] = useState('');
+  const [isSavingScore, setIsSavingScore] = useState(false);
+  const [isMarkingComplete, setIsMarkingComplete] = useState(false);
 
   // Fetch game by ID
   useEffect(() => {
@@ -63,7 +76,11 @@ export default function GameDetailPage({
     getDoc(doc(db, 'games', id))
       .then((snap) => {
         if (snap.exists()) {
-          setGame({ id: snap.id, ...snap.data() } as Game);
+          const data = { id: snap.id, ...snap.data() } as Game;
+          setGame(data);
+          // Pre-fill score inputs if scores already recorded
+          if (data.homeScore != null) setHomeScoreInput(String(data.homeScore));
+          if (data.awayScore != null) setAwayScoreInput(String(data.awayScore));
         } else {
           setNotFound(true);
         }
@@ -82,6 +99,51 @@ export default function GameDetailPage({
   }, [db, game, isAdmin, isBoardMember]);
 
   const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionQuery);
+
+  // ── Score handlers ────────────────────────────────────────────────────────────
+
+  const handleSaveScore = async () => {
+    if (!game || homeScoreInput === '' || awayScoreInput === '') return;
+    const homeScore = Number(homeScoreInput);
+    const awayScore = Number(awayScoreInput);
+    if (isNaN(homeScore) || isNaN(awayScore) || homeScore < 0 || awayScore < 0) {
+      toast({ variant: 'destructive', title: 'Invalid Score', description: 'Scores must be non-negative numbers.' });
+      return;
+    }
+    setIsSavingScore(true);
+    try {
+      await updateDoc(doc(db, 'games', game.id), {
+        homeScore,
+        awayScore,
+        status: 'completed',
+        updatedAt: new Date().toISOString(),
+      });
+      setGame(prev => prev ? { ...prev, homeScore, awayScore, status: 'completed' } : prev);
+      setEditingScore(false);
+      toast({ title: 'Score Saved', description: 'Final score has been recorded and game marked complete.' });
+    } catch {
+      toast({ variant: 'destructive', title: 'Error', description: 'Could not save score.' });
+    } finally {
+      setIsSavingScore(false);
+    }
+  };
+
+  const handleMarkComplete = async () => {
+    if (!game) return;
+    setIsMarkingComplete(true);
+    try {
+      await updateDoc(doc(db, 'games', game.id), {
+        status: 'completed',
+        updatedAt: new Date().toISOString(),
+      });
+      setGame(prev => prev ? { ...prev, status: 'completed' } : prev);
+      toast({ title: 'Game Marked Complete' });
+    } catch {
+      toast({ variant: 'destructive', title: 'Error', description: 'Could not update status.' });
+    } finally {
+      setIsMarkingComplete(false);
+    }
+  };
 
   // ── Access guard ─────────────────────────────────────────────────────────────
 
@@ -144,6 +206,7 @@ export default function GameDetailPage({
 
   const statusCfg = STATUS_CONFIG[game.status] ?? STATUS_CONFIG.scheduled;
   const dateLabel = game.date ? format(parseISO(game.date), 'EEEE, MMMM d, yyyy') : '';
+  const hasScore = game.homeScore != null && game.awayScore != null;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -181,6 +244,18 @@ export default function GameDetailPage({
                   </Badge>
                 )}
               </div>
+              {game.type === 'game' && game.status !== 'completed' && game.status !== 'cancelled' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full text-xs"
+                  onClick={handleMarkComplete}
+                  disabled={isMarkingComplete}
+                >
+                  {isMarkingComplete ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+                  Mark Complete
+                </Button>
+              )}
             </div>
 
             <h1 className="text-2xl font-bold font-headline mb-5">{title}</h1>
@@ -212,6 +287,113 @@ export default function GameDetailPage({
             </div>
           </CardContent>
         </Card>
+
+        {/* Final Score card — league games only */}
+        {game.type === 'game' && (
+          <Card className="border-none shadow-md mb-4">
+            <CardHeader className="pb-2 pt-4 px-5">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-headline flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-muted-foreground" />
+                  Final Score
+                </CardTitle>
+                {!editingScore && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs gap-1 text-muted-foreground hover:text-primary"
+                    onClick={() => {
+                      setHomeScoreInput(game.homeScore != null ? String(game.homeScore) : '');
+                      setAwayScoreInput(game.awayScore != null ? String(game.awayScore) : '');
+                      setEditingScore(true);
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    {hasScore ? 'Edit Score' : 'Record Score'}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="px-5 pb-5">
+              {editingScore ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">{game.homeTeamName || 'Home Team'}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={homeScoreInput}
+                        onChange={e => setHomeScoreInput(e.target.value)}
+                        className="text-2xl font-bold h-14 text-center"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">{game.awayTeamName || 'Away Team'}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={awayScoreInput}
+                        onChange={e => setAwayScoreInput(e.target.value)}
+                        className="text-2xl font-bold h-14 text-center"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Saving will also mark this game as Completed.</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleSaveScore} disabled={isSavingScore}>
+                      {isSavingScore ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+                      Save Score
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditingScore(false)}
+                      disabled={isSavingScore}
+                    >
+                      <X className="h-3.5 w-3.5 mr-1" />
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : hasScore ? (
+                <div className="flex items-center gap-6">
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground mb-1">{game.homeTeamName || 'Home'}</p>
+                    <p className={cn(
+                      'text-4xl font-bold',
+                      game.homeScore! > game.awayScore! ? 'text-green-600' : game.homeScore! < game.awayScore! ? 'text-red-500' : 'text-foreground'
+                    )}>
+                      {game.homeScore}
+                    </p>
+                  </div>
+                  <p className="text-xl text-muted-foreground font-bold">–</p>
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground mb-1">{game.awayTeamName || 'Away'}</p>
+                    <p className={cn(
+                      'text-4xl font-bold',
+                      game.awayScore! > game.homeScore! ? 'text-green-600' : game.awayScore! < game.homeScore! ? 'text-red-500' : 'text-foreground'
+                    )}>
+                      {game.awayScore}
+                    </p>
+                  </div>
+                  {game.homeScore === game.awayScore && (
+                    <p className="text-xs text-muted-foreground self-end pb-1">Tie</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No score recorded yet.{' '}
+                  {game.status === 'completed'
+                    ? 'Click "Record Score" above to add the final score.'
+                    : 'Mark the game complete and record the final score after it is played.'}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Concession coverage */}
         {concessionSlots && concessionSlots.length > 0 && (
