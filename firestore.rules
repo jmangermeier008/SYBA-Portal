@@ -113,7 +113,7 @@ service cloud.firestore {
           !request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['payment_status', 'paymentStatus', 'stripe_payment_id'])
           ) || isAdmin();
-        allow delete: if isUser(userId) || isAdmin();
+        allow delete: if isUser(userId) || isBoardMember();
       }
     }
 
