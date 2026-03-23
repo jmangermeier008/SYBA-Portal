@@ -19,10 +19,9 @@ function formatDate(dateStr: string) {
 // Supported filenames: sponsor1.png, sponsor2.png, sponsor3.png (etc.)
 // Images will be hidden automatically if the file doesn't exist yet.
 const SPONSOR_IMAGES = [
-  '/sponsors/IMG_20250306_144313.png',
-  '/sponsors/Screenshot 2026-03-21 at 5.02.42 PM.png',
+  '/sponsors/sponsor1.png',
+  '/sponsors/sponsor2.png',
   '/sponsors/sponsor3.png',
-  '/sponsors/sponsor4.png',
 ];
 
 interface ActiveSeason {
