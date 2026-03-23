@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import {
-  collection, doc, addDoc, query, orderBy, where, limit,
+  collection, doc, query, orderBy, where, limit,
   Timestamp, writeBatch,
 } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -70,6 +70,31 @@ function getDatesForWeekday(startDate: string, endDate: string, weekday: number)
     .map(weekStart => addDays(weekStart, weekday))
     .filter(d => !isBefore(d, start) && !isAfter(d, end))
     .map(d => format(d, 'yyyy-MM-dd'));
+}
+
+/** Splits a time window into teamsPerDate equal sub-slots with staggered start/end times.
+ *  e.g. 16:30–19:30 with teamsPerDate=2 → [{16:30,18:00},{18:00,19:30}]
+ *  Remainder minutes (uneven splits) go to the last slot. */
+function calculateSubSlotTimes(
+  startTime: string,
+  endTime: string,
+  teamsPerDate: number
+): Array<{ startTime: string; endTime: string }> {
+  if (teamsPerDate <= 1) return [{ startTime, endTime }];
+  const [startH, startM] = startTime.split(':').map(Number);
+  const [endH, endM] = endTime.split(':').map(Number);
+  const totalMinutes = (endH * 60 + endM) - (startH * 60 + startM);
+  if (totalMinutes <= 0) return [{ startTime, endTime }];
+  const baseDuration = Math.floor(totalMinutes / teamsPerDate);
+  const remainder = totalMinutes % teamsPerDate;
+  const baseMinutes = startH * 60 + startM;
+  const toHHMM = (mins: number) =>
+    `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  return Array.from({ length: teamsPerDate }, (_, i) => {
+    const slotStart = baseMinutes + i * baseDuration;
+    const slotDuration = i === teamsPerDate - 1 ? baseDuration + remainder : baseDuration;
+    return { startTime: toHHMM(slotStart), endTime: toHHMM(slotStart + slotDuration) };
+  });
 }
 
 const EMPTY_FORM = {
@@ -203,20 +228,29 @@ export default function PracticeSlotsAdminPage() {
     }
     setSaving(true);
     try {
-      await addDoc(collection(db, 'practiceSlots'), {
+      const subSlots = calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate);
+      const batch = writeBatch(db);
+      const baseFields = {
         seasonId: activeSeason.id,
         fieldId: form.fieldId,
         fieldName: fieldMap[form.fieldId] ?? '',
         divisionIds: form.divisionIds,
         date: form.date,
-        startTime: form.startTime,
-        endTime: form.endTime,
         status: 'available',
         notes: form.notes.trim(),
         createdBy: profile.id,
         createdAt: Timestamp.now(),
-      });
-      toast({ title: 'Practice Slot Created', description: `Slot on ${form.date} at ${fieldMap[form.fieldId] ?? 'field'} added.` });
+      };
+      for (let i = 0; i < form.slotsPerDate; i++) {
+        batch.set(doc(collection(db, 'practiceSlots')), {
+          ...baseFields,
+          startTime: subSlots[i].startTime,
+          endTime: subSlots[i].endTime,
+        });
+      }
+      await batch.commit();
+      const slotWord = form.slotsPerDate === 1 ? 'Slot' : 'Slots';
+      toast({ title: `${form.slotsPerDate} Practice ${slotWord} Created`, description: `${form.slotsPerDate === 1 ? 'Slot' : 'Slots'} on ${form.date} at ${fieldMap[form.fieldId] ?? 'field'} added.` });
       setForm(EMPTY_FORM);
       setAddDialog(false);
     } catch (err: any) {
@@ -238,14 +272,13 @@ export default function PracticeSlotsAdminPage() {
     }
     setSaving(true);
     try {
+      const subSlots = calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate);
       const batch = writeBatch(db);
       const baseFields = {
         seasonId: activeSeason.id,
         fieldId: form.fieldId,
         fieldName: fieldMap[form.fieldId] ?? '',
         divisionIds: form.divisionIds,
-        startTime: form.startTime,
-        endTime: form.endTime,
         status: 'available',
         notes: form.notes.trim(),
         createdBy: profile.id,
@@ -253,7 +286,12 @@ export default function PracticeSlotsAdminPage() {
       };
       for (const date of previewDates) {
         for (let i = 0; i < form.slotsPerDate; i++) {
-          batch.set(doc(collection(db, 'practiceSlots')), { ...baseFields, date });
+          batch.set(doc(collection(db, 'practiceSlots')), {
+            ...baseFields,
+            date,
+            startTime: subSlots[i].startTime,
+            endTime: subSlots[i].endTime,
+          });
         }
       }
       await batch.commit();
@@ -596,10 +634,20 @@ export default function PracticeSlotsAdminPage() {
                 </div>
                 <div className="flex gap-2">
                   <Clock className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                  <span>{formatTime(form.startTime)} – {formatTime(form.endTime)}</span>
+                  {form.slotsPerDate === 1 ? (
+                    <span>{formatTime(form.startTime)} – {formatTime(form.endTime)}</span>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate).map((s, i) => (
+                        <div key={i} className="text-xs">
+                          Slot {i + 1}: {formatTime(s.startTime)} – {formatTime(s.endTime)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="text-muted-foreground text-xs pl-6">
-                  {form.divisionIds.map(d => divisionMap[d] ?? d).join(', ')} · {form.slotsPerDate} slot{form.slotsPerDate > 1 ? 's' : ''} per date
+                  {form.divisionIds.map(d => divisionMap[d] ?? d).join(', ')} · {form.slotsPerDate} team{form.slotsPerDate > 1 ? 's' : ''} per date
                 </div>
               </div>
               <div className="max-h-52 overflow-y-auto space-y-1 rounded-xl border p-3">
@@ -727,9 +775,9 @@ export default function PracticeSlotsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Slots per date */}
+                  {/* Teams per date */}
                   <div className="space-y-1.5">
-                    <Label>Slots Per Date</Label>
+                    <Label>Teams Per Date</Label>
                     <div className="flex items-center gap-3">
                       <Button
                         type="button"
@@ -753,10 +801,26 @@ export default function PracticeSlotsAdminPage() {
                         +
                       </Button>
                       <span className="text-xs text-muted-foreground">
-                        How many teams can practice on the same date
+                        {form.slotsPerDate > 1
+                          ? 'The time window will be split into equal practice slots'
+                          : 'One team gets the full time window'}
                       </span>
                     </div>
                   </div>
+
+                  {/* Live time-window preview */}
+                  {form.startTime && form.endTime && (
+                    <div className="rounded-xl bg-muted/50 border px-4 py-3 text-sm space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Time windows per date</p>
+                      {calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate).map((s, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="font-medium">Slot {i + 1}:</span>
+                          <span>{formatTime(s.startTime)} – {formatTime(s.endTime)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Preview count */}
                   {previewDates.length > 0 && (
@@ -768,9 +832,58 @@ export default function PracticeSlotsAdminPage() {
                 </>
               ) : (
                 /* Single date */
-                <div className="space-y-1.5">
-                  <Label>Date *</Label>
-                  <Input type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Date *</Label>
+                    <Input type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
+                  </div>
+
+                  {/* Teams per date (single mode) */}
+                  <div className="space-y-1.5">
+                    <Label>Teams Per Date</Label>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setForm(prev => ({ ...prev, slotsPerDate: Math.max(1, prev.slotsPerDate - 1) }))}
+                        disabled={form.slotsPerDate <= 1}
+                        className="h-8 w-8 p-0"
+                      >
+                        −
+                      </Button>
+                      <span className="text-sm font-medium w-8 text-center">{form.slotsPerDate}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setForm(prev => ({ ...prev, slotsPerDate: Math.min(4, prev.slotsPerDate + 1) }))}
+                        disabled={form.slotsPerDate >= 4}
+                        className="h-8 w-8 p-0"
+                      >
+                        +
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        {form.slotsPerDate > 1
+                          ? 'The time window will be split into equal practice slots'
+                          : 'One team gets the full time window'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Live time-window preview (single mode) */}
+                  {form.startTime && form.endTime && (
+                    <div className="rounded-xl bg-muted/50 border px-4 py-3 text-sm space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Time windows</p>
+                      {calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate).map((s, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="font-medium">Slot {i + 1}:</span>
+                          <span>{formatTime(s.startTime)} – {formatTime(s.endTime)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
