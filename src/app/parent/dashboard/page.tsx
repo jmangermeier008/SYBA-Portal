@@ -200,7 +200,7 @@ export default function ParentDashboard({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 max-w-[1400px]">
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">Welcome back, {profile?.displayName?.split(' ')[0]}</h1>

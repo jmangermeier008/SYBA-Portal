@@ -150,6 +150,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
+        <div className="max-w-7xl">
         <header className="mb-8">
           <Button variant="ghost" asChild className="mb-4 -ml-2">
             <Link href="/coach/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to My Teams</Link>
@@ -200,7 +201,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                       {(player.medicalNotes || (player.emergencyContacts && player.emergencyContacts.length > 0)) && (
                         <Dialog>
                           <DialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive bg-destructive/10 hover:bg-destructive/20 rounded-full h-10 w-10 animate-pulse">
+                            <Button variant="ghost" size="icon" className="text-destructive bg-destructive/10 hover:bg-destructive/20 rounded-full h-10 w-10">
                               <AlertTriangle className="h-5 w-5" />
                             </Button>
                           </DialogTrigger>
@@ -256,9 +257,8 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                       {parent ? (
                         <div className="bg-secondary/20 p-4 rounded-xl space-y-3 border border-secondary">
                           <p className="font-bold text-sm">{parent.displayName}</p>
-                          <div className="flex gap-2">
-                            {/* M7: Only render contact links if phoneNumber is non-null */}
-                            {parent.phoneNumber && (
+                          {parent.phoneNumber ? (
+                            <div className="flex gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -269,8 +269,6 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                                   <Phone className="mr-2 h-3 w-3 text-primary" /> Call
                                 </a>
                               </Button>
-                            )}
-                            {parent.phoneNumber && (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -281,8 +279,10 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                                   <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
                                 </a>
                               </Button>
-                            )}
-                          </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">Contact info not shared</p>
+                          )}
                         </div>
                       ) : (
                         <div className="p-4 rounded-xl bg-muted/30 text-center border border-dashed">
@@ -307,6 +307,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
             })}
           </div>
         )}
+        </div>
       </main>
     </div>
   );

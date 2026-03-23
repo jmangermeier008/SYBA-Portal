@@ -472,7 +472,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               <div className="space-y-3">
                 <Label>Emergency Contact</Label>
                 {state.emergencyContacts.map((contact, i) => (
-                  <div key={i} className="grid grid-cols-3 gap-3">
+                  <div key={i} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <Input
                       className="rounded-xl"
                       placeholder="Name"
