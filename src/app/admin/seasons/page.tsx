@@ -7,9 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star } from 'lucide-react';
+import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star, Pencil } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch, updateDoc } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -23,6 +23,7 @@ interface Season {
   registrationClose: string;
   isActive?: boolean;
   status?: string;
+  volunteerSlotsRequired?: number;
 }
 
 export default function SeasonsAdminPage() {
@@ -31,6 +32,13 @@ export default function SeasonsAdminPage() {
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [editingSeason, setEditingSeason] = useState<Season | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    registrationOpen: '',
+    registrationClose: '',
+    volunteerSlotsRequired: 1,
+  });
+  const [isUpdating, setIsUpdating] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     registrationOpen: '',
@@ -148,6 +156,36 @@ export default function SeasonsAdminPage() {
       toast({ title: "Active Season Updated", description: `Season set as active.` });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error", description: error.message });
+    }
+  };
+
+  const handleUpdateSeason = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSeason) return;
+    if (editFormData.registrationClose < editFormData.registrationOpen) {
+      toast({ variant: "destructive", title: "Invalid Dates", description: "Close date must be on or after the open date." });
+      return;
+    }
+    setIsUpdating(true);
+    try {
+      await updateDoc(doc(db, 'seasons', editingSeason.id), {
+        registrationOpen: editFormData.registrationOpen,
+        registrationClose: editFormData.registrationClose,
+        volunteerSlotsRequired: Number(editFormData.volunteerSlotsRequired),
+      });
+      toast({ title: "Season Updated", description: `${editingSeason.name} registration dates saved.` });
+      setEditingSeason(null);
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: `seasons/${editingSeason.id}`,
+          operation: 'update'
+        }));
+      } else {
+        toast({ variant: "destructive", title: "Update Failed", description: error.message });
+      }
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -298,6 +336,21 @@ export default function SeasonsAdminPage() {
                           Set as Active
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:bg-muted/20"
+                        onClick={() => {
+                          setEditFormData({
+                            registrationOpen: season.registrationOpen,
+                            registrationClose: season.registrationClose,
+                            volunteerSlotsRequired: season.volunteerSlotsRequired ?? 1,
+                          });
+                          setEditingSeason(season);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => handleDeleteSeason(season.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -314,6 +367,59 @@ export default function SeasonsAdminPage() {
           )}
         </div>
       </main>
+
+      {/* Edit Season Dialog */}
+      <Dialog open={!!editingSeason} onOpenChange={(o) => { if (!o) setEditingSeason(null); }}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-headline text-2xl">Edit Season</DialogTitle>
+            <DialogDescription>{editingSeason?.name} — update registration dates and volunteer requirements.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpdateSeason}>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="editRegOpen">Registration Open</Label>
+                  <Input
+                    id="editRegOpen"
+                    type="date"
+                    value={editFormData.registrationOpen}
+                    onChange={(e) => setEditFormData({ ...editFormData, registrationOpen: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="editRegClose">Registration Close</Label>
+                  <Input
+                    id="editRegClose"
+                    type="date"
+                    value={editFormData.registrationClose}
+                    onChange={(e) => setEditFormData({ ...editFormData, registrationClose: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editVolunteerSlots">Volunteer Slots Required per Family</Label>
+                <Input
+                  id="editVolunteerSlots"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={editFormData.volunteerSlotsRequired}
+                  onChange={(e) => setEditFormData({ ...editFormData, volunteerSlotsRequired: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditingSeason(null)}>Cancel</Button>
+              <Button type="submit" disabled={isUpdating}>
+                {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

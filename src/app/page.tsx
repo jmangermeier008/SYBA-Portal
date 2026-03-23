@@ -101,17 +101,17 @@ export default function Home() {
   }, [db]);
   const { data: rawAnnouncements } = useCollection<Announcement>(announcementsQuery);
 
-  // Derived: registration banner text
+  // Derived: registration banner
   const registrationBanner = useMemo(() => {
     if (!activeSeason) return null;
     const today = new Date().toISOString().slice(0, 10);
     if (today < activeSeason.registrationOpen) {
-      return `Registration opens ${formatDate(activeSeason.registrationOpen)} for ${activeSeason.name}`;
+      return { text: `Registration opens ${formatDate(activeSeason.registrationOpen)} for ${activeSeason.name}`, closed: false };
     }
     if (today <= activeSeason.registrationClose) {
-      return `Registration open for ${activeSeason.name} — closes ${formatDate(activeSeason.registrationClose)}`;
+      return { text: `Registration open for ${activeSeason.name} — closes ${formatDate(activeSeason.registrationClose)}`, closed: false };
     }
-    return null;
+    return { text: `Registration for ${activeSeason.name} is now closed.`, closed: true };
   }, [activeSeason]);
 
   // Derived: today's complex closure (if any)
@@ -202,8 +202,12 @@ export default function Home() {
 
         {/* Registration banner */}
         {registrationBanner && (
-          <div className="w-full rounded-xl bg-primary/10 border border-primary/20 px-4 py-2.5 text-sm text-primary font-medium text-center">
-            {registrationBanner}
+          <div className={`w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-center ${
+            registrationBanner.closed
+              ? 'bg-muted/20 border-muted/30 text-muted-foreground'
+              : 'bg-primary/10 border-primary/20 text-primary'
+          }`}>
+            {registrationBanner.text}
           </div>
         )}
       </div>
