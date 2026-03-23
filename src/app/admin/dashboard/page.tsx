@@ -422,7 +422,11 @@ export default function AdminDashboard({
     (allGames ?? []).forEach(g => events.push(normalizeGame(g)));
     (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s)));
     (allConcessionSlots ?? []).forEach(s => events.push(normalizeConcessionSlot(s)));
-    return events;
+    return events.sort((a, b) => {
+      const dateComp = a.date.localeCompare(b.date);
+      if (dateComp !== 0) return dateComp;
+      return (a.startTime ?? '').localeCompare(b.startTime ?? '');
+    });
   }, [allGames, practiceSlots, allConcessionSlots]);
 
   const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
@@ -631,26 +635,29 @@ export default function AdminDashboard({
             </div>
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-3">
-            <Tabs defaultValue="games">
-              <div className="overflow-x-auto -mx-4 px-4 mb-3">
-              <TabsList className="h-8 w-max">
-                <TabsTrigger value="games" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                  <CalendarDays className="h-3.5 w-3.5" />
-                  Games & Practices
-                </TabsTrigger>
-                <TabsTrigger value="concessions" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                  <ShoppingCart className="h-3.5 w-3.5" />
-                  Concessions
-                </TabsTrigger>
-                <TabsTrigger value="meetings" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                  <Inbox className="h-3.5 w-3.5" />
-                  Board Meetings
-                </TabsTrigger>
-                <TabsTrigger value="calendar" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                  <Trophy className="h-3.5 w-3.5" />
-                  Calendar
-                </TabsTrigger>
-              </TabsList>
+            <Tabs defaultValue="calendar">
+              <div className="relative mb-3">
+                <div className="overflow-x-auto -mx-4 px-4">
+                <TabsList className="h-8 w-max">
+                  <TabsTrigger value="calendar" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                    <Trophy className="h-3.5 w-3.5" />
+                    Calendar
+                  </TabsTrigger>
+                  <TabsTrigger value="games" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5" />
+                    Games & Practices
+                  </TabsTrigger>
+                  <TabsTrigger value="concessions" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                    <ShoppingCart className="h-3.5 w-3.5" />
+                    Concessions
+                  </TabsTrigger>
+                  <TabsTrigger value="meetings" className="text-xs px-3 h-7 flex items-center gap-1.5">
+                    <Inbox className="h-3.5 w-3.5" />
+                    Board Meetings
+                  </TabsTrigger>
+                </TabsList>
+                </div>
+                <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-background to-transparent" />
               </div>
 
               {/* Tab: Games & Practices */}
@@ -837,6 +844,7 @@ export default function AdminDashboard({
                   filters={calendarFilters}
                   onFilterChange={(key, val) => setCalendarFilters(f => ({ ...f, [key]: val }))}
                   visibleFilters={['games', 'practices', 'concessions']}
+                  defaultView="week"
                   onViewRecord={(event) => {
                     if (event.sourceType === 'global-game' || event.sourceType === 'practice-slot') {
                       router.push(`/admin/games/${event.sourceId}`);

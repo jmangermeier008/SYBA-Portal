@@ -117,6 +117,8 @@ export interface LeagueCalendarProps {
   childSelector?: React.ReactNode;
   // View full record link — board/admin use; undefined = hidden
   onViewRecord?: (event: CalendarEvent) => void;
+  // Override initial view (default: 'month')
+  defaultView?: 'month' | 'week';
 }
 
 // ─── Event Popover Content ─────────────────────────────────────────────────────
@@ -616,9 +618,10 @@ export function LeagueCalendar({
   onAddEvent,
   childSelector,
   onViewRecord,
+  defaultView,
 }: LeagueCalendarProps) {
   const isMobile = useIsMobile();
-  const [view, setView] = useState<'month' | 'week'>('month');
+  const [view, setView] = useState<'month' | 'week'>(defaultView ?? 'month');
   const [hasUserSetView, setHasUserSetView] = useState(false);
   // On mobile, default to week view unless the user has explicitly chosen
   const effectiveView = !hasUserSetView && isMobile ? 'week' : view;
