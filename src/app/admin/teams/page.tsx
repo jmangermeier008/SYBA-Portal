@@ -46,6 +46,9 @@ export default function TeamsAdminPage() {
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterSeason, setFilterSeason] = useState<string>('all');
+  const [filterDivision, setFilterDivision] = useState<string>('all');
   const [formData, setFormData] = useState({
     name: '',
     seasonId: '',
@@ -91,6 +94,21 @@ export default function TeamsAdminPage() {
     });
     return map;
   }, [allEnrollments]);
+
+  const availableDivisions = useMemo(() => {
+    const ids = [...new Set(teams?.map(t => t.divisionId).filter(Boolean) ?? [])];
+    return ids.sort();
+  }, [teams]);
+
+  const filteredTeams = useMemo(() => {
+    if (!teams) return [];
+    return teams.filter(team => {
+      const matchesSeason = filterSeason === 'all' || team.seasonId === filterSeason;
+      const matchesDivision = filterDivision === 'all' || team.divisionId === filterDivision;
+      const matchesSearch = !searchQuery || team.name.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesSeason && matchesDivision && matchesSearch;
+    });
+  }, [teams, filterSeason, filterDivision, searchQuery]);
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !formData.seasonId || (!isAdmin && !isBoardMember)) return null;
@@ -296,60 +314,90 @@ export default function TeamsAdminPage() {
           </Dialog>
         </header>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {/* Filter bar */}
+        <div className="flex flex-wrap gap-2 mb-4 items-center">
+          <Input
+            placeholder="Search teams..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 w-48 text-sm"
+          />
+          <Select value={filterSeason} onValueChange={setFilterSeason}>
+            <SelectTrigger className="h-8 w-40 text-sm">
+              <SelectValue placeholder="All Seasons" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Seasons</SelectItem>
+              {seasons?.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filterDivision} onValueChange={setFilterDivision}>
+            <SelectTrigger className="h-8 w-40 text-sm">
+              <SelectValue placeholder="All Divisions" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Divisions</SelectItem>
+              {availableDivisions.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {(filterSeason !== 'all' || filterDivision !== 'all' || searchQuery) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-muted-foreground"
+              onClick={() => { setFilterSeason('all'); setFilterDivision('all'); setSearchQuery(''); }}
+            >
+              Clear filters
+            </Button>
+          )}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {loadingTeams ? (
             <div className="col-span-full flex justify-center py-20">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
-          ) : !teams || teams.length === 0 ? (
-            <Card className="col-span-full border-none shadow-md py-12 text-center">
+          ) : filteredTeams.length === 0 ? (
+            <Card className="col-span-full border-none shadow-md py-8 text-center">
               <CardContent>
-                <Users className="h-16 w-16 text-muted mx-auto mb-4" />
-                <h3 className="text-xl font-bold font-headline">No Teams Defined</h3>
-                <p className="text-muted-foreground">Start creating teams to begin the roster assignment process.</p>
+                <p className="text-muted-foreground text-sm">
+                  {teams?.length ? 'No teams match the current filters.' : 'Start creating teams to begin the roster assignment process.'}
+                </p>
               </CardContent>
             </Card>
           ) : (
-            teams.map((team) => (
+            filteredTeams.map((team) => (
               <Link key={team.id} href={`/admin/teams/${team.id}`} className="block group">
-                <Card className="border-none shadow-md overflow-hidden transition-all hover:shadow-xl hover:ring-2 hover:ring-primary/20 h-full">
-                  <CardHeader className="bg-primary/5 border-b">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                          <Users className="h-5 w-5" />
+                <Card className="border-none shadow-sm overflow-hidden transition-all hover:shadow-md hover:ring-1 hover:ring-primary/20">
+                  <CardContent className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                        <Users className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-sm truncate">{team.name}</span>
+                          <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground">{team.divisionId}</span>
                         </div>
-                        <div>
-                          <CardTitle className="text-lg">{team.name}</CardTitle>
-                          <CardDescription>
-                            {seasons?.find((s: any) => s.id === team.seasonId)?.name} • {team.divisionId}
-                          </CardDescription>
+                        <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <UserCog className="h-3 w-3" />{getCoachLabel(team)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Users className="h-3 w-3" />{enrollmentCountByTeam.get(team.id) ?? 0} players
+                          </span>
                         </div>
                       </div>
                       <Button
                         variant="ghost"
                         size="icon"
                         type="button"
-                        className="text-destructive hover:bg-destructive/10"
+                        className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
                         onClick={(e) => handleDeleteTeam(e, team.id)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-4 flex flex-col justify-between h-[100px]">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <UserCog className="h-3.5 w-3.5" />
-                        <span>Coach: {getCoachLabel(team)}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Users className="h-3.5 w-3.5" />
-                        <span>Roster: {enrollmentCountByTeam.get(team.id) ?? 0} Players</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-end text-primary font-bold text-xs group-hover:translate-x-1 transition-transform">
-                      View Roster <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
                     </div>
                   </CardContent>
                 </Card>
