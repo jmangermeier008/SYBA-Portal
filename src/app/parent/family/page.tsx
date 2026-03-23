@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Loader2, Plus, User as UserIcon, Calendar, FileText, ChevronRight, Trophy, Upload, CheckCircle2, AlertTriangle, Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
@@ -60,6 +61,13 @@ export default function FamilyPage() {
   const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([
     { name: '', phone: '', relationship: '' }
   ]);
+
+  const [deletePlayerDialog, setDeletePlayerDialog] = useState<{
+    open: boolean;
+    playerId: string | null;
+    playerName: string;
+    loading: boolean;
+  }>({ open: false, playerId: null, playerName: '', loading: false });
 
   const playersQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -175,6 +183,32 @@ export default function FamilyPage() {
       toast({ variant: "destructive", title: "Upload Failed", description: error.message });
     } finally {
       setUploading(null);
+    }
+  };
+
+  const handleDeletePlayer = async () => {
+    const { playerId } = deletePlayerDialog;
+    if (!playerId || !user || !db) return;
+    setDeletePlayerDialog(prev => ({ ...prev, loading: true }));
+    try {
+      const enrollmentsSnap = await getDocs(
+        query(collection(db, 'userProfiles', user.uid, 'enrollments'), where('playerId', '==', playerId))
+      );
+      if (!enrollmentsSnap.empty) {
+        toast({
+          title: "Cannot Delete Player",
+          description: "This player has active registrations. Please contact an administrator to cancel them first.",
+          variant: "destructive",
+        });
+        setDeletePlayerDialog({ open: false, playerId: null, playerName: '', loading: false });
+        return;
+      }
+      await deleteDoc(doc(db, 'userProfiles', user.uid, 'players', playerId));
+      toast({ title: "Player Removed", description: "The player profile has been deleted." });
+      setDeletePlayerDialog({ open: false, playerId: null, playerName: '', loading: false });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: 'destructive' });
+      setDeletePlayerDialog(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -352,6 +386,15 @@ export default function FamilyPage() {
                       >
                         <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeletePlayerDialog({ open: true, playerId: player.id, playerName: `${player.firstName} ${player.lastName}`, loading: false })}
+                        title="Delete player"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -405,6 +448,29 @@ export default function FamilyPage() {
           </div>
         )}
       </main>
+
+      {/* Delete Player Dialog */}
+      <AlertDialog open={deletePlayerDialog.open} onOpenChange={(open) => !deletePlayerDialog.loading && setDeletePlayerDialog(prev => ({ ...prev, open }))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Player Profile?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove <strong>{deletePlayerDialog.playerName}</strong> from your family account.
+              You will need to re-register if you want to add them again. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletePlayerDialog.loading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              disabled={deletePlayerDialog.loading}
+              onClick={handleDeletePlayer}
+            >
+              {deletePlayerDialog.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Player'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

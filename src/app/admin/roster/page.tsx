@@ -2,9 +2,10 @@
 "use client";
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,8 +13,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -44,6 +46,8 @@ interface Player {
   clearanceUrl?: string;
   dateOfBirth: string;
   medicalNotes?: string;
+  birthCertificateUrl?: string;
+  ageVerified?: boolean;
 }
 
 interface Team {
@@ -60,6 +64,7 @@ function getPaymentStatus(e: Enrollment) {
 
 export default function MasterRosterPage() {
   const db = useFirestore();
+  const router = useRouter();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { toast } = useToast();
   const [selectedSeason, setSelectedSeason] = useState<string>('');
@@ -88,6 +93,14 @@ export default function MasterRosterPage() {
     form: { firstName: string; lastName: string; dateOfBirth: string; medicalNotes: string };
     loading: boolean;
   }>({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
+
+  // Delete enrollment dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    enrollment: Enrollment | null;
+    player: Player | null;
+    loading: boolean;
+  }>({ open: false, enrollment: null, player: null, loading: false });
 
   // Guarded queries
   const seasonsQuery = useMemoFirebase(() => {
@@ -229,6 +242,25 @@ export default function MasterRosterPage() {
       console.error('[roster] Waiver error:', error);
       toast({ title: "Error", description: error.message, variant: 'destructive' });
       setWaiverDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleDeleteEnrollment = async () => {
+    const { enrollment } = deleteDialog;
+    if (!enrollment || !db) return;
+    setDeleteDialog(prev => ({ ...prev, loading: true }));
+    try {
+      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
+      await deleteDoc(enrollmentRef);
+      if (enrollment.teamId) {
+        const teamRef = doc(db, 'teams', enrollment.teamId);
+        await updateDoc(teamRef, { player_ids: arrayRemove(enrollment.playerId) });
+      }
+      toast({ title: "Registration Deleted", description: "The enrollment has been removed." });
+      setDeleteDialog({ open: false, enrollment: null, player: null, loading: false });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: 'destructive' });
+      setDeleteDialog(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -476,16 +508,13 @@ export default function MasterRosterPage() {
               </div>
             ) : (
               <>
-              <p className="text-[10px] text-muted-foreground text-center py-1.5 border-b sm:hidden">
-                Scroll left/right to see all columns →
-              </p>
               <div className="overflow-x-auto w-full">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-6">Player</TableHead>
                     <TableHead>Paid</TableHead>
-                    <TableHead>Clearance</TableHead>
+                    <TableHead className="hidden sm:table-cell">Clearance</TableHead>
                     <TableHead>Assignment</TableHead>
                     <TableHead className="w-12" />
                   </TableRow>
@@ -498,7 +527,14 @@ export default function MasterRosterPage() {
                     return (
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
                         <TableCell className="pl-6 py-4">
-                          <div className="font-semibold">{p ? `${p.firstName} ${p.lastName}` : 'Loading...'}</div>
+                          <div className="font-semibold flex items-center gap-1">
+                            {p ? `${p.firstName} ${p.lastName}` : 'Loading...'}
+                            {p?.birthCertificateUrl && !p?.ageVerified && (
+                              <span title="Pending birth certificate review">
+                                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
                         </TableCell>
                         <TableCell>
@@ -514,7 +550,7 @@ export default function MasterRosterPage() {
                             <XCircle className="h-5 w-5 text-destructive" />
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           {p?.clearanceUrl ? (
                             <CheckCircle2 className="h-5 w-5 text-green-500" />
                           ) : (
@@ -527,7 +563,7 @@ export default function MasterRosterPage() {
                             onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
                           >
                             <SelectTrigger className={cn(
-                              "w-full min-w-[140px] md:w-[180px] rounded-xl",
+                              "w-full min-w-[100px] md:w-[180px] rounded-xl",
                               !e.teamId ? "border-dashed border-primary" : ""
                             )}>
                               <SelectValue />
@@ -579,6 +615,19 @@ export default function MasterRosterPage() {
                                   Mark as Fee Waived
                                 </DropdownMenuItem>
                               )}
+                              {p?.birthCertificateUrl && !p?.ageVerified && (
+                                <DropdownMenuItem onClick={() => router.push('/admin/compliance')}>
+                                  <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
+                                  Review Documents
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false })}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete Registration
+                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -593,6 +642,31 @@ export default function MasterRosterPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Delete Enrollment Dialog */}
+      <AlertDialog open={deleteDialog.open} onOpenChange={(open) => !deleteDialog.loading && setDeleteDialog(prev => ({ ...prev, open }))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Registration?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the enrollment for{' '}
+              <strong>{deleteDialog.player ? `${deleteDialog.player.firstName} ${deleteDialog.player.lastName}` : 'this player'}</strong>.
+              {deleteDialog.enrollment?.teamId && ' The player will also be removed from their assigned team.'}
+              {' '}This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteDialog.loading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              disabled={deleteDialog.loading}
+              onClick={handleDeleteEnrollment}
+            >
+              {deleteDialog.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Fee Waiver Dialog */}
       <Dialog open={waiverDialog.open} onOpenChange={(open) => !waiverDialog.loading && setWaiverDialog(prev => ({ ...prev, open }))}>
