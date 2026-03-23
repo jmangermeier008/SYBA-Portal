@@ -253,8 +253,12 @@ export default function MasterRosterPage() {
       const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
       await deleteDoc(enrollmentRef);
       if (enrollment.teamId && enrollment.playerId) {
-        const teamRef = doc(db, 'teams', enrollment.teamId);
-        await updateDoc(teamRef, { player_ids: arrayRemove(enrollment.playerId) });
+        try {
+          const teamRef = doc(db, 'teams', enrollment.teamId);
+          await updateDoc(teamRef, { player_ids: arrayRemove(enrollment.playerId) });
+        } catch {
+          // Team document may not exist or player_ids field absent — enrollment was deleted, safe to continue
+        }
       }
       toast({ title: "Registration Deleted", description: "The enrollment has been removed." });
       setDeleteDialog({ open: false, enrollment: null, player: null, loading: false });
