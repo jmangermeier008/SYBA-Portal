@@ -485,7 +485,7 @@ export default function AdminDashboard({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
+      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-auto">
 
         {/* ── Zone 1: Header ── */}
         <header className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -632,7 +632,8 @@ export default function AdminDashboard({
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-3">
             <Tabs defaultValue="games">
-              <TabsList className="mb-3 h-8">
+              <div className="overflow-x-auto -mx-4 px-4 mb-3">
+              <TabsList className="h-8 w-max">
                 <TabsTrigger value="games" className="text-xs px-3 h-7 flex items-center gap-1.5">
                   <CalendarDays className="h-3.5 w-3.5" />
                   Games & Practices
@@ -650,6 +651,7 @@ export default function AdminDashboard({
                   Calendar
                 </TabsTrigger>
               </TabsList>
+              </div>
 
               {/* Tab: Games & Practices */}
               <TabsContent value="games" className="mt-0">
