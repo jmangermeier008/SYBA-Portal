@@ -253,6 +253,7 @@ async function main() {
   console.log('\n── Step 5: Creating player records ──');
 
   let playerCount = 0;
+  const playerIds: string[] = [];
 
   for (const player of players) {
     const parentUid = emailToUid.get(player.parentEmail);
@@ -264,6 +265,7 @@ async function main() {
 
     const playerRef = db.collection(`userProfiles/${parentUid}/players`).doc();
     const playerId = playerRef.id;
+    playerIds.push(playerId);
 
     await playerRef.set({
       id: playerId,
@@ -300,8 +302,10 @@ async function main() {
 
   await db.doc(`teams/${teamId}`).update({
     coachIds: FieldValue.arrayUnion(...coachUids),
+    player_ids: FieldValue.arrayUnion(...playerIds),
   });
   console.log(`  ✓ Added ${coachUids.length} coach UIDs to teams/${teamId}.coachIds`);
+  console.log(`  ✓ Added ${playerIds.length} player IDs to teams/${teamId}.player_ids`);
 
   // ── Summary ───────────────────────────────────────────────────────────────
 

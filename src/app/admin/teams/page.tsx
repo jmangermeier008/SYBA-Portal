@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock, ChevronRight } from 'lucide-react';
+import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock, ChevronRight, Check } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
+import { collection, collectionGroup, doc, setDoc, query, orderBy } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
@@ -22,6 +22,7 @@ interface Team {
   seasonId: string;
   divisionId: string;
   coach_uid?: string;
+  coachIds?: string[];
   player_ids?: string[];
 }
 
@@ -31,6 +32,11 @@ interface CoachProfile {
   email: string;
   role: string;
   roles?: string[];
+}
+
+interface Enrollment {
+  id: string;
+  teamId: string;
 }
 
 export default function TeamsAdminPage() {
@@ -44,7 +50,7 @@ export default function TeamsAdminPage() {
     name: '',
     seasonId: '',
     divisionId: '',
-    coach_uid: '',
+    coachIds: [] as string[],
   });
 
   // Guarded queries
@@ -63,14 +69,28 @@ export default function TeamsAdminPage() {
     return collection(db, 'userProfiles');
   }, [db, isAdmin, isBoardMember]);
 
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collectionGroup(db, 'enrollments');
+  }, [db, isAdmin, isBoardMember]);
+
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: allUsers } = useCollection<CoachProfile>(usersQuery);
+  const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
 
   const coaches = allUsers?.filter(u =>
     u.roles?.includes('Coach') || u.roles?.includes('Admin') ||
     u.role === 'Coach' || u.role === 'Admin'
   ) || [];
+
+  const enrollmentCountByTeam = useMemo(() => {
+    const map = new Map<string, number>();
+    allEnrollments?.forEach(e => {
+      if (e.teamId) map.set(e.teamId, (map.get(e.teamId) ?? 0) + 1);
+    });
+    return map;
+  }, [allEnrollments]);
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !formData.seasonId || (!isAdmin && !isBoardMember)) return null;
@@ -78,10 +98,18 @@ export default function TeamsAdminPage() {
   }, [db, formData.seasonId, isAdmin, isBoardMember]);
   const { data: divisions } = useCollection<any>(divisionsQuery);
 
+  const toggleCoach = (uid: string) => {
+    setFormData(prev => ({
+      ...prev,
+      coachIds: prev.coachIds.includes(uid)
+        ? prev.coachIds.filter(id => id !== uid)
+        : [...prev.coachIds, uid],
+    }));
+  };
+
   const handleCreateTeam = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // M14: Require a division to be selected before saving
     if (!formData.divisionId) {
       toast({ title: "Division Required", description: "Please select a division before creating the team.", variant: "destructive" });
       return;
@@ -93,8 +121,10 @@ export default function TeamsAdminPage() {
     const teamRef = doc(db, 'teams', teamId);
     const teamData = {
       id: teamId,
-      ...formData,
-      coachIds: formData.coach_uid ? [formData.coach_uid] : [],
+      name: formData.name,
+      seasonId: formData.seasonId,
+      divisionId: formData.divisionId,
+      coachIds: formData.coachIds,
       player_ids: [],
       createdAt: new Date().toISOString()
     };
@@ -103,7 +133,7 @@ export default function TeamsAdminPage() {
       .then(() => {
         toast({ title: "Team Created", description: `${formData.name} has been added.` });
         setOpen(false);
-        setFormData({ name: '', seasonId: '', divisionId: '', coach_uid: '' });
+        setFormData({ name: '', seasonId: '', divisionId: '', coachIds: [] });
       })
       .catch((error) => {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -129,6 +159,15 @@ export default function TeamsAdminPage() {
     deleteDocumentNonBlocking(teamRef);
     toast({ title: "Team Deleted", description: "The team has been removed from the league." });
     setDeleteConfirmId(null);
+  };
+
+  const getCoachLabel = (team: Team) => {
+    const ids = team.coachIds?.length ? team.coachIds : (team.coach_uid ? [team.coach_uid] : []);
+    if (!ids.length) return 'Unassigned';
+    const names = ids.map(id => coaches.find(c => c.id === id)?.displayName).filter(Boolean);
+    if (!names.length) return 'Unassigned';
+    if (names.length === 1) return names[0];
+    return `${names.length} Coaches`;
   };
 
   if (loadingUser) {
@@ -170,7 +209,7 @@ export default function TeamsAdminPage() {
             <h1 className="text-3xl font-bold font-headline">League Teams</h1>
             <p className="text-muted-foreground">Manage all teams and view their rosters across the association.</p>
           </div>
-          
+
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button className="rounded-full shadow-lg">
@@ -197,8 +236,8 @@ export default function TeamsAdminPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="division">Division</Label>
-                    <Select 
-                      onValueChange={(val) => setFormData({...formData, divisionId: val})} 
+                    <Select
+                      onValueChange={(val) => setFormData({...formData, divisionId: val})}
                       value={formData.divisionId}
                       disabled={!formData.seasonId}
                     >
@@ -212,24 +251,38 @@ export default function TeamsAdminPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="name">Team Name</Label>
-                    <Input 
-                      id="name" 
-                      placeholder="e.g. Blue Jays" 
+                    <Input
+                      id="name"
+                      placeholder="e.g. Blue Jays"
                       value={formData.name}
                       onChange={(e) => setFormData({...formData, name: e.target.value})}
                       required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="coach">Assign Coach</Label>
-                    <Select onValueChange={(val) => setFormData({...formData, coach_uid: val})} value={formData.coach_uid}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select Coach" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {coaches.map(c => <SelectItem key={c.id} value={c.id}>{c.displayName}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <Label>Assign Coaches</Label>
+                    <div className="border rounded-lg divide-y max-h-48 overflow-y-auto">
+                      {coaches.length === 0 ? (
+                        <p className="text-xs text-muted-foreground p-3">No coaches found.</p>
+                      ) : (
+                        coaches.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => toggleCoach(c.id)}
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                          >
+                            <span>{c.displayName}</span>
+                            {formData.coachIds.includes(c.id) && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    {formData.coachIds.length > 0 && (
+                      <p className="text-xs text-muted-foreground">{formData.coachIds.length} coach{formData.coachIds.length > 1 ? 'es' : ''} selected</p>
+                    )}
                   </div>
                 </div>
                 <DialogFooter>
@@ -273,11 +326,11 @@ export default function TeamsAdminPage() {
                           </CardDescription>
                         </div>
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         type="button"
-                        className="text-destructive hover:bg-destructive/10" 
+                        className="text-destructive hover:bg-destructive/10"
                         onClick={(e) => handleDeleteTeam(e, team.id)}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -288,11 +341,11 @@ export default function TeamsAdminPage() {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <UserCog className="h-3.5 w-3.5" />
-                        <span>Coach: {coaches.find(c => c.id === team.coach_uid)?.displayName || 'Unassigned'}</span>
+                        <span>Coach: {getCoachLabel(team)}</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Users className="h-3.5 w-3.5" />
-                        <span>Roster: {team.player_ids?.length || 0} Players</span>
+                        <span>Roster: {enrollmentCountByTeam.get(team.id) ?? 0} Players</span>
                       </div>
                     </div>
                     <div className="flex items-center justify-end text-primary font-bold text-xs group-hover:translate-x-1 transition-transform">
