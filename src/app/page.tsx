@@ -2,7 +2,7 @@
 
 import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -37,7 +37,7 @@ export default function Home() {
   const { data: activeSeasons } = useCollection<ActiveSeason>(activeSeasonQuery);
   const activeSeason = activeSeasons?.[0] ?? null;
 
-  const registrationBanner = (() => {
+  const registrationBanner = useMemo(() => {
     if (!activeSeason) return null;
     const today = new Date().toISOString().slice(0, 10);
     if (today < activeSeason.registrationOpen) {
@@ -47,7 +47,7 @@ export default function Home() {
       return `Registration open for ${activeSeason.name} — closes ${activeSeason.registrationClose}`;
     }
     return null;
-  })();
+  }, [activeSeason]);
 
   useEffect(() => {
     if (!loading && user && profile) {
@@ -62,6 +62,7 @@ export default function Home() {
   }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach]);
 
   if (loading) return null;
+  if (user && profile) return null; // redirect is in flight — suppress flash
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-white px-4">
@@ -83,7 +84,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold font-headline tracking-tight text-primary">
             Sharpsville Youth Baseball Association
           </h1>
-          <p className="text-muted-foreground text-sm">Welcome back, SYBA families</p>
+          <p className="text-muted-foreground text-sm">The online home for Sharpsville Youth Baseball</p>
         </div>
 
         {/* CTA buttons */}
@@ -105,26 +106,31 @@ export default function Home() {
       </div>
 
       {/* Sponsors */}
-      <div className="mt-16 flex flex-col items-center gap-4 w-full max-w-2xl">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Our Sponsors</p>
-        <div className="flex flex-wrap items-center justify-center gap-8">
-          {SPONSOR_IMAGES.map((src, i) => (
-            <img
-              key={i}
-              src={src}
-              alt={`Sponsor ${i + 1}`}
-              className="h-12 w-auto object-contain grayscale hover:grayscale-0 transition-all duration-300"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-              }}
-            />
-          ))}
+      {SPONSOR_IMAGES.length > 0 && (
+        <div className="mt-16 flex flex-col items-center gap-4 w-full max-w-2xl">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Our Sponsors</p>
+          <div className="flex flex-wrap items-center justify-center gap-8">
+            {SPONSOR_IMAGES.map((src, i) => (
+              <Image
+                key={i}
+                src={src}
+                alt={`Sponsor ${i + 1}`}
+                width={160}
+                height={48}
+                className="h-12 w-auto object-contain grayscale hover:grayscale-0 transition-all duration-300"
+                style={{ width: 'auto' }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Footer */}
       <footer className="mt-12 text-xs text-muted-foreground text-center">
-        © 2026 SYBA. All rights reserved. Sharpsville, PA.
+        © {new Date().getFullYear()} SYBA. All rights reserved. Sharpsville, PA.
       </footer>
     </div>
   );

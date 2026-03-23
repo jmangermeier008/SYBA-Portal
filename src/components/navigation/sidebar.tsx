@@ -41,6 +41,7 @@ import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // ── Role context helpers ─────────────────────────────────────────────────────
 
@@ -380,19 +381,20 @@ export function Sidebar() {
         {roleContexts.length > 1 && !(collapsed && !isMobile) && activeContext && (
           <div className="pt-3 pb-1">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-1 mb-1.5">Acting as</p>
-            <select
-              value={activeContext}
-              onChange={(e) => handleContextSwitch(e.target.value as RoleContext)}
-              className="w-full text-sm bg-secondary rounded-lg px-3 py-2 text-primary font-medium cursor-pointer border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              {roleContexts.map(c => (
-                <option key={c.context} value={c.context}>{c.label}</option>
-              ))}
-            </select>
+            <Select value={activeContext} onValueChange={(v) => handleContextSwitch(v as RoleContext)}>
+              <SelectTrigger className="w-full text-sm bg-secondary border-border/50 text-primary font-medium h-9 focus:ring-primary/30">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {roleContexts.map(c => (
+                  <SelectItem key={c.context} value={c.context}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 
-        {activeContext === 'admin' && isBoardMember && (
+        {activeContext === 'admin' && (isAdmin || isBoardMember || isSiteAdmin) && (
           <>
             <NavSection
               label="Scheduling"
@@ -403,6 +405,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('Scheduling')}
               collapsed={collapsed && !isMobile}
             />
+            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
             <NavSection
               label="People"
               items={adminPeopleItems}
@@ -412,6 +415,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('People')}
               collapsed={collapsed && !isMobile}
             />
+            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
             <NavSection
               label="Venue & Finance"
               items={adminVenueItems}
@@ -421,6 +425,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('Venue & Finance')}
               collapsed={collapsed && !isMobile}
             />
+            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
             <NavSection
               label="Communications"
               items={adminCommsItems}
@@ -430,6 +435,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('Communications')}
               collapsed={collapsed && !isMobile}
             />
+            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
             <NavSection
               label="System"
               items={[...adminSystemBaseItems, ...(isSiteAdmin ? adminSystemAdminItems : [])]}
@@ -551,10 +557,13 @@ export function Sidebar() {
         <div className="fixed top-0 left-0 right-0 h-14 bg-white border-b z-30 flex items-center px-4 gap-3">
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground"
+            className="relative p-2 rounded-lg hover:bg-secondary text-muted-foreground"
             aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />
+            {(hasUnread || hasUnreadNotifs) && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+            )}
           </button>
           <Link href="/" className="flex items-center gap-2">
             <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={30} height={30} className="object-contain" />

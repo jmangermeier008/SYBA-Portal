@@ -26,6 +26,7 @@ import {
   Users,
   CalendarPlus,
   CloudRain,
+  Calendar as CalendarIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -534,8 +535,8 @@ function WeekStrip({
   const days = getWeekDays(focusDate);
 
   return (
-    <div className="border rounded-xl overflow-hidden">
-      <div className="grid grid-cols-7">
+    <div className="border rounded-xl overflow-x-auto">
+      <div className="grid grid-cols-7 min-w-[560px]">
         {days.map((day, idx) => {
           const key = toDateKey(day);
           const dayEvents = eventsByDate.get(key) ?? [];
@@ -661,8 +662,8 @@ export function LeagueCalendar({
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
+      {/* Toolbar — row 1: view controls + navigation */}
+      <div className="flex flex-wrap items-center gap-2">
         {/* Child selector slot */}
         {childSelector && <div>{childSelector}</div>}
 
@@ -701,28 +702,36 @@ export function LeagueCalendar({
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={navigateNext}>
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => setFocusDate(new Date())}
+          >
+            Today
+          </Button>
         </div>
+      </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-4 flex-wrap">
-          {shown.map(key => (
-            <div key={key} className="flex items-center gap-1.5">
-              <Checkbox
-                id={`filter-${key}`}
-                checked={filters[key as keyof typeof filters]}
-                onCheckedChange={(v) => onFilterChange(key as 'games' | 'practices' | 'concessions', !!v)}
-              />
-              <Label htmlFor={`filter-${key}`} className="flex items-center gap-1.5 cursor-pointer text-sm">
-                <span className={cn('w-2 h-2 rounded-full', dotColors[filterKeyToEventType[key]])} />
-                {filterLabels[key]}
-              </Label>
-            </div>
-          ))}
-        </div>
+      {/* Toolbar — row 2: filters + add event */}
+      <div className="flex flex-wrap items-center gap-4">
+        {shown.map(key => (
+          <div key={key} className="flex items-center gap-1.5">
+            <Checkbox
+              id={`filter-${key}`}
+              checked={filters[key as keyof typeof filters]}
+              onCheckedChange={(v) => onFilterChange(key as 'games' | 'practices' | 'concessions', !!v)}
+            />
+            <Label htmlFor={`filter-${key}`} className="flex items-center gap-1.5 cursor-pointer text-sm">
+              <span className={cn('w-2 h-2 rounded-full', dotColors[filterKeyToEventType[key]])} />
+              {filterLabels[key]}
+            </Label>
+          </div>
+        ))}
 
         {/* Add Event button (coach only) */}
         {onAddEvent && (
-          <div className="sm:ml-auto">
+          <div className="ml-auto">
             <Button className="rounded-full shadow-lg shadow-primary/20" onClick={onAddEvent}>
               <Plus className="mr-2 h-4 w-4" /> Add Event
             </Button>
@@ -734,6 +743,14 @@ export function LeagueCalendar({
       {isLoading ? (
         <div className="flex justify-center py-20">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </div>
+      ) : filteredEvents.length === 0 ? (
+        <div className="border rounded-xl flex flex-col items-center justify-center py-20 text-center gap-3">
+          <CalendarIcon className="h-10 w-10 text-muted-foreground/30" />
+          <div>
+            <p className="font-medium text-muted-foreground">No events for this period</p>
+            <p className="text-sm text-muted-foreground/70 mt-0.5">Try adjusting your filters or navigating to another month.</p>
+          </div>
         </div>
       ) : effectiveView === 'month' ? (
         <MonthGrid
@@ -758,17 +775,6 @@ export function LeagueCalendar({
           onViewRecord={onViewRecord}
         />
       )}
-
-      {/* Legend */}
-      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-        {shown.map(key => (
-          <span key={key} className="flex items-center gap-1.5">
-            <span className={cn('w-3 h-3 rounded', dotColors[filterKeyToEventType[key]])} />
-            {filterLabels[key]}
-          </span>
-        ))}
-        <span className="ml-auto">Click any event to see details</span>
-      </div>
     </div>
   );
 }

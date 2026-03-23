@@ -150,7 +150,7 @@ export default function PracticeSlotsAdminPage() {
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'seasons'), where('isActive', '==', true), limit(1));
+    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
   }, [db, isAdmin, isBoardMember]);
 
   const { data: slots, isLoading } = useCollection<PracticeSlot>(slotsQuery);

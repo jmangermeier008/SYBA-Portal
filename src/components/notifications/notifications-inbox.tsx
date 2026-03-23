@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import type { Notification, NotificationType } from '@/types/scheduling';
+import { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import type { Notification, NotificationType, NotificationRelatedDocType } from '@/types/scheduling';
 
 // ─── Icon map per notification type ───────────────────────────────────────────
 
@@ -23,11 +25,21 @@ function NotifIcon({ type }: { type: NotificationType }) {
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }
 
+// ─── Navigation routing ────────────────────────────────────────────────────────
+
+function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, isCoach: boolean): string | null {
+  if (relatedDocType === 'concessionSlot') return '/parent/concessions';
+  if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
+  if (relatedDocType === 'game') return isCoach ? '/coach/schedules' : '/parent/schedules';
+  return null;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function NotificationsInbox() {
   const db = useFirestore();
-  const { user } = useUser();
+  const { user, isCoach } = useUser();
+  const router = useRouter();
 
   const notifQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -42,9 +54,25 @@ export function NotificationsInbox() {
 
   const unreadCount = (notifications ?? []).filter(n => !n.read).length;
 
+  const formattedTimes = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of notifications ?? []) {
+      if (!n.createdAt) continue;
+      const date = typeof n.createdAt === 'string'
+        ? parseISO(n.createdAt)
+        : (n.createdAt as unknown as { toDate(): Date }).toDate();
+      map.set(n.id, formatDistanceToNow(date, { addSuffix: true }));
+    }
+    return map;
+  }, [notifications]);
+
   const handleMarkRead = async (notif: Notification) => {
-    if (!db || notif.read) return;
-    await updateDoc(doc(db, 'notifications', notif.id), { read: true });
+    if (!db) return;
+    if (!notif.read) {
+      await updateDoc(doc(db, 'notifications', notif.id), { read: true });
+    }
+    const route = getNotifRoute(notif.relatedDocType, isCoach);
+    if (route) router.push(route);
   };
 
   const handleMarkAllRead = async () => {
@@ -70,7 +98,7 @@ export function NotificationsInbox() {
         <CardContent className="flex flex-col items-center justify-center py-16 text-center">
           <Bell className="h-12 w-12 text-muted-foreground/40 mb-4" />
           <p className="text-muted-foreground font-medium">No notifications yet</p>
-          <p className="text-sm text-muted-foreground">You'll be notified here when a shift or practice slot changes.</p>
+          <p className="text-sm text-muted-foreground">You'll be notified here about games, concession shifts, practice slots, and other league updates.</p>
         </CardContent>
       </Card>
     );
@@ -91,14 +119,7 @@ export function NotificationsInbox() {
 
       <div className="space-y-2">
         {notifications.map(notif => {
-          const createdAt = notif.createdAt
-            ? formatDistanceToNow(
-                typeof notif.createdAt === 'string'
-                  ? parseISO(notif.createdAt)
-                  : (notif.createdAt as any).toDate?.() ?? new Date(notif.createdAt),
-                { addSuffix: true }
-              )
-            : '';
+          const createdAt = formattedTimes.get(notif.id) ?? '';
 
           return (
             <button
