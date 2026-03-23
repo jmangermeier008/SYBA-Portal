@@ -22,6 +22,7 @@ interface Season {
   registrationOpen: string;
   registrationClose: string;
   isActive?: boolean;
+  status?: string;
 }
 
 export default function SeasonsAdminPage() {
@@ -138,7 +139,10 @@ export default function SeasonsAdminPage() {
     try {
       const batch = writeBatch(db);
       seasons.forEach((s) => {
-        batch.update(doc(db, 'seasons', s.id), { isActive: s.id === id });
+        batch.update(doc(db, 'seasons', s.id), {
+          isActive: s.id === id,
+          status: s.id === id ? 'active' : 'archived',
+        });
       });
       await batch.commit();
       toast({ title: "Active Season Updated", description: `Season set as active.` });

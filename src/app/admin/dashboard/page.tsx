@@ -53,6 +53,7 @@ interface Season {
   id: string;
   name: string;
   isActive?: boolean;
+  status?: string;
   startDate?: string;
 }
 
@@ -295,7 +296,7 @@ export default function AdminDashboard({
 
   const activeSeason = useMemo(() => {
     if (!seasons?.length) return null;
-    return seasons.find((s) => s.isActive) ?? seasons[0];
+    return seasons.find((s) => s.status === 'active' || s.isActive) ?? seasons[0];
   }, [seasons]);
 
   const displaySeason = useMemo(() => {
