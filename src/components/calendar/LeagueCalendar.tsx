@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   format,
   startOfMonth,
@@ -326,7 +327,45 @@ function EventPill({
           {event.title}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0 shadow-lg" align="start">
+      <PopoverContent className="w-[calc(100vw-2rem)] max-w-72 p-0 shadow-lg" align="start">
+        <EventPopoverContent
+          event={event}
+          onRsvp={onRsvp}
+          onWeatherCancel={onWeatherCancel}
+          onConcessionSignup={onConcessionSignup}
+          onConcessionCancel={onConcessionCancel}
+          onViewRecord={onViewRecord}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Event Dot (mobile month view) ─────────────────────────────────────────────
+
+function EventDot({
+  event,
+  onRsvp,
+  onWeatherCancel,
+  onConcessionSignup,
+  onConcessionCancel,
+  onViewRecord,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
+  event: CalendarEvent;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          aria-label={event.title}
+          className={cn(
+            'w-2.5 h-2.5 rounded-full shrink-0 hover:opacity-80 transition-opacity',
+            dotColors[event.eventType],
+            event.status === 'cancelled' && 'opacity-40'
+          )}
+        />
+      </PopoverTrigger>
+      <PopoverContent className="w-[calc(100vw-2rem)] max-w-72 p-0 shadow-lg" align="start">
         <EventPopoverContent
           event={event}
           onRsvp={onRsvp}
@@ -348,6 +387,7 @@ function MonthGrid({
   focusDate,
   eventsByDate,
   onDayClick,
+  isMobile,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
@@ -357,6 +397,7 @@ function MonthGrid({
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
   onDayClick: (d: Date) => void;
+  isMobile?: boolean;
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
@@ -365,6 +406,7 @@ function MonthGrid({
 }) {
   const days = getMonthGridDays(focusDate);
   const MAX_PILLS = 3;
+  const MAX_DOTS = 5;
 
   return (
     <div className="border rounded-xl overflow-hidden">
@@ -387,18 +429,20 @@ function MonthGrid({
           const inMonth = isSameMonth(day, focusDate);
           const today = isToday(day);
 
+          const dotEvents = dayEvents.slice(0, MAX_DOTS);
+
           return (
             <div
               key={idx}
               className={cn(
-                'min-h-[90px] p-1 border-b border-r flex flex-col gap-0.5',
+                'min-h-[60px] sm:min-h-[90px] p-1 border-b border-r flex flex-col gap-0.5',
                 !inMonth && 'bg-secondary/20',
                 idx % 7 === 6 && 'border-r-0',
                 Math.floor(idx / 7) === Math.floor((days.length - 1) / 7) && 'border-b-0'
               )}
             >
               {/* Day number */}
-              <div className="flex justify-end mb-0.5">
+              <div className={cn('flex mb-0.5', isMobile ? 'justify-center' : 'justify-end')}>
                 <span
                   className={cn(
                     'text-xs w-6 h-6 flex items-center justify-center rounded-full font-medium',
@@ -413,27 +457,52 @@ function MonthGrid({
                 </span>
               </div>
 
-              {/* Event pills */}
-              {visibleEvents.map(e => (
-                <EventPill
-                  key={e.id}
-                  event={e}
-                  onRsvp={onRsvp}
-                  onWeatherCancel={onWeatherCancel}
-                  onConcessionSignup={onConcessionSignup}
-                  onConcessionCancel={onConcessionCancel}
-                  onViewRecord={onViewRecord}
-                />
-              ))}
-
-              {/* +N more */}
-              {overflow > 0 && (
-                <button
-                  onClick={() => onDayClick(day)}
-                  className="text-[10px] text-primary hover:underline font-medium text-left px-1"
-                >
-                  +{overflow} more
-                </button>
+              {isMobile ? (
+                /* Mobile: colored dots, tap each to see event details */
+                <div className="flex flex-wrap justify-center gap-0.5">
+                  {dotEvents.map(e => (
+                    <EventDot
+                      key={e.id}
+                      event={e}
+                      onRsvp={onRsvp}
+                      onWeatherCancel={onWeatherCancel}
+                      onConcessionSignup={onConcessionSignup}
+                      onConcessionCancel={onConcessionCancel}
+                      onViewRecord={onViewRecord}
+                    />
+                  ))}
+                  {dayEvents.length > MAX_DOTS && (
+                    <button
+                      onClick={() => onDayClick(day)}
+                      className="text-[9px] text-primary font-semibold leading-none"
+                    >
+                      +{dayEvents.length - MAX_DOTS}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                /* Desktop: full text pills */
+                <>
+                  {visibleEvents.map(e => (
+                    <EventPill
+                      key={e.id}
+                      event={e}
+                      onRsvp={onRsvp}
+                      onWeatherCancel={onWeatherCancel}
+                      onConcessionSignup={onConcessionSignup}
+                      onConcessionCancel={onConcessionCancel}
+                      onViewRecord={onViewRecord}
+                    />
+                  ))}
+                  {overflow > 0 && (
+                    <button
+                      onClick={() => onDayClick(day)}
+                      className="text-[10px] text-primary hover:underline font-medium text-left px-1"
+                    >
+                      +{overflow} more
+                    </button>
+                  )}
+                </>
               )}
             </div>
           );
@@ -542,7 +611,11 @@ export function LeagueCalendar({
   childSelector,
   onViewRecord,
 }: LeagueCalendarProps) {
+  const isMobile = useIsMobile();
   const [view, setView] = useState<'month' | 'week'>('month');
+  const [hasUserSetView, setHasUserSetView] = useState(false);
+  // On mobile, default to week view unless the user has explicitly chosen
+  const effectiveView = !hasUserSetView && isMobile ? 'week' : view;
   const [focusDate, setFocusDate] = useState<Date>(new Date());
 
   // Apply filters
@@ -565,13 +638,13 @@ export function LeagueCalendar({
   };
 
   const navigatePrev = () => {
-    setFocusDate(d => view === 'month' ? subMonths(d, 1) : subWeeks(d, 1));
+    setFocusDate(d => effectiveView === 'month' ? subMonths(d, 1) : subWeeks(d, 1));
   };
   const navigateNext = () => {
-    setFocusDate(d => view === 'month' ? addMonths(d, 1) : addWeeks(d, 1));
+    setFocusDate(d => effectiveView === 'month' ? addMonths(d, 1) : addWeeks(d, 1));
   };
 
-  const titleLabel = view === 'month'
+  const titleLabel = effectiveView === 'month'
     ? format(focusDate, 'MMMM yyyy')
     : `Week of ${format(startOfWeek(focusDate, { weekStartsOn: 0 }), 'MMM d')}`;
 
@@ -591,10 +664,10 @@ export function LeagueCalendar({
         {/* View toggle */}
         <div className="flex items-center rounded-lg border bg-secondary/30 p-0.5 self-start">
           <button
-            onClick={() => setView('month')}
+            onClick={() => { setView('month'); setHasUserSetView(true); }}
             className={cn(
               'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-              view === 'month'
+              effectiveView === 'month'
                 ? 'bg-white shadow text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
@@ -602,10 +675,10 @@ export function LeagueCalendar({
             Month
           </button>
           <button
-            onClick={() => setView('week')}
+            onClick={() => { setView('week'); setHasUserSetView(true); }}
             className={cn(
               'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-              view === 'week'
+              effectiveView === 'week'
                 ? 'bg-white shadow text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
@@ -657,11 +730,12 @@ export function LeagueCalendar({
         <div className="flex justify-center py-20">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
         </div>
-      ) : view === 'month' ? (
+      ) : effectiveView === 'month' ? (
         <MonthGrid
           focusDate={focusDate}
           eventsByDate={eventsByDate}
           onDayClick={handleDayClick}
+          isMobile={isMobile}
           onRsvp={onRsvp}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
