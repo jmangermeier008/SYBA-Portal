@@ -20,7 +20,6 @@ import type { PracticeSlot } from '@/types/scheduling';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Team { id: string; name: string; divisionId?: string; seasonId?: string; }
-interface Season { id: string; name: string; status: string; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,34 +51,23 @@ export default function CoachPracticeSlotsPage() {
   const { data: userTeams, isLoading: loadingTeam } = useCollection<Team>(teamsQuery);
   const activeTeam = userTeams?.[0];
 
-  // Active season — needed to scope slot queries
-  const activeSeasonsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
-  }, [db]);
-
-  const { data: seasons } = useCollection<Season>(activeSeasonsQuery);
-  const activeSeason = seasons?.[0] ?? null;
-
-  // Available slots for this team's division in the active season
+  // Available slots for this team's division — filtered by divisionIds + status (uses existing index)
   const availableQuery = useMemoFirebase(() => {
-    if (!db || !activeSeason || !activeTeam?.divisionId) return null;
+    if (!db || !activeTeam?.divisionId) return null;
     return query(
       collection(db, 'practiceSlots'),
-      where('seasonId', '==', activeSeason.id),
       where('divisionIds', 'array-contains', activeTeam.divisionId),
       where('status', '==', 'available'),
       orderBy('date', 'asc')
     );
-  }, [db, activeSeason?.id, activeTeam?.divisionId]);
+  }, [db, activeTeam?.divisionId]);
 
-  // Slots this coach has claimed
+  // Slots this coach has claimed — coachId alone is sufficient (unclaiming nulls the field)
   const myClaimedQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return query(
       collection(db, 'practiceSlots'),
       where('coachId', '==', user.uid),
-      where('status', '==', 'claimed'),
       orderBy('date', 'asc')
     );
   }, [db, user?.uid]);

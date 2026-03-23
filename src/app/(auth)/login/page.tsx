@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useAuth, useFirestore } from '@/firebase';
+import { useAuth, useFirestore, useUser } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +43,20 @@ export default function LoginPage() {
   const { toast } = useToast();
   const auth = useAuth();
   const db = useFirestore();
+  const { user, profile, loading: loadingUser, isAdmin, isBoardMember, isCoach } = useUser();
+
+  // Redirect already-authenticated users to their dashboard
+  useEffect(() => {
+    if (!loadingUser && user && profile) {
+      if (isAdmin || isBoardMember) {
+        router.push('/admin/dashboard');
+      } else if (isCoach) {
+        router.push('/coach/dashboard');
+      } else {
+        router.push('/parent/dashboard');
+      }
+    }
+  }, [user, profile, loadingUser, router, isAdmin, isBoardMember, isCoach]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,13 +125,18 @@ export default function LoginPage() {
                 <Input id="email" type="email" placeholder="john@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <Link href="/forgot-password" className="text-xs text-primary hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full h-11 rounded-lg" disabled={loading}>
-                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Login"}
+                {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in...</> : "Sign In"}
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 New to SYBA?{" "}

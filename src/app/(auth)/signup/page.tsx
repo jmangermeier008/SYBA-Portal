@@ -137,12 +137,13 @@ export default function SignupPage() {
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                <p className="text-xs text-muted-foreground">Must be at least 6 characters.</p>
               </div>
 
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full h-11 rounded-lg" disabled={loading}>
-                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Sign Up"}
+                {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating account...</> : "Sign Up"}
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 Already have an account?{" "}

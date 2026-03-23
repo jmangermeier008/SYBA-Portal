@@ -6,7 +6,14 @@ import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
+import { Loader2 } from 'lucide-react';
 import { collection, query, where, limit } from 'firebase/firestore';
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric',
+  });
+}
 
 // Add your sponsor image files to public/sponsors/
 // Supported filenames: sponsor1.png, sponsor2.png, sponsor3.png (etc.)
@@ -41,10 +48,10 @@ export default function Home() {
     if (!activeSeason) return null;
     const today = new Date().toISOString().slice(0, 10);
     if (today < activeSeason.registrationOpen) {
-      return `Registration opens ${activeSeason.registrationOpen} for ${activeSeason.name}`;
+      return `Registration opens ${formatDate(activeSeason.registrationOpen)} for ${activeSeason.name}`;
     }
     if (today <= activeSeason.registrationClose) {
-      return `Registration open for ${activeSeason.name} — closes ${activeSeason.registrationClose}`;
+      return `Registration open for ${activeSeason.name} — closes ${formatDate(activeSeason.registrationClose)}`;
     }
     return null;
   }, [activeSeason]);
@@ -61,7 +68,11 @@ export default function Home() {
     }
   }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach]);
 
-  if (loading) return null;
+  if (loading) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-white px-4">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
   if (user && profile) return null; // redirect is in flight — suppress flash
 
   return (

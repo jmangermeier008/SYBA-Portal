@@ -269,15 +269,14 @@ export function Sidebar() {
 
   useEffect(() => {
     const adminSection = getAdminSectionForPath(pathname);
-    setOpenSections({
-      'Scheduling': adminSection === 'Scheduling',
-      'People': adminSection === 'People',
-      'Venue & Finance': adminSection === 'Venue & Finance',
-      'Communications': adminSection === 'Communications',
-      'System': adminSection === 'System',
-      'Coaching': pathname.startsWith('/coach/'),
-      'Family': pathname.startsWith('/parent/'),
-    });
+    // Only open the section matching the current path — don't collapse others
+    if (adminSection) {
+      setOpenSections(prev => ({ ...prev, [adminSection]: true }));
+    } else if (pathname.startsWith('/coach/')) {
+      setOpenSections(prev => ({ ...prev, 'Coaching': true }));
+    } else if (pathname.startsWith('/parent/')) {
+      setOpenSections(prev => ({ ...prev, 'Family': true }));
+    }
   }, [pathname]);
 
   // Initialize active role context from localStorage once roles are available
@@ -377,21 +376,41 @@ export function Sidebar() {
       </div>
 
       <nav className={cn("flex-1 overflow-y-auto space-y-1", collapsed && !isMobile ? "px-1" : "px-4")}>
-        {/* Role context switcher — only shown when user has multiple role contexts */}
-        {roleContexts.length > 1 && !(collapsed && !isMobile) && activeContext && (
-          <div className="pt-3 pb-1">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-1 mb-1.5">Acting as</p>
-            <Select value={activeContext} onValueChange={(v) => handleContextSwitch(v as RoleContext)}>
-              <SelectTrigger className="w-full text-sm bg-secondary border-border/50 text-primary font-medium h-9 focus:ring-primary/30">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {roleContexts.map(c => (
-                  <SelectItem key={c.context} value={c.context}>{c.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        {/* Role context switcher — dropdown in expanded mode, icon buttons in collapsed mode */}
+        {roleContexts.length > 1 && activeContext && (
+          collapsed && !isMobile ? (
+            <div className="flex flex-col items-center gap-1 pt-2 pb-1">
+              {roleContexts.map(c => (
+                <button
+                  key={c.context}
+                  onClick={() => handleContextSwitch(c.context)}
+                  title={`Switch to ${c.label}`}
+                  className={cn(
+                    "w-8 h-8 rounded-full text-xs font-bold transition-colors",
+                    activeContext === c.context
+                      ? "bg-primary text-white"
+                      : "bg-secondary text-muted-foreground hover:text-primary"
+                  )}
+                >
+                  {c.label[0]}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="pt-3 pb-1">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-1 mb-1.5">Acting as</p>
+              <Select value={activeContext} onValueChange={(v) => handleContextSwitch(v as RoleContext)}>
+                <SelectTrigger className="w-full text-sm bg-secondary border-border/50 text-primary font-medium h-9 focus:ring-primary/30">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {roleContexts.map(c => (
+                    <SelectItem key={c.context} value={c.context}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )
         )}
 
         {activeContext === 'admin' && (isAdmin || isBoardMember || isSiteAdmin) && (
@@ -405,7 +424,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('Scheduling')}
               collapsed={collapsed && !isMobile}
             />
-            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
+            <hr className="border-border/40 mx-2 my-1" />
             <NavSection
               label="People"
               items={adminPeopleItems}
@@ -415,7 +434,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('People')}
               collapsed={collapsed && !isMobile}
             />
-            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
+            <hr className="border-border/40 mx-2 my-1" />
             <NavSection
               label="Venue & Finance"
               items={adminVenueItems}
@@ -425,7 +444,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('Venue & Finance')}
               collapsed={collapsed && !isMobile}
             />
-            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
+            <hr className="border-border/40 mx-2 my-1" />
             <NavSection
               label="Communications"
               items={adminCommsItems}
@@ -435,7 +454,7 @@ export function Sidebar() {
               onToggle={() => toggleSection('Communications')}
               collapsed={collapsed && !isMobile}
             />
-            {collapsed && !isMobile && <hr className="border-border/40 mx-2 my-1" />}
+            <hr className="border-border/40 mx-2 my-1" />
             <NavSection
               label="System"
               items={[...adminSystemBaseItems, ...(isSiteAdmin ? adminSystemAdminItems : [])]}
@@ -478,7 +497,7 @@ export function Sidebar() {
           />
         )}
 
-        {!isBoardMember && !isCoach && !isParent && (
+        {!isAdmin && !isSiteAdmin && !isBoardMember && !isCoach && !isParent && (
           <div className={cn("py-4 text-sm text-muted-foreground", collapsed && !isMobile ? "hidden" : "px-3")}>
             No navigation available. Contact your administrator.
           </div>
