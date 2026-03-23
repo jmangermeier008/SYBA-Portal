@@ -27,10 +27,12 @@ import {
   UserCheck,
   Inbox,
   FileText,
+  Dumbbell,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
 import Link from 'next/link';
 import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -140,7 +142,7 @@ function normalizePracticeSlot(s: PracticeSlot): CalendarEvent {
     date: s.date,
     startTime: s.startTime,
     endTime: s.endTime,
-    title: `${s.teamName} Practice`,
+    title: s.teamName ? `${s.teamName} Practice` : `${s.fieldName} Practice`,
     status: s.status,
     fieldName: s.fieldName,
     sourceType: 'practice-slot',
@@ -265,6 +267,11 @@ export default function AdminDashboard({
     return collection(db, 'practiceSlots');
   }, [db, isAdmin, isBoardMember]);
 
+  const allTeamsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'teams');
+  }, [db, isAdmin, isBoardMember]);
+
   const allConcessionSlotsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
     return collection(db, 'concessionSlots');
@@ -282,6 +289,7 @@ export default function AdminDashboard({
   const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
   const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
+  const { data: allTeams } = useCollection<{ id: string; name: string }>(allTeamsQuery);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -417,6 +425,14 @@ export default function AdminDashboard({
   }, [allGames, practiceSlots, allConcessionSlots]);
 
   const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
+
+  const practiceSlotCoverage = useMemo(() => {
+    const totalTeams = (allTeams ?? []).length;
+    const claimedTeamIds = new Set(
+      (practiceSlots ?? []).filter(s => s.status === 'claimed' && s.teamId).map(s => s.teamId!)
+    );
+    return { totalTeams, teamsWithSlots: claimedTeamIds.size };
+  }, [allTeams, practiceSlots]);
 
   // ── Loading / access guard ────────────────────────────────────────────────────
 
@@ -575,6 +591,35 @@ export default function AdminDashboard({
             </Card>
           </Link>
         </div>
+
+        {/* ── Zone 2.5: Practice Slot Coverage ── */}
+        <Link href="/admin/practice-slots?tab=distribution">
+          <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer mb-4">
+            <CardContent className="px-4 py-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Dumbbell className="h-4 w-4 text-green-500 shrink-0" />
+                  <p className="text-xs font-medium text-muted-foreground">Practice Slot Coverage</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">
+                    {practiceSlotCoverage.teamsWithSlots}
+                  </span>
+                  <span>of</span>
+                  <span className="font-semibold text-foreground">{practiceSlotCoverage.totalTeams}</span>
+                  <span>teams have claimed a slot</span>
+                  <ChevronRight className="h-3.5 w-3.5 opacity-50" />
+                </div>
+              </div>
+              <Progress
+                value={practiceSlotCoverage.totalTeams > 0
+                  ? (practiceSlotCoverage.teamsWithSlots / practiceSlotCoverage.totalTeams) * 100
+                  : 0}
+                className="h-1.5"
+              />
+            </CardContent>
+          </Card>
+        </Link>
 
         {/* ── Zone 3: This Week — tabbed card ── */}
         <Card className="border-none shadow-md">

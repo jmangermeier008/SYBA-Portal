@@ -205,19 +205,31 @@ service cloud.firestore {
     //
     // Board members: full CRUD.
     // Signed-in users: read all (coaches need to browse available slots).
-    // Coaches: may claim an available slot by setting their own coachId.
-    //   They cannot change date, field, team, or time window.
+    // Coaches: may CLAIM an available slot (writes coachId, coachName, teamId,
+    //   teamName, teamGameId, status, claimedAt, updatedAt).
+    // Coaches: may UNCLAIM their own claimed slot (reverts those same fields).
     // ---------------------------------------------------------------------------
 
     match /practiceSlots/{slotId} {
       allow get, list: if isSignedIn();
       allow create, delete: if isBoardMember();
       allow update: if isBoardMember() ||
+        // CLAIM: slot must be available, coach writes their own uid
         (isCoach() &&
          resource.data.status == 'available' &&
+         request.resource.data.status == 'claimed' &&
          request.resource.data.coachId == request.auth.uid &&
          request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['coachId', 'coachName', 'status', 'claimedAt', 'updatedAt']));
+           .hasOnly(['coachId', 'coachName', 'teamId', 'teamName',
+                     'status', 'claimedAt', 'teamGameId', 'updatedAt'])) ||
+        // UNCLAIM: coach releases their own claimed slot
+        (isCoach() &&
+         resource.data.status == 'claimed' &&
+         resource.data.coachId == request.auth.uid &&
+         request.resource.data.status == 'available' &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['coachId', 'coachName', 'teamId', 'teamName',
+                     'status', 'claimedAt', 'teamGameId', 'updatedAt']));
     }
 
     // ---------------------------------------------------------------------------

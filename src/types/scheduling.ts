@@ -166,25 +166,27 @@ export interface ConcessionClaim {
 
 export type PracticeSlotStatus = 'available' | 'claimed' | 'cancelled';
 
-/** A practice time slot pre-allotted to a team by an admin. Coaches claim available slots. */
+/** A practice time window on a field, available for division-eligible teams to claim. */
 export interface PracticeSlot {
   id: string;
   seasonId: string;
   fieldId: string;
   fieldName: string;
-  teamId: string;   // Pre-allotted by a Board Member to a specific team
-  teamName: string;
-  // Null until a coach claims the slot:
+  divisionIds: string[]; // Eligible divisions (e.g. ['coach-pitch', 'kid-pitch']). Always at least 1.
+  date: string;          // YYYY-MM-DD
+  startTime: string;     // HH:MM
+  endTime: string;       // HH:MM
+  status: PracticeSlotStatus;
+  // Populated ONLY when claimed:
+  teamId?: string;
+  teamName?: string;
   coachId?: string;
   coachName?: string;
-  date: string;      // YYYY-MM-DD
-  startTime: string; // HH:MM
-  endTime: string;   // HH:MM
-  status: PracticeSlotStatus;
+  claimedAt?: string;
+  teamGameId?: string;   // Doc ID written to teams/{teamId}/games/{teamGameId} — used for cleanup on cancel/unclaim
   notes?: string;
   createdBy: string;
   createdAt: string;
-  claimedAt?: string;
   updatedAt?: string;
 }
 
@@ -197,6 +199,7 @@ export type NotificationType =
   | 'shiftCancelled'
   | 'practiceSlotCancelled'
   | 'practiceSlotChanged'
+  | 'practiceSlotClaimed'
   | 'concessionSignupConfirmed'
   | 'concessionSignupCancelled';
 

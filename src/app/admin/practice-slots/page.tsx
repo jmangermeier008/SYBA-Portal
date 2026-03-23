@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, addDoc, query, orderBy, where, Timestamp, writeBatch, getDocs } from 'firebase/firestore';
+import {
+  collection, doc, addDoc, query, orderBy, where, limit,
+  Timestamp, writeBatch,
+} from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,30 +14,40 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import {
-  Dumbbell,
-  Plus,
-  Trash2,
-  Loader2,
-  Lock,
-  CalendarDays,
-  Clock,
-  MapPin,
-  Users,
-  CheckCircle2,
-  XCircle,
+  Dumbbell, Plus, Trash2, Loader2, Lock, CalendarDays, Clock,
+  MapPin, XCircle, ChevronRight, AlertTriangle,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, parseISO } from 'date-fns';
+import {
+  format, parseISO, eachWeekOfInterval, addDays, isAfter,
+  isBefore, startOfDay,
+} from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { PracticeSlot } from '@/types/scheduling';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Team { id: string; name: string; }
+interface Team { id: string; name: string; divisionId?: string; }
 interface Field { id: string; name: string; }
+interface Division { id: string; name: string; }
+interface Season { id: string; name: string; status: string; startDate?: string; endDate?: string; }
 
 type FilterStatus = 'all' | 'available' | 'claimed' | 'cancelled';
+
+const WEEKDAYS = [
+  { label: 'Sun', value: 0 },
+  { label: 'Mon', value: 1 },
+  { label: 'Tue', value: 2 },
+  { label: 'Wed', value: 3 },
+  { label: 'Thu', value: 4 },
+  { label: 'Fri', value: 5 },
+  { label: 'Sat', value: 6 },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -45,13 +58,32 @@ function formatTime(t: string) {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+/** Returns all dates between startDate and endDate (inclusive) that fall on the given weekday (0=Sun). */
+function getDatesForWeekday(startDate: string, endDate: string, weekday: number): string[] {
+  if (!startDate || !endDate) return [];
+  const start = startOfDay(parseISO(startDate));
+  const end = startOfDay(parseISO(endDate));
+  if (isAfter(start, end)) return [];
+
+  const weeks = eachWeekOfInterval({ start, end }, { weekStartsOn: 0 });
+  return weeks
+    .map(weekStart => addDays(weekStart, weekday))
+    .filter(d => !isBefore(d, start) && !isAfter(d, end))
+    .map(d => format(d, 'yyyy-MM-dd'));
+}
+
 const EMPTY_FORM = {
-  teamId: '',
   fieldId: '',
+  divisionIds: [] as string[],
   date: '',
-  startTime: '',
-  endTime: '',
+  startTime: '17:00',
+  endTime: '18:30',
   notes: '',
+  isRecurring: false,
+  recurringWeekdays: [] as number[],
+  recurringStartDate: '',
+  recurringEndDate: '',
+  slotsPerDate: 1,
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -62,16 +94,14 @@ export default function PracticeSlotsAdminPage() {
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);
+  const [recurringStep, setRecurringStep] = useState<'configure' | 'preview'>('configure');
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
 
-  // Cancel slot dialog
   const [cancelDialog, setCancelDialog] = useState<{ open: boolean; slot: PracticeSlot | null; isCancelling: boolean }>({
     open: false, slot: null, isCancelling: false,
   });
-
-  // Delete slot dialog
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: PracticeSlot | null; isDeleting: boolean }>({
     open: false, slot: null, isDeleting: false,
   });
@@ -93,12 +123,27 @@ export default function PracticeSlotsAdminPage() {
     return collection(db, 'fields');
   }, [db, isAdmin, isBoardMember]);
 
+  const seasonsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
+  }, [db, isAdmin, isBoardMember]);
+
   const { data: slots, isLoading } = useCollection<PracticeSlot>(slotsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
   const { data: fields } = useCollection<Field>(fieldsQuery);
+  const { data: seasons } = useCollection<Season>(seasonsQuery);
 
-  const teamMap = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name]));
+  const activeSeason = seasons?.[0] ?? null;
+
+  const divisionsQuery = useMemoFirebase(() => {
+    if (!db || !activeSeason || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'seasons', activeSeason.id, 'divisions');
+  }, [db, activeSeason?.id, isAdmin, isBoardMember]);
+
+  const { data: divisions } = useCollection<Division>(divisionsQuery);
+
   const fieldMap = Object.fromEntries((fields ?? []).map((f) => [f.id, f.name]));
+  const divisionMap = Object.fromEntries((divisions ?? []).map((d) => [d.id, d.name]));
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
@@ -111,34 +156,111 @@ export default function PracticeSlotsAdminPage() {
     {} as Record<string, number>
   );
 
+  // Distribution tab data
+  const distributionData = useMemo(() => {
+    const claimedSlots = (slots ?? []).filter(s => s.status === 'claimed');
+    const claimedByTeam = claimedSlots.reduce<Record<string, number>>((acc, s) => {
+      if (s.teamId) acc[s.teamId] = (acc[s.teamId] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    const teamsByDivision: Record<string, Team[]> = {};
+    for (const t of (teams ?? [])) {
+      const key = t.divisionId ?? 'unknown';
+      (teamsByDivision[key] ??= []).push(t);
+    }
+    for (const group of Object.values(teamsByDivision)) {
+      group.sort((a, b) => (claimedByTeam[a.id] ?? 0) - (claimedByTeam[b.id] ?? 0));
+    }
+
+    const totalTeams = (teams ?? []).length;
+    const teamsWithSlots = Object.keys(claimedByTeam).length;
+
+    return { claimedByTeam, teamsByDivision, totalTeams, teamsWithSlots };
+  }, [slots, teams]);
+
+  // Preview dates for recurring creation
+  const previewDates = useMemo(() => {
+    if (!form.isRecurring || form.recurringWeekdays.length === 0) return [];
+    const allDates: string[] = [];
+    for (const wd of form.recurringWeekdays) {
+      allDates.push(...getDatesForWeekday(form.recurringStartDate, form.recurringEndDate, wd));
+    }
+    return allDates.sort();
+  }, [form.isRecurring, form.recurringWeekdays, form.recurringStartDate, form.recurringEndDate]);
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   const handleAdd = async () => {
-    if (!db || !profile) return;
-    if (!form.teamId || !form.fieldId || !form.date || !form.startTime || !form.endTime) {
-      toast({ title: 'Missing fields', description: 'Team, field, date, start time, and end time are required.', variant: 'destructive' });
+    if (!db || !profile || !activeSeason) return;
+    if (!form.fieldId || !form.date || !form.startTime || !form.endTime) {
+      toast({ title: 'Missing fields', description: 'Field, date, start time, and end time are required.', variant: 'destructive' });
+      return;
+    }
+    if (form.divisionIds.length === 0) {
+      toast({ title: 'Select at least one division', description: 'Choose which divisions are eligible for this slot.', variant: 'destructive' });
       return;
     }
     setSaving(true);
     try {
       await addDoc(collection(db, 'practiceSlots'), {
-        teamId: form.teamId,
-        teamName: teamMap[form.teamId] ?? '',
+        seasonId: activeSeason.id,
         fieldId: form.fieldId,
         fieldName: fieldMap[form.fieldId] ?? '',
+        divisionIds: form.divisionIds,
         date: form.date,
         startTime: form.startTime,
         endTime: form.endTime,
-        notes: form.notes.trim(),
         status: 'available',
-        coachId: null,
-        coachName: null,
-        claimedAt: null,
+        notes: form.notes.trim(),
         createdBy: profile.id,
         createdAt: Timestamp.now(),
       });
-      toast({ title: 'Practice Slot Created', description: `Slot for ${teamMap[form.teamId]} on ${form.date} added.` });
+      toast({ title: 'Practice Slot Created', description: `Slot on ${form.date} at ${fieldMap[form.fieldId] ?? 'field'} added.` });
       setForm(EMPTY_FORM);
+      setAddDialog(false);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddBulk = async () => {
+    if (!db || !profile || !activeSeason) return;
+    if (previewDates.length === 0) {
+      toast({ title: 'No dates generated', description: 'Check your weekday and date range selections.', variant: 'destructive' });
+      return;
+    }
+    if (previewDates.length * form.slotsPerDate > 500) {
+      toast({ title: 'Too many slots', description: 'Reduce the date range or slots per date.', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const batch = writeBatch(db);
+      const baseFields = {
+        seasonId: activeSeason.id,
+        fieldId: form.fieldId,
+        fieldName: fieldMap[form.fieldId] ?? '',
+        divisionIds: form.divisionIds,
+        startTime: form.startTime,
+        endTime: form.endTime,
+        status: 'available',
+        notes: form.notes.trim(),
+        createdBy: profile.id,
+        createdAt: Timestamp.now(),
+      };
+      for (const date of previewDates) {
+        for (let i = 0; i < form.slotsPerDate; i++) {
+          batch.set(doc(collection(db, 'practiceSlots')), { ...baseFields, date });
+        }
+      }
+      await batch.commit();
+      const total = previewDates.length * form.slotsPerDate;
+      toast({ title: `${total} Slots Created`, description: `Practice slots added across ${previewDates.length} dates.` });
+      setForm(EMPTY_FORM);
+      setRecurringStep('configure');
       setAddDialog(false);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -162,7 +284,14 @@ export default function PracticeSlotsAdminPage() {
         updatedAt: Timestamp.now(),
       });
 
-      // Notify the coach who claimed this slot
+      // Clean up linked team game doc
+      if (slot.teamId && slot.teamGameId) {
+        batch.update(doc(db, 'teams', slot.teamId, 'games', slot.teamGameId), {
+          cancelled: true,
+          cancellationReason: 'Practice slot cancelled by board.',
+        });
+      }
+
       if (slot.coachId) {
         batch.set(doc(db, 'notifications', crypto.randomUUID()), {
           userId: slot.coachId,
@@ -194,11 +323,17 @@ export default function PracticeSlotsAdminPage() {
     if (!db || !slot) return;
     setDeleteDialog(prev => ({ ...prev, isDeleting: true }));
     try {
-      await doc(db, 'practiceSlots', slot.id);
       const batch = writeBatch(db);
       batch.delete(doc(db, 'practiceSlots', slot.id));
 
-      // Notify coach if slot was claimed
+      // Clean up linked team game doc
+      if (slot.teamId && slot.teamGameId) {
+        batch.update(doc(db, 'teams', slot.teamId, 'games', slot.teamGameId), {
+          cancelled: true,
+          cancellationReason: 'Practice slot removed by board.',
+        });
+      }
+
       if (slot.coachId) {
         batch.set(doc(db, 'notifications', crypto.randomUUID()), {
           userId: slot.coachId,
@@ -219,6 +354,24 @@ export default function PracticeSlotsAdminPage() {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
       setDeleteDialog(prev => ({ ...prev, isDeleting: false }));
     }
+  };
+
+  const toggleDivision = (divId: string) => {
+    setForm(prev => ({
+      ...prev,
+      divisionIds: prev.divisionIds.includes(divId)
+        ? prev.divisionIds.filter(d => d !== divId)
+        : [...prev.divisionIds, divId],
+    }));
+  };
+
+  const toggleWeekday = (wd: number) => {
+    setForm(prev => ({
+      ...prev,
+      recurringWeekdays: prev.recurringWeekdays.includes(wd)
+        ? prev.recurringWeekdays.filter(d => d !== wd)
+        : [...prev.recurringWeekdays, wd],
+    }));
   };
 
   // ── Access guard ──────────────────────────────────────────────────────────────
@@ -255,15 +408,29 @@ export default function PracticeSlotsAdminPage() {
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
 
         {/* Header */}
-        <header className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <header className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold font-headline">Practice Slots</h1>
-            <p className="text-muted-foreground">Create available practice windows for teams. Coaches claim their team's allotted slots.</p>
+            <p className="text-muted-foreground">
+              Create available practice windows by field and division. Coaches claim slots for their teams.
+            </p>
           </div>
-          <Button onClick={() => setAddDialog(true)} className="rounded-full shadow-lg">
-            <Plus className="mr-2 h-4 w-4" /> Add Practice Slot
+          <Button
+            onClick={() => { setRecurringStep('configure'); setAddDialog(true); }}
+            disabled={!activeSeason}
+            className="rounded-full shadow-lg"
+          >
+            <Plus className="mr-2 h-4 w-4" /> Add Practice Slots
           </Button>
         </header>
+
+        {/* No active season warning */}
+        {!activeSeason && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>No active season found. Set a season to <strong>Active</strong> in Seasons settings before creating slots.</span>
+          </div>
+        )}
 
         {/* Summary Counts */}
         <div className="grid grid-cols-3 gap-3 mb-6">
@@ -287,115 +454,390 @@ export default function PracticeSlotsAdminPage() {
           ))}
         </div>
 
-        {/* Slot List */}
-        {isLoading ? (
-          <div className="flex justify-center py-20">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          </div>
-        ) : filteredSlots.length === 0 ? (
-          <Card className="border-none shadow-md border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-              <Dumbbell className="h-12 w-12 text-muted-foreground/40 mb-4" />
-              <p className="text-muted-foreground font-medium">
-                {filterStatus === 'all' ? 'No practice slots yet' : `No ${filterStatus} slots`}
-              </p>
-              {filterStatus === 'all' && (
-                <Button onClick={() => setAddDialog(true)} className="rounded-full mt-4">
-                  <Plus className="mr-2 h-4 w-4" /> Add Practice Slot
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {filteredSlots.map(slot => (
-              <SlotRow
-                key={slot.id}
-                slot={slot}
-                onCancel={() => handleInitiateCancel(slot)}
-                onDelete={() => handleInitiateDelete(slot)}
-              />
-            ))}
-          </div>
-        )}
+        {/* Tabs */}
+        <Tabs defaultValue="slots">
+          <TabsList className="mb-4">
+            <TabsTrigger value="slots">Slot List</TabsTrigger>
+            <TabsTrigger value="distribution">Team Distribution</TabsTrigger>
+          </TabsList>
+
+          {/* ── Slot List Tab ─────────────────────────────────────────────────── */}
+          <TabsContent value="slots">
+            {isLoading ? (
+              <div className="flex justify-center py-20">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              </div>
+            ) : filteredSlots.length === 0 ? (
+              <Card className="border-none shadow-md border-dashed">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <Dumbbell className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground font-medium">
+                    {filterStatus === 'all' ? 'No practice slots yet' : `No ${filterStatus} slots`}
+                  </p>
+                  {filterStatus === 'all' && activeSeason && (
+                    <Button
+                      onClick={() => { setRecurringStep('configure'); setAddDialog(true); }}
+                      className="rounded-full mt-4"
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Add Practice Slots
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {filteredSlots.map(slot => (
+                  <SlotRow
+                    key={slot.id}
+                    slot={slot}
+                    divisionMap={divisionMap}
+                    onCancel={() => handleInitiateCancel(slot)}
+                    onDelete={() => handleInitiateDelete(slot)}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Distribution Tab ──────────────────────────────────────────────── */}
+          <TabsContent value="distribution">
+            {distributionData.totalTeams === 0 ? (
+              <Card className="border-none shadow-md">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <p className="text-muted-foreground">No teams found for the active season.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-6">
+                {/* Coverage summary */}
+                <Card className="border-none shadow-md">
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-medium">Team Coverage</p>
+                      <p className="text-sm text-muted-foreground">
+                        {distributionData.teamsWithSlots} of {distributionData.totalTeams} teams have claimed a slot
+                      </p>
+                    </div>
+                    <Progress
+                      value={distributionData.totalTeams > 0
+                        ? (distributionData.teamsWithSlots / distributionData.totalTeams) * 100
+                        : 0}
+                      className="h-2"
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* Division groups */}
+                {Object.entries(distributionData.teamsByDivision).map(([divId, divTeams]) => (
+                  <div key={divId}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 px-1">
+                      {divisionMap[divId] ?? divId}
+                    </h3>
+                    <div className="space-y-1.5">
+                      {divTeams.map(team => {
+                        const count = distributionData.claimedByTeam[team.id] ?? 0;
+                        return (
+                          <div
+                            key={team.id}
+                            className={cn(
+                              'flex items-center justify-between rounded-xl border px-4 py-3',
+                              count === 0
+                                ? 'bg-red-50 border-red-100'
+                                : 'bg-card border-border'
+                            )}
+                          >
+                            <span className="text-sm font-medium">{team.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-muted-foreground">
+                                {count === 0 ? 'No practices' : `${count} ${count === 1 ? 'practice' : 'practices'}`}
+                              </span>
+                              {count === 0 && (
+                                <Badge variant="destructive" className="text-xs">No slots claimed</Badge>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </main>
 
-      {/* Add Slot Dialog */}
-      <Dialog open={addDialog} onOpenChange={(o) => { setAddDialog(o); if (!o) setForm(EMPTY_FORM); }}>
-        <DialogContent className="sm:max-w-md">
+      {/* ── Add Slot Dialog ────────────────────────────────────────────────────── */}
+      <Dialog open={addDialog} onOpenChange={(o) => {
+        setAddDialog(o);
+        if (!o) { setForm(EMPTY_FORM); setRecurringStep('configure'); }
+      }}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-headline">Add Practice Slot</DialogTitle>
-            <DialogDescription>Create an available practice window for a team to claim.</DialogDescription>
+            <DialogTitle className="font-headline">
+              {form.isRecurring && recurringStep === 'preview'
+                ? 'Confirm Practice Slots'
+                : 'Add Practice Slots'}
+            </DialogTitle>
+            <DialogDescription>
+              {form.isRecurring && recurringStep === 'preview'
+                ? `${previewDates.length * form.slotsPerDate} slots will be created across ${previewDates.length} dates.`
+                : 'Create practice time windows by field and division. Coaches claim them for their teams.'}
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Team *</Label>
-              <Select value={form.teamId} onValueChange={(v) => setForm(prev => ({ ...prev, teamId: v }))}>
-                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select a team" /></SelectTrigger>
-                <SelectContent>
-                  {(teams ?? []).map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
 
-            <div className="space-y-1.5">
-              <Label>Field *</Label>
-              <Select value={form.fieldId} onValueChange={(v) => setForm(prev => ({ ...prev, fieldId: v }))}>
-                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select a field" /></SelectTrigger>
-                <SelectContent>
-                  {(fields ?? []).map(f => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Date *</Label>
-              <Input type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Start Time *</Label>
-                <Input type="time" value={form.startTime} onChange={e => setForm(prev => ({ ...prev, startTime: e.target.value }))} />
+          {form.isRecurring && recurringStep === 'preview' ? (
+            // ── Preview Step ──────────────────────────────────────────────────
+            <div className="space-y-4 py-2">
+              <div className="rounded-xl bg-muted/50 border p-3 space-y-1 text-sm">
+                <div className="flex gap-2">
+                  <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <span>{fieldMap[form.fieldId] ?? '—'}</span>
+                </div>
+                <div className="flex gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <span>{formatTime(form.startTime)} – {formatTime(form.endTime)}</span>
+                </div>
+                <div className="text-muted-foreground text-xs pl-6">
+                  {form.divisionIds.map(d => divisionMap[d] ?? d).join(', ')} · {form.slotsPerDate} slot{form.slotsPerDate > 1 ? 's' : ''} per date
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>End Time *</Label>
-                <Input type="time" value={form.endTime} onChange={e => setForm(prev => ({ ...prev, endTime: e.target.value }))} />
+              <div className="max-h-52 overflow-y-auto space-y-1 rounded-xl border p-3">
+                {previewDates.map(d => (
+                  <div key={d} className="flex items-center gap-2 text-sm">
+                    <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span>{format(parseISO(d), 'EEE, MMM d, yyyy')}</span>
+                  </div>
+                ))}
               </div>
             </div>
+          ) : (
+            // ── Configure Step ────────────────────────────────────────────────
+            <div className="space-y-4 py-2">
 
-            <div className="space-y-1.5">
-              <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Input placeholder="e.g. Infield only" value={form.notes} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} />
+              {/* Recurring toggle */}
+              <div className="flex items-center justify-between rounded-xl border px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Recurring Schedule</p>
+                  <p className="text-xs text-muted-foreground">Generate slots across multiple dates</p>
+                </div>
+                <Switch
+                  checked={form.isRecurring}
+                  onCheckedChange={v => setForm(prev => ({ ...prev, isRecurring: v }))}
+                />
+              </div>
+
+              {/* Field */}
+              <div className="space-y-1.5">
+                <Label>Field *</Label>
+                <Select value={form.fieldId} onValueChange={(v) => setForm(prev => ({ ...prev, fieldId: v }))}>
+                  <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select a field" /></SelectTrigger>
+                  <SelectContent>
+                    {(fields ?? []).map(f => (
+                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Division eligibility */}
+              <div className="space-y-2">
+                <Label>Division Eligibility * <span className="text-muted-foreground text-xs">(select all that apply)</span></Label>
+                {(divisions ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No divisions found for the active season.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {(divisions ?? []).map(div => (
+                      <label
+                        key={div.id}
+                        className={cn(
+                          'flex items-center gap-2.5 rounded-xl border px-3 py-2.5 cursor-pointer text-sm transition-colors',
+                          form.divisionIds.includes(div.id)
+                            ? 'bg-primary/10 border-primary/30 text-primary font-medium'
+                            : 'hover:bg-muted/50'
+                        )}
+                      >
+                        <Checkbox
+                          checked={form.divisionIds.includes(div.id)}
+                          onCheckedChange={() => toggleDivision(div.id)}
+                          className="shrink-0"
+                        />
+                        {div.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Time window */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Start Time *</Label>
+                  <Input type="time" value={form.startTime} onChange={e => setForm(prev => ({ ...prev, startTime: e.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>End Time *</Label>
+                  <Input type="time" value={form.endTime} onChange={e => setForm(prev => ({ ...prev, endTime: e.target.value }))} />
+                </div>
+              </div>
+
+              {form.isRecurring ? (
+                <>
+                  {/* Weekday picker */}
+                  <div className="space-y-2">
+                    <Label>Day(s) of Week *</Label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {WEEKDAYS.map(({ label, value }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => toggleWeekday(value)}
+                          className={cn(
+                            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                            form.recurringWeekdays.includes(value)
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-background border-border hover:bg-muted'
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Date range */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label>From Date *</Label>
+                      <Input
+                        type="date"
+                        value={form.recurringStartDate}
+                        defaultValue={activeSeason?.startDate ?? ''}
+                        onChange={e => setForm(prev => ({ ...prev, recurringStartDate: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>To Date *</Label>
+                      <Input
+                        type="date"
+                        value={form.recurringEndDate}
+                        defaultValue={activeSeason?.endDate ?? ''}
+                        onChange={e => setForm(prev => ({ ...prev, recurringEndDate: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Slots per date */}
+                  <div className="space-y-1.5">
+                    <Label>Slots Per Date</Label>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setForm(prev => ({ ...prev, slotsPerDate: Math.max(1, prev.slotsPerDate - 1) }))}
+                        disabled={form.slotsPerDate <= 1}
+                        className="h-8 w-8 p-0"
+                      >
+                        −
+                      </Button>
+                      <span className="text-sm font-medium w-8 text-center">{form.slotsPerDate}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setForm(prev => ({ ...prev, slotsPerDate: Math.min(4, prev.slotsPerDate + 1) }))}
+                        disabled={form.slotsPerDate >= 4}
+                        className="h-8 w-8 p-0"
+                      >
+                        +
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        How many teams can practice on the same date
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Preview count */}
+                  {previewDates.length > 0 && (
+                    <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-sm text-blue-800">
+                      <strong>{previewDates.length * form.slotsPerDate} slots</strong> will be created across{' '}
+                      <strong>{previewDates.length} dates</strong>.
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* Single date */
+                <div className="space-y-1.5">
+                  <Label>Date *</Label>
+                  <Input type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
+                </div>
+              )}
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <Input
+                  placeholder="e.g. Infield only"
+                  value={form.notes}
+                  onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
             </div>
-          </div>
+          )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleAdd} disabled={saving}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Slot
-            </Button>
+            {form.isRecurring && recurringStep === 'preview' ? (
+              <>
+                <Button variant="outline" onClick={() => setRecurringStep('configure')} disabled={saving}>
+                  Edit
+                </Button>
+                <Button onClick={handleAddBulk} disabled={saving}>
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Confirm &amp; Create
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>
+                  Cancel
+                </Button>
+                {form.isRecurring ? (
+                  <Button
+                    onClick={() => setRecurringStep('preview')}
+                    disabled={!form.fieldId || form.divisionIds.length === 0 || form.recurringWeekdays.length === 0 || !form.recurringStartDate || !form.recurringEndDate || previewDates.length === 0}
+                  >
+                    Preview Dates <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button onClick={handleAdd} disabled={saving}>
+                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Slot
+                  </Button>
+                )}
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Cancel Slot Dialog */}
+      {/* ── Cancel Slot Dialog ─────────────────────────────────────────────────── */}
       <Dialog open={cancelDialog.open} onOpenChange={(o) => { if (!cancelDialog.isCancelling) setCancelDialog(prev => ({ ...prev, open: o })); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="font-headline">Cancel Practice Slot</DialogTitle>
             <DialogDescription>
-              {cancelDialog.slot && `${cancelDialog.slot.teamName} — ${format(parseISO(cancelDialog.slot.date), 'EEE, MMM d')} at ${cancelDialog.slot.fieldName}`}
+              {cancelDialog.slot && `${cancelDialog.slot.fieldName} — ${format(parseISO(cancelDialog.slot.date), 'EEE, MMM d')}`}
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
             {cancelDialog.slot?.coachId ? (
               <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-                <p className="font-medium">This slot has been claimed by {cancelDialog.slot.coachName ?? 'a coach'}.</p>
-                <p className="mt-1 text-amber-700">They will receive a notification that this slot has been cancelled.</p>
+                <p className="font-medium">
+                  This slot has been claimed by {cancelDialog.slot.teamName ?? 'a team'} ({cancelDialog.slot.coachName ?? 'coach'}).
+                </p>
+                <p className="mt-1 text-amber-700">
+                  They will receive a notification and the practice will be marked cancelled on their team calendar.
+                </p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">This slot has not been claimed yet.</p>
@@ -413,7 +855,7 @@ export default function PracticeSlotsAdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Slot Dialog */}
+      {/* ── Delete Slot Dialog ─────────────────────────────────────────────────── */}
       <Dialog open={deleteDialog.open} onOpenChange={(o) => { if (!deleteDialog.isDeleting) setDeleteDialog(prev => ({ ...prev, open: o })); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -424,7 +866,7 @@ export default function PracticeSlotsAdminPage() {
             {deleteDialog.slot?.coachId && (
               <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
                 <p className="font-medium">This slot was claimed by {deleteDialog.slot.coachName ?? 'a coach'}.</p>
-                <p className="mt-1">They will be notified that it has been removed.</p>
+                <p className="mt-1">They will be notified and the practice removed from their team calendar.</p>
               </div>
             )}
           </div>
@@ -446,10 +888,12 @@ export default function PracticeSlotsAdminPage() {
 
 function SlotRow({
   slot,
+  divisionMap,
   onCancel,
   onDelete,
 }: {
   slot: PracticeSlot;
+  divisionMap: Record<string, string>;
   onCancel: () => void;
   onDelete: () => void;
 }) {
@@ -473,15 +917,27 @@ function SlotRow({
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold">{slot.teamName}</p>
-            <span className={cn(
-              'text-xs px-2 py-0.5 rounded-full border font-medium',
-              isCancelled ? 'bg-red-50 text-red-600 border-red-200'
-                : isClaimed ? 'bg-blue-100 text-blue-700 border-blue-200'
-                : 'bg-green-100 text-green-700 border-green-200'
-            )}>
-              {isCancelled ? 'Cancelled' : isClaimed ? `Claimed${slot.coachName ? ` · ${slot.coachName}` : ''}` : 'Available'}
-            </span>
+            <p className="text-sm font-semibold">{slot.fieldName}</p>
+            {isClaimed ? (
+              <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-blue-100 text-blue-700 border-blue-200">
+                Claimed · {slot.teamName}{slot.coachName ? ` · ${slot.coachName}` : ''}
+              </span>
+            ) : isCancelled ? (
+              <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-red-50 text-red-600 border-red-200">
+                Cancelled
+              </span>
+            ) : (
+              <>
+                <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-green-100 text-green-700 border-green-200">
+                  Available
+                </span>
+                {(slot.divisionIds ?? []).map(d => (
+                  <span key={d} className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground border">
+                    {divisionMap[d] ?? d}
+                  </span>
+                ))}
+              </>
+            )}
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -491,9 +947,6 @@ function SlotRow({
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" />
               {formatTime(slot.startTime)} – {formatTime(slot.endTime)}
-            </span>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3" /> {slot.fieldName}
             </span>
             {slot.notes && <span className="text-xs text-muted-foreground italic">{slot.notes}</span>}
           </div>
