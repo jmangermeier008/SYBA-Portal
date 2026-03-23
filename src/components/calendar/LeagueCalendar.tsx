@@ -567,6 +567,11 @@ function WeekStrip({
                 >
                   {format(day, 'd')}
                 </span>
+                {day.getDate() === 1 && (
+                  <p className="text-[9px] font-semibold text-primary/70 mt-0.5 leading-none">
+                    {format(day, 'MMM')}
+                  </p>
+                )}
               </div>
 
               {/* Events */}

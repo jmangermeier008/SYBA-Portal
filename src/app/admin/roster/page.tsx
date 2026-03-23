@@ -442,6 +442,10 @@ export default function MasterRosterPage() {
                 No matching registrations found.
               </div>
             ) : (
+              <>
+              <p className="text-[10px] text-muted-foreground text-center py-1.5 border-b sm:hidden">
+                Scroll left/right to see all columns →
+              </p>
               <div className="overflow-x-auto w-full">
               <Table>
                 <TableHeader>
@@ -534,6 +538,7 @@ export default function MasterRosterPage() {
                 </TableBody>
               </Table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>

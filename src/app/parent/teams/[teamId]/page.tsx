@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, collectionGroup, query, where } from 'firebase/firestore';
 import { AlertTriangle } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +54,7 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
   const { teamId } = use(params);
   const { user } = useUser();
   const db = useFirestore();
+  const isMobile = useIsMobile();
 
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -152,92 +154,142 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
           </div>
         </header>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {enrollments?.map((enrollment) => {
-            const player = allPlayers?.find(p => p.id === enrollment.playerId);
-            const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
-            const isOwnFamily = enrollment.parentUserId === user?.uid;
-            
-            if (!player) return null;
-
-            return (
-              <Card key={enrollment.id} className="border-none shadow-lg overflow-hidden transition-all hover:shadow-xl">
-                <CardHeader className="bg-primary/5 pb-4 border-b">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold">
-                      {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
+          {isMobile ? (
+            /* ── Mobile: compact list rows ── */
+            <div className="space-y-2">
+              {enrollments?.map((enrollment) => {
+                const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+                const isOwnFamily = enrollment.parentUserId === user?.uid;
+                if (!player) return null;
+                const canContact = isOwnFamily || parent?.shareContactInfo;
+                return (
+                  <div key={enrollment.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card hover:shadow-sm transition-shadow">
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
+                      {enrollment.jerseyNumber || player.firstName?.[0] || '?'}
                     </div>
-                    <div>
-                      <CardTitle className="text-lg font-headline">{player.firstName} {player.lastName}</CardTitle>
-                      {enrollment.jerseyNumber && (
-                        <Badge variant="outline" className="h-5 text-[10px]">#{enrollment.jerseyNumber}</Badge>
-                      )}
+                    {/* Name + parent */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-semibold text-sm truncate">{player.firstName} {player.lastName}</p>
+                        {isOwnFamily && (
+                          <Badge className="bg-green-100 text-green-700 border-none text-[10px] h-4 shrink-0">You</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">{parent?.displayName || 'Unknown Parent'}</p>
                     </div>
-                    {isOwnFamily && (
-                      <Badge className="ml-auto bg-green-100 text-green-700 hover:bg-green-100 border-none">You</Badge>
+                    {/* Privacy badge or contact buttons */}
+                    {canContact ? (
+                      <div className="flex gap-1 shrink-0">
+                        {parent?.phoneNumber && (
+                          <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" asChild>
+                            <a href={`tel:${parent.phoneNumber}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
+                          </Button>
+                        )}
+                        {parent?.email && (
+                          <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" asChild>
+                            <a href={`mailto:${parent.email}`}><Mail className="h-3.5 w-3.5 text-primary" /></a>
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <Badge variant="outline" className="text-[9px] gap-1 shrink-0 h-5">
+                        <Lock className="h-2.5 w-2.5" /> Private
+                      </Badge>
                     )}
                   </div>
-                </CardHeader>
-                <CardContent className="pt-6 space-y-4">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Parent / Guardian</h4>
-                      {!isOwnFamily && !parent?.shareContactInfo && (
-                        <Badge variant="outline" className="text-[9px] gap-1 py-0 px-2 h-5">
-                          <Lock className="h-2 w-2" /> Private
-                        </Badge>
-                      )}
-                      {(isOwnFamily || parent?.shareContactInfo) && (
-                        <Badge variant="outline" className="text-[9px] gap-1 py-0 px-2 h-5 text-green-600 border-green-200">
-                          <ShieldCheck className="h-2 w-2" /> Contact Shared
-                        </Badge>
-                      )}
-                    </div>
+                );
+              })}
+            </div>
+          ) : (
+          /* ── Desktop: full cards ── */
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {enrollments?.map((enrollment) => {
+              const player = allPlayers?.find(p => p.id === enrollment.playerId);
+              const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+              const isOwnFamily = enrollment.parentUserId === user?.uid;
 
-                    <div className="bg-secondary/10 p-4 rounded-xl space-y-3">
-                      <p className="font-semibold text-sm">{parent?.displayName || 'Unknown Parent'}</p>
-                      
-                      {(isOwnFamily || parent?.shareContactInfo) ? (
-                        <div className="flex gap-2">
-                          {/* M7: Only render contact links if the field is non-null */}
-                          {parent?.phoneNumber && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
-                              asChild
-                            >
-                              <a href={`tel:${parent.phoneNumber}`}>
-                                <Phone className="mr-2 h-3 w-3 text-primary" /> Call
-                              </a>
-                            </Button>
-                          )}
-                          {parent?.email && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
-                              asChild
-                            >
-                              <a href={`mailto:${parent.email}`}>
-                                <Mail className="mr-2 h-3 w-3 text-primary" /> Email
-                              </a>
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="py-2 px-3 bg-muted/50 rounded-lg flex items-center justify-center gap-2">
-                          <Lock className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-[10px] italic text-muted-foreground">Privacy enabled by parent</span>
-                        </div>
+              if (!player) return null;
+
+              return (
+                <Card key={enrollment.id} className="border-none shadow-lg overflow-hidden transition-all hover:shadow-xl">
+                  <CardHeader className="bg-primary/5 pb-4 border-b">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold">
+                        {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg font-headline">{player.firstName} {player.lastName}</CardTitle>
+                        {enrollment.jerseyNumber && (
+                          <Badge variant="outline" className="h-5 text-[10px]">#{enrollment.jerseyNumber}</Badge>
+                        )}
+                      </div>
+                      {isOwnFamily && (
+                        <Badge className="ml-auto bg-green-100 text-green-700 hover:bg-green-100 border-none">You</Badge>
                       )}
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  </CardHeader>
+                  <CardContent className="pt-6 space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Parent / Guardian</h4>
+                        {!isOwnFamily && !parent?.shareContactInfo && (
+                          <Badge variant="outline" className="text-[9px] gap-1 py-0 px-2 h-5">
+                            <Lock className="h-2 w-2" /> Private
+                          </Badge>
+                        )}
+                        {(isOwnFamily || parent?.shareContactInfo) && (
+                          <Badge variant="outline" className="text-[9px] gap-1 py-0 px-2 h-5 text-green-600 border-green-200">
+                            <ShieldCheck className="h-2 w-2" /> Contact Shared
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="bg-secondary/10 p-4 rounded-xl space-y-3">
+                        <p className="font-semibold text-sm">{parent?.displayName || 'Unknown Parent'}</p>
+
+                        {(isOwnFamily || parent?.shareContactInfo) ? (
+                          <div className="flex gap-2">
+                            {parent?.phoneNumber && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
+                                asChild
+                              >
+                                <a href={`tel:${parent.phoneNumber}`}>
+                                  <Phone className="mr-2 h-3 w-3 text-primary" /> Call
+                                </a>
+                              </Button>
+                            )}
+                            {parent?.email && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 rounded-full bg-white h-8 text-xs hover:bg-primary/5"
+                                asChild
+                              >
+                                <a href={`mailto:${parent.email}`}>
+                                  <Mail className="mr-2 h-3 w-3 text-primary" /> Email
+                                </a>
+                              </Button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="py-2 px-3 bg-muted/50 rounded-lg flex items-center justify-center gap-2">
+                            <Lock className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-[10px] italic text-muted-foreground">Privacy enabled by parent</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+          )} {/* end mobile/desktop conditional */}
       </main>
     </div>
   );

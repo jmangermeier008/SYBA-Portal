@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { differenceInYears } from 'date-fns';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
   DialogContent,
@@ -75,6 +76,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const db = useFirestore();
   const { user, isAdmin, isSiteAdmin } = useUser();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   // C2: Load the team doc to verify coach ownership
   const teamDocRef = useMemoFirebase(() => {
@@ -170,12 +172,47 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
               </Button>
             </CardContent>
           </Card>
-        ) : (
+        ) : isMobile ? (
+            /* ── Mobile: compact list rows ── */
+            <div className="space-y-2">
+              {enrollments.map((enrollment) => {
+                const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+                if (!player) return null;
+                return (
+                  <div key={enrollment.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card hover:shadow-sm transition-shadow">
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
+                      {enrollment.jerseyNumber || player.firstName?.[0] || '?'}
+                    </div>
+                    {/* Name + meta */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate">{player.firstName} {player.lastName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Age {calculateBaseballAge(player.dateOfBirth)}
+                        {enrollment.jerseyNumber ? ` · #${enrollment.jerseyNumber}` : ''}
+                        {' · '}{enrollment.divisionId}
+                      </p>
+                    </div>
+                    {/* Medical alert button */}
+                    <MedicalAlertButton player={player} iconSize="sm" />
+                    {/* Quick call */}
+                    {parent?.phoneNumber ? (
+                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full shrink-0" asChild>
+                        <a href={`tel:${parent.phoneNumber}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+          /* ── Desktop: full cards ── */
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {enrollments.map((enrollment) => {
               const player = allPlayers?.find(p => p.id === enrollment.playerId);
               const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
-              
+
               if (!player) return null;
 
               return (
@@ -198,55 +235,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                           </CardDescription>
                         </div>
                       </div>
-                      {(player.medicalNotes || (player.emergencyContacts && player.emergencyContacts.length > 0)) && (
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive bg-destructive/10 hover:bg-destructive/20 rounded-full h-10 w-10">
-                              <AlertTriangle className="h-5 w-5" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="rounded-2xl">
-                            <DialogHeader>
-                              <DialogTitle className="flex items-center gap-2 text-destructive font-headline">
-                                <AlertTriangle className="h-5 w-5" /> Health & Safety: {player.firstName}
-                              </DialogTitle>
-                              <DialogDescription>
-                                Critical medical notes and emergency contact tree.
-                              </DialogDescription>
-                            </DialogHeader>
-                            
-                            <div className="space-y-4 mt-4">
-                              {player.medicalNotes && (
-                                <div className="bg-destructive/5 p-4 rounded-xl border border-destructive/20">
-                                  <h4 className="text-[10px] font-bold uppercase mb-2 tracking-widest text-destructive/70">Medical Alert</h4>
-                                  <p className="font-bold text-destructive">{player.medicalNotes}</p>
-                                </div>
-                              )}
-
-                              {player.emergencyContacts && player.emergencyContacts.length > 0 && (
-                                <div className="space-y-3">
-                                  <h4 className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 text-muted-foreground">
-                                    <LifeBuoy className="h-4 w-4" /> Emergency Contacts
-                                  </h4>
-                                  {player.emergencyContacts.map((contact, i) => (
-                                    <div key={i} className="bg-secondary/20 p-4 rounded-xl flex justify-between items-center border">
-                                      <div>
-                                        <p className="font-bold text-sm">{contact.name}</p>
-                                        <p className="text-xs text-muted-foreground">{contact.relationship}</p>
-                                      </div>
-                                      <Button size="sm" variant="outline" className="rounded-full shadow-sm bg-white" asChild>
-                                        <a href={`tel:${contact.phone}`}>
-                                          <Phone className="h-3 w-3 mr-2 text-primary" /> {contact.phone}
-                                        </a>
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </DialogContent>
-                        </Dialog>
-                      )}
+                      <MedicalAlertButton player={player} iconSize="lg" />
                     </div>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-4">
@@ -310,5 +299,66 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
         </div>
       </main>
     </div>
+  );
+}
+
+// ─── Medical Alert Button + Dialog ────────────────────────────────────────────
+
+function MedicalAlertButton({
+  player,
+  iconSize = 'lg',
+}: {
+  player: Player;
+  iconSize?: 'sm' | 'lg';
+}) {
+  if (!player.medicalNotes && !(player.emergencyContacts?.length)) return null;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`text-destructive bg-destructive/10 hover:bg-destructive/20 rounded-full shrink-0 ${iconSize === 'lg' ? 'h-10 w-10' : 'h-8 w-8'}`}
+        >
+          <AlertTriangle className={iconSize === 'lg' ? 'h-5 w-5' : 'h-4 w-4'} />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive font-headline">
+            <AlertTriangle className="h-5 w-5" /> Health & Safety: {player.firstName}
+          </DialogTitle>
+          <DialogDescription>Critical medical notes and emergency contact tree.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 mt-4">
+          {player.medicalNotes && (
+            <div className="bg-destructive/5 p-4 rounded-xl border border-destructive/20">
+              <h4 className="text-[10px] font-bold uppercase mb-2 tracking-widest text-destructive/70">Medical Alert</h4>
+              <p className="font-bold text-destructive">{player.medicalNotes}</p>
+            </div>
+          )}
+          {player.emergencyContacts && player.emergencyContacts.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 text-muted-foreground">
+                <LifeBuoy className="h-4 w-4" /> Emergency Contacts
+              </h4>
+              {player.emergencyContacts.map((contact, i) => (
+                <div key={i} className="bg-secondary/20 p-4 rounded-xl flex justify-between items-center border">
+                  <div>
+                    <p className="font-bold text-sm">{contact.name}</p>
+                    <p className="text-xs text-muted-foreground">{contact.relationship}</p>
+                  </div>
+                  <Button size="sm" variant="outline" className="rounded-full shadow-sm bg-white" asChild>
+                    <a href={`tel:${contact.phone}`}>
+                      <Phone className="h-3 w-3 mr-2 text-primary" /> {contact.phone}
+                    </a>
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
