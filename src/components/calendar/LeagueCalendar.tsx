@@ -15,6 +15,8 @@ import {
   subMonths,
   addWeeks,
   subWeeks,
+  addDays,
+  subDays,
 } from 'date-fns';
 import {
   ChevronLeft,
@@ -118,7 +120,7 @@ export interface LeagueCalendarProps {
   // View full record link — board/admin use; undefined = hidden
   onViewRecord?: (event: CalendarEvent) => void;
   // Override initial view (default: 'month')
-  defaultView?: 'month' | 'week';
+  defaultView?: 'month' | 'week' | 'day';
 }
 
 // ─── Event Popover Content ─────────────────────────────────────────────────────
@@ -603,6 +605,99 @@ function WeekStrip({
   );
 }
 
+// ─── Day View ──────────────────────────────────────────────────────────────────
+
+function DayEventCard({
+  event,
+  onRsvp,
+  onWeatherCancel,
+  onConcessionSignup,
+  onConcessionCancel,
+  onViewRecord,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
+  event: CalendarEvent;
+}) {
+  return (
+    <div>
+      <EventPopoverContent
+        event={event}
+        onRsvp={onRsvp}
+        onWeatherCancel={onWeatherCancel}
+        onConcessionSignup={onConcessionSignup}
+        onConcessionCancel={onConcessionCancel}
+        onViewRecord={onViewRecord}
+      />
+    </div>
+  );
+}
+
+function DayView({
+  focusDate,
+  eventsByDate,
+  onRsvp,
+  onWeatherCancel,
+  onConcessionSignup,
+  onConcessionCancel,
+  onViewRecord,
+}: {
+  focusDate: Date;
+  eventsByDate: Map<string, CalendarEvent[]>;
+  onRsvp?: LeagueCalendarProps['onRsvp'];
+  onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
+  onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
+  onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
+  onViewRecord?: LeagueCalendarProps['onViewRecord'];
+}) {
+  const key = toDateKey(focusDate);
+  const dayEvents = (eventsByDate.get(key) ?? []).sort(
+    (a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? '')
+  );
+  const todayFlag = isToday(focusDate);
+
+  return (
+    <div className="border rounded-xl overflow-hidden">
+      <div className={cn('px-4 py-3 border-b', todayFlag ? 'bg-primary/5' : 'bg-secondary/30')}>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          {format(focusDate, 'EEEE')}
+        </p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className={cn('text-2xl font-bold leading-none', todayFlag ? 'text-primary' : 'text-foreground')}>
+            {format(focusDate, 'd')}
+          </span>
+          <span className="text-sm text-muted-foreground">{format(focusDate, 'MMMM yyyy')}</span>
+          {todayFlag && (
+            <span className="text-[10px] font-bold uppercase bg-primary text-primary-foreground rounded px-1.5 py-0.5">
+              Today
+            </span>
+          )}
+        </div>
+      </div>
+
+      {dayEvents.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-14 text-center gap-2">
+          <CalendarIcon className="h-8 w-8 text-muted-foreground/25" />
+          <p className="text-sm font-medium text-muted-foreground">No events today</p>
+          <p className="text-xs text-muted-foreground/60">Use the arrows to navigate to another day</p>
+        </div>
+      ) : (
+        <div className="divide-y">
+          {dayEvents.map(e => (
+            <DayEventCard
+              key={e.id}
+              event={e}
+              onRsvp={onRsvp}
+              onWeatherCancel={onWeatherCancel}
+              onConcessionSignup={onConcessionSignup}
+              onConcessionCancel={onConcessionCancel}
+              onViewRecord={onViewRecord}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function LeagueCalendar({
@@ -621,10 +716,10 @@ export function LeagueCalendar({
   defaultView,
 }: LeagueCalendarProps) {
   const isMobile = useIsMobile();
-  const [view, setView] = useState<'month' | 'week'>(defaultView ?? 'month');
-  const [hasUserSetView, setHasUserSetView] = useState(false);
-  // On mobile, default to week view unless the user has explicitly chosen
-  const effectiveView = !hasUserSetView && isMobile ? 'week' : view;
+  const [view, setView] = useState<'month' | 'week' | 'day'>(defaultView ?? 'month');
+  const [hasUserSetView, setHasUserSetView] = useState(defaultView !== undefined);
+  // On mobile, default to day view unless the user has explicitly chosen (or caller passed defaultView)
+  const effectiveView = !hasUserSetView && isMobile ? 'day' : view;
   const [focusDate, setFocusDate] = useState<Date>(new Date());
 
   // Apply filters
@@ -647,20 +742,28 @@ export function LeagueCalendar({
   };
 
   const navigatePrev = () => {
-    setFocusDate(d => effectiveView === 'month' ? subMonths(d, 1) : subWeeks(d, 1));
+    setFocusDate(d =>
+      effectiveView === 'month' ? subMonths(d, 1) :
+      effectiveView === 'week'  ? subWeeks(d, 1)  : subDays(d, 1)
+    );
   };
   const navigateNext = () => {
-    setFocusDate(d => effectiveView === 'month' ? addMonths(d, 1) : addWeeks(d, 1));
+    setFocusDate(d =>
+      effectiveView === 'month' ? addMonths(d, 1) :
+      effectiveView === 'week'  ? addWeeks(d, 1)  : addDays(d, 1)
+    );
   };
 
-  const titleLabel = effectiveView === 'month'
-    ? format(focusDate, 'MMMM yyyy')
-    : `Week of ${format(startOfWeek(focusDate, { weekStartsOn: 0 }), 'MMM d')}`;
+  const titleLabel =
+    effectiveView === 'month' ? format(focusDate, 'MMMM yyyy') :
+    effectiveView === 'week'  ? `Week of ${format(startOfWeek(focusDate, { weekStartsOn: 0 }), 'MMM d')}` :
+    format(focusDate, 'EEE, MMM d');
 
-  // When "+N more" clicked in month view → switch to week view on that day
+  // When "+N more" clicked in month view → drill to day view for that date
   const handleDayClick = (day: Date) => {
     setFocusDate(day);
-    setView('week');
+    setView('day');
+    setHasUserSetView(true);
   };
 
   return (
@@ -693,6 +796,17 @@ export function LeagueCalendar({
             )}
           >
             Week
+          </button>
+          <button
+            onClick={() => { setView('day'); setHasUserSetView(true); }}
+            className={cn(
+              'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
+              effectiveView === 'day'
+                ? 'bg-white shadow text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Day
           </button>
         </div>
 
@@ -747,6 +861,16 @@ export function LeagueCalendar({
         <div className="flex justify-center py-20">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
         </div>
+      ) : effectiveView === 'day' ? (
+        <DayView
+          focusDate={focusDate}
+          eventsByDate={eventsByDate}
+          onRsvp={onRsvp}
+          onWeatherCancel={onWeatherCancel}
+          onConcessionSignup={onConcessionSignup}
+          onConcessionCancel={onConcessionCancel}
+          onViewRecord={onViewRecord}
+        />
       ) : filteredEvents.length === 0 ? (
         <div className="border rounded-xl flex flex-col items-center justify-center py-20 text-center gap-3">
           <CalendarIcon className="h-10 w-10 text-muted-foreground/30" />
