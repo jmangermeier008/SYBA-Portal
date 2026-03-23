@@ -8,7 +8,7 @@ import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebas
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ShieldCheck, User as UserIcon, Lock, Trash2, Plus, Mail } from 'lucide-react';
+import { Loader2, ShieldCheck, User as UserIcon, Lock, Trash2, Plus, Mail, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -32,6 +32,7 @@ interface UserData {
   role: string;
   roles?: string[];
   officerTitle?: string;
+  phoneNumber?: string;
 }
 
 function getUserRoles(user: UserData): string[] {
@@ -62,6 +63,14 @@ export default function RolesPage() {
 
   // Mobile edit roles dialog
   const [editTarget, setEditTarget] = useState<UserData | null>(null);
+
+  // Edit user profile dialog
+  const [editUserDialog, setEditUserDialog] = useState<{
+    open: boolean;
+    user: UserData | null;
+    form: { displayName: string; phoneNumber: string };
+    loading: boolean;
+  }>({ open: false, user: null, form: { displayName: '', phoneNumber: '' }, loading: false });
 
   const usersQuery = useMemoFirebase(() => {
     if (!db || !isSiteAdmin) return null;
@@ -158,6 +167,24 @@ export default function RolesPage() {
       toast({ title: "Removal Failed", description: error.message, variant: "destructive" });
     } finally {
       setRemoving(false);
+    }
+  };
+
+  const handleSaveUserEdit = async () => {
+    if (!db || !editUserDialog.user) return;
+    setEditUserDialog(prev => ({ ...prev, loading: true }));
+    try {
+      await updateDoc(doc(db, 'userProfiles', editUserDialog.user.id), {
+        displayName: editUserDialog.form.displayName.trim(),
+        phoneNumber: editUserDialog.form.phoneNumber.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+      toast({ title: "User Updated" });
+      setEditUserDialog(prev => ({ ...prev, open: false }));
+    } catch (error: any) {
+      toast({ title: "Update Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setEditUserDialog(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -322,6 +349,20 @@ export default function RolesPage() {
                                 size="icon"
                                 variant="ghost"
                                 className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                title="Edit profile"
+                                onClick={() => setEditUserDialog({
+                                  open: true,
+                                  user,
+                                  form: { displayName: user.displayName || '', phoneNumber: user.phoneNumber || '' },
+                                  loading: false,
+                                })}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-muted-foreground hover:text-primary"
                                 title="Send password reset email"
                                 onClick={() => handlePasswordReset(user.email, user.displayName || user.email)}
                               >
@@ -466,6 +507,55 @@ export default function RolesPage() {
           </Dialog>
         );
       })()}
+
+      {/* Edit User Dialog */}
+      <Dialog open={editUserDialog.open} onOpenChange={(open) => !editUserDialog.loading && setEditUserDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-headline">Edit User Profile</DialogTitle>
+            <DialogDescription>Update display name and phone number. Email changes must be done via Firebase Console.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <p className="text-sm text-muted-foreground rounded-xl border bg-secondary/30 px-3 py-2">{editUserDialog.user?.email}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-user-name">Display Name</Label>
+              <Input
+                id="edit-user-name"
+                className="rounded-xl"
+                value={editUserDialog.form.displayName}
+                onChange={e => setEditUserDialog(prev => ({ ...prev, form: { ...prev.form, displayName: e.target.value } }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-user-phone">Phone Number</Label>
+              <Input
+                id="edit-user-phone"
+                type="tel"
+                className="rounded-xl"
+                placeholder="e.g. 724-555-0100"
+                value={editUserDialog.form.phoneNumber}
+                onChange={e => setEditUserDialog(prev => ({ ...prev, form: { ...prev.form, phoneNumber: e.target.value } }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditUserDialog({ open: false, user: null, form: { displayName: '', phoneNumber: '' }, loading: false })}
+              disabled={editUserDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveUserEdit} disabled={editUserDialog.loading || !editUserDialog.form.displayName.trim()}>
+              {editUserDialog.loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Remove User Dialog */}
       <Dialog open={!!removeTarget} onOpenChange={(o) => { if (!removing && !o) setRemoveTarget(null); }}>

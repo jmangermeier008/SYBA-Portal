@@ -13,7 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -42,6 +43,7 @@ interface Player {
   lastName: string;
   clearanceUrl?: string;
   dateOfBirth: string;
+  medicalNotes?: string;
 }
 
 interface Team {
@@ -77,6 +79,15 @@ export default function MasterRosterPage() {
     reason: string;
     loading: boolean;
   }>({ open: false, enrollment: null, player: null, reason: '', loading: false });
+
+  // Edit player dialog state
+  const [editPlayerDialog, setEditPlayerDialog] = useState<{
+    open: boolean;
+    enrollment: Enrollment | null;
+    player: Player | null;
+    form: { firstName: string; lastName: string; dateOfBirth: string; medicalNotes: string };
+    loading: boolean;
+  }>({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
 
   // Guarded queries
   const seasonsQuery = useMemoFirebase(() => {
@@ -297,6 +308,28 @@ export default function MasterRosterPage() {
     }
   };
 
+  const handleSavePlayerEdit = async () => {
+    const { enrollment, player, form } = editPlayerDialog;
+    if (!db || !enrollment || !player) return;
+    setEditPlayerDialog(prev => ({ ...prev, loading: true }));
+    try {
+      const playerRef = doc(db, 'userProfiles', enrollment.parentUserId, 'players', player.id);
+      await updateDoc(playerRef, {
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        dateOfBirth: form.dateOfBirth,
+        medicalNotes: form.medicalNotes.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+      toast({ title: "Player Updated" });
+      setEditPlayerDialog(prev => ({ ...prev, open: false }));
+    } catch (error: any) {
+      toast({ title: "Update Failed", description: error.message, variant: 'destructive' });
+    } finally {
+      setEditPlayerDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
   const exportRosterCSV = () => {
     if (!filteredEnrollments || filteredEnrollments.length === 0) return;
 
@@ -508,14 +541,31 @@ export default function MasterRosterPage() {
                           </Select>
                         </TableCell>
                         <TableCell className="pr-4">
-                          {canWaive && (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 group-hover:opacity-100 transition-opacity">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => setEditPlayerDialog({
+                                  open: true,
+                                  enrollment: e,
+                                  player: p ?? null,
+                                  form: {
+                                    firstName: p?.firstName ?? '',
+                                    lastName: p?.lastName ?? '',
+                                    dateOfBirth: p?.dateOfBirth ?? '',
+                                    medicalNotes: p?.medicalNotes ?? '',
+                                  },
+                                  loading: false,
+                                })}
+                              >
+                                <Pencil className="mr-2 h-4 w-4" />
+                                Edit Player
+                              </DropdownMenuItem>
+                              {canWaive && (
                                 <DropdownMenuItem
                                   onClick={() => setWaiverDialog({
                                     open: true,
@@ -528,9 +578,9 @@ export default function MasterRosterPage() {
                                   <BadgeCheck className="mr-2 h-4 w-4 text-emerald-500" />
                                   Mark as Fee Waived
                                 </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          )}
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     );
@@ -577,6 +627,74 @@ export default function MasterRosterPage() {
             <Button onClick={handleConfirmWaiver} disabled={waiverDialog.loading} className="bg-emerald-600 hover:bg-emerald-700">
               {waiverDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
               Confirm Waiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Player Dialog */}
+      <Dialog open={editPlayerDialog.open} onOpenChange={(open) => !editPlayerDialog.loading && setEditPlayerDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Player</DialogTitle>
+            <DialogDescription>
+              Update player profile information. Changes are saved to the player's record.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="edit-first-name">First Name</Label>
+                <Input
+                  id="edit-first-name"
+                  className="rounded-xl"
+                  value={editPlayerDialog.form.firstName}
+                  onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, firstName: e.target.value } }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-last-name">Last Name</Label>
+                <Input
+                  id="edit-last-name"
+                  className="rounded-xl"
+                  value={editPlayerDialog.form.lastName}
+                  onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, lastName: e.target.value } }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-dob">Date of Birth</Label>
+              <Input
+                id="edit-dob"
+                type="date"
+                className="rounded-xl"
+                value={editPlayerDialog.form.dateOfBirth}
+                onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, dateOfBirth: e.target.value } }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-medical">Medical Notes</Label>
+              <Textarea
+                id="edit-medical"
+                className="rounded-xl resize-none"
+                rows={3}
+                placeholder="Allergies, conditions, or other notes…"
+                value={editPlayerDialog.form.medicalNotes}
+                onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, medicalNotes: e.target.value } }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false })}
+              disabled={editPlayerDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSavePlayerEdit} disabled={editPlayerDialog.loading || !editPlayerDialog.form.firstName.trim() || !editPlayerDialog.form.lastName.trim()}>
+              {editPlayerDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Pencil className="h-4 w-4 mr-2" />}
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
