@@ -67,12 +67,13 @@ interface UserProfile {
 interface Team {
   id: string;
   coach_uid?: string;
+  coachIds?: string[];
 }
 
 export default function TeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
   const { teamId } = use(params);
   const db = useFirestore();
-  const { user, isAdmin } = useUser();
+  const { user, isAdmin, isSiteAdmin } = useUser();
   const router = useRouter();
 
   // C2: Load the team doc to verify coach ownership
@@ -118,7 +119,15 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const isLoading = loadingTeam || loadingEnrollments || loadingPlayers || loadingUsers;
 
   // C2: Once team is loaded, verify the coach owns it
-  if (!loadingTeam && teamDoc && !isAdmin && teamDoc.coach_uid !== user?.uid) {
+  const isAuthorizedCoach =
+    isAdmin ||
+    isSiteAdmin ||
+    (user?.uid != null && (
+      teamDoc?.coachIds?.includes(user.uid) ||
+      teamDoc?.coach_uid === user.uid
+    ));
+
+  if (!loadingTeam && teamDoc && !isAuthorizedCoach) {
     router.replace('/coach/dashboard');
     return null;
   }
