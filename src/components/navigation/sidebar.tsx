@@ -165,7 +165,7 @@ function NavSection({
             onClick={onNavigate}
             title={item.label}
             className={cn(
-              "relative flex items-center justify-center w-10 h-10 rounded-lg transition-colors",
+              "relative flex items-center justify-center w-11 h-11 rounded-lg transition-colors",
               pathname === item.href || pathname.startsWith(item.href + '/')
                 ? "bg-primary text-white shadow-md shadow-primary/20"
                 : "text-muted-foreground hover:bg-secondary hover:text-primary"
@@ -173,7 +173,7 @@ function NavSection({
           >
             <item.icon className="h-4 w-4 shrink-0" />
             {item.badge && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+              <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
             )}
           </Link>
         ))}
@@ -185,6 +185,8 @@ function NavSection({
     <>
       <button
         onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-label={`${label} navigation section`}
         className="w-full flex items-center justify-between px-3 py-2 mt-4 rounded-lg hover:bg-secondary/50 transition-colors"
       >
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{label}</p>
@@ -195,7 +197,7 @@ function NavSection({
       </button>
       <div className={cn(
         "overflow-hidden transition-all duration-200",
-        isOpen ? "max-h-[400px] opacity-100" : "max-h-0 opacity-0"
+        isOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
       )}>
         {items.map((item) => (
           <Link
@@ -212,7 +214,7 @@ function NavSection({
             <item.icon className="h-4 w-4 shrink-0" />
             {item.label}
             {item.badge && (
-              <span className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
+              <span aria-hidden="true" className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
             )}
           </Link>
         ))}
@@ -356,6 +358,14 @@ export function Sidebar() {
 
   const closeMenu = () => setMobileOpen(false);
 
+  // Close mobile drawer on Escape key
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
   const roleLabel = roles.join(' · ') || profile?.role || '';
   const roleContexts = getRoleContexts(roles);
 
@@ -374,7 +384,7 @@ export function Sidebar() {
         {isMobile && (
           <button
             onClick={closeMenu}
-            className="p-1 rounded-lg hover:bg-secondary text-muted-foreground"
+            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground"
             aria-label="Close menu"
           >
             <X className="h-5 w-5" />
@@ -393,7 +403,7 @@ export function Sidebar() {
                   onClick={() => handleContextSwitch(c.context)}
                   title={`Switch to ${c.label}`}
                   className={cn(
-                    "w-8 h-8 rounded-full text-xs font-bold transition-colors",
+                    "w-11 h-11 rounded-full text-xs font-bold transition-colors",
                     activeContext === c.context
                       ? "bg-primary text-white"
                       : "bg-secondary text-muted-foreground hover:text-primary"
@@ -585,12 +595,12 @@ export function Sidebar() {
         <div className="fixed top-0 left-0 right-0 h-14 bg-white border-b z-30 flex items-center px-4 gap-3">
           <button
             onClick={() => setMobileOpen(true)}
-            className="relative p-2 rounded-lg hover:bg-secondary text-muted-foreground"
+            className="relative p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-secondary text-muted-foreground"
             aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />
             {(hasUnread || hasUnreadNotifs) && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+              <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
             )}
           </button>
           <Link href="/" className="flex items-center gap-2">
@@ -608,7 +618,7 @@ export function Sidebar() {
         {mobileOpen && (
           <>
             <div
-              className="fixed inset-0 bg-black/40 z-30"
+              className="fixed inset-0 bg-black/40 z-[29]"
               onClick={closeMenu}
             />
             {sidebarInner}

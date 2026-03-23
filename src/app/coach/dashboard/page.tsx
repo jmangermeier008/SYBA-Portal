@@ -50,11 +50,11 @@ export default function CoachDashboard() {
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
 
   // Query enrollments for the coach's teams to count players
-  const teamIds = teams?.map(t => t.id) ?? [];
+  const teamIds = useMemo(() => teams?.map(t => t.id) ?? [], [teams]);
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || teamIds.length === 0) return null;
     return query(collectionGroup(db, 'enrollments'), where('teamId', 'in', teamIds));
-  }, [db, JSON.stringify(teamIds)]);
+  }, [db, teamIds]);
 
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
 

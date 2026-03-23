@@ -298,7 +298,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       <div className="flex items-center mb-8 gap-2">
         {[1, 2, 3].map((s) => (
           <div key={s} className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
               state.step === s
                 ? 'bg-primary text-primary-foreground'
                 : state.step > s
@@ -307,7 +307,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             }`}>
               {state.step > s ? '✓' : s}
             </div>
-            <span className={`text-sm ${state.step === s ? 'font-semibold' : 'text-muted-foreground'}`}>
+            <span className={`text-sm hidden sm:inline ${state.step === s ? 'font-semibold' : 'text-muted-foreground'}`}>
               {s === 1 ? 'Season & Division' : s === 2 ? 'Player Details' : 'Review & Pay'}
             </span>
             {s < 3 && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
@@ -329,7 +329,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-6 pt-6">
+        <CardContent className="space-y-6 pt-6 pb-24">
           {/* ── STEP 1 ── */}
           {state.step === 1 && (
             <>
@@ -430,7 +430,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           {/* ── STEP 2 ── */}
           {state.step === 2 && (
             <>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Shirt Size</Label>
                   <Select
@@ -574,7 +574,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           )}
         </CardContent>
 
-        <CardFooter className="flex gap-3 justify-between">
+        <CardFooter className="flex gap-3 justify-between sticky bottom-0 z-10 bg-card border-t shadow-sm rounded-b-xl">
           {state.step > 1 ? (
             <Button type="button" variant="outline" className="rounded-xl" onClick={handleBack} disabled={submitting}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back

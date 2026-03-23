@@ -88,7 +88,11 @@ export function useCollection<T = any>(
       (error: FirestoreError) => {
         // Silent on logout to prevent E2E noise
         const auth = getAuth();
-        if (!auth.currentUser) return;
+        if (!auth.currentUser) {
+          setIsLoading(false);
+          setData(null);
+          return;
+        }
 
         // This logic extracts the path from either a ref or a query
         let parsedPath = 'unknown_path';

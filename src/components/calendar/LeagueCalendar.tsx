@@ -332,7 +332,7 @@ function EventPill({
           {event.title}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[calc(100vw-2rem)] max-w-72 p-0 shadow-lg" align="start">
+      <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-0 shadow-lg" align="start">
         <EventPopoverContent
           event={event}
           onRsvp={onRsvp}
@@ -370,7 +370,7 @@ function EventDot({
           )}
         />
       </PopoverTrigger>
-      <PopoverContent className="w-[calc(100vw-2rem)] max-w-72 p-0 shadow-lg" align="start">
+      <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-0 shadow-lg" align="start">
         <EventPopoverContent
           event={event}
           onRsvp={onRsvp}
@@ -440,7 +440,7 @@ function MonthGrid({
             <div
               key={idx}
               className={cn(
-                'min-h-[60px] sm:min-h-[90px] p-1 border-b border-r flex flex-col gap-0.5',
+                'min-h-[70px] sm:min-h-[90px] p-1 border-b border-r flex flex-col gap-0.5',
                 !inMonth && 'bg-secondary/20',
                 idx % 7 === 6 && 'border-r-0',
                 Math.floor(idx / 7) === Math.floor((days.length - 1) / 7) && 'border-b-0'
@@ -540,7 +540,7 @@ function WeekStrip({
 
   return (
     <div className="border rounded-xl overflow-x-auto">
-      <div className="grid grid-cols-7 min-w-[560px]">
+      <div className="grid grid-cols-7">
         {days.map((day, idx) => {
           const key = toDateKey(day);
           const dayEvents = eventsByDate.get(key) ?? [];
@@ -812,11 +812,11 @@ export function LeagueCalendar({
 
         {/* Month/week navigator */}
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={navigatePrev}>
+          <Button variant="outline" size="icon" className="h-10 w-10" onClick={navigatePrev} aria-label="Previous">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-semibold min-w-[160px] text-center">{titleLabel}</span>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={navigateNext}>
+          <span className="text-sm font-semibold min-w-[120px] text-center">{titleLabel}</span>
+          <Button variant="outline" size="icon" className="h-10 w-10" onClick={navigateNext} aria-label="Next">
             <ChevronRight className="h-4 w-4" />
           </Button>
           <Button

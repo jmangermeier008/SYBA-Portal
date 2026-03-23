@@ -187,6 +187,7 @@ export default function AdminDashboard({
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('calendar');
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: true });
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [showLeftFade, setShowLeftFade] = useState(false);
@@ -265,16 +266,16 @@ export default function AdminDashboard({
     return query(collection(db, 'inquiries'), where('status', 'in', ['open', 'in_progress']));
   }, [db, isAdmin, isBoardMember]);
 
-  // All games, practice slots, all concession slots — for the Calendar tab
+  // All games, practice slots, all concession slots — for the Calendar tab only
   const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar') return null;
     return collection(db, 'games');
-  }, [db, isAdmin, isBoardMember]);
+  }, [db, isAdmin, isBoardMember, activeTab]);
 
   const practiceSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar') return null;
     return collection(db, 'practiceSlots');
-  }, [db, isAdmin, isBoardMember]);
+  }, [db, isAdmin, isBoardMember, activeTab]);
 
   const allTeamsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -282,9 +283,9 @@ export default function AdminDashboard({
   }, [db, isAdmin, isBoardMember]);
 
   const allConcessionSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar') return null;
     return collection(db, 'concessionSlots');
-  }, [db, isAdmin, isBoardMember]);
+  }, [db, isAdmin, isBoardMember, activeTab]);
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
@@ -643,7 +644,7 @@ export default function AdminDashboard({
             </div>
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-3">
-            <Tabs defaultValue="calendar">
+            <Tabs defaultValue="calendar" value={activeTab} onValueChange={setActiveTab}>
               <div className="relative mb-3">
                 {showLeftFade && (
                   <div className="pointer-events-none absolute left-0 top-0 h-full w-8 bg-gradient-to-r from-card to-transparent z-10" />
