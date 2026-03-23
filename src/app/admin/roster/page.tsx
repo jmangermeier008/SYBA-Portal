@@ -358,10 +358,9 @@ export default function MasterRosterPage() {
         updatedAt: new Date().toISOString(),
       });
       toast({ title: "Player Updated" });
-      setEditPlayerDialog(prev => ({ ...prev, open: false }));
+      setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
     } catch (error: any) {
       toast({ title: "Update Failed", description: error.message, variant: 'destructive' });
-    } finally {
       setEditPlayerDialog(prev => ({ ...prev, loading: false }));
     }
   };
@@ -589,7 +588,7 @@ export default function MasterRosterPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                onClick={() => setEditPlayerDialog({
+                                onClick={() => setTimeout(() => setEditPlayerDialog({
                                   open: true,
                                   enrollment: e,
                                   player: p ?? null,
@@ -600,20 +599,20 @@ export default function MasterRosterPage() {
                                     medicalNotes: p?.medicalNotes ?? '',
                                   },
                                   loading: false,
-                                })}
+                                }), 0)}
                               >
                                 <Pencil className="mr-2 h-4 w-4" />
                                 Edit Player
                               </DropdownMenuItem>
                               {canWaive && (
                                 <DropdownMenuItem
-                                  onClick={() => setWaiverDialog({
+                                  onClick={() => setTimeout(() => setWaiverDialog({
                                     open: true,
                                     enrollment: e,
                                     player: p ?? null,
                                     reason: '',
                                     loading: false,
-                                  })}
+                                  }), 0)}
                                 >
                                   <BadgeCheck className="mr-2 h-4 w-4 text-emerald-500" />
                                   Mark as Fee Waived
@@ -627,7 +626,7 @@ export default function MasterRosterPage() {
                               )}
                               <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
-                                onClick={() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false })}
+                                onClick={() => setTimeout(() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false }), 0)}
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Delete Registration
@@ -648,7 +647,7 @@ export default function MasterRosterPage() {
       </main>
 
       {/* Delete Enrollment Dialog */}
-      <AlertDialog open={deleteDialog.open} onOpenChange={(open) => !deleteDialog.loading && setDeleteDialog(prev => ({ ...prev, open }))}>
+      <AlertDialog open={deleteDialog.open} onOpenChange={(open) => { if (!open && !deleteDialog.loading) setDeleteDialog({ open: false, enrollment: null, player: null, loading: false }); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Registration?</AlertDialogTitle>
@@ -673,7 +672,7 @@ export default function MasterRosterPage() {
       </AlertDialog>
 
       {/* Fee Waiver Dialog */}
-      <Dialog open={waiverDialog.open} onOpenChange={(open) => !waiverDialog.loading && setWaiverDialog(prev => ({ ...prev, open }))}>
+      <Dialog open={waiverDialog.open} onOpenChange={(open) => { if (!open && !waiverDialog.loading) setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false }); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Apply Fee Waiver</DialogTitle>
@@ -711,7 +710,7 @@ export default function MasterRosterPage() {
       </Dialog>
 
       {/* Edit Player Dialog */}
-      <Dialog open={editPlayerDialog.open} onOpenChange={(open) => !editPlayerDialog.loading && setEditPlayerDialog(prev => ({ ...prev, open }))}>
+      <Dialog open={editPlayerDialog.open} onOpenChange={(open) => { if (!open && !editPlayerDialog.loading) setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false }); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Player</DialogTitle>
