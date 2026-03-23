@@ -131,7 +131,7 @@ export default function PracticeSlotsAdminPage() {
   const { data: slots, isLoading } = useCollection<PracticeSlot>(slotsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
   const { data: fields } = useCollection<Field>(fieldsQuery);
-  const { data: seasons } = useCollection<Season>(seasonsQuery);
+  const { data: seasons, isLoading: isLoadingSeasons } = useCollection<Season>(seasonsQuery);
 
   const activeSeason = seasons?.[0] ?? null;
 
@@ -417,7 +417,7 @@ export default function PracticeSlotsAdminPage() {
           </div>
           <Button
             onClick={() => { setRecurringStep('configure'); setAddDialog(true); }}
-            disabled={!activeSeason}
+            disabled={isLoadingSeasons || !activeSeason}
             className="rounded-full shadow-lg"
           >
             <Plus className="mr-2 h-4 w-4" /> Add Practice Slots
@@ -425,7 +425,7 @@ export default function PracticeSlotsAdminPage() {
         </header>
 
         {/* No active season warning */}
-        {!activeSeason && (
+        {!isLoadingSeasons && !activeSeason && (
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
             <span>No active season found. Set a season to <strong>Active</strong> in Seasons settings before creating slots.</span>
