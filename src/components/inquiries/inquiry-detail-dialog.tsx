@@ -11,7 +11,7 @@ import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Send, Clock, User } from 'lucide-react';
 import { format } from 'date-fns';
-import { getTopicConfig } from '@/data/inquiry-topics';
+import { getTopicConfig, INQUIRY_STATUS_CONFIG } from '@/data/inquiry-topics';
 import type { Inquiry, InquiryStatus } from '@/data/inquiry-topics';
 
 interface InquiryDetailDialogProps {
@@ -19,12 +19,6 @@ interface InquiryDetailDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }> = {
-  open: { label: 'Open', className: 'bg-blue-100 text-blue-800' },
-  in_progress: { label: 'In Progress', className: 'bg-orange-100 text-orange-800' },
-  resolved: { label: 'Resolved', className: 'bg-green-100 text-green-800' },
-};
 
 export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDetailDialogProps) {
   const { profile } = useUser();
@@ -39,7 +33,7 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
   if (!inquiry) return null;
 
   const topicConfig = getTopicConfig(inquiry.topic);
-  const statusInfo = STATUS_CONFIG[inquiry.status];
+  const statusInfo = INQUIRY_STATUS_CONFIG[inquiry.status];
 
   const doStatusChange = async (newStatus: InquiryStatus) => {
     if (!db) return;
@@ -53,7 +47,7 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
         updates.resolvedAt = new Date().toISOString();
       }
       await updateDoc(doc(db, 'inquiries', inquiry.id), updates);
-      toast({ title: `Status updated to ${STATUS_CONFIG[newStatus].label}` });
+      toast({ title: `Status updated to ${INQUIRY_STATUS_CONFIG[newStatus].label}` });
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Update Failed', description: error.message });
     } finally {

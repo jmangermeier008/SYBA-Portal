@@ -8,15 +8,9 @@ import { useMemoFirebase } from '@/firebase/provider';
 import { collection, query, where, orderBy } from 'firebase/firestore';
 import { Loader2, Inbox, Clock, User, ChevronDown } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { getTopicConfig } from '@/data/inquiry-topics';
-import type { Inquiry, InquiryStatus } from '@/data/inquiry-topics';
+import { getTopicConfig, INQUIRY_STATUS_CONFIG } from '@/data/inquiry-topics';
+import type { Inquiry } from '@/data/inquiry-topics';
 import { cn } from '@/lib/utils';
-
-const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }> = {
-  open: { label: 'Open', className: 'bg-blue-100 text-blue-800' },
-  in_progress: { label: 'In Progress', className: 'bg-orange-100 text-orange-800' },
-  resolved: { label: 'Resolved', className: 'bg-green-100 text-green-800' },
-};
 
 interface InquiryHistoryProps {
   onReplyCount?: (count: number) => void;
@@ -70,7 +64,7 @@ export function InquiryHistory({ onReplyCount }: InquiryHistoryProps = {}) {
     <div className="space-y-3">
       {inquiries.map((inquiry) => {
         const topicConfig = getTopicConfig(inquiry.topic);
-        const statusInfo = STATUS_CONFIG[inquiry.status] ?? STATUS_CONFIG.open;
+        const statusInfo = INQUIRY_STATUS_CONFIG[inquiry.status] ?? INQUIRY_STATUS_CONFIG.open;
         const isExpanded = expandedId === inquiry.id;
 
         return (

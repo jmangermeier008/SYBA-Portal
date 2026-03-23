@@ -55,8 +55,6 @@ export async function GET() {
     ok: keySet && firestoreOk,
     FIREBASE_SERVICE_ACCOUNT_KEY: keySet ? 'set' : 'MISSING',
     firestore: firestoreOk ? 'connected' : `error: ${firestoreError}`,
-    topicMap: INBOUND_TOPIC_MAP,
-    roleOverrideMap: INBOUND_ROLE_OVERRIDE_MAP,
   });
 }
 

@@ -55,7 +55,7 @@ export default function CoachPracticeSlotsPage() {
   // Active season — needed to scope slot queries
   const activeSeasonsQuery = useMemoFirebase(() => {
     if (!db) return null;
-    return query(collection(db, 'seasons'), where('isActive', '==', true), limit(1));
+    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
   }, [db]);
 
   const { data: seasons } = useCollection<Season>(activeSeasonsQuery);

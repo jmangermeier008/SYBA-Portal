@@ -12,8 +12,6 @@ import {
   where,
   collectionGroup,
   runTransaction,
-  updateDoc,
-  arrayRemove,
 } from 'firebase/firestore';
 import { Users } from 'lucide-react';
 import { format } from 'date-fns';
@@ -289,7 +287,10 @@ export default function ParentSchedulesPage() {
           displayName: profile.displayName ?? 'Parent',
           signedUpAt: new Date().toISOString(),
         };
-        transaction.update(slotRef, { signups: [...(current.signups ?? []), newSignup] });
+        transaction.update(slotRef, {
+          signups: [...(current.signups ?? []), newSignup],
+          claimedCount: (current.signups?.length ?? 0) + 1,
+        });
       });
       toast({ title: 'Signed Up!', description: `You're volunteering for the ${slot.gameDate} shift.` });
     } catch (err: any) {
@@ -305,7 +306,14 @@ export default function ParentSchedulesPage() {
     const signup = slot.signups.find(s => s.parentUserId === profile.id);
     if (!signup) return;
     try {
-      await updateDoc(doc(db, 'concessionSlots', slotId), { signups: arrayRemove(signup) });
+      const slotRef = doc(db, 'concessionSlots', slotId);
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(slotRef);
+        if (!snap.exists()) throw new Error('Slot no longer exists.');
+        const current = snap.data() as ConcessionSlot;
+        const filtered = (current.signups ?? []).filter(s => s.parentUserId !== profile.id);
+        transaction.update(slotRef, { signups: filtered, claimedCount: filtered.length });
+      });
       toast({ title: 'Cancelled', description: 'Your concession sign-up has been removed.' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
