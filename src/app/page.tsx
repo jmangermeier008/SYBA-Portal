@@ -21,6 +21,8 @@ function formatDate(dateStr: string) {
 const SPONSOR_IMAGES = [
   '/sponsors/IMG_20250306_144313.png',
   '/sponsors/Screenshot 2026-03-21 at 5.02.42 PM.png',
+  '/sponsors/sponsor3.png',
+  '/sponsors/sponsor4.png',
 ];
 
 interface ActiveSeason {
@@ -108,6 +110,14 @@ export default function Home() {
           </Button>
         </div>
 
+        {/* Contact link */}
+        <p className="text-sm text-muted-foreground">
+          Have a question?{' '}
+          <Link href="/contact" className="text-primary hover:underline font-medium">
+            Contact us
+          </Link>
+        </p>
+
         {/* Registration banner */}
         {registrationBanner && (
           <div className="w-full rounded-xl bg-primary/10 border border-primary/20 px-4 py-2.5 text-sm text-primary font-medium text-center">
@@ -126,9 +136,9 @@ export default function Home() {
                 key={i}
                 src={src}
                 alt={`Sponsor ${i + 1}`}
-                width={160}
-                height={48}
-                className="h-12 w-auto object-contain grayscale hover:grayscale-0 transition-all duration-300"
+                width={240}
+                height={80}
+                className="h-20 w-auto object-contain grayscale hover:grayscale-0 transition-all duration-300"
                 style={{ width: 'auto' }}
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = 'none';
