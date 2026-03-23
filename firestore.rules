@@ -207,7 +207,9 @@ service cloud.firestore {
     // Signed-in users: read all (coaches need to browse available slots).
     // Coaches: may CLAIM an available slot (writes coachId, coachName, teamId,
     //   teamName, teamGameId, status, claimedAt, updatedAt).
+    // Coaches: may REQUEST a slot (available → pending) when fairness rules apply.
     // Coaches: may UNCLAIM their own claimed slot (reverts those same fields).
+    // Approve (pending → claimed) and deny (pending → available) are board-member only.
     // ---------------------------------------------------------------------------
 
     match /practiceSlots/{slotId} {
@@ -222,6 +224,14 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['coachId', 'coachName', 'teamId', 'teamName',
                      'status', 'claimedAt', 'teamGameId', 'updatedAt'])) ||
+        // PENDING REQUEST: available → pending (coach submits for admin review)
+        (isCoach() &&
+         resource.data.status == 'available' &&
+         request.resource.data.status == 'pending' &&
+         request.resource.data.pendingCoachId == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'pendingCoachId', 'pendingCoachName', 'pendingTeamId',
+                     'pendingTeamName', 'pendingRequestedAt', 'pendingReason', 'updatedAt'])) ||
         // UNCLAIM: coach releases their own claimed slot
         (isCoach() &&
          resource.data.status == 'claimed' &&

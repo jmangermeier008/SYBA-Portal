@@ -85,6 +85,7 @@ export interface Team {
   coachIds: string[];    // Supports multiple coaches per team
   player_ids?: string[]; // Legacy field — kept for backward compatibility
   createdAt: string;
+  practiceOptOut?: boolean; // When true, excluded from fairness rotation count
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +180,7 @@ export interface ConcessionClaim {
 // Practice Slots  (collection: practiceSlots)
 // ---------------------------------------------------------------------------
 
-export type PracticeSlotStatus = 'available' | 'claimed' | 'cancelled';
+export type PracticeSlotStatus = 'available' | 'claimed' | 'pending' | 'cancelled';
 
 /** A practice time window on a field, available for division-eligible teams to claim. */
 export interface PracticeSlot {
@@ -200,6 +201,13 @@ export interface PracticeSlot {
   claimedAt?: string;
   teamGameId?: string;   // Doc ID written to teams/{teamId}/games/{teamGameId} — used for cleanup on cancel/unclaim
   notes?: string;
+  // Populated ONLY when status === 'pending' (awaiting admin approval); cleared on approve/deny:
+  pendingTeamId?: string;
+  pendingTeamName?: string;
+  pendingCoachId?: string;
+  pendingCoachName?: string;
+  pendingRequestedAt?: string;
+  pendingReason?: string; // Human-readable reason why approval is needed
   createdBy: string;
   createdAt: string;
   updatedAt?: string;
@@ -215,6 +223,8 @@ export type NotificationType =
   | 'practiceSlotCancelled'
   | 'practiceSlotChanged'
   | 'practiceSlotClaimed'
+  | 'practiceSlotRequestApproved'
+  | 'practiceSlotRequestDenied'
   | 'concessionSignupConfirmed'
   | 'concessionSignupCancelled';
 

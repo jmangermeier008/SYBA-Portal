@@ -111,6 +111,14 @@
       "collectionGroup": "practiceSlots",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "pendingCoachId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practiceSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "seasonId", "order": "ASCENDING" },
         { "fieldPath": "divisionIds", "arrayConfig": "CONTAINS" },
         { "fieldPath": "status", "order": "ASCENDING" },

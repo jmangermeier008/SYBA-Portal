@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import {
   collection, doc, query, where, orderBy, limit,
-  runTransaction, Timestamp,
+  runTransaction, Timestamp, getDocs,
 } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,7 +19,7 @@ import type { PracticeSlot } from '@/types/scheduling';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Team { id: string; name: string; divisionId?: string; seasonId?: string; }
+interface Team { id: string; name: string; divisionId?: string; seasonId?: string; practiceOptOut?: boolean; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -72,10 +72,21 @@ export default function CoachPracticeSlotsPage() {
     );
   }, [db, user?.uid]);
 
+  // Slots this coach has submitted for admin approval (status === 'pending')
+  const myPendingQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(
+      collection(db, 'practiceSlots'),
+      where('pendingCoachId', '==', user.uid),
+      orderBy('date', 'asc')
+    );
+  }, [db, user?.uid]);
+
   const { data: available, isLoading: loadingAvailable } = useCollection<PracticeSlot>(availableQuery);
   const { data: myClaimed, isLoading: loadingClaimed } = useCollection<PracticeSlot>(myClaimedQuery);
+  const { data: myPending, isLoading: loadingPending } = useCollection<PracticeSlot>(myPendingQuery);
 
-  const loadingSlots = loadingAvailable || loadingClaimed;
+  const loadingSlots = loadingAvailable || loadingClaimed || loadingPending;
 
   // ── Claim a slot (also writes to teams/{teamId}/games) ────────────────────
 
@@ -83,50 +94,125 @@ export default function CoachPracticeSlotsPage() {
     if (!db || !user || !profile || !activeTeam) return;
     setClaimingId(slot.id);
     try {
+      // Phase 1 — Same-day check (client-side, instant)
+      const sameDay = [...(myClaimed ?? []), ...(myPending ?? [])]
+        .some(s => s.date === slot.date && s.id !== slot.id);
+      if (sameDay) {
+        toast({
+          title: 'Already Booked This Day',
+          description: `${activeTeam.name} already has a practice slot on ${format(parseISO(slot.date), 'MMM d')}. Only one slot per day is allowed.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Phase 2 — Fairness pre-check (one-shot reads outside transaction)
+      let needsApproval = false;
+      if (activeTeam.divisionId) {
+        const [claimedSlotsSnap, divTeamsSnap] = await Promise.all([
+          getDocs(query(
+            collection(db, 'practiceSlots'),
+            where('divisionIds', 'array-contains', activeTeam.divisionId),
+            where('status', '==', 'claimed')
+          )),
+          getDocs(query(
+            collection(db, 'teams'),
+            where('divisionId', '==', activeTeam.divisionId)
+          )),
+        ]);
+
+        // Count claimed slots per team in this division
+        const claimedByTeam: Record<string, number> = {};
+        claimedSlotsSnap.docs.forEach(d => {
+          const tid = d.data().teamId as string | undefined;
+          if (tid) claimedByTeam[tid] = (claimedByTeam[tid] ?? 0) + 1;
+        });
+
+        // Only consider teams participating in the fairness rotation (not opted out)
+        const participatingTeams = divTeamsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Team))
+          .filter(t => !t.practiceOptOut);
+
+        const myTeamCount = claimedByTeam[activeTeam.id] ?? 0;
+        const anyOtherHasZero = participatingTeams.some(
+          t => t.id !== activeTeam.id && (claimedByTeam[t.id] ?? 0) === 0
+        );
+        needsApproval = myTeamCount >= 1 && anyOtherHasZero;
+      }
+
+      // Phase 3 — Transaction (branches on needsApproval)
       const slotRef = doc(db, 'practiceSlots', slot.id);
-      const teamGameId = crypto.randomUUID();
-      const teamGameRef = doc(db, 'teams', activeTeam.id, 'games', teamGameId);
-      // Build combined ISO dateTime for the team subcollection format
-      const dateTime = `${slot.date}T${slot.startTime}:00`;
 
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(slotRef);
-        if (!snap.exists()) throw new Error('This slot no longer exists.');
-        const current = snap.data() as PracticeSlot;
-        if (current.status !== 'available') {
-          throw new Error('This slot was just claimed by someone else. Please pick another.');
-        }
+      if (needsApproval) {
+        // Submit a pending request — admin will approve or deny
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(slotRef);
+          if (!snap.exists()) throw new Error('This slot no longer exists.');
+          if (snap.data()?.status !== 'available') {
+            throw new Error('This slot was just claimed by someone else. Please pick another.');
+          }
 
-        tx.update(slotRef, {
-          coachId: user.uid,
-          coachName: profile.displayName ?? 'Coach',
-          teamId: activeTeam.id,
-          teamName: activeTeam.name,
-          teamGameId,
-          status: 'claimed',
-          claimedAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
+          tx.update(slotRef, {
+            status: 'pending',
+            pendingTeamId: activeTeam.id,
+            pendingTeamName: activeTeam.name,
+            pendingCoachId: user.uid,
+            pendingCoachName: profile.displayName ?? 'Coach',
+            pendingRequestedAt: Timestamp.now(),
+            pendingReason: 'Fairness: other teams in your division have not yet claimed a slot.',
+            updatedAt: Timestamp.now(),
+          });
         });
 
-        // Create a practice event in the team subcollection so it shows on calendars
-        tx.set(teamGameRef, {
-          id: teamGameId,
-          teamId: activeTeam.id,
-          seasonId: activeTeam.seasonId ?? slot.seasonId ?? '',
-          type: 'Practice',     // capitalized — team subcollection convention
-          dateTime,             // combined ISO string — team subcollection convention
-          location: slot.fieldName,
-          fieldId: slot.fieldId,
-          cancelled: false,
-          practiceSlotId: slot.id,
-          coachUserId: user.uid,
+        toast({
+          title: 'Request Submitted',
+          description: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been sent to the board for review. You'll be notified when it's approved.`,
         });
-      });
+      } else {
+        // Direct claim — no fairness conflict
+        const teamGameId = crypto.randomUUID();
+        const teamGameRef = doc(db, 'teams', activeTeam.id, 'games', teamGameId);
+        const dateTime = `${slot.date}T${slot.startTime}:00`;
 
-      toast({
-        title: 'Practice Slot Claimed',
-        description: `${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} is confirmed. It will appear on your team calendar.`,
-      });
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(slotRef);
+          if (!snap.exists()) throw new Error('This slot no longer exists.');
+          const current = snap.data() as PracticeSlot;
+          if (current.status !== 'available') {
+            throw new Error('This slot was just claimed by someone else. Please pick another.');
+          }
+
+          tx.update(slotRef, {
+            coachId: user.uid,
+            coachName: profile.displayName ?? 'Coach',
+            teamId: activeTeam.id,
+            teamName: activeTeam.name,
+            teamGameId,
+            status: 'claimed',
+            claimedAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          });
+
+          // Create a practice event in the team subcollection so it shows on calendars
+          tx.set(teamGameRef, {
+            id: teamGameId,
+            teamId: activeTeam.id,
+            seasonId: activeTeam.seasonId ?? slot.seasonId ?? '',
+            type: 'Practice',     // capitalized — team subcollection convention
+            dateTime,             // combined ISO string — team subcollection convention
+            location: slot.fieldName,
+            fieldId: slot.fieldId,
+            cancelled: false,
+            practiceSlotId: slot.id,
+            coachUserId: user.uid,
+          });
+        });
+
+        toast({
+          title: 'Practice Slot Claimed',
+          description: `${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} is confirmed. It will appear on your team calendar.`,
+        });
+      }
     } catch (err: any) {
       toast({ title: 'Could Not Claim Slot', description: err.message, variant: 'destructive' });
     } finally {
@@ -219,7 +305,10 @@ export default function CoachPracticeSlotsPage() {
     );
   }
 
-  const hasAnything = (myClaimed ?? []).length > 0 || (available ?? []).length > 0;
+  const hasAnything =
+    (myClaimed ?? []).length > 0 ||
+    (myPending ?? []).length > 0 ||
+    (available ?? []).length > 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -273,6 +362,24 @@ export default function CoachPracticeSlotsPage() {
               </section>
             )}
 
+            {/* Pending approval slots */}
+            {(myPending ?? []).length > 0 && (
+              <section>
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  Pending Admin Approval
+                </h2>
+                <div className="space-y-2">
+                  {(myPending ?? []).map(slot => (
+                    <SlotCard
+                      key={slot.id}
+                      slot={slot}
+                      variant="pending"
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Available slots */}
             {(available ?? []).length > 0 && (
               <section>
@@ -311,7 +418,7 @@ function SlotCard({
   onAction,
 }: {
   slot: PracticeSlot;
-  variant: 'available' | 'claimed';
+  variant: 'available' | 'claimed' | 'pending';
   actionLabel?: string;
   actionLoading?: boolean;
   onAction?: () => void;
@@ -319,10 +426,12 @@ function SlotCard({
   const colors = {
     available: 'bg-green-50 border-green-100',
     claimed: 'bg-blue-50 border-blue-100',
+    pending: 'bg-amber-50 border-amber-200',
   };
   const iconColors = {
     available: 'bg-green-100 text-green-600',
     claimed: 'bg-blue-100 text-blue-600',
+    pending: 'bg-amber-100 text-amber-600',
   };
 
   return (
@@ -337,6 +446,11 @@ function SlotCard({
             {variant === 'claimed' && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium flex items-center gap-1">
                 <CheckCircle2 className="h-3 w-3" /> Your Slot
+              </span>
+            )}
+            {variant === 'pending' && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Awaiting Approval
               </span>
             )}
           </div>
@@ -354,6 +468,9 @@ function SlotCard({
             </span>
             {slot.notes && <span className="text-xs text-muted-foreground italic">{slot.notes}</span>}
           </div>
+          {variant === 'pending' && slot.pendingReason && (
+            <p className="text-xs text-amber-700 mt-1">{slot.pendingReason}</p>
+          )}
         </div>
       </div>
 

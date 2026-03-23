@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import {
   collection, doc, query, orderBy, where, limit,
-  Timestamp, writeBatch,
+  Timestamp, writeBatch, runTransaction, deleteField, updateDoc,
 } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import {
   Dumbbell, Plus, Trash2, Loader2, Lock, CalendarDays, Clock,
-  MapPin, XCircle, ChevronRight, AlertTriangle,
+  MapPin, XCircle, ChevronRight, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -32,12 +32,12 @@ import type { PracticeSlot } from '@/types/scheduling';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Team { id: string; name: string; divisionId?: string; }
+interface Team { id: string; name: string; divisionId?: string; practiceOptOut?: boolean; }
 interface Field { id: string; name: string; }
 interface Division { id: string; name: string; }
 interface Season { id: string; name: string; status: string; startDate?: string; endDate?: string; }
 
-type FilterStatus = 'all' | 'available' | 'claimed' | 'cancelled';
+type FilterStatus = 'all' | 'available' | 'claimed' | 'pending' | 'cancelled';
 
 const WEEKDAYS = [
   { label: 'Sun', value: 0 },
@@ -130,6 +130,8 @@ export default function PracticeSlotsAdminPage() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: PracticeSlot | null; isDeleting: boolean }>({
     open: false, slot: null, isDeleting: false,
   });
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [denyingId, setDenyingId] = useState<string | null>(null);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -180,6 +182,10 @@ export default function PracticeSlotsAdminPage() {
     (acc, s) => { acc[s.status ?? 'available'] = (acc[s.status ?? 'available'] ?? 0) + 1; return acc; },
     {} as Record<string, number>
   );
+
+  const pendingSlots = useMemo(() =>
+    (slots ?? []).filter(s => s.status === 'pending'),
+  [slots]);
 
   // Distribution tab data
   const distributionData = useMemo(() => {
@@ -412,6 +418,125 @@ export default function PracticeSlotsAdminPage() {
     }));
   };
 
+  const handleApprove = async (slot: PracticeSlot) => {
+    if (!db) return;
+    setApprovingId(slot.id);
+    try {
+      const teamGameId = crypto.randomUUID();
+      const slotRef = doc(db, 'practiceSlots', slot.id);
+
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists() || snap.data()?.status !== 'pending') {
+          throw new Error('This request is no longer pending.');
+        }
+
+        const dateTime = `${slot.date}T${slot.startTime}:00`;
+        const teamId = slot.pendingTeamId!;
+        const teamGameRef = doc(db, 'teams', teamId, 'games', teamGameId);
+
+        tx.update(slotRef, {
+          status: 'claimed',
+          teamId,
+          teamName: slot.pendingTeamName ?? '',
+          coachId: slot.pendingCoachId ?? '',
+          coachName: slot.pendingCoachName ?? '',
+          claimedAt: Timestamp.now(),
+          teamGameId,
+          pendingTeamId: deleteField(),
+          pendingTeamName: deleteField(),
+          pendingCoachId: deleteField(),
+          pendingCoachName: deleteField(),
+          pendingRequestedAt: deleteField(),
+          pendingReason: deleteField(),
+          updatedAt: Timestamp.now(),
+        });
+
+        tx.set(teamGameRef, {
+          id: teamGameId,
+          teamId,
+          seasonId: slot.seasonId ?? '',
+          type: 'Practice',
+          dateTime,
+          location: slot.fieldName,
+          fieldId: slot.fieldId,
+          cancelled: false,
+          practiceSlotId: slot.id,
+          coachUserId: slot.pendingCoachId ?? '',
+        });
+
+        tx.set(doc(db, 'notifications', crypto.randomUUID()), {
+          userId: slot.pendingCoachId,
+          type: 'practiceSlotRequestApproved',
+          title: 'Practice Slot Approved',
+          body: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been approved. It will appear on your team calendar.`,
+          relatedDocId: slot.id,
+          relatedDocType: 'practiceSlot',
+          read: false,
+          createdAt: Timestamp.now(),
+        });
+      });
+
+      toast({ title: 'Approved', description: 'The coach has been notified.' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleDeny = async (slot: PracticeSlot) => {
+    if (!db) return;
+    setDenyingId(slot.id);
+    try {
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, 'practiceSlots', slot.id), {
+        status: 'available',
+        pendingTeamId: deleteField(),
+        pendingTeamName: deleteField(),
+        pendingCoachId: deleteField(),
+        pendingCoachName: deleteField(),
+        pendingRequestedAt: deleteField(),
+        pendingReason: deleteField(),
+        updatedAt: Timestamp.now(),
+      });
+
+      batch.set(doc(db, 'notifications', crypto.randomUUID()), {
+        userId: slot.pendingCoachId,
+        type: 'practiceSlotRequestDenied',
+        title: 'Practice Slot Request Not Approved',
+        body: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} was not approved. The slot is available again for other teams.`,
+        relatedDocId: slot.id,
+        relatedDocType: 'practiceSlot',
+        read: false,
+        createdAt: Timestamp.now(),
+      });
+
+      await batch.commit();
+      toast({ title: 'Request Denied', description: 'The coach has been notified and the slot is available again.' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setDenyingId(null);
+    }
+  };
+
+  const handleToggleOptOut = async (team: Team, value: boolean) => {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'teams', team.id), { practiceOptOut: value });
+      toast({
+        title: value ? 'Team opted out' : 'Team re-enrolled',
+        description: value
+          ? `${team.name} is excluded from the fairness rotation.`
+          : `${team.name} is back in the fairness rotation.`,
+      });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+  };
+
   // ── Access guard ──────────────────────────────────────────────────────────────
 
   if (loadingUser) {
@@ -471,10 +596,11 @@ export default function PracticeSlotsAdminPage() {
         )}
 
         {/* Summary Counts */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           {[
             { key: 'available', label: 'Available', color: 'text-green-600 bg-green-50 border-green-100' },
             { key: 'claimed',   label: 'Claimed',   color: 'text-blue-600 bg-blue-50 border-blue-100' },
+            { key: 'pending',   label: 'Pending',   color: 'text-amber-600 bg-amber-50 border-amber-200' },
             { key: 'cancelled', label: 'Cancelled', color: 'text-red-600 bg-red-50 border-red-100' },
           ].map(({ key, label, color }) => (
             <button
@@ -496,6 +622,14 @@ export default function PracticeSlotsAdminPage() {
         <Tabs defaultValue="slots">
           <TabsList className="mb-4">
             <TabsTrigger value="slots">Slot List</TabsTrigger>
+            <TabsTrigger value="pending" className="relative">
+              Pending Requests
+              {pendingSlots.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none h-4 min-w-[1rem] px-1">
+                  {pendingSlots.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="distribution">Team Distribution</TabsTrigger>
           </TabsList>
 
@@ -532,6 +666,78 @@ export default function PracticeSlotsAdminPage() {
                     onCancel={() => handleInitiateCancel(slot)}
                     onDelete={() => handleInitiateDelete(slot)}
                   />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Pending Requests Tab ──────────────────────────────────────────── */}
+          <TabsContent value="pending">
+            {pendingSlots.length === 0 ? (
+              <Card className="border-none shadow-md border-dashed">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <CheckCircle2 className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground font-medium">No pending requests</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    When coaches submit slot requests that need review, they'll appear here.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {pendingSlots.map(slot => (
+                  <div
+                    key={slot.id}
+                    className="flex items-center justify-between rounded-xl px-4 py-3 gap-3 border bg-amber-50 border-amber-200"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="p-2 rounded-lg shrink-0 bg-amber-100 text-amber-600">
+                        <Dumbbell className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold">{slot.fieldName}</p>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 font-medium">
+                            {slot.pendingTeamName ?? 'Unknown Team'} · {slot.pendingCoachName ?? 'Coach'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <CalendarDays className="h-3 w-3" />
+                            {format(parseISO(slot.date), 'EEE, MMM d')}
+                          </span>
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {formatTime(slot.startTime)} – {formatTime(slot.endTime)}
+                          </span>
+                        </div>
+                        {slot.pendingReason && (
+                          <p className="text-xs text-amber-700 mt-1">{slot.pendingReason}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl border-destructive text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDeny(slot)}
+                        disabled={denyingId === slot.id || approvingId === slot.id}
+                      >
+                        {denyingId === slot.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                        Deny
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => handleApprove(slot)}
+                        disabled={approvingId === slot.id || denyingId === slot.id}
+                      >
+                        {approvingId === slot.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                        Approve
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -574,24 +780,39 @@ export default function PracticeSlotsAdminPage() {
                     <div className="space-y-1.5">
                       {divTeams.map(team => {
                         const count = distributionData.claimedByTeam[team.id] ?? 0;
+                        const isOptedOut = !!(team as Team & { practiceOptOut?: boolean }).practiceOptOut;
                         return (
                           <div
                             key={team.id}
                             className={cn(
                               'flex items-center justify-between rounded-xl border px-4 py-3',
-                              count === 0
-                                ? 'bg-red-50 border-red-100'
+                              isOptedOut ? 'bg-muted/40 border-border opacity-60'
+                                : count === 0 ? 'bg-red-50 border-red-100'
                                 : 'bg-card border-border'
                             )}
                           >
                             <span className="text-sm font-medium">{team.name}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-muted-foreground">
-                                {count === 0 ? 'No practices' : `${count} ${count === 1 ? 'practice' : 'practices'}`}
-                              </span>
-                              {count === 0 && (
-                                <Badge variant="destructive" className="text-xs">No slots claimed</Badge>
+                            <div className="flex items-center gap-3">
+                              {!isOptedOut && (
+                                <span className="text-sm text-muted-foreground">
+                                  {count === 0 ? 'No practices' : `${count} ${count === 1 ? 'practice' : 'practices'}`}
+                                </span>
                               )}
+                              {isOptedOut ? (
+                                <Badge variant="secondary" className="text-xs">Opted Out</Badge>
+                              ) : count === 0 ? (
+                                <Badge variant="destructive" className="text-xs">No slots claimed</Badge>
+                              ) : null}
+                              <div className="flex items-center gap-1.5">
+                                <Switch
+                                  checked={!isOptedOut}
+                                  onCheckedChange={val => handleToggleOptOut(team, !val)}
+                                  className="scale-75"
+                                />
+                                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                  {isOptedOut ? 'Opt back in' : 'Opt out'}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         );
@@ -1012,20 +1233,22 @@ function SlotRow({
 }) {
   const isCancelled = slot.status === 'cancelled';
   const isClaimed = slot.status === 'claimed';
+  const isPending = slot.status === 'pending';
 
   return (
     <div className={cn(
       'flex items-center justify-between rounded-xl px-4 py-3 gap-3 border',
       isCancelled ? 'bg-gray-50 border-gray-200 opacity-60'
         : isClaimed ? 'bg-blue-50 border-blue-100'
+        : isPending ? 'bg-amber-50 border-amber-200'
         : 'bg-green-50 border-green-100'
     )}>
       <div className="flex items-center gap-3 min-w-0">
         <div className={cn('p-2 rounded-lg shrink-0',
-          isCancelled ? 'bg-gray-100' : isClaimed ? 'bg-blue-100' : 'bg-green-100'
+          isCancelled ? 'bg-gray-100' : isClaimed ? 'bg-blue-100' : isPending ? 'bg-amber-100' : 'bg-green-100'
         )}>
           <Dumbbell className={cn('h-4 w-4',
-            isCancelled ? 'text-gray-400' : isClaimed ? 'text-blue-600' : 'text-green-600'
+            isCancelled ? 'text-gray-400' : isClaimed ? 'text-blue-600' : isPending ? 'text-amber-600' : 'text-green-600'
           )} />
         </div>
         <div className="min-w-0">
@@ -1034,6 +1257,10 @@ function SlotRow({
             {isClaimed ? (
               <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-blue-100 text-blue-700 border-blue-200">
                 Claimed · {slot.teamName}{slot.coachName ? ` · ${slot.coachName}` : ''}
+              </span>
+            ) : isPending ? (
+              <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-amber-100 text-amber-700 border-amber-300">
+                Pending · {slot.pendingTeamName}{slot.pendingCoachName ? ` · ${slot.pendingCoachName}` : ''}
               </span>
             ) : isCancelled ? (
               <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-red-50 text-red-600 border-red-200">
@@ -1074,10 +1301,12 @@ function SlotRow({
               <XCircle className="h-4 w-4" />
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={onDelete}
-            className="text-muted-foreground hover:text-destructive h-8 w-8 p-0" title="Delete slot">
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {!isPending && (
+            <Button size="sm" variant="ghost" onClick={onDelete}
+              className="text-muted-foreground hover:text-destructive h-8 w-8 p-0" title="Delete slot">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       )}
 
