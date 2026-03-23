@@ -60,6 +60,18 @@ export interface Field {
   createdAt: string;
 }
 
+/** A single date on which the entire sports complex is closed (weather, events, etc.). */
+export interface ComplexClosure {
+  date: string;    // YYYY-MM-DD
+  reason?: string;
+}
+
+/** Shape of the `settings/complexClosures` singleton Firestore document. */
+export interface ComplexClosuresDocument {
+  closures: ComplexClosure[];
+  updatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Teams
 // ---------------------------------------------------------------------------
@@ -269,7 +281,7 @@ export interface Player {
 // Calendar Events  (normalized type for the unified calendar view)
 // ---------------------------------------------------------------------------
 
-export type CalendarEventType = 'game' | 'practice' | 'concession';
+export type CalendarEventType = 'game' | 'practice' | 'concession' | 'closure';
 
 /**
  * Normalized unified event type consumed by LeagueCalendar.
@@ -285,7 +297,8 @@ export interface CalendarEvent {
   title: string;        // pill label
   status: string;       // 'scheduled' | 'cancelled' | 'completed' | 'claimed' | 'active' etc.
   fieldName?: string;
-  sourceType: 'global-game' | 'team-game' | 'practice-slot' | 'concession-slot';
+  fieldId?: string;     // Firestore fields/{id} — used to cross-reference closures
+  sourceType: 'global-game' | 'team-game' | 'practice-slot' | 'concession-slot' | 'field-closure' | 'complex-closure';
   sourceId: string;     // Firestore doc ID
   // Game-specific
   homeTeamName?: string;

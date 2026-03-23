@@ -283,5 +283,14 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isBoardMember();
     }
+
+    // ---------------------------------------------------------------------------
+    // Settings — singleton documents (e.g. complexClosures)
+    // ---------------------------------------------------------------------------
+
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isBoardMember();
+    }
   }
 }

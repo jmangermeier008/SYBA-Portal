@@ -2,11 +2,11 @@
 
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { useFirestore, useMemoFirebase, useCollection, useDoc } from '@/firebase';
+import { collection, doc } from 'firebase/firestore';
 import { CalendarDays } from 'lucide-react';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot } from '@/types/scheduling';
+import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument } from '@/types/scheduling';
 
 // ─── Normalizers ───────────────────────────────────────────────────────────────
 
@@ -66,6 +66,35 @@ function normalizeConcessionSlot(s: ConcessionSlot): CalendarEvent {
   };
 }
 
+function normalizeFieldClosure(field: Field, closure: MaintenanceClosure): CalendarEvent {
+  return {
+    id: `closure-field-${field.id}-${closure.date}`,
+    eventType: 'closure',
+    date: closure.date,
+    startTime: '00:00',
+    title: closure.reason ? `${field.name}: ${closure.reason}` : `${field.name} Closed`,
+    status: 'active',
+    fieldName: field.name,
+    fieldId: field.id,
+    sourceType: 'field-closure',
+    sourceId: field.id,
+  };
+}
+
+function normalizeComplexClosure(closure: ComplexClosure): CalendarEvent {
+  return {
+    id: `closure-complex-${closure.date}`,
+    eventType: 'closure',
+    date: closure.date,
+    startTime: '00:00',
+    title: closure.reason || 'Complex Closed',
+    status: 'active',
+    fieldName: 'All Fields',
+    sourceType: 'complex-closure',
+    sourceId: 'complex',
+  };
+}
+
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AdminCalendarPage() {
@@ -88,9 +117,21 @@ export default function AdminCalendarPage() {
     return collection(db, 'concessionSlots');
   }, [db]);
 
+  const fieldsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, 'fields');
+  }, [db]);
+
+  const complexClosuresRef = useMemoFirebase(() => {
+    if (!db) return null;
+    return doc(db, 'settings', 'complexClosures');
+  }, [db]);
+
   const { data: games, isLoading: loadingGames } = useCollection<Game>(gamesQuery);
   const { data: practiceSlots, isLoading: loadingPractice } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: concessionSlots, isLoading: loadingConcessions } = useCollection<ConcessionSlot>(concessionSlotsQuery);
+  const { data: fields } = useCollection<Field>(fieldsQuery);
+  const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(complexClosuresRef);
 
   // ── Normalize to CalendarEvent[] ────────────────────────────────────────────
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
@@ -98,8 +139,12 @@ export default function AdminCalendarPage() {
     (games ?? []).forEach(g => events.push(normalizeGame(g)));
     (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s)));
     (concessionSlots ?? []).forEach(s => events.push(normalizeConcessionSlot(s)));
+    (fields ?? []).forEach(f =>
+      (f.maintenanceClosures ?? []).forEach(c => events.push(normalizeFieldClosure(f, c)))
+    );
+    (complexClosuresDoc?.closures ?? []).forEach(c => events.push(normalizeComplexClosure(c)));
     return events;
-  }, [games, practiceSlots, concessionSlots]);
+  }, [games, practiceSlots, concessionSlots, fields, complexClosuresDoc]);
 
   const isLoading = loadingGames || loadingPractice || loadingConcessions;
 

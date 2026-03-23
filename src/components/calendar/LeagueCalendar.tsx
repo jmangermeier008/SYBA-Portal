@@ -41,12 +41,14 @@ const pillColors: Record<CalendarEventType, string> = {
   game: 'bg-primary text-white',
   practice: 'bg-green-600 text-white',
   concession: 'bg-amber-500 text-white',
+  closure: 'bg-red-600 text-white',
 };
 
 const dotColors: Record<CalendarEventType, string> = {
   game: 'bg-primary',
   practice: 'bg-green-600',
   concession: 'bg-amber-500',
+  closure: 'bg-red-600',
 };
 
 // Filter keys are plural; map them to CalendarEventType for color lookups
@@ -132,9 +134,31 @@ function EventPopoverContent({
       ? 'League Game'
       : event.eventType === 'practice'
       ? 'Practice'
+      : event.eventType === 'closure'
+      ? (event.sourceType === 'complex-closure' ? 'Complex Closure' : 'Field Closure')
       : 'Concession Shift';
 
   const isCancelled = event.status === 'cancelled';
+
+  // Closure events are read-only — show a simple card with no action buttons
+  if (event.eventType === 'closure') {
+    return (
+      <div className="overflow-hidden rounded-lg">
+        <div className={cn('px-4 py-3', pillColors.closure)}>
+          <p className="font-semibold text-sm leading-tight">{event.title}</p>
+          <p className="text-xs opacity-80 mt-0.5">{typeLabel}</p>
+        </div>
+        <div className="px-4 py-3 space-y-1.5">
+          {event.fieldName && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5 shrink-0" />
+              <span>{event.fieldName}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-lg">
