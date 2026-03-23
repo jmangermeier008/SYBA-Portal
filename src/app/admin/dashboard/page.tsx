@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -188,6 +188,14 @@ export default function AdminDashboard({
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: true });
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [showLeftFade, setShowLeftFade] = useState(false);
+
+  const handleTabScroll = useCallback(() => {
+    if (tabScrollRef.current) {
+      setShowLeftFade(tabScrollRef.current.scrollLeft > 4);
+    }
+  }, []);
 
   const todayISO = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const nextWeekISO = useMemo(() => format(addDays(new Date(), 7), 'yyyy-MM-dd'), []);
@@ -637,27 +645,50 @@ export default function AdminDashboard({
           <CardContent className="px-4 pb-4 pt-3">
             <Tabs defaultValue="calendar">
               <div className="relative mb-3">
-                <div className="overflow-x-auto -mx-4 px-4">
-                <TabsList className="h-8 w-max">
-                  <TabsTrigger value="calendar" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                    <Trophy className="h-3.5 w-3.5" />
-                    Calendar
-                  </TabsTrigger>
-                  <TabsTrigger value="games" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                    <CalendarDays className="h-3.5 w-3.5" />
-                    Games & Practices
-                  </TabsTrigger>
-                  <TabsTrigger value="concessions" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                    <ShoppingCart className="h-3.5 w-3.5" />
-                    Concessions
-                  </TabsTrigger>
-                  <TabsTrigger value="meetings" className="text-xs px-3 h-7 flex items-center gap-1.5">
-                    <Inbox className="h-3.5 w-3.5" />
-                    Board Meetings
-                  </TabsTrigger>
-                </TabsList>
+                {showLeftFade && (
+                  <div className="pointer-events-none absolute left-0 top-0 h-full w-8 bg-gradient-to-r from-card to-transparent z-10" />
+                )}
+                <div
+                  ref={tabScrollRef}
+                  onScroll={handleTabScroll}
+                  className="overflow-x-auto -mx-4 px-4 no-scrollbar scroll-smooth"
+                >
+                  <TabsList className="h-8 w-max">
+                    <TabsTrigger
+                      value="calendar"
+                      className="text-xs px-3 h-7 flex items-center gap-1.5"
+                      onClick={(e) => (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
+                    >
+                      <Trophy className="h-3.5 w-3.5" />
+                      Calendar
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="games"
+                      className="text-xs px-3 h-7 flex items-center gap-1.5"
+                      onClick={(e) => (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
+                    >
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      Games & Practices
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="concessions"
+                      className="text-xs px-3 h-7 flex items-center gap-1.5"
+                      onClick={(e) => (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
+                    >
+                      <ShoppingCart className="h-3.5 w-3.5" />
+                      Concessions
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="meetings"
+                      className="text-xs px-3 h-7 flex items-center gap-1.5"
+                      onClick={(e) => (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
+                    >
+                      <Inbox className="h-3.5 w-3.5" />
+                      Board Meetings
+                    </TabsTrigger>
+                  </TabsList>
                 </div>
-                <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-background to-transparent" />
+                <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-card to-transparent" />
               </div>
 
               {/* Tab: Games & Practices */}
