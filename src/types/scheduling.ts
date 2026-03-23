@@ -226,12 +226,14 @@ export type NotificationType =
   | 'practiceSlotRequestApproved'
   | 'practiceSlotRequestDenied'
   | 'concessionSignupConfirmed'
-  | 'concessionSignupCancelled';
+  | 'concessionSignupCancelled'
+  | 'announcement';
 
 export type NotificationRelatedDocType =
   | 'game'
   | 'concessionSlot'
-  | 'practiceSlot';
+  | 'practiceSlot'
+  | 'announcement';
 
 /** An in-app notification written to the notifications collection when league events occur. */
 export interface Notification {

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, doc, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, doc, addDoc, deleteDoc, getDocs, writeBatch, where, Timestamp } from 'firebase/firestore';
 import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -48,13 +48,36 @@ export default function AdminAnnouncementsPage() {
     if (!form.title.trim() || !form.body.trim() || !db) return;
     setSaving(true);
     try {
-      await addDoc(collection(db, 'announcements'), {
+      const newDocRef = await addDoc(collection(db, 'announcements'), {
         title: form.title.trim(),
         body: form.body.trim(),
         pinned: form.pinned,
         publishedAt: new Date().toISOString(),
         publishedBy: profile?.displayName || 'Admin',
       });
+
+      // Fan-out: create a notification for every coach and parent
+      const usersSnap = await getDocs(
+        query(collection(db, 'userProfiles'), where('roles', 'array-contains-any', ['Coach', 'Parent']))
+      );
+      if (!usersSnap.empty) {
+        const notifBatch = writeBatch(db);
+        const bodyPreview = form.body.length > 120 ? form.body.slice(0, 120) + '…' : form.body;
+        usersSnap.forEach(userDoc => {
+          notifBatch.set(doc(db, 'notifications', crypto.randomUUID()), {
+            userId: userDoc.id,
+            type: 'announcement',
+            title: form.title.trim(),
+            body: bodyPreview,
+            relatedDocId: newDocRef.id,
+            relatedDocType: 'announcement',
+            read: false,
+            createdAt: Timestamp.now(),
+          });
+        });
+        await notifBatch.commit();
+      }
+
       toast({ title: 'Announcement Published' });
       setAddOpen(false);
       setForm({ title: '', body: '', pinned: false });

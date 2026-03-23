@@ -7,7 +7,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
-import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck } from 'lucide-react';
+import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -97,6 +97,13 @@ export default function CoachDashboard() {
   const attendingCount = rsvps?.filter((r: any) => r.status === 'Attending').length ?? 0;
   const totalRsvpCount = rsvps?.length ?? 0;
   const attendanceRate = totalRsvpCount > 0 ? Math.round((attendingCount / totalRsvpCount) * 100) : null;
+
+  // Latest announcements
+  const announcementsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(2));
+  }, [db]);
+  const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string }>(announcementsQuery);
 
   const calendarEvents = useMemo((): CalendarEvent[] => {
     if (!allGames || !firstTeamId) return [];
@@ -271,29 +278,72 @@ export default function CoachDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="font-headline">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
-                <Link href="/coach/drills">
-                  <div className="text-left">
-                    <p className="font-semibold flex items-center gap-2"><Dumbbell className="h-4 w-4" /> Practice Drills</p>
-                    <p className="text-xs text-muted-foreground">Browse age-grouped baseball drills</p>
+          <div className="flex flex-col gap-6">
+            <Card className="border-none shadow-md">
+              <CardHeader>
+                <CardTitle className="font-headline">League Announcements</CardTitle>
+                <CardDescription>Latest updates from the league</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loadingAnnouncements ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
                   </div>
-                </Link>
-              </Button>
-              <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
-                <Link href="/coach/teams">
-                  <div className="text-left">
-                    <p className="font-semibold flex items-center gap-2"><Users className="h-4 w-4" /> Roster Management</p>
-                    <p className="text-xs text-muted-foreground">View player details and contacts</p>
+                ) : announcements && announcements.length > 0 ? (
+                  <div className="space-y-4">
+                    {announcements.map((a) => (
+                      <div key={a.id} className="flex items-start gap-4 p-3 rounded-lg bg-secondary/30">
+                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary shrink-0">
+                          <Megaphone className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold">{a.title}</p>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{a.body}</p>
+                          {a.publishedAt && (
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              {format(new Date(a.publishedAt), 'MMM d')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    <Button variant="ghost" size="sm" asChild className="w-full mt-2">
+                      <Link href="/coach/announcements">View all announcements</Link>
+                    </Button>
                   </div>
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
+                ) : (
+                  <div className="text-center py-8">
+                    <Megaphone className="h-10 w-10 text-muted mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">No announcements yet.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-md">
+              <CardHeader>
+                <CardTitle className="font-headline">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
+                  <Link href="/coach/drills">
+                    <div className="text-left">
+                      <p className="font-semibold flex items-center gap-2"><Dumbbell className="h-4 w-4" /> Practice Drills</p>
+                      <p className="text-xs text-muted-foreground">Browse age-grouped baseball drills</p>
+                    </div>
+                  </Link>
+                </Button>
+                <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
+                  <Link href="/coach/teams">
+                    <div className="text-left">
+                      <p className="font-semibold flex items-center gap-2"><Users className="h-4 w-4" /> Roster Management</p>
+                      <p className="text-xs text-muted-foreground">View player details and contacts</p>
+                    </div>
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </main>
     </div>

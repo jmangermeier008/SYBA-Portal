@@ -36,6 +36,7 @@ import {
   MessageSquare,
   Inbox,
   Layers,
+  Megaphone,
 } from 'lucide-react';
 import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -118,6 +119,7 @@ const coachItems = [
   { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
   { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/coach/practice-slots' },
+  { label: 'Announcements', icon: Megaphone, href: '/coach/announcements' },
   { label: 'Notifications', icon: Bell, href: '/coach/notifications' },
   { label: 'Contact Us', icon: MessageSquare, href: '/coach/contact' },
 ];
@@ -229,6 +231,7 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
+  const [hasUnreadCoach, setHasUnreadCoach] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
   const [activeContext, setActiveContext] = useState<RoleContext | null>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
@@ -319,24 +322,28 @@ export function Sidebar() {
     setHasUnreadNotifs((unreadNotifs?.length ?? 0) > 0);
   }, [unreadNotifs]);
 
-  // Unread announcements badge
+  // Unread announcements badge (shared query for both parent and coach)
   const latestAnnouncementQuery = useMemoFirebase(() => {
-    if (!db || !isParent) return null;
+    if (!db || (!isParent && !isCoach)) return null;
     return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(1));
-  }, [db, isParent]);
+  }, [db, isParent, isCoach]);
   const { data: latestAnnouncements } = useCollection<{ id: string; publishedAt: string }>(latestAnnouncementQuery);
 
   useEffect(() => {
     if (!latestAnnouncements || latestAnnouncements.length === 0) return;
     const latest = latestAnnouncements[0];
     if (!latest.publishedAt) return;
-    const lastRead = localStorage.getItem('syba_announcements_last_read');
-    if (!lastRead) {
-      setHasUnread(true);
-      return;
+    const latestTime = new Date(latest.publishedAt).getTime();
+
+    if (isParent) {
+      const lastRead = localStorage.getItem('syba_announcements_last_read');
+      setHasUnread(!lastRead || latestTime > parseInt(lastRead, 10));
     }
-    setHasUnread(new Date(latest.publishedAt).getTime() > parseInt(lastRead, 10));
-  }, [latestAnnouncements]);
+    if (isCoach) {
+      const lastRead = localStorage.getItem('syba_coach_announcements_last_read');
+      setHasUnreadCoach(!lastRead || latestTime > parseInt(lastRead, 10));
+    }
+  }, [latestAnnouncements, isParent, isCoach]);
 
   const toggleSection = (label: string) => {
     setOpenSections(prev => ({ ...prev, [label]: !prev[label] }));
@@ -470,9 +477,11 @@ export function Sidebar() {
         {activeContext === 'coach' && isCoach && (
           <NavSection
             label="Coaching"
-            items={coachItems.map(item =>
-              item.href === '/coach/notifications' ? { ...item, badge: hasUnreadNotifs } : item
-            )}
+            items={coachItems.map(item => {
+              if (item.href === '/coach/notifications') return { ...item, badge: hasUnreadNotifs };
+              if (item.href === '/coach/announcements') return { ...item, badge: hasUnreadCoach };
+              return item;
+            })}
             pathname={pathname}
             onNavigate={closeMenu}
             isOpen={openSections['Coaching']}

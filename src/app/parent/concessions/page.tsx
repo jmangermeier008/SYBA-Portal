@@ -2,7 +2,7 @@
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where } from 'firebase/firestore';
+import { collection, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -116,6 +116,16 @@ export default function ParentConcessionsPage() {
         };
         transaction.update(slotRef, { signups: [...(current.signups ?? []), newSignup] });
       });
+      await addDoc(collection(db, 'notifications'), {
+        userId: profile.id,
+        type: 'concessionSignupConfirmed',
+        title: 'Concession Shift Confirmed',
+        body: `You're signed up for the shift on ${format(parseISO(slot.gameDate), 'MMM d')} (${formatTime(slot.startTime)}–${formatTime(slot.endTime)}).`,
+        relatedDocId: slot.id,
+        relatedDocType: 'concessionSlot',
+        read: false,
+        createdAt: Timestamp.now(),
+      });
       toast({ title: 'Signed Up!', description: `You're volunteering for the ${slot.gameDate} shift.` });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -130,6 +140,16 @@ export default function ParentConcessionsPage() {
       const slotRef = doc(db, 'concessionSlots', slot.id);
       await updateDoc(slotRef, {
         signups: arrayRemove(signup),
+      });
+      await addDoc(collection(db, 'notifications'), {
+        userId: profile.id,
+        type: 'concessionSignupCancelled',
+        title: 'Concession Shift Cancelled',
+        body: `Your signup for the shift on ${format(parseISO(slot.gameDate), 'MMM d')} has been removed.`,
+        relatedDocId: slot.id,
+        relatedDocType: 'concessionSlot',
+        read: false,
+        createdAt: Timestamp.now(),
       });
       toast({ title: 'Cancelled', description: 'Your concession sign-up has been removed.' });
     } catch (err: any) {

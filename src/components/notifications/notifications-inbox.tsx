@@ -4,7 +4,7 @@ import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebas
 import { collection, doc, query, orderBy, where, updateDoc, writeBatch } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, Megaphone } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
@@ -22,6 +22,9 @@ function NotifIcon({ type }: { type: NotificationType }) {
   if (type === 'practiceSlotCancelled' || type === 'practiceSlotChanged') {
     return <Dumbbell className={cn(base, 'text-blue-500')} />;
   }
+  if (type === 'announcement') {
+    return <Megaphone className={cn(base, 'text-primary')} />;
+  }
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }
 
@@ -31,6 +34,7 @@ function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, i
   if (relatedDocType === 'concessionSlot') return '/parent/concessions';
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
   if (relatedDocType === 'game') return isCoach ? '/coach/schedules' : '/parent/schedules';
+  if (relatedDocType === 'announcement') return isCoach ? '/coach/announcements' : '/parent/announcements';
   return null;
 }
 
