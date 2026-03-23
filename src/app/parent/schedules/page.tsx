@@ -192,7 +192,6 @@ export default function ParentSchedulesPage() {
     return query(
       collection(db, 'concessionSlots'),
       where('gameDate', '>=', todayISO),
-      where('status', '!=', 'cancelled'),
     );
   }, [db, todayISO]);
 

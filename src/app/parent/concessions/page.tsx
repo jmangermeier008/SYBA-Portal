@@ -64,7 +64,6 @@ export default function ParentConcessionsPage() {
     return query(
       collection(db, 'concessionSlots'),
       where('gameDate', '>=', todayISO),
-      where('status', '!=', 'cancelled'),
     );
   }, [db, profile, todayISO]);
 
