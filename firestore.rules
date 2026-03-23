@@ -122,7 +122,7 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
 
     match /seasons/{seasonId} {
-      allow get, list: if isSignedIn();
+      allow get, list: if true; // public — home page shows registration banner
       allow create, update, delete: if isBoardMember();
 
       match /divisions/{divisionId} {
@@ -145,7 +145,7 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
 
     match /games/{gameId} {
-      allow get, list: if isSignedIn();
+      allow get, list: if true; // public — home page shows this week's schedule
       allow create, update, delete: if isBoardMember();
     }
 
@@ -270,7 +270,7 @@ service cloud.firestore {
     }
 
     match /announcements/{announcementId} {
-      allow get, list: if isSignedIn();
+      allow get, list: if true; // public — home page shows league announcements
       allow create, update, delete: if isBoardMember();
     }
 
@@ -301,7 +301,7 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
 
     match /settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if true; // public — home page shows complex closure alert
       allow write: if isBoardMember();
     }
   }

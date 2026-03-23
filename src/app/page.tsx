@@ -1,28 +1,31 @@
 "use client";
 
-import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Loader2 } from 'lucide-react';
-import { collection, query, where, limit } from 'firebase/firestore';
+import { Loader2, AlertTriangle, Megaphone, Calendar, Pin } from 'lucide-react';
+import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
+import type { ComplexClosuresDocument, Game } from '@/types/scheduling';
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
-    month: 'long', day: 'numeric', year: 'numeric',
-  });
-}
+const CONTACT_EMAIL = 'info@syba.blue';
 
-// Add your sponsor image files to public/sponsors/
-// Supported filenames: sponsor1.png, sponsor2.png, sponsor3.png (etc.)
-// Images will be hidden automatically if the file doesn't exist yet.
+// Add sponsor image files to public/sponsors/ — images with load errors are auto-hidden.
 const SPONSOR_IMAGES = [
   '/sponsors/sponsor1.png',
   '/sponsors/sponsor2.png',
   '/sponsors/sponsor3.png',
 ];
+
+interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+  publishedAt: string;
+}
 
 interface ActiveSeason {
   id: string;
@@ -32,19 +35,73 @@ interface ActiveSeason {
   isActive?: boolean;
 }
 
+function formatDate(dateStr: string) {
+  const d = dateStr.length > 10 ? new Date(dateStr) : new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function formatGameDate(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+}
+
+function formatTime(timeStr: string) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${ampm}`;
+}
+
 export default function Home() {
   const { user, profile, loading, isAdmin, isBoardMember, isCoach } = useUser();
   const router = useRouter();
   const db = useFirestore();
 
+  const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const weekEndISO = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  // Active season — registration banner
   const activeSeasonQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
   }, [db]);
-
   const { data: activeSeasons } = useCollection<ActiveSeason>(activeSeasonQuery);
   const activeSeason = activeSeasons?.[0] ?? null;
 
+  // Complex closure singleton
+  const closuresRef = useMemoFirebase(() => {
+    if (!db) return null;
+    return doc(db, 'settings', 'complexClosures');
+  }, [db]);
+  const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(closuresRef);
+
+  // This week's games (top-level collection, games only, date range)
+  const gamesQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(
+      collection(db, 'games'),
+      where('date', '>=', todayISO),
+      where('date', '<=', weekEndISO),
+      orderBy('date', 'asc'),
+      orderBy('time', 'asc'),
+      limit(20)
+    );
+  }, [db, todayISO, weekEndISO]);
+  const { data: rawWeekGames } = useCollection<Game>(gamesQuery);
+
+  // Announcements
+  const announcementsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(10));
+  }, [db]);
+  const { data: rawAnnouncements } = useCollection<Announcement>(announcementsQuery);
+
+  // Derived: registration banner text
   const registrationBanner = useMemo(() => {
     if (!activeSeason) return null;
     const today = new Date().toISOString().slice(0, 10);
@@ -56,6 +113,26 @@ export default function Home() {
     }
     return null;
   }, [activeSeason]);
+
+  // Derived: today's complex closure (if any)
+  const todayClosure = useMemo(
+    () => complexClosuresDoc?.closures?.find(c => c.date === todayISO) ?? null,
+    [complexClosuresDoc, todayISO],
+  );
+
+  // Derived: non-cancelled games this week, games only
+  const visibleGames = useMemo(() => {
+    if (!rawWeekGames) return [];
+    return rawWeekGames.filter(g => g.type === 'game' && g.status !== 'cancelled');
+  }, [rawWeekGames]);
+
+  // Derived: pinned announcements first, max 3
+  const announcements = useMemo(() => {
+    if (!rawAnnouncements) return [];
+    return [...rawAnnouncements]
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
+      .slice(0, 3);
+  }, [rawAnnouncements]);
 
   useEffect(() => {
     if (!loading && user && profile) {
@@ -74,24 +151,21 @@ export default function Home() {
       <Loader2 className="h-8 w-8 animate-spin text-primary" />
     </div>
   );
-  if (user && profile) return null; // redirect is in flight — suppress flash
+  if (user && profile) return null; // redirect in flight — suppress flash
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-white px-4">
+    <div className="min-h-screen flex flex-col items-center bg-gradient-to-b from-blue-50 to-white px-4 py-12">
+
+      {/* ── Hero ── */}
       <div className="flex flex-col items-center text-center space-y-6 max-w-sm w-full">
-        {/* Logo */}
         <Image
           src="/contentrotator637479479383661633.png"
           alt="Sharpsville Youth Baseball Association"
           width={120}
           height={120}
           className="object-contain"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
-
-        {/* League name */}
         <div className="space-y-1">
           <h1 className="text-2xl font-bold font-headline tracking-tight text-primary">
             Sharpsville Youth Baseball Association
@@ -99,7 +173,6 @@ export default function Home() {
           <p className="text-muted-foreground text-sm">The online home for Sharpsville Youth Baseball</p>
         </div>
 
-        {/* CTA buttons */}
         <div className="flex gap-3 w-full justify-center">
           <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
             <Link href="/login">Sign In</Link>
@@ -109,13 +182,23 @@ export default function Home() {
           </Button>
         </div>
 
-        {/* Contact link */}
+        {/* Contact */}
         <p className="text-sm text-muted-foreground">
           Have a question?{' '}
-          <Link href="/contact" className="text-primary hover:underline font-medium">
-            Contact us
-          </Link>
+          <Link href="/contact" className="text-primary hover:underline font-medium">Contact us</Link>
+          {' '}or email{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary hover:underline font-medium">
+            {CONTACT_EMAIL}
+          </a>
         </p>
+
+        {/* Complex closure alert */}
+        {todayClosure && (
+          <div className="w-full rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive font-medium text-center flex items-center justify-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Complex closed today{todayClosure.reason ? ` — ${todayClosure.reason}` : ''}
+          </div>
+        )}
 
         {/* Registration banner */}
         {registrationBanner && (
@@ -125,9 +208,77 @@ export default function Home() {
         )}
       </div>
 
-      {/* Sponsors */}
+      {/* ── This Week's Games ── */}
+      <div className="mt-12 w-full max-w-xl">
+        <div className="flex items-center gap-2 mb-3">
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+            This Week&apos;s Games
+          </p>
+        </div>
+        {visibleGames.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No games scheduled this week</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {visibleGames.map(g => (
+              <div
+                key={g.id}
+                className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1"
+              >
+                <div>
+                  <p className="font-medium text-sm">
+                    {g.homeTeamName ?? 'TBD'} vs. {g.awayTeamName ?? 'TBD'}
+                  </p>
+                  {g.division && <p className="text-xs text-muted-foreground">{g.division}</p>}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-medium">{formatGameDate(g.date)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatTime(g.time)}{g.fieldName ? ` · ${g.fieldName}` : ''}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Announcements ── */}
+      {announcements.length > 0 && (
+        <div className="mt-10 w-full max-w-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <Megaphone className="h-4 w-4 text-muted-foreground" />
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+              Announcements
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            {announcements.map(a => (
+              <div key={a.id} className="rounded-xl border bg-white/80 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  {a.pinned && <Pin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />}
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">{a.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{a.body}</p>
+                    <p className="text-xs text-muted-foreground/70 mt-1">
+                      {formatDate(a.publishedAt.slice(0, 10))}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-center mt-3">
+            <Link href="/login" className="text-xs text-primary hover:underline">
+              Sign in to see all announcements →
+            </Link>
+          </p>
+        </div>
+      )}
+
+      {/* ── Sponsors ── */}
       {SPONSOR_IMAGES.length > 0 && (
-        <div className="mt-16 flex flex-col items-center gap-4 w-full max-w-2xl">
+        <div className="mt-12 flex flex-col items-center gap-4 w-full max-w-2xl">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Our Sponsors</p>
           <div className="flex flex-wrap items-center justify-center gap-8">
             {SPONSOR_IMAGES.map((src, i) => (
@@ -139,18 +290,22 @@ export default function Home() {
                 height={80}
                 className="h-20 w-auto object-contain grayscale hover:grayscale-0 transition-all duration-300"
                 style={{ width: 'auto' }}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
               />
             ))}
           </div>
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="mt-12 text-xs text-muted-foreground text-center">
-        © {new Date().getFullYear()} SYBA. All rights reserved. Sharpsville, PA.
+      {/* ── Footer ── */}
+      <footer className="mt-12 text-xs text-muted-foreground text-center space-y-1">
+        <p>© {new Date().getFullYear()} SYBA. All rights reserved. Sharpsville, PA.</p>
+        <p>
+          General inquiries:{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-primary hover:underline transition-colors">
+            {CONTACT_EMAIL}
+          </a>
+        </p>
       </footer>
     </div>
   );
