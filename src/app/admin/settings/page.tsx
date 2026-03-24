@@ -13,6 +13,9 @@ import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
 import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { OFFICER_TITLES } from '@/data/officers';
+import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
+import type { InquiryTopic } from '@/data/inquiry-topics';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
 import { clearUserNotifications } from '@/lib/maintenance-actions';
 
@@ -22,69 +25,68 @@ interface OfficerRecord {
   name: string | null;
   email: string | null;
   contactHint: string;
+  mappedTopic?: InquiryTopic;
   order: number;
 }
 
 // Default seed data matching officers.ts
 const DEFAULT_OFFICERS: Omit<OfficerRecord, 'id'>[] = [
-  { title: 'President', name: 'John Heutsche', email: null, contactHint: 'Leadership questions', order: 0 },
-  { title: 'Vice President', name: 'Tom Roskos', email: null, contactHint: 'Leadership questions', order: 1 },
-  { title: 'Treasurer', name: 'Don Nelson', email: null, contactHint: 'Payment questions', order: 2 },
-  { title: 'Secretary', name: 'Russ Adkins', email: null, contactHint: 'Registration questions', order: 3 },
-  { title: 'Building/Grounds Committee Chair', name: null, email: null, contactHint: 'Field & concession questions', order: 4 },
-  { title: 'Competition Committee Chair', name: null, email: null, contactHint: 'Scheduling questions', order: 5 },
-  { title: 'Finance Committee Chair', name: null, email: null, contactHint: 'Fundraising questions', order: 6 },
-  { title: 'Equipment Coordinator', name: null, email: null, contactHint: 'Uniform & equipment questions', order: 7 },
-  { title: 'Umpire Coordinator', name: null, email: null, contactHint: 'Umpire questions', order: 8 },
-  { title: 'Tee Ball Coordinator', name: null, email: null, contactHint: 'Tee ball division', order: 9 },
-  { title: 'Coach Pitch Coordinator', name: null, email: null, contactHint: 'Coach pitch division', order: 10 },
-  { title: 'Kid Pitch Coordinator', name: null, email: null, contactHint: 'Kid pitch division', order: 11 },
-  { title: 'Senior Division Coordinator', name: null, email: null, contactHint: 'Senior division', order: 12 },
+  { title: 'President', name: 'John Heutsche', email: 'president@syba.blue', contactHint: 'Leadership questions', mappedTopic: 'general', order: 0 },
+  { title: 'Vice President', name: 'Tom Roskos', email: 'vicepresident@syba.blue', contactHint: 'Leadership questions', mappedTopic: 'general', order: 1 },
+  { title: 'Treasurer', name: 'Don Nelson', email: 'treasurer@syba.blue', contactHint: 'Payment questions', mappedTopic: 'general', order: 2 },
+  { title: 'Secretary', name: 'Russ Adkins', email: 'secretary@syba.blue', contactHint: 'Registration questions', mappedTopic: 'registration', order: 3 },
+  { title: 'Building/Grounds Committee Chair', name: null, email: 'grounds@syba.blue', contactHint: 'Field & concession questions', mappedTopic: 'field_maintenance', order: 4 },
+  { title: 'Competition Committee Chair', name: null, email: null, contactHint: 'Scheduling questions', mappedTopic: 'scheduling', order: 5 },
+  { title: 'Finance Committee Chair', name: null, email: null, contactHint: 'Fundraising questions', mappedTopic: 'fundraising', order: 6 },
+  { title: 'Equipment Coordinator', name: null, email: null, contactHint: 'Uniform & equipment questions', mappedTopic: 'uniforms', order: 7 },
+  { title: 'Umpire Coordinator', name: null, email: null, contactHint: 'Umpire questions', mappedTopic: 'general', order: 8 },
+  { title: 'Tee Ball Coordinator', name: null, email: null, contactHint: 'Tee ball division', mappedTopic: 'general', order: 9 },
+  { title: 'Coach Pitch Coordinator', name: null, email: null, contactHint: 'Coach pitch division', mappedTopic: 'general', order: 10 },
+  { title: 'Kid Pitch Coordinator', name: null, email: null, contactHint: 'Kid pitch division', mappedTopic: 'general', order: 11 },
+  { title: 'Senior Division Coordinator', name: null, email: null, contactHint: 'Senior division', mappedTopic: 'general', order: 12 },
 ];
 
 function titleToId(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
 }
 
-function OfficerRow({ officer, onSave }: { officer: OfficerRecord; onSave: (id: string, name: string, email: string, hint: string) => Promise<void> }) {
-  const [name, setName] = useState(officer.name ?? '');
+function OfficerRow({ officer, holderName, onSave }: {
+  officer: OfficerRecord;
+  holderName: string | null;
+  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => Promise<void>;
+}) {
   const [email, setEmail] = useState(officer.email ?? '');
   const [hint, setHint] = useState(officer.contactHint ?? '');
+  const [mappedTopic, setMappedTopic] = useState(officer.mappedTopic ?? 'general');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setName(officer.name ?? '');
     setEmail(officer.email ?? '');
     setHint(officer.contactHint ?? '');
-  }, [officer.name, officer.email, officer.contactHint]);
+    setMappedTopic(officer.mappedTopic ?? 'general');
+  }, [officer.email, officer.contactHint, officer.mappedTopic]);
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(officer.id, name, email, hint);
+    await onSave(officer.id, holderName, email, hint, mappedTopic);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
   const dirty =
-    name !== (officer.name ?? '') ||
     email !== (officer.email ?? '') ||
-    hint !== (officer.contactHint ?? '');
+    hint !== (officer.contactHint ?? '') ||
+    mappedTopic !== (officer.mappedTopic ?? 'general');
 
   return (
     <div className="border rounded-xl p-4 space-y-3">
-      <p className="font-semibold text-sm">{officer.title}</p>
+      <div className="flex items-center justify-between">
+        <p className="font-semibold text-sm">{officer.title}</p>
+        <span className="text-xs text-muted-foreground">{holderName ?? 'TBA'}</span>
+      </div>
       <div className="grid sm:grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Name</Label>
-          <Input
-            placeholder="Full name (or leave blank for TBA)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-          />
-        </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Email (syba.blue address)</Label>
           <Input
@@ -94,6 +96,19 @@ function OfficerRow({ officer, onSave }: { officer: OfficerRecord; onSave: (id: 
             onChange={(e) => setEmail(e.target.value)}
             maxLength={120}
           />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Routes inbound email to topic</Label>
+          <Select value={mappedTopic} onValueChange={(v) => setMappedTopic(v as InquiryTopic)}>
+            <SelectTrigger className="rounded-xl text-xs h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {INQUIRY_TOPICS.map((t) => (
+                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <div className="space-y-1">
@@ -139,7 +154,18 @@ export default function AdminSettingsPage() {
     return query(collection(db, 'officers'), orderBy('order'));
   }, [db]);
 
+  const usersQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, 'userProfiles');
+  }, [db]);
+
   const { data: officers, isLoading } = useCollection<OfficerRecord>(officersQuery);
+  const { data: allUsers } = useCollection<{ id: string; displayName: string; officerTitles?: string[] }>(usersQuery);
+
+  function getHolderName(title: string): string | null {
+    const holders = allUsers?.filter(u => u.officerTitles?.includes(title)) ?? [];
+    return holders.length ? holders.map(u => u.displayName).filter(Boolean).join(', ') : null;
+  }
 
   // Seed Firestore from defaults if the collection is empty
   useEffect(() => {
@@ -153,12 +179,12 @@ export default function AdminSettingsPage() {
     seed().catch(console.error);
   }, [db, isBoardMember, officers]);
 
-  const handleSave = async (id: string, name: string, email: string, hint: string) => {
+  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
     if (!db) return;
     try {
       await setDoc(
         doc(db, 'officers', id),
-        { name: name.trim() || null, email: email.trim() || null, contactHint: hint.trim() },
+        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general' },
         { merge: true }
       );
     } catch (err: any) {
@@ -233,8 +259,8 @@ export default function AdminSettingsPage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(officers && officers.length > 0 ? officers : DEFAULT_OFFICERS.map((o, i) => ({ ...o, id: titleToId(o.title) }))).map((officer) => (
-                        <OfficerRow key={officer.id} officer={officer as OfficerRecord} onSave={handleSave} />
+                      {(officers && officers.length > 0 ? officers : DEFAULT_OFFICERS.map((o) => ({ ...o, id: titleToId(o.title) }))).map((officer) => (
+                        <OfficerRow key={officer.id} officer={officer as OfficerRecord} holderName={getHolderName(officer.title)} onSave={handleSave} />
                       ))}
                     </div>
                   )}

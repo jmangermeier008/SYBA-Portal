@@ -3,26 +3,6 @@ import { getAdminFirestore } from '@/lib/firebase-admin';
 import { getTopicConfig } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
 
-// Maps syba.blue recipient address → inquiry topic
-const INBOUND_TOPIC_MAP: Record<string, InquiryTopic> = {
-  'registration@syba.blue': 'registration',
-  'concessions@syba.blue': 'concessions',
-  'treasurer@syba.blue': 'general',
-  'secretary@syba.blue': 'registration',
-  'president@syba.blue': 'general',
-  'vicepresident@syba.blue': 'general',
-  'grounds@syba.blue': 'field_maintenance',
-  'admin@syba.blue': 'general',
-  'info@syba.blue': 'general',
-};
-
-// Override assignedToRole for specific inbound addresses (takes precedence over topic-derived role)
-const INBOUND_ROLE_OVERRIDE_MAP: Record<string, string> = {
-  'vicepresident@syba.blue': 'Vice President',
-  'treasurer@syba.blue': 'Finance Committee Chair',
-  'grounds@syba.blue': 'Building/Grounds Committee Chair',
-  'admin@syba.blue': 'Site Admin',
-};
 
 function parseEmailAddress(raw: string): { name: string; email: string } {
   // Handles "First Last <email@domain.com>" or plain "email@domain.com"
@@ -90,16 +70,29 @@ export async function POST(req: Request) {
     const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw);
     const recipientEmail = normalizeEmail(toRaw);
 
-    const topic: InquiryTopic = INBOUND_TOPIC_MAP[recipientEmail] ?? 'general';
+    const db = getAdminFirestore();
+
+    // Look up officer record by @syba.blue address to determine topic and assignedToRole dynamically
+    let topic: InquiryTopic = 'general';
+    let assignedToRole = 'Secretary';
+
+    const officerSnap = await db.collection('officers')
+      .where('email', '==', recipientEmail)
+      .limit(1)
+      .get();
+
+    if (!officerSnap.empty) {
+      const officer = officerSnap.docs[0].data();
+      assignedToRole = officer.title ?? 'Secretary';
+      topic = (officer.mappedTopic as InquiryTopic) ?? 'general';
+    }
+
     const topicConfig = getTopicConfig(topic);
     if (!topicConfig) {
       return NextResponse.json({ ok: false, error: 'Unknown topic' }, { status: 400 });
     }
 
-    const db = getAdminFirestore();
     const now = new Date().toISOString();
-
-    const assignedToRole = INBOUND_ROLE_OVERRIDE_MAP[recipientEmail] ?? topicConfig.assignedToRole;
     const message = text.trim();
 
     const docRef = await db.collection('inquiries').add({

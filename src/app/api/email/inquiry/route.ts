@@ -1,50 +1,37 @@
 import { NextResponse } from 'next/server';
+import { getAdminFirestore } from '@/lib/firebase-admin';
 
-// Maps topic → env var name for topic-specific email routing
-const TOPIC_EMAIL_MAP: Record<string, string> = {
-  'concessions': 'INQUIRY_EMAIL_CONCESSIONS',
-};
+async function getRecipientEmails(assignedToRole: string): Promise<string[]> {
+  const db = getAdminFirestore();
+  const snap = await db.collection('userProfiles')
+    .where('officerTitles', 'array-contains', assignedToRole)
+    .get();
 
-// Maps OfficerTitle → env var name for role-specific aliases
-const ROLE_EMAIL_MAP: Record<string, string> = {
-  'President': 'INQUIRY_EMAIL_PRESIDENT',
-  'Vice President': 'INQUIRY_EMAIL_VICE_PRESIDENT',
-  'Treasurer': 'INQUIRY_EMAIL_TREASURER',
-  'Secretary': 'INQUIRY_EMAIL_SECRETARY',
-  'Building/Grounds Committee Chair': 'INQUIRY_EMAIL_BUILDING_GROUNDS',
-  'Competition Committee Chair': 'INQUIRY_EMAIL_COMPETITION',
-  'Finance Committee Chair': 'INQUIRY_EMAIL_FINANCE',
-  'Equipment Coordinator': 'INQUIRY_EMAIL_EQUIPMENT',
-};
-
-function getRecipientEmail(topic: string, assignedToRole: string): string | null {
-  // Check for topic-specific alias first (e.g. concessions@syba.blue)
-  const topicEnvKey = TOPIC_EMAIL_MAP[topic];
-  if (topicEnvKey && process.env[topicEnvKey]) {
-    return process.env[topicEnvKey]!;
-  }
-  // Then check role-specific alias
-  const roleEnvKey = ROLE_EMAIL_MAP[assignedToRole];
-  if (roleEnvKey && process.env[roleEnvKey]) {
-    return process.env[roleEnvKey]!;
-  }
-  // Fall back to catch-all
-  return process.env.INQUIRY_NOTIFICATION_EMAIL || null;
+  const emails: string[] = [];
+  snap.forEach(doc => {
+    const email = doc.data().email;
+    if (email) emails.push(email);
+  });
+  return emails;
 }
 
 export async function POST(req: Request) {
   try {
     const { senderName, topic, subject, message, assignedToRole, inquiryId } = await req.json();
 
-    const toEmail = getRecipientEmail(topic, assignedToRole);
-    if (!toEmail) {
-      console.warn('[email] No INQUIRY_NOTIFICATION_EMAIL configured, skipping notification');
-      return NextResponse.json({ ok: true, skipped: true });
+    const recipients = await getRecipientEmails(assignedToRole);
+
+    if (recipients.length === 0) {
+      const fallback = process.env.INQUIRY_NOTIFICATION_EMAIL;
+      if (!fallback) {
+        console.warn('[email] No recipients found for role and no fallback configured, skipping notification');
+        return NextResponse.json({ ok: true, skipped: true });
+      }
+      recipients.push(fallback);
     }
 
-    const recipients = [toEmail];
     const siteAdminEmail = process.env.INQUIRY_EMAIL_SITE_ADMIN;
-    if (siteAdminEmail && siteAdminEmail !== toEmail) {
+    if (siteAdminEmail && !recipients.includes(siteAdminEmail)) {
       recipients.push(siteAdminEmail);
     }
 

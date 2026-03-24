@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import Link from 'next/link';
 import { initializeApp, deleteApp } from 'firebase/app';
@@ -32,6 +32,7 @@ interface UserData {
   role: string;
   roles?: string[];
   officerTitle?: string;
+  officerTitles?: string[];
   phoneNumber?: string;
 }
 
@@ -104,10 +105,10 @@ export default function RolesPage() {
       });
   };
 
-  const handleOfficerTitleChange = async (uid: string, title: string) => {
+  const handleOfficerTitlesChange = async (uid: string, titles: string[]) => {
     const userRef = doc(db, 'userProfiles', uid);
-    updateDoc(userRef, { officerTitle: title === 'none' ? null : title })
-      .then(() => toast({ title: "Title Updated" }))
+    updateDoc(userRef, { officerTitles: titles })
+      .then(() => toast({ title: "Titles Updated" }))
       .catch((error: any) => toast({ title: "Update Failed", description: error.message, variant: "destructive" }));
   };
 
@@ -271,7 +272,7 @@ export default function RolesPage() {
                       {ALL_ROLES.map((role) => (
                         <TableHead key={role} className="text-center hidden md:table-cell">{role}</TableHead>
                       ))}
-                      <TableHead className="hidden md:table-cell">Officer Title</TableHead>
+                      <TableHead className="hidden md:table-cell">Officer Titles</TableHead>
                       <TableHead className="w-24" />
                     </TableRow>
                   </TableHeader>
@@ -314,22 +315,37 @@ export default function RolesPage() {
                             </TableCell>
                           ))}
                           <TableCell className="hidden md:table-cell">
-                            {isBoardMember ? (
-                              <Select
-                                value={user.officerTitle || 'none'}
-                                onValueChange={(val) => handleOfficerTitleChange(user.id, val)}
-                              >
-                                <SelectTrigger className="rounded-xl w-48 text-xs h-8">
-                                  <SelectValue placeholder="Assign title…" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">— No Title —</SelectItem>
-                                  {OFFICER_TITLES.map((t) => (
-                                    <SelectItem key={t} value={t}>{t}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
+                            {isBoardMember ? (() => {
+                              const currentTitles = user.officerTitles ?? (user.officerTitle ? [user.officerTitle] : []);
+                              return (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="outline" size="sm" className="rounded-xl w-48 text-xs h-8 justify-start font-normal truncate">
+                                      {currentTitles.length > 0 ? currentTitles.join(', ') : '— No Titles —'}
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-3" align="start">
+                                    <p className="text-xs font-semibold mb-2 text-muted-foreground">Assign Officer Titles</p>
+                                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                                      {OFFICER_TITLES.map((t) => (
+                                        <label key={t} className="flex items-center gap-2 text-xs cursor-pointer">
+                                          <Checkbox
+                                            checked={currentTitles.includes(t)}
+                                            onCheckedChange={(checked) => {
+                                              const next = checked
+                                                ? [...currentTitles, t]
+                                                : currentTitles.filter((x) => x !== t);
+                                              handleOfficerTitlesChange(user.id, next);
+                                            }}
+                                          />
+                                          {t}
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              );
+                            })() : (
                               <span className="text-xs text-muted-foreground">—</span>
                             )}
                           </TableCell>
@@ -481,25 +497,30 @@ export default function RolesPage() {
                   </label>
                 ))}
               </div>
-              {editRoles.includes('Board Member') && liveEditUser && (
-                <div className="space-y-1.5 pt-2 border-t">
-                  <Label className="text-xs text-muted-foreground">Officer Title</Label>
-                  <Select
-                    value={liveEditUser.officerTitle || 'none'}
-                    onValueChange={(val) => handleOfficerTitleChange(liveEditUser.id, val)}
-                  >
-                    <SelectTrigger className="rounded-xl text-xs h-8">
-                      <SelectValue placeholder="Assign title…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">— No Title —</SelectItem>
+              {editRoles.includes('Board Member') && liveEditUser && (() => {
+                const currentTitles = liveEditUser.officerTitles ?? (liveEditUser.officerTitle ? [liveEditUser.officerTitle] : []);
+                return (
+                  <div className="space-y-1.5 pt-2 border-t">
+                    <Label className="text-xs text-muted-foreground">Officer Titles</Label>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
                       {OFFICER_TITLES.map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                        <label key={t} className="flex items-center gap-2 text-xs cursor-pointer">
+                          <Checkbox
+                            checked={currentTitles.includes(t)}
+                            onCheckedChange={(checked) => {
+                              const next = checked
+                                ? [...currentTitles, t]
+                                : currentTitles.filter((x) => x !== t);
+                              handleOfficerTitlesChange(liveEditUser.id, next);
+                            }}
+                          />
+                          {t}
+                        </label>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+                    </div>
+                  </div>
+                );
+              })()}
               <DialogFooter>
                 <Button className="w-full rounded-full" onClick={() => setEditTarget(null)}>Done</Button>
               </DialogFooter>

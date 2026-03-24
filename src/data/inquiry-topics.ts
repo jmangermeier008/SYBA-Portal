@@ -47,7 +47,7 @@ export const INQUIRY_TOPICS: InquiryTopicConfig[] = [
   {
     value: 'general',
     label: 'General Question',
-    assignedToRole: 'President',
+    assignedToRole: 'Secretary',
     description: 'Anything not covered by the other categories',
   },
 ];
