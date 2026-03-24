@@ -35,7 +35,7 @@ export async function POST(req: Request) {
       recipients.push(siteAdminEmail);
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+    const appUrl = process.env.NEXT_PUBLIC_BASE_URL ?? '';
     const portalUrl = inquiryId
       ? `${appUrl}/admin/inquiries?id=${inquiryId}`
       : `${appUrl}/admin/inquiries`;

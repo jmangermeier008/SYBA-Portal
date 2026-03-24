@@ -115,8 +115,8 @@ export async function POST(req: Request) {
 
     // Notify the assigned board member — fire-and-forget after confirmed Firestore write
     try {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
-      await fetch(`${appUrl}/api/email/inquiry`, {
+      const appUrl = process.env.NEXT_PUBLIC_BASE_URL ?? '';
+      const notifyRes = await fetch(`${appUrl}/api/email/inquiry`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -128,6 +128,12 @@ export async function POST(req: Request) {
           inquiryId: docRef.id,
         }),
       });
+      if (notifyRes.ok) {
+        console.log('[inbound-email] Notification relay successful');
+      } else {
+        const errText = await notifyRes.text();
+        console.error('[inbound-email] Notification relay failed:', notifyRes.status, errText);
+      }
     } catch (notifyErr: any) {
       console.error('[inbound-email] Notification dispatch failed:', notifyErr.message);
       // Do not rethrow — record is saved, return 200 regardless
