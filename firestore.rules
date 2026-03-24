@@ -292,7 +292,7 @@ service cloud.firestore {
           ? request.resource.data.senderId == request.auth.uid
           : request.resource.data.senderId == null);
       allow update: if isBoardMember();
-      allow delete: if isAdmin();
+      allow delete: if isBoardMember();
     }
 
     match /officers/{officerId} {
