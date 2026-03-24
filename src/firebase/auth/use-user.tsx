@@ -15,6 +15,9 @@ export interface UserProfile {
   role: 'Parent' | 'Coach' | 'Admin';
   // New multi-role field — takes precedence when present
   roles?: ('Parent' | 'Coach' | 'Board Member' | 'Admin' | 'Site Admin')[];
+  phoneNumber?: string | null;
+  shareContactInfo?: boolean;
+  enrolledPlayerIds?: string[];
   createdAt: string;
 }
 

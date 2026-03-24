@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
@@ -56,6 +56,13 @@ interface Team {
   seasonId: string;
   divisionId: string;
   player_ids?: string[];
+}
+
+interface ParentProfile {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+  phoneNumber?: string | null;
 }
 
 function getPaymentStatus(e: Enrollment) {
@@ -123,10 +130,22 @@ export default function MasterRosterPage() {
     return collectionGroup(db, 'players');
   }, [db, isAdmin, isBoardMember]);
 
+  const parentProfilesQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'userProfiles');
+  }, [db, isAdmin, isBoardMember]);
+
   const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: players } = useCollection<Player>(playersQuery);
+  const { data: parentProfiles } = useCollection<ParentProfile>(parentProfilesQuery);
+
+  const profileMap = useMemo(() => {
+    const m = new Map<string, ParentProfile>();
+    parentProfiles?.forEach(p => m.set(p.id, p));
+    return m;
+  }, [parentProfiles]);
 
   const filteredEnrollments = enrollments?.filter(e => {
     if (selectedSeason && selectedSeason !== 'all-seasons' && e.seasonId !== selectedSeason) return false;
@@ -516,6 +535,7 @@ export default function MasterRosterPage() {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-6">Player</TableHead>
+                    <TableHead className="hidden md:table-cell">Parent</TableHead>
                     <TableHead>Paid</TableHead>
                     <TableHead className="hidden sm:table-cell">Clearance</TableHead>
                     <TableHead>Assignment</TableHead>
@@ -539,6 +559,24 @@ export default function MasterRosterPage() {
                             )}
                           </div>
                           <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell py-4">
+                          {(() => {
+                            const parent = profileMap.get(e.parentUserId);
+                            if (!parent) return <span className="text-muted-foreground text-xs">—</span>;
+                            return (
+                              <div>
+                                <p className="text-xs font-medium">{parent.displayName || parent.email}</p>
+                                {parent.phoneNumber ? (
+                                  <a href={`tel:${parent.phoneNumber}`} className="text-[10px] text-primary hover:underline">
+                                    {parent.phoneNumber}
+                                  </a>
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground">No phone</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           {status === 'paid' ? (

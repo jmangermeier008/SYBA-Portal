@@ -56,8 +56,10 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
 
     // Players: board members use collectionGroup for compliance; parents use direct path
+    // Secondary parents can read players linked to them via secondaryParentId
     match /{path=**}/players/{playerId} {
-      allow read: if isBoardMember();
+      allow read: if isBoardMember() ||
+        (isSignedIn() && resource.data.secondaryParentId == request.auth.uid);
     }
 
     // Enrollments: board members can read all; parents can read their own (filtered by parentUserId)
@@ -100,9 +102,11 @@ service cloud.firestore {
       }
 
       match /players/{playerId} {
-        allow read: if isUser(userId) || isBoardMember();
+        allow read: if isUser(userId) || isBoardMember() ||
+          (isSignedIn() && resource.data.secondaryParentId == request.auth.uid);
         allow create: if isUser(userId) || isAdmin();
-        allow update: if isUser(userId) || isAdmin();
+        allow update: if isUser(userId) || isAdmin() ||
+          (isSignedIn() && resource.data.secondaryParentId == request.auth.uid);
         allow delete: if isUser(userId) || isAdmin();
       }
 

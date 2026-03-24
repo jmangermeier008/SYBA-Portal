@@ -265,6 +265,8 @@ export interface UserProfile {
   displayName: string | null;
   role?: UserRole;    // Legacy single-role field (backward compat)
   roles?: UserRole[]; // Current multi-role field
+  phoneNumber?: string | null;
+  shareContactInfo?: boolean;
   // Parents — drives the combined family calendar query:
   enrolledPlayerIds?: string[];
   // Coaches — all teams they are assigned to:
@@ -286,6 +288,8 @@ export interface Player {
   division?: string;
   seasonId?: string;
   parentIds?: string[]; // Supports two parents per child
+  primaryParentId?: string;   // UID of the parent whose subcollection this player lives under
+  secondaryParentId?: string; // UID of linked second parent
   dateOfBirth: string;
   clearanceUrl?: string;
 }

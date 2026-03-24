@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, collectionGroup, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -36,6 +36,8 @@ interface Player {
   birthCertificateUrl?: string;
   ageVerified?: boolean;
   emergencyContacts?: EmergencyContact[];
+  primaryParentId?: string;
+  secondaryParentId?: string;
 }
 
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
@@ -74,7 +76,13 @@ export default function FamilyPage() {
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user]);
 
+  const sharedPlayersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(collectionGroup(db, 'players'), where('secondaryParentId', '==', user.uid));
+  }, [db, user]);
+
   const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
+  const { data: sharedPlayers } = useCollection<Player>(sharedPlayersQuery);
 
   const openAddDialog = () => {
     setEditingPlayer(null);
@@ -108,6 +116,7 @@ export default function FamilyPage() {
       ...formData,
       emergencyContacts: emergencyContacts.filter(c => c.name && c.phone),
       parentUserId: user.uid,
+      primaryParentId: user.uid,
     };
 
     if (editingPlayer) {
@@ -445,6 +454,54 @@ export default function FamilyPage() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        )}
+
+        {/* Shared with Me */}
+        {sharedPlayers && sharedPlayers.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-xl font-bold font-headline mb-1">Shared with Me</h2>
+            <p className="text-muted-foreground text-sm mb-5">Players you co-manage as a second parent or guardian.</p>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {sharedPlayers.map((player) => (
+                <Card key={player.id} className="border-none shadow-lg overflow-hidden">
+                  <CardHeader className="bg-secondary/10 pb-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-secondary/40 flex items-center justify-center text-foreground font-bold text-xl">
+                        {player?.firstName?.[0] || '?'}{player?.lastName?.[0] || ''}
+                      </div>
+                      <div>
+                        <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
+                        <CardDescription className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> Born: {player.dateOfBirth}
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <div className="space-y-3">
+                      {player.medicalNotes && (
+                        <div className="p-3 rounded-xl bg-destructive/5 border border-destructive/20 text-xs text-destructive">
+                          <p className="font-semibold mb-0.5 flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" /> Medical Notes
+                          </p>
+                          <p>{player.medicalNotes}</p>
+                        </div>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-start rounded-xl bg-secondary/20 hover:bg-secondary/40 border-none font-normal"
+                        onClick={() => openEditDialog(player)}
+                      >
+                        <Pencil className="h-4 w-4 mr-2 text-primary" />
+                        <span className="text-sm">Edit Profile</span>
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
       </main>

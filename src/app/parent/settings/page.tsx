@@ -9,8 +9,8 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { doc, updateDoc, collection, query, orderBy } from 'firebase/firestore';
-import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users } from 'lucide-react';
+import { doc, updateDoc, collection, query, orderBy, where, getDocs, arrayUnion } from 'firebase/firestore';
+import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, UserPlus, CheckCircle2, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface OfficerRecord {
@@ -22,50 +22,172 @@ interface OfficerRecord {
   order: number;
 }
 
+interface Player {
+  id: string;
+  firstName: string;
+  lastName: string;
+  secondaryParentId?: string;
+}
+
+interface LinkedParent {
+  uid: string;
+  displayName: string | null;
+  email: string | null;
+}
+
 export default function ParentSettingsPage() {
   const { user, profile } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [privacyLoading, setPrivacyLoading] = useState(false);
 
   const officersQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(collection(db, 'officers'), orderBy('order'));
   }, [db]);
   const { data: officers } = useCollection<OfficerRecord>(officersQuery);
+
+  const playersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles', user.uid, 'players');
+  }, [db, user]);
+  const { data: players } = useCollection<Player>(playersQuery);
+
   const [formData, setFormData] = useState({
     displayName: '',
     phoneNumber: '',
     shareContactInfo: false,
   });
 
+  // Second parent linking state — keyed by playerId
+  const [linkEmail, setLinkEmail] = useState<Record<string, string>>({});
+  const [linkLoading, setLinkLoading] = useState<Record<string, boolean>>({});
+  const [linkedParents, setLinkedParents] = useState<Record<string, LinkedParent | null>>({});
+
   useEffect(() => {
     if (profile) {
       setFormData({
         displayName: profile.displayName || '',
-        phoneNumber: (profile as any).phoneNumber || '',
-        shareContactInfo: (profile as any).shareContactInfo || false,
+        phoneNumber: profile.phoneNumber || '',
+        shareContactInfo: profile.shareContactInfo || false,
       });
     }
   }, [profile]);
 
-  const handleSave = async () => {
+  // Fetch display info for already-linked secondary parents
+  useEffect(() => {
+    if (!db || !players) return;
+    players.forEach(async (player) => {
+      if (player.secondaryParentId && !linkedParents[player.id]) {
+        try {
+          const snap = await getDocs(
+            query(collection(db, 'userProfiles'), where('__name__', '==', player.secondaryParentId))
+          );
+          if (!snap.empty) {
+            const data = snap.docs[0].data();
+            setLinkedParents(prev => ({
+              ...prev,
+              [player.id]: { uid: snap.docs[0].id, displayName: data.displayName || null, email: data.email || null },
+            }));
+          }
+        } catch {}
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players, db]);
+
+  const handleSaveProfile = async () => {
     if (!user || !db) return;
-    setLoading(true);
-
+    setProfileLoading(true);
     const userRef = doc(db, 'userProfiles', user.uid);
-    const updateData = {
-      ...formData,
-      updatedAt: new Date().toISOString(),
-    };
-
     try {
-      await updateDoc(userRef, updateData);
-      toast({ title: "Settings Saved", description: "Your profile has been updated." });
+      await updateDoc(userRef, {
+        displayName: formData.displayName,
+        phoneNumber: formData.phoneNumber,
+        updatedAt: new Date().toISOString(),
+      });
+      toast({ title: "Profile Saved", description: "Your name and phone number have been updated." });
+    } catch (error: any) {
+      toast({ title: "Save Failed", description: error.message || "Could not save your profile. Please try again.", variant: "destructive" });
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const handleSavePrivacy = async () => {
+    if (!user || !db) return;
+    setPrivacyLoading(true);
+    const userRef = doc(db, 'userProfiles', user.uid);
+    try {
+      await updateDoc(userRef, {
+        shareContactInfo: formData.shareContactInfo,
+        updatedAt: new Date().toISOString(),
+      });
+      toast({ title: "Privacy Settings Saved", description: "Your visibility preferences have been updated." });
     } catch (error: any) {
       toast({ title: "Save Failed", description: error.message || "Could not save your settings. Please try again.", variant: "destructive" });
     } finally {
-      setLoading(false);
+      setPrivacyLoading(false);
+    }
+  };
+
+  const handleLinkSecondParent = async (player: Player) => {
+    const email = linkEmail[player.id]?.trim().toLowerCase();
+    if (!email || !user || !db) return;
+
+    setLinkLoading(prev => ({ ...prev, [player.id]: true }));
+    try {
+      // Look up the second parent's userProfile by email
+      const snap = await getDocs(query(collection(db, 'userProfiles'), where('email', '==', email)));
+      if (snap.empty) {
+        toast({ title: "User Not Found", description: `No SYBA account found for "${email}". They must sign up first.`, variant: "destructive" });
+        return;
+      }
+      const secondParentDoc = snap.docs[0];
+      const secondParentUid = secondParentDoc.id;
+
+      if (secondParentUid === user.uid) {
+        toast({ title: "Invalid", description: "You cannot link your own account as a second parent.", variant: "destructive" });
+        return;
+      }
+
+      if (player.secondaryParentId === secondParentUid) {
+        toast({ title: "Already Linked", description: "This parent is already linked to this player." });
+        return;
+      }
+
+      // Write secondaryParentId to the player doc
+      const playerRef = doc(db, 'userProfiles', user.uid, 'players', player.id);
+      await updateDoc(playerRef, { secondaryParentId: secondParentUid });
+
+      // Grant the second parent access via enrolledPlayerIds on their profile
+      const secondParentRef = doc(db, 'userProfiles', secondParentUid);
+      await updateDoc(secondParentRef, { enrolledPlayerIds: arrayUnion(player.id) });
+
+      const data = secondParentDoc.data();
+      setLinkedParents(prev => ({
+        ...prev,
+        [player.id]: { uid: secondParentUid, displayName: data.displayName || null, email: data.email || null },
+      }));
+      setLinkEmail(prev => ({ ...prev, [player.id]: '' }));
+      toast({ title: "Second Parent Linked", description: `${data.displayName || email} can now co-manage ${player.firstName}.` });
+    } catch (error: any) {
+      toast({ title: "Link Failed", description: error.message || "Could not link the second parent.", variant: "destructive" });
+    } finally {
+      setLinkLoading(prev => ({ ...prev, [player.id]: false }));
+    }
+  };
+
+  const handleUnlinkSecondParent = async (player: Player) => {
+    if (!user || !db || !player.secondaryParentId) return;
+    try {
+      const playerRef = doc(db, 'userProfiles', user.uid, 'players', player.id);
+      await updateDoc(playerRef, { secondaryParentId: null });
+      setLinkedParents(prev => ({ ...prev, [player.id]: null }));
+      toast({ title: "Second Parent Removed", description: `Co-management access for ${player.firstName} has been revoked.` });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
 
@@ -79,6 +201,7 @@ export default function ParentSettingsPage() {
         </header>
 
         <div className="max-w-2xl space-y-6">
+          {/* Profile Details */}
           <Card className="border-none shadow-md">
             <CardHeader>
               <div className="flex items-center gap-2 text-primary">
@@ -90,22 +213,22 @@ export default function ParentSettingsPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
-                <Input 
-                  id="name" 
-                  value={formData.displayName} 
-                  onChange={(e) => setFormData({...formData, displayName: e.target.value})} 
+                <Input
+                  id="name"
+                  value={formData.displayName}
+                  onChange={(e) => setFormData({...formData, displayName: e.target.value})}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone Number</Label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input 
-                    id="phone" 
+                  <Input
+                    id="phone"
                     className="pl-10"
                     placeholder="(555) 000-0000"
-                    value={formData.phoneNumber} 
-                    onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})} 
+                    value={formData.phoneNumber}
+                    onChange={(e) => setFormData({...formData, phoneNumber: e.target.value})}
                   />
                 </div>
               </div>
@@ -113,16 +236,83 @@ export default function ParentSettingsPage() {
                 <Label htmlFor="email">Email (Read-only)</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input 
-                    id="email" 
-                    className="pl-10 bg-muted/50" 
-                    value={user?.email || ''} 
-                    readOnly 
+                  <Input
+                    id="email"
+                    className="pl-10 bg-muted/50"
+                    value={user?.email || ''}
+                    readOnly
                   />
                 </div>
               </div>
             </CardContent>
+            <CardFooter className="border-t pt-6">
+              <Button onClick={handleSaveProfile} className="w-full h-11 rounded-xl" disabled={profileLoading}>
+                {profileLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Save Profile
+              </Button>
+            </CardFooter>
           </Card>
+
+          {/* Family Management */}
+          {players && players.length > 0 && (
+            <Card className="border-none shadow-md">
+              <CardHeader>
+                <div className="flex items-center gap-2 text-primary">
+                  <Users className="h-5 w-5" />
+                  <CardTitle className="text-xl">Family Management</CardTitle>
+                </div>
+                <CardDescription>Link a second parent or guardian to co-manage a player's profile.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {players.map((player) => {
+                  const linked = linkedParents[player.id] ?? (player.secondaryParentId ? { uid: player.secondaryParentId, displayName: null, email: null } : null);
+                  return (
+                    <div key={player.id} className="p-4 rounded-xl bg-secondary/20 border space-y-3">
+                      <p className="text-sm font-semibold">{player.firstName}</p>
+                      {linked ? (
+                        <div className="flex items-center justify-between gap-2 text-sm">
+                          <div className="flex items-center gap-2 text-green-700">
+                            <CheckCircle2 className="h-4 w-4 shrink-0" />
+                            <span>{linked.displayName || linked.email || 'Second parent linked'}</span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 rounded-full text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleUnlinkSecondParent(player)}
+                          >
+                            <X className="h-3 w-3 mr-1" /> Remove
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              className="pl-9 h-9 text-sm"
+                              placeholder="Second parent's email"
+                              type="email"
+                              value={linkEmail[player.id] || ''}
+                              onChange={(e) => setLinkEmail(prev => ({ ...prev, [player.id]: e.target.value }))}
+                              onKeyDown={(e) => e.key === 'Enter' && handleLinkSecondParent(player)}
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            className="h-9 rounded-xl shrink-0"
+                            disabled={!linkEmail[player.id] || linkLoading[player.id]}
+                            onClick={() => handleLinkSecondParent(player)}
+                          >
+                            {linkLoading[player.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
 
           {/* League Contacts */}
           <Card className="border-none shadow-md">
@@ -160,6 +350,7 @@ export default function ParentSettingsPage() {
             </CardContent>
           </Card>
 
+          {/* Team Directory Privacy */}
           <Card className="border-none shadow-md overflow-hidden">
             <CardHeader className="bg-primary/5">
               <div className="flex items-center gap-2 text-primary">
@@ -174,8 +365,8 @@ export default function ParentSettingsPage() {
                   <Label className="text-base">Share contact info with team</Label>
                   <p className="text-xs text-muted-foreground">Allow other parents to see your phone and email for carpooling and coordination.</p>
                 </div>
-                <Switch 
-                  checked={formData.shareContactInfo} 
+                <Switch
+                  checked={formData.shareContactInfo}
                   onCheckedChange={(val) => setFormData({...formData, shareContactInfo: val})}
                 />
               </div>
@@ -189,8 +380,8 @@ export default function ParentSettingsPage() {
               </div>
             </CardContent>
             <CardFooter className="bg-secondary/10 border-t pt-6">
-              <Button onClick={handleSave} className="w-full h-11 rounded-xl" disabled={loading}>
-                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              <Button onClick={handleSavePrivacy} className="w-full h-11 rounded-xl" disabled={privacyLoading}>
+                {privacyLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                 Save Privacy Settings
               </Button>
             </CardFooter>
