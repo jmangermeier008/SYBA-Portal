@@ -198,6 +198,19 @@ export default function AdminGamesPage() {
   }, [db, activeSeason?.id]);
   const { data: divisions } = useCollection<Division>(divisionsQuery);
 
+  // Fixed palette — assigned to divisions by index (must match admin/calendar/page.tsx)
+  const DIVISION_COLOR_PALETTE = [
+    '#3b82f6', '#a855f7', '#6366f1', '#f59e0b',
+    '#10b981', '#ef4444', '#ec4899', '#14b8a6',
+  ];
+
+  const divisionColors = useMemo<Record<string, string>>(() => {
+    if (!divisions) return {};
+    return Object.fromEntries(
+      divisions.map((div, i) => [div.id, DIVISION_COLOR_PALETTE[i % DIVISION_COLOR_PALETTE.length]])
+    );
+  }, [divisions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: upcomingGames, isLoading: loadingUpcoming } = useCollection<Game>(upcomingQuery);
   const { data: pastGames, isLoading: loadingPast } = useCollection<Game>(pastQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
@@ -801,6 +814,8 @@ export default function AdminGamesPage() {
             onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
             visibleFilters={['games', 'practices']}
             onViewRecord={(event) => router.push(`/admin/games/${event.id}`)}
+            availableDivisions={divisions ?? []}
+            divisionColors={divisionColors}
           />
         ) : (
           <>
