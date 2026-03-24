@@ -6,7 +6,19 @@ import { useFirestore, useMemoFirebase, useCollection, useDoc } from '@/firebase
 import { collection, doc } from 'firebase/firestore';
 import { CalendarDays } from 'lucide-react';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument } from '@/types/scheduling';
+import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, Team } from '@/types/scheduling';
+
+// Fixed palette — assigned to divisions by index
+const DIVISION_COLOR_PALETTE = [
+  '#3b82f6', // blue-500
+  '#a855f7', // purple-500
+  '#6366f1', // indigo-500
+  '#f59e0b', // amber-500
+  '#10b981', // emerald-500
+  '#ef4444', // red-500
+  '#ec4899', // pink-500
+  '#14b8a6', // teal-500
+];
 
 // ─── Normalizers ───────────────────────────────────────────────────────────────
 
@@ -28,24 +40,30 @@ function normalizeGame(g: Game): CalendarEvent {
     awayTeamName: g.awayTeamName,
     teamId: g.teamId,
     division: g.division,
+    divisionId: g.divisionId,
     notes: g.notes,
   };
 }
 
-function normalizePracticeSlot(s: PracticeSlot): CalendarEvent {
+function normalizePracticeSlot(s: PracticeSlot, teams: Team[]): CalendarEvent {
+  // Look up the claiming team's divisionId for accurate division color
+  const claimingTeam = s.teamId ? teams.find(t => t.id === s.teamId) : undefined;
+  const divisionId = claimingTeam?.divisionId ?? s.divisionIds?.[0];
+
   return {
     id: s.id,
     eventType: 'practice',
     date: s.date,
     startTime: s.startTime,
     endTime: s.endTime,
-    title: `${s.teamName} Practice`,
+    title: s.teamName ? `${s.teamName} Practice` : 'Practice',
     status: s.status,
     fieldName: s.fieldName,
     sourceType: 'practice-slot',
     sourceId: s.id,
     teamId: s.teamId,
     teamName: s.teamName,
+    divisionId,
     notes: s.notes,
   };
 }
@@ -97,11 +115,16 @@ function normalizeComplexClosure(closure: ComplexClosure): CalendarEvent {
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
+interface Division {
+  id: string;
+  name: string;
+}
+
 export default function AdminCalendarPage() {
   const db = useFirestore();
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: true });
 
-  // ── Fetch all three collections ─────────────────────────────────────────────
+  // ── Fetch all collections ────────────────────────────────────────────────────
   const gamesQuery = useMemoFirebase(() => {
     if (!db) return null;
     return collection(db, 'games');
@@ -127,24 +150,57 @@ export default function AdminCalendarPage() {
     return doc(db, 'settings', 'complexClosures');
   }, [db]);
 
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, 'teams');
+  }, [db]);
+
+  const seasonsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return collection(db, 'seasons');
+  }, [db]);
+
   const { data: games, isLoading: loadingGames } = useCollection<Game>(gamesQuery);
   const { data: practiceSlots, isLoading: loadingPractice } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: concessionSlots, isLoading: loadingConcessions } = useCollection<ConcessionSlot>(concessionSlotsQuery);
   const { data: fields } = useCollection<Field>(fieldsQuery);
   const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(complexClosuresRef);
+  const { data: teams } = useCollection<Team>(teamsQuery);
+  const { data: seasons } = useCollection<{ id: string; status: string }>(seasonsQuery);
+
+  // ── Resolve active season's divisions ───────────────────────────────────────
+  const activeSeason = useMemo(() => seasons?.find(s => s.status === 'active'), [seasons]);
+
+  const divisionsQuery = useMemoFirebase(() => {
+    if (!db || !activeSeason?.id) return null;
+    return collection(db, 'seasons', activeSeason.id, 'divisions');
+  }, [db, activeSeason?.id]);
+
+  const { data: divisions } = useCollection<Division>(divisionsQuery);
+
+  // ── Build divisionColors map: divisionId → hex color ────────────────────────
+  const divisionColors = useMemo<Record<string, string>>(() => {
+    if (!divisions) return {};
+    return Object.fromEntries(
+      divisions.map((div, i) => [div.id, DIVISION_COLOR_PALETTE[i % DIVISION_COLOR_PALETTE.length]])
+    );
+  }, [divisions]);
+
+  const availableDivisions = useMemo(() => divisions ?? [], [divisions]);
 
   // ── Normalize to CalendarEvent[] ────────────────────────────────────────────
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
+    const teamsList = teams ?? [];
     const events: CalendarEvent[] = [];
     (games ?? []).forEach(g => events.push(normalizeGame(g)));
-    (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s)));
+    (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s, teamsList)));
     (concessionSlots ?? []).forEach(s => events.push(normalizeConcessionSlot(s)));
     (fields ?? []).forEach(f =>
       (f.maintenanceClosures ?? []).forEach(c => events.push(normalizeFieldClosure(f, c)))
     );
     (complexClosuresDoc?.closures ?? []).forEach(c => events.push(normalizeComplexClosure(c)));
     return events;
-  }, [games, practiceSlots, concessionSlots, fields, complexClosuresDoc]);
+  }, [games, practiceSlots, concessionSlots, fields, complexClosuresDoc, teams]);
 
   const isLoading = loadingGames || loadingPractice || loadingConcessions;
 
@@ -172,6 +228,8 @@ export default function AdminCalendarPage() {
           filters={filters}
           onFilterChange={handleFilterChange}
           visibleFilters={['games', 'practices', 'concessions']}
+          availableDivisions={availableDivisions}
+          divisionColors={divisionColors}
           // No action callbacks — board member calendar is view-only
         />
       </main>

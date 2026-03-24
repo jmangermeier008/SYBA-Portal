@@ -41,6 +41,7 @@ import type { CalendarEvent, CalendarEventType } from '@/types/scheduling';
 
 // ─── Color config ──────────────────────────────────────────────────────────────
 
+// Fallback static colors (used when no divisionColors map is provided — coach/parent views)
 const pillColors: Record<CalendarEventType, string> = {
   game: 'bg-primary text-white',
   practice: 'bg-green-600 text-white',
@@ -54,6 +55,61 @@ const dotColors: Record<CalendarEventType, string> = {
   concession: 'bg-amber-500',
   closure: 'bg-red-600',
 };
+
+const FALLBACK_GAME_COLOR = '#3b82f6';    // blue-500
+const PRACTICE_BG_COLOR = '#16a34a';      // green-600
+
+/**
+ * Returns inline style + className for a pill/dot/header.
+ * Only applies division colors when divisionColors map is provided (admin view).
+ */
+function getEventStyles(
+  event: CalendarEvent,
+  divisionColors?: Record<string, string>
+): { className: string; style: React.CSSProperties } {
+  // Non-division event types — always static
+  if (event.eventType === 'concession') return { className: pillColors.concession, style: {} };
+  if (event.eventType === 'closure') return { className: pillColors.closure, style: {} };
+
+  // No division color map — fall back to static colors (coach/parent)
+  if (!divisionColors) {
+    return {
+      className: pillColors[event.eventType],
+      style: {},
+    };
+  }
+
+  const divColor = event.divisionId ? (divisionColors[event.divisionId] ?? FALLBACK_GAME_COLOR) : FALLBACK_GAME_COLOR;
+
+  if (event.eventType === 'game') {
+    return {
+      className: 'text-white',
+      style: { backgroundColor: divColor },
+    };
+  }
+
+  // Practice: green bg + colored left border
+  return {
+    className: 'text-white',
+    style: {
+      backgroundColor: PRACTICE_BG_COLOR,
+      borderLeft: `4px solid ${divColor}`,
+    },
+  };
+}
+
+/**
+ * Returns just the color hex for dots (mobile month view).
+ */
+function getDotColor(event: CalendarEvent, divisionColors?: Record<string, string>): string {
+  if (event.eventType === 'concession') return '#f59e0b'; // amber-500
+  if (event.eventType === 'closure') return '#dc2626';    // red-600
+  if (!divisionColors) {
+    return event.eventType === 'game' ? FALLBACK_GAME_COLOR : PRACTICE_BG_COLOR;
+  }
+  const divColor = event.divisionId ? (divisionColors[event.divisionId] ?? FALLBACK_GAME_COLOR) : FALLBACK_GAME_COLOR;
+  return event.eventType === 'practice' ? PRACTICE_BG_COLOR : divColor;
+}
 
 // Filter keys are plural; map them to CalendarEventType for color lookups
 const filterKeyToEventType: Record<string, CalendarEventType> = {
@@ -111,6 +167,8 @@ export interface LeagueCalendarProps {
   // Division filter — optional; renders checkboxes when provided
   availableDivisions?: Array<{ id: string; name: string }>;
   onDivisionFilterChange?: (divisionIds: string[]) => void;
+  // Division color map: divisionId → hex color (admin only; omit for coach/parent views)
+  divisionColors?: Record<string, string>;
   // Role-specific action callbacks — undefined = hidden in popover
   onRsvp?: (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => void;
   onWeatherCancel?: (teamId: string, gameId: string) => void;
@@ -130,12 +188,13 @@ export interface LeagueCalendarProps {
 
 function EventPopoverContent({
   event,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
   event: CalendarEvent;
 }) {
   const typeLabel =
@@ -151,9 +210,10 @@ function EventPopoverContent({
 
   // Closure events are read-only — show a simple card with no action buttons
   if (event.eventType === 'closure') {
+    const closureStyles = getEventStyles(event, divisionColors);
     return (
       <div className="overflow-hidden rounded-lg">
-        <div className={cn('px-4 py-3', pillColors.closure)}>
+        <div className={cn('px-4 py-3', closureStyles.className)} style={closureStyles.style}>
           <p className="font-semibold text-sm leading-tight">{event.title}</p>
           <p className="text-xs opacity-80 mt-0.5">{typeLabel}</p>
         </div>
@@ -169,10 +229,12 @@ function EventPopoverContent({
     );
   }
 
+  const headerStyles = getEventStyles(event, divisionColors);
+
   return (
     <div className="overflow-hidden rounded-lg">
       {/* Colored header */}
-      <div className={cn('px-4 py-3', pillColors[event.eventType])}>
+      <div className={cn('px-4 py-3', headerStyles.className)} style={headerStyles.style}>
         <p className="font-semibold text-sm leading-tight">{event.title}</p>
         <p className="text-xs opacity-80 mt-0.5">{typeLabel}</p>
         {isCancelled && (
@@ -314,23 +376,26 @@ function EventPopoverContent({
 
 function EventPill({
   event,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
   event: CalendarEvent;
 }) {
+  const { className: pillCls, style: pillStyle } = getEventStyles(event, divisionColors);
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           className={cn(
             'w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate transition-opacity hover:opacity-80 leading-snug',
-            pillColors[event.eventType],
+            pillCls,
             event.status === 'cancelled' && 'opacity-40 line-through'
           )}
+          style={pillStyle}
         >
           {event.title}
         </button>
@@ -338,6 +403,7 @@ function EventPill({
       <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-0 shadow-lg" align="start">
         <EventPopoverContent
           event={event}
+          divisionColors={divisionColors}
           onRsvp={onRsvp}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
@@ -353,14 +419,16 @@ function EventPill({
 
 function EventDot({
   event,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
   event: CalendarEvent;
 }) {
+  const dotColor = getDotColor(event, divisionColors);
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -368,14 +436,16 @@ function EventDot({
           aria-label={event.title}
           className={cn(
             'w-2.5 h-2.5 rounded-full shrink-0 hover:opacity-80 transition-opacity',
-            dotColors[event.eventType],
+            !divisionColors && dotColors[event.eventType],
             event.status === 'cancelled' && 'opacity-40'
           )}
+          style={divisionColors ? { backgroundColor: dotColor } : undefined}
         />
       </PopoverTrigger>
       <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-0 shadow-lg" align="start">
         <EventPopoverContent
           event={event}
+          divisionColors={divisionColors}
           onRsvp={onRsvp}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
@@ -396,6 +466,7 @@ function MonthGrid({
   eventsByDate,
   onDayClick,
   isMobile,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
@@ -406,6 +477,7 @@ function MonthGrid({
   eventsByDate: Map<string, CalendarEvent[]>;
   onDayClick: (d: Date) => void;
   isMobile?: boolean;
+  divisionColors?: LeagueCalendarProps['divisionColors'];
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
@@ -472,6 +544,7 @@ function MonthGrid({
                     <EventDot
                       key={e.id}
                       event={e}
+                      divisionColors={divisionColors}
                       onRsvp={onRsvp}
                       onWeatherCancel={onWeatherCancel}
                       onConcessionSignup={onConcessionSignup}
@@ -495,6 +568,7 @@ function MonthGrid({
                     <EventPill
                       key={e.id}
                       event={e}
+                      divisionColors={divisionColors}
                       onRsvp={onRsvp}
                       onWeatherCancel={onWeatherCancel}
                       onConcessionSignup={onConcessionSignup}
@@ -525,6 +599,7 @@ function MonthGrid({
 function WeekStrip({
   focusDate,
   eventsByDate,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
@@ -533,6 +608,7 @@ function WeekStrip({
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
+  divisionColors?: LeagueCalendarProps['divisionColors'];
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
@@ -591,6 +667,7 @@ function WeekStrip({
                     <EventPill
                       key={e.id}
                       event={e}
+                      divisionColors={divisionColors}
                       onRsvp={onRsvp}
                       onWeatherCancel={onWeatherCancel}
                       onConcessionSignup={onConcessionSignup}
@@ -612,18 +689,20 @@ function WeekStrip({
 
 function DayEventCard({
   event,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
   event: CalendarEvent;
 }) {
   return (
     <div>
       <EventPopoverContent
         event={event}
+        divisionColors={divisionColors}
         onRsvp={onRsvp}
         onWeatherCancel={onWeatherCancel}
         onConcessionSignup={onConcessionSignup}
@@ -637,6 +716,7 @@ function DayEventCard({
 function DayView({
   focusDate,
   eventsByDate,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
@@ -645,6 +725,7 @@ function DayView({
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
+  divisionColors?: LeagueCalendarProps['divisionColors'];
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
@@ -688,6 +769,7 @@ function DayView({
             <DayEventCard
               key={e.id}
               event={e}
+              divisionColors={divisionColors}
               onRsvp={onRsvp}
               onWeatherCancel={onWeatherCancel}
               onConcessionSignup={onConcessionSignup}
@@ -711,6 +793,7 @@ export function LeagueCalendar({
   visibleFilters,
   availableDivisions,
   onDivisionFilterChange,
+  divisionColors,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
@@ -894,6 +977,35 @@ export function LeagueCalendar({
         )}
       </div>
 
+      {/* Division legend row — only shown when divisionColors provided (admin view) */}
+      {divisionColors && availableDivisions && availableDivisions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Divisions</span>
+          {availableDivisions.map(div => {
+            const color = divisionColors[div.id];
+            if (!color) return null;
+            return (
+              <div key={div.id} className="flex items-center gap-2">
+                {/* Game swatch */}
+                <span
+                  className="w-3 h-3 rounded-sm shrink-0"
+                  style={{ backgroundColor: color }}
+                  title={`${div.name} — Game color`}
+                />
+                {/* Practice swatch: green with left border */}
+                <span
+                  className="w-3 h-3 rounded-sm shrink-0"
+                  style={{ backgroundColor: PRACTICE_BG_COLOR, borderLeft: `3px solid ${color}` }}
+                  title={`${div.name} — Practice color`}
+                />
+                <span className="text-xs text-muted-foreground">{div.name}</span>
+              </div>
+            );
+          })}
+          <span className="text-[10px] text-muted-foreground/60 italic">Left swatch = game · Right = practice</span>
+        </div>
+      )}
+
       {/* Calendar grid */}
       {isLoading ? (
         <div className="flex justify-center py-20">
@@ -903,6 +1015,7 @@ export function LeagueCalendar({
         <DayView
           focusDate={focusDate}
           eventsByDate={eventsByDate}
+          divisionColors={divisionColors}
           onRsvp={onRsvp}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
@@ -923,6 +1036,7 @@ export function LeagueCalendar({
           eventsByDate={eventsByDate}
           onDayClick={handleDayClick}
           isMobile={isMobile}
+          divisionColors={divisionColors}
           onRsvp={onRsvp}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
@@ -933,6 +1047,7 @@ export function LeagueCalendar({
         <WeekStrip
           focusDate={focusDate}
           eventsByDate={eventsByDate}
+          divisionColors={divisionColors}
           onRsvp={onRsvp}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
