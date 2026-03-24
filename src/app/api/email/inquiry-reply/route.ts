@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
-    const { toEmail, replierName, originalSubject, replyMessage } = await req.json();
+    const { toEmail, replierName, originalSubject, replyMessage, inquiryId } = await req.json();
 
     if (!toEmail) {
       return NextResponse.json({ error: 'Missing toEmail' }, { status: 400 });
@@ -15,7 +15,9 @@ export async function POST(req: Request) {
       replyMessage,
       ``,
       `---`,
-      `Log in to the SYBA Portal to view the full conversation.`,
+      inquiryId
+        ? `View this inquiry directly: ${process.env.NEXT_PUBLIC_APP_URL ?? 'https://syba-portal.vercel.app'}/admin/inquiries?id=${inquiryId}`
+        : `Log in to the SYBA Portal to view the full conversation.`,
     ].join('\n');
 
     const response = await fetch('https://api.resend.com/emails', {

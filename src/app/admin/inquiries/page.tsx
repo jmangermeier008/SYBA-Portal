@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,9 +21,10 @@ const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }>
   resolved: { label: 'Resolved', className: 'bg-green-100 text-green-800' },
 };
 
-export default function AdminInquiriesPage() {
+function AdminInquiriesContent() {
   const { isBoardMember, loading: loadingUser } = useUser();
   const db = useFirestore();
+  const searchParams = useSearchParams();
 
   const [topicFilter, setTopicFilter] = useState<InquiryTopic | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<InquiryStatus | 'all'>('all');
@@ -54,10 +56,16 @@ export default function AdminInquiriesPage() {
     });
   }, [inquiries, topicFilter, statusFilter, searchQuery]);
 
-  const handleOpenInquiry = (inquiry: Inquiry) => {
-    setSelectedInquiry(inquiry);
-    setDialogOpen(true);
-  };
+  // Deep-link: auto-open dialog when ?id= param matches a loaded inquiry
+  useEffect(() => {
+    const id = searchParams.get('id');
+    if (!id || !inquiries?.length) return;
+    const match = inquiries.find(i => i.id === id);
+    if (match) {
+      setSelectedInquiry(match);
+      setDialogOpen(true);
+    }
+  }, [searchParams, inquiries]);
 
   if (loadingUser) {
     return (
@@ -70,7 +78,7 @@ export default function AdminInquiriesPage() {
     );
   }
 
-  if (!isBoardMember) {
+  if (!loadingUser && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
@@ -140,11 +148,14 @@ export default function AdminInquiriesPage() {
                 <Card
                   key={inquiry.id}
                   className="cursor-pointer hover:shadow-md transition-shadow"
-                  onClick={() => handleOpenInquiry(inquiry)}
+                  onClick={() => { setSelectedInquiry(inquiry); setDialogOpen(true); }}
                 >
                   <CardContent className="py-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {inquiry.isUnread && (
+                          <span className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0" title="New" />
+                        )}
                         <Badge variant="outline" className={statusInfo.className}>
                           {statusInfo.label}
                         </Badge>
@@ -191,5 +202,20 @@ export default function AdminInquiriesPage() {
         />
       </main>
     </div>
+  );
+}
+
+export default function AdminInquiriesPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 flex items-center justify-center pt-16 md:pt-0">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </main>
+      </div>
+    }>
+      <AdminInquiriesContent />
+    </Suspense>
   );
 }

@@ -81,6 +81,7 @@ export interface Inquiry {
   updatedAt: string;
   resolvedAt: string | null;
   replies: InquiryReply[];
+  isUnread?: boolean;
 }
 
 export function getTopicConfig(topic: InquiryTopic): InquiryTopicConfig | undefined {

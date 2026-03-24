@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useUser, useFirestore } from '@/firebase';
 import { doc, updateDoc, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Send, Clock, User, Trash2 } from 'lucide-react';
+import { Loader2, Send, Clock, User, Trash2, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 import { getTopicConfig, INQUIRY_STATUS_CONFIG } from '@/data/inquiry-topics';
 import type { Inquiry, InquiryStatus } from '@/data/inquiry-topics';
@@ -31,6 +31,12 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [pendingResolved, setPendingResolved] = useState(false);
+
+  // Auto-mark as read when dialog opens
+  useEffect(() => {
+    if (!open || !inquiry?.isUnread || !inquiry?.id || !db) return;
+    updateDoc(doc(db, 'inquiries', inquiry.id), { isUnread: false });
+  }, [open, inquiry?.id, inquiry?.isUnread, db]);
 
   if (!inquiry) return null;
 
@@ -96,6 +102,7 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
           replierName: profile.displayName || 'SYBA Board',
           originalSubject: inquiry.subject,
           replyMessage: replyMessage.trim(),
+          inquiryId: inquiry.id,
         }),
       }).catch(() => {});
 
@@ -187,6 +194,18 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
               </SelectContent>
             </Select>
             {updatingStatus && <Loader2 className="h-4 w-4 animate-spin" />}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 ml-auto text-muted-foreground hover:text-foreground"
+              title="Mark as unread"
+              onClick={() => {
+                if (!db || !inquiry.id) return;
+                updateDoc(doc(db, 'inquiries', inquiry.id), { isUnread: true });
+              }}
+            >
+              <Mail className="h-4 w-4" />
+            </Button>
           </div>
           {pendingResolved && (
             <div className="flex items-center gap-2 rounded-md bg-orange-50 border border-orange-200 px-3 py-2 text-sm text-orange-800">
