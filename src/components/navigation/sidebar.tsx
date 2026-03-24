@@ -37,6 +37,7 @@ import {
   Inbox,
   Layers,
   Megaphone,
+  Briefcase,
 } from 'lucide-react';
 import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -66,13 +67,13 @@ function getDefaultContext(roles: string[]): RoleContext {
 
 // ── Admin nav groups ──────────────────────────────────────────────────────────
 
-const adminSchedulingItems = [
-  { label: 'Dashboard', icon: LayoutDashboard, href: '/admin/dashboard' },
+const adminSeasonItems = [
   { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
   { label: 'Standings', icon: BarChart3, href: '/admin/standings' },
   { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
   { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
+  { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
 ];
 
 const adminPeopleItems = [
@@ -83,9 +84,8 @@ const adminPeopleItems = [
   { label: 'Divisions', icon: Layers, href: '/admin/divisions' },
 ];
 
-const adminVenueItems = [
+const adminFacilitiesItems = [
   { label: 'Fields', icon: MapPin, href: '/admin/fields' },
-  { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
   { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
 ];
 
@@ -105,9 +105,9 @@ const adminSystemAdminItems = [
 ];
 
 function getAdminSectionForPath(p: string): string | null {
-  if (['/admin/dashboard', '/admin/games', '/admin/standings', '/admin/calendar', '/admin/practice-slots', '/admin/seasons'].some(r => p === r || p.startsWith(r + '/'))) return 'Scheduling';
-  if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams', '/admin/divisions'].some(r => p === r || p.startsWith(r + '/'))) return 'People';
-  if (['/admin/fields', '/admin/concessions', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Venue & Finance';
+  if (['/admin/games', '/admin/standings', '/admin/calendar', '/admin/practice-slots', '/admin/seasons', '/admin/concessions'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Management';
+  if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams', '/admin/divisions'].some(r => p === r || p.startsWith(r + '/'))) return 'People & Teams';
+  if (['/admin/fields', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Facilities & Finance';
   if (['/admin/announcements', '/admin/board-meetings', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Communications';
   if (['/admin/import', '/admin/roles', '/admin/settings'].some(r => p === r || p.startsWith(r + '/'))) return 'System';
   return null;
@@ -145,6 +145,7 @@ function NavSection({
   isOpen,
   onToggle,
   collapsed,
+  sectionIcon,
 }: {
   label: string;
   items: { label: string; icon: React.ElementType; href: string; badge?: boolean }[];
@@ -153,30 +154,61 @@ function NavSection({
   isOpen: boolean;
   onToggle: () => void;
   collapsed: boolean;
+  sectionIcon?: React.ElementType;
 }) {
+  const [flyoutOpen, setFlyoutOpen] = useState(false);
+
+  const isSectionActive = items.some(
+    item => pathname === item.href || pathname.startsWith(item.href + '/')
+  );
+
   if (collapsed) {
-    // Icon-only mode: just show the icons, no section header
+    const Icon = sectionIcon ?? items[0]?.icon ?? LayoutDashboard;
+
     return (
-      <div className="flex flex-col items-center gap-1 mt-2">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            title={item.label}
-            className={cn(
-              "relative flex items-center justify-center w-11 h-11 rounded-lg transition-colors",
-              pathname === item.href || pathname.startsWith(item.href + '/')
-                ? "bg-primary text-white shadow-md shadow-primary/20"
-                : "text-muted-foreground hover:bg-secondary hover:text-primary"
-            )}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {item.badge && (
-              <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-            )}
-          </Link>
-        ))}
+      <div
+        className="relative flex flex-col items-center mt-2"
+        onMouseEnter={() => setFlyoutOpen(true)}
+        onMouseLeave={() => setFlyoutOpen(false)}
+      >
+        <button
+          title={label}
+          className={cn(
+            "flex items-center justify-center w-11 h-11 rounded-lg transition-colors",
+            isSectionActive
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-secondary hover:text-primary"
+          )}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+        </button>
+
+        {flyoutOpen && (
+          <div className="absolute left-full top-0 ml-2 z-50 bg-white border border-border rounded-lg shadow-lg py-1 min-w-[200px]">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-3 py-1.5 border-b border-border/40">
+              {label}
+            </p>
+            {items.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => { onNavigate(); setFlyoutOpen(false); }}
+                className={cn(
+                  "flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-colors",
+                  pathname === item.href || pathname.startsWith(item.href + '/')
+                    ? "bg-primary text-white"
+                    : "text-muted-foreground hover:bg-secondary hover:text-primary"
+                )}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {item.label}
+                {item.badge && (
+                  <span aria-hidden="true" className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -239,9 +271,9 @@ export function Sidebar() {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
     const adminSection = getAdminSectionForPath(pathname);
     return {
-      'Scheduling': adminSection === 'Scheduling',
-      'People': adminSection === 'People',
-      'Venue & Finance': adminSection === 'Venue & Finance',
+      'Season Management': adminSection === 'Season Management',
+      'People & Teams': adminSection === 'People & Teams',
+      'Facilities & Finance': adminSection === 'Facilities & Finance',
       'Communications': adminSection === 'Communications',
       'System': adminSection === 'System',
       'Coaching': pathname.startsWith('/coach/'),
@@ -274,13 +306,22 @@ export function Sidebar() {
 
   useEffect(() => {
     const adminSection = getAdminSectionForPath(pathname);
-    // Only open the section matching the current path — don't collapse others
     if (adminSection) {
-      setOpenSections(prev => ({ ...prev, [adminSection]: true }));
+      // Accordion: close all, open only the matching section
+      setOpenSections(prev => {
+        const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
+        return { ...allClosed, [adminSection]: true };
+      });
     } else if (pathname.startsWith('/coach/')) {
-      setOpenSections(prev => ({ ...prev, 'Coaching': true }));
+      setOpenSections(prev => {
+        const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
+        return { ...allClosed, 'Coaching': true };
+      });
     } else if (pathname.startsWith('/parent/')) {
-      setOpenSections(prev => ({ ...prev, 'Family': true }));
+      setOpenSections(prev => {
+        const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
+        return { ...allClosed, 'Family': true };
+      });
     }
   }, [pathname]);
 
@@ -301,11 +342,17 @@ export function Sidebar() {
     setActiveContext(context);
     localStorage.setItem('syba_active_role', context);
     if (context === 'admin') {
-      const activeAdminSection = getAdminSectionForPath(pathname) ?? 'Scheduling';
-      setOpenSections(prev => ({ ...prev, [activeAdminSection]: true }));
+      const activeAdminSection = getAdminSectionForPath(pathname) ?? 'Season Management';
+      setOpenSections(prev => {
+        const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
+        return { ...allClosed, [activeAdminSection]: true };
+      });
     } else {
       const sectionLabel = context === 'coach' ? 'Coaching' : 'Family';
-      setOpenSections(prev => ({ ...prev, [sectionLabel]: true }));
+      setOpenSections(prev => {
+        const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
+        return { ...allClosed, [sectionLabel]: true };
+      });
     }
   }, [pathname]);
 
@@ -348,7 +395,11 @@ export function Sidebar() {
   }, [latestAnnouncements, isParent, isCoach]);
 
   const toggleSection = (label: string) => {
-    setOpenSections(prev => ({ ...prev, [label]: !prev[label] }));
+    setOpenSections(prev => {
+      const isCurrentlyOpen = prev[label];
+      const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
+      return { ...allClosed, [label]: !isCurrentlyOpen };
+    });
   };
 
   const handleSignOut = async () => {
@@ -368,6 +419,8 @@ export function Sidebar() {
 
   const roleLabel = roles.join(' · ') || profile?.role || '';
   const roleContexts = getRoleContexts(roles);
+
+  const isDashboardActive = pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/');
 
   const sidebarInner = (
     <aside className={cn(
@@ -432,38 +485,75 @@ export function Sidebar() {
 
         {activeContext === 'admin' && (isAdmin || isBoardMember || isSiteAdmin) && (
           <>
+            {/* Standalone Dashboard link */}
+            {collapsed && !isMobile ? (
+              <div className="flex flex-col items-center gap-1 mt-2">
+                <Link
+                  href="/admin/dashboard"
+                  onClick={closeMenu}
+                  title="Dashboard"
+                  className={cn(
+                    "relative flex items-center justify-center w-11 h-11 rounded-lg transition-colors",
+                    isDashboardActive
+                      ? "bg-primary text-white shadow-md shadow-primary/20"
+                      : "text-muted-foreground hover:bg-secondary hover:text-primary"
+                  )}
+                >
+                  <LayoutDashboard className="h-4 w-4 shrink-0" />
+                </Link>
+              </div>
+            ) : (
+              <Link
+                href="/admin/dashboard"
+                onClick={closeMenu}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors mt-2",
+                  isDashboardActive
+                    ? "bg-primary text-white shadow-md shadow-primary/20"
+                    : "text-muted-foreground hover:bg-secondary hover:text-primary"
+                )}
+              >
+                <LayoutDashboard className="h-4 w-4 shrink-0" />
+                Dashboard
+              </Link>
+            )}
+
             <NavSection
-              label="Scheduling"
-              items={adminSchedulingItems}
+              label="Season Management"
+              sectionIcon={CalendarDays}
+              items={adminSeasonItems}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['Scheduling']}
-              onToggle={() => toggleSection('Scheduling')}
+              isOpen={openSections['Season Management']}
+              onToggle={() => toggleSection('Season Management')}
               collapsed={collapsed && !isMobile}
             />
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
-              label="People"
+              label="People & Teams"
+              sectionIcon={Users}
               items={adminPeopleItems}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['People']}
-              onToggle={() => toggleSection('People')}
+              isOpen={openSections['People & Teams']}
+              onToggle={() => toggleSection('People & Teams')}
               collapsed={collapsed && !isMobile}
             />
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
-              label="Venue & Finance"
-              items={adminVenueItems}
+              label="Facilities & Finance"
+              sectionIcon={Briefcase}
+              items={adminFacilitiesItems}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['Venue & Finance']}
-              onToggle={() => toggleSection('Venue & Finance')}
+              isOpen={openSections['Facilities & Finance']}
+              onToggle={() => toggleSection('Facilities & Finance')}
               collapsed={collapsed && !isMobile}
             />
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
               label="Communications"
+              sectionIcon={Megaphone}
               items={adminCommsItems}
               pathname={pathname}
               onNavigate={closeMenu}
@@ -474,6 +564,7 @@ export function Sidebar() {
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
               label="System"
+              sectionIcon={Settings}
               items={[...adminSystemBaseItems, ...(isSiteAdmin ? adminSystemAdminItems : [])]}
               pathname={pathname}
               onNavigate={closeMenu}
