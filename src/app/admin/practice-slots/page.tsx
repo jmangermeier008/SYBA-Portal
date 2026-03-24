@@ -18,6 +18,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import {
   Dumbbell, Plus, Trash2, Loader2, Lock, CalendarDays, Clock,
   MapPin, XCircle, ChevronRight, AlertTriangle, CheckCircle2,
@@ -133,6 +134,10 @@ export default function PracticeSlotsAdminPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
 
+  const [selectedSlotIds, setSelectedSlotIds] = useState<Set<string>>(new Set());
+  const [bulkCancelling, setBulkCancelling] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const slotsQuery = useMemoFirebase(() => {
@@ -209,6 +214,19 @@ export default function PracticeSlotsAdminPage() {
 
     return { claimedByTeam, teamsByDivision, totalTeams, teamsWithSlots };
   }, [slots, teams]);
+
+  // Grouped by date → field for the accordion layout
+  const groupedByDate = useMemo(() => {
+    const map = new Map<string, Map<string, PracticeSlot[]>>();
+    for (const slot of filteredSlots) {
+      if (!map.has(slot.date)) map.set(slot.date, new Map());
+      const fieldMap = map.get(slot.date)!;
+      const key = slot.fieldName ?? slot.fieldId;
+      if (!fieldMap.has(key)) fieldMap.set(key, []);
+      fieldMap.get(key)!.push(slot);
+    }
+    return map;
+  }, [filteredSlots]);
 
   // Preview dates for recurring creation
   const previewDates = useMemo(() => {
@@ -537,6 +555,44 @@ export default function PracticeSlotsAdminPage() {
     }
   };
 
+  const handleBulkCancel = async () => {
+    if (!db) return;
+    const ids = [...selectedSlotIds];
+    setBulkCancelling(true);
+    try {
+      const batch = writeBatch(db);
+      for (const id of ids) {
+        batch.update(doc(db, 'practiceSlots', id), { status: 'cancelled', updatedAt: Timestamp.now() });
+      }
+      await batch.commit();
+      setSelectedSlotIds(new Set());
+      toast({ title: `${ids.length} slot${ids.length !== 1 ? 's' : ''} cancelled` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBulkCancelling(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!db) return;
+    const ids = [...selectedSlotIds];
+    setBulkDeleting(true);
+    try {
+      const batch = writeBatch(db);
+      for (const id of ids) {
+        batch.delete(doc(db, 'practiceSlots', id));
+      }
+      await batch.commit();
+      setSelectedSlotIds(new Set());
+      toast({ title: `${ids.length} slot${ids.length !== 1 ? 's' : ''} deleted` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   // ── Access guard ──────────────────────────────────────────────────────────────
 
   if (loadingUser) {
@@ -657,17 +713,67 @@ export default function PracticeSlotsAdminPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-2">
-                {filteredSlots.map(slot => (
-                  <SlotRow
-                    key={slot.id}
-                    slot={slot}
-                    divisionMap={divisionMap}
-                    onCancel={() => handleInitiateCancel(slot)}
-                    onDelete={() => handleInitiateDelete(slot)}
-                  />
-                ))}
-              </div>
+              <Accordion type="multiple" className="space-y-2">
+                {[...groupedByDate.entries()].map(([date, fieldMap]) => {
+                  const allSlotsForDate = [...fieldMap.values()].flat();
+                  const allSelected = allSlotsForDate.length > 0 && allSlotsForDate.every(s => selectedSlotIds.has(s.id));
+                  const someSelected = allSlotsForDate.some(s => selectedSlotIds.has(s.id));
+                  return (
+                    <AccordionItem key={date} value={date} className="border rounded-xl px-4">
+                      <AccordionTrigger className="hover:no-underline py-3">
+                        <div className="flex items-center gap-3 w-full min-w-0">
+                          <Checkbox
+                            checked={allSelected}
+                            data-state={someSelected && !allSelected ? 'indeterminate' : undefined}
+                            onCheckedChange={(checked) => {
+                              setSelectedSlotIds(prev => {
+                                const next = new Set(prev);
+                                allSlotsForDate.forEach(s => checked ? next.add(s.id) : next.delete(s.id));
+                                return next;
+                              });
+                            }}
+                            onClick={e => e.stopPropagation()}
+                            className="shrink-0"
+                          />
+                          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="font-semibold text-sm">{format(parseISO(date), 'EEEE, MMMM d')}</span>
+                          <span className="text-muted-foreground text-xs ml-auto mr-2 shrink-0">
+                            {allSlotsForDate.length} slot{allSlotsForDate.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-3">
+                        {[...fieldMap.entries()].map(([fieldName, slots]) => (
+                          <div key={fieldName} className="mb-3 last:mb-0">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                              <MapPin className="h-3 w-3" /> {fieldName}
+                            </p>
+                            <div className="space-y-1">
+                              {slots.map(slot => (
+                                <SlotRow
+                                  key={slot.id}
+                                  slot={slot}
+                                  selected={selectedSlotIds.has(slot.id)}
+                                  onSelect={(checked) => {
+                                    setSelectedSlotIds(prev => {
+                                      const next = new Set(prev);
+                                      checked ? next.add(slot.id) : next.delete(slot.id);
+                                      return next;
+                                    });
+                                  }}
+                                  divisionMap={divisionMap}
+                                  onCancel={() => handleInitiateCancel(slot)}
+                                  onDelete={() => handleInitiateDelete(slot)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
             )}
           </TabsContent>
 
@@ -825,6 +931,41 @@ export default function PracticeSlotsAdminPage() {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* ── Bulk Action Bar ─────────────────────────────────────────────────────── */}
+      {selectedSlotIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-background border shadow-xl rounded-2xl px-6 py-3">
+          <span className="text-sm font-medium whitespace-nowrap">
+            {selectedSlotIds.size} selected
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleBulkCancel}
+            disabled={bulkCancelling || bulkDeleting}
+          >
+            {bulkCancelling && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+            Cancel Selected
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting || bulkCancelling}
+          >
+            {bulkDeleting && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+            Delete Selected
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelectedSlotIds(new Set())}
+            disabled={bulkCancelling || bulkDeleting}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
 
       {/* ── Add Slot Dialog ────────────────────────────────────────────────────── */}
       <Dialog open={addDialog} onOpenChange={(o) => {
@@ -1222,11 +1363,15 @@ export default function PracticeSlotsAdminPage() {
 
 function SlotRow({
   slot,
+  selected,
+  onSelect,
   divisionMap,
   onCancel,
   onDelete,
 }: {
   slot: PracticeSlot;
+  selected?: boolean;
+  onSelect?: (checked: boolean) => void;
   divisionMap: Record<string, string>;
   onCancel: () => void;
   onDelete: () => void;
@@ -1244,6 +1389,13 @@ function SlotRow({
         : 'bg-green-50 border-green-100'
     )}>
       <div className="flex items-center gap-3 min-w-0">
+        {onSelect && (
+          <Checkbox
+            checked={selected}
+            onCheckedChange={onSelect}
+            className="shrink-0"
+          />
+        )}
         <div className={cn('p-2 rounded-lg shrink-0',
           isCancelled ? 'bg-gray-100' : isClaimed ? 'bg-blue-100' : isPending ? 'bg-amber-100' : 'bg-green-100'
         )}>

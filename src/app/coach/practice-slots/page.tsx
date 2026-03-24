@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import {
@@ -9,11 +9,12 @@ import {
 } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Dumbbell, CalendarDays, Clock, MapPin, Loader2, ShieldAlert, CheckCircle2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, startOfWeek, endOfWeek, addWeeks } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { PracticeSlot } from '@/types/scheduling';
 
@@ -28,6 +29,20 @@ function formatTime(t: string) {
   const [h, m] = t.split(':').map(Number);
   const ampm = h >= 12 ? 'PM' : 'AM';
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+const FIELD_COLORS = [
+  'bg-blue-100 text-blue-700 border-blue-200',
+  'bg-green-100 text-green-700 border-green-200',
+  'bg-purple-100 text-purple-700 border-purple-200',
+  'bg-orange-100 text-orange-700 border-orange-200',
+  'bg-pink-100 text-pink-700 border-pink-200',
+  'bg-cyan-100 text-cyan-700 border-cyan-200',
+];
+
+function getFieldColorClass(fieldName: string, allFieldNames: string[]): string {
+  const index = allFieldNames.indexOf(fieldName);
+  return FIELD_COLORS[Math.max(0, index) % FIELD_COLORS.length];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -88,6 +103,35 @@ export default function CoachPracticeSlotsPage() {
 
   const loadingSlots = loadingAvailable || loadingClaimed || loadingPending;
 
+  // ── Time-horizon grouping for available slots ─────────────────────────────
+
+  const thisWeekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
+  const nextWeekStart = addWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), 1);
+  const nextWeekEnd = endOfWeek(nextWeekStart, { weekStartsOn: 1 });
+
+  const horizonGroups = useMemo(() => {
+    const thisWeekEndStr = format(thisWeekEnd, 'yyyy-MM-dd');
+    const nextWeekEndStr = format(nextWeekEnd, 'yyyy-MM-dd');
+    const thisWeek: PracticeSlot[] = [];
+    const nextWeek: PracticeSlot[] = [];
+    const later: PracticeSlot[] = [];
+    for (const slot of (available ?? [])) {
+      if (slot.date <= thisWeekEndStr) thisWeek.push(slot);
+      else if (slot.date <= nextWeekEndStr) nextWeek.push(slot);
+      else later.push(slot);
+    }
+    return { thisWeek, nextWeek, later };
+  }, [available, thisWeekEnd, nextWeekEnd]);
+
+  // Sorted unique field names for deterministic color assignment
+  const allFieldNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const slot of (available ?? [])) {
+      if (slot.fieldName) names.add(slot.fieldName);
+    }
+    return [...names].sort();
+  }, [available]);
+
   // ── Claim a slot (also writes to teams/{teamId}/games) ────────────────────
 
   const handleClaim = async (slot: PracticeSlot) => {
@@ -106,9 +150,14 @@ export default function CoachPracticeSlotsPage() {
         return;
       }
 
-      // Phase 2 — Fairness pre-check (one-shot reads outside transaction)
+      // Phase 2 — Weekly fairness pre-check (scoped to Mon–Sun of target slot's week)
       let needsApproval = false;
       if (activeTeam.divisionId) {
+        // Compute the Monday–Sunday window for this slot's date
+        const slotDate = parseISO(slot.date);
+        const weekStart = format(startOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+        const weekEnd = format(endOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
         const [claimedSlotsSnap, divTeamsSnap] = await Promise.all([
           getDocs(query(
             collection(db, 'practiceSlots'),
@@ -121,19 +170,30 @@ export default function CoachPracticeSlotsPage() {
           )),
         ]);
 
-        // Count claimed slots per team in this division
+        // Filter to only slots within this week's window
+        const weekClaimedDocs = claimedSlotsSnap.docs.filter(d => {
+          const date = d.data().date as string;
+          return date >= weekStart && date <= weekEnd;
+        });
+
+        // Count claimed slots per team in this week
         const claimedByTeam: Record<string, number> = {};
-        claimedSlotsSnap.docs.forEach(d => {
+        weekClaimedDocs.forEach(d => {
           const tid = d.data().teamId as string | undefined;
           if (tid) claimedByTeam[tid] = (claimedByTeam[tid] ?? 0) + 1;
         });
+
+        // Also count this team's pending requests in the same week
+        const myPendingThisWeek = (myPending ?? []).filter(
+          s => s.date >= weekStart && s.date <= weekEnd
+        );
 
         // Only consider teams participating in the fairness rotation (not opted out)
         const participatingTeams = divTeamsSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as Team))
           .filter(t => !t.practiceOptOut);
 
-        const myTeamCount = claimedByTeam[activeTeam.id] ?? 0;
+        const myTeamCount = (claimedByTeam[activeTeam.id] ?? 0) + myPendingThisWeek.length;
         const anyOtherHasZero = participatingTeams.some(
           t => t.id !== activeTeam.id && (claimedByTeam[t.id] ?? 0) === 0
         );
@@ -159,17 +219,17 @@ export default function CoachPracticeSlotsPage() {
             pendingCoachId: user.uid,
             pendingCoachName: profile.displayName ?? 'Coach',
             pendingRequestedAt: Timestamp.now(),
-            pendingReason: 'Fairness: other teams in your division have not yet claimed a slot.',
+            pendingReason: 'Fairness: other teams in your division have not yet claimed a slot this week.',
             updatedAt: Timestamp.now(),
           });
         });
 
         toast({
           title: 'Request Submitted',
-          description: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been sent to the board for review. You'll be notified when it's approved.`,
+          description: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been sent to the board for review. Since your team already has a slot this week and other teams don't, it needs approval. You'll be notified when it's decided.`,
         });
       } else {
-        // Direct claim — no fairness conflict
+        // Direct claim — no fairness conflict this week
         const teamGameId = crypto.randomUUID();
         const teamGameRef = doc(db, 'teams', activeTeam.id, 'games', teamGameId);
         const dateTime = `${slot.date}T${slot.startTime}:00`;
@@ -310,6 +370,12 @@ export default function CoachPracticeSlotsPage() {
     (myPending ?? []).length > 0 ||
     (available ?? []).length > 0;
 
+  const horizonLabels: Array<{ label: string; slots: PracticeSlot[] }> = [
+    { label: 'This Week', slots: horizonGroups.thisWeek },
+    { label: 'Next Week', slots: horizonGroups.nextWeek },
+    { label: 'Later', slots: horizonGroups.later },
+  ];
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -380,23 +446,37 @@ export default function CoachPracticeSlotsPage() {
               </section>
             )}
 
-            {/* Available slots */}
+            {/* Available slots — grouped by time horizon */}
             {(available ?? []).length > 0 && (
               <section>
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                   Available to Claim
                 </h2>
-                <div className="space-y-2">
-                  {(available ?? []).map(slot => (
-                    <SlotCard
-                      key={slot.id}
-                      slot={slot}
-                      variant="available"
-                      actionLabel="Claim Slot"
-                      actionLoading={claimingId === slot.id}
-                      onAction={() => handleClaim(slot)}
-                    />
-                  ))}
+                <div className="space-y-6">
+                  {horizonLabels.map(({ label, slots }) => {
+                    if (slots.length === 0) return null;
+                    return (
+                      <div key={label}>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
+                          {label}
+                        </p>
+                        <div className="space-y-2">
+                          {slots.map(slot => (
+                            <SlotCard
+                              key={slot.id}
+                              slot={slot}
+                              variant="available"
+                              fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
+                              actionLabel="Claim Slot"
+                              actionLoading={claimingId === slot.id}
+                              onAction={() => handleClaim(slot)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -413,12 +493,14 @@ export default function CoachPracticeSlotsPage() {
 function SlotCard({
   slot,
   variant,
+  fieldColorClass,
   actionLabel,
   actionLoading,
   onAction,
 }: {
   slot: PracticeSlot;
   variant: 'available' | 'claimed' | 'pending';
+  fieldColorClass?: string;
   actionLabel?: string;
   actionLoading?: boolean;
   onAction?: () => void;
@@ -443,6 +525,11 @@ function SlotCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold">{slot.fieldName}</p>
+            {variant === 'available' && fieldColorClass && (
+              <Badge className={cn('text-xs border font-medium px-2 py-0.5', fieldColorClass)}>
+                {slot.fieldName}
+              </Badge>
+            )}
             {variant === 'claimed' && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium flex items-center gap-1">
                 <CheckCircle2 className="h-3 w-3" /> Your Slot
@@ -463,9 +550,11 @@ function SlotCard({
               <Clock className="h-3 w-3" />
               {formatTime(slot.startTime)} – {formatTime(slot.endTime)}
             </span>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3" /> {slot.fieldName}
-            </span>
+            {variant !== 'available' && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3" /> {slot.fieldName}
+              </span>
+            )}
             {slot.notes && <span className="text-xs text-muted-foreground italic">{slot.notes}</span>}
           </div>
           {variant === 'pending' && slot.pendingReason && (
