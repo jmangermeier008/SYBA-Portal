@@ -6,10 +6,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useUser, useFirestore } from '@/firebase';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Send, Clock, User } from 'lucide-react';
+import { Loader2, Send, Clock, User, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { getTopicConfig, INQUIRY_STATUS_CONFIG } from '@/data/inquiry-topics';
 import type { Inquiry, InquiryStatus } from '@/data/inquiry-topics';
@@ -21,11 +22,12 @@ interface InquiryDetailDialogProps {
 }
 
 export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDetailDialogProps) {
-  const { profile } = useUser();
+  const { profile, isBoardMember } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
 
   const [replyMessage, setReplyMessage] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [pendingResolved, setPendingResolved] = useState(false);
@@ -103,6 +105,20 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
       toast({ variant: 'destructive', title: 'Reply Failed', description: error.message });
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!db) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'inquiries', inquiry.id));
+      onOpenChange(false);
+      toast({ title: 'Inquiry deleted' });
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Delete Failed', description: error.message });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -200,6 +216,36 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
               )}
             </Button>
           </div>
+
+          {isBoardMember && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10 w-fit">
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Inquiry
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this inquiry?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently remove the inquiry and all its replies. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </DialogContent>
     </Dialog>
