@@ -7,6 +7,7 @@ import {
   collection, doc, query, where, orderBy, limit,
   runTransaction, Timestamp, getDocs,
 } from 'firebase/firestore';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -131,6 +132,22 @@ export default function CoachPracticeSlotsPage() {
     }
     return [...names].sort();
   }, [available]);
+
+  // Per-slot approval hint: true if this team already has ≥1 claimed/pending slot
+  // in the same Mon–Sun week as the slot. Client-side estimate — no extra queries.
+  const slotApprovalHints = useMemo(() => {
+    const hints: Record<string, boolean> = {};
+    for (const slot of (available ?? [])) {
+      const slotDate = parseISO(slot.date);
+      const weekStart = format(startOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const weekEnd = format(endOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const hasExistingThisWeek = [...(myClaimed ?? []), ...(myPending ?? [])].some(
+        s => s.date >= weekStart && s.date <= weekEnd
+      );
+      hints[slot.id] = hasExistingThisWeek;
+    }
+    return hints;
+  }, [available, myClaimed, myPending]);
 
   // ── Claim a slot (also writes to teams/{teamId}/games) ────────────────────
 
@@ -446,38 +463,43 @@ export default function CoachPracticeSlotsPage() {
               </section>
             )}
 
-            {/* Available slots — grouped by time horizon */}
+            {/* Available slots — grouped by time horizon in accordions */}
             {(available ?? []).length > 0 && (
               <section>
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                   Available to Claim
                 </h2>
-                <div className="space-y-6">
+                <Accordion type="multiple" defaultValue={['This Week', 'Next Week']} className="space-y-2">
                   {horizonLabels.map(({ label, slots }) => {
                     if (slots.length === 0) return null;
                     return (
-                      <div key={label}>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
-                          {label}
-                        </p>
-                        <div className="space-y-2">
-                          {slots.map(slot => (
-                            <SlotCard
-                              key={slot.id}
-                              slot={slot}
-                              variant="available"
-                              fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
-                              actionLabel="Claim Slot"
-                              actionLoading={claimingId === slot.id}
-                              onAction={() => handleClaim(slot)}
-                            />
-                          ))}
-                        </div>
-                      </div>
+                      <AccordionItem key={label} value={label} className="border rounded-xl px-4">
+                        <AccordionTrigger className="hover:no-underline py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm">{label}</span>
+                            <span className="text-xs text-muted-foreground">({slots.length})</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="pb-3">
+                          <div className="space-y-2">
+                            {slots.map(slot => (
+                              <SlotCard
+                                key={slot.id}
+                                slot={slot}
+                                variant="available"
+                                fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
+                                requiresApproval={slotApprovalHints[slot.id] ?? false}
+                                actionLabel="Claim Slot"
+                                actionLoading={claimingId === slot.id}
+                                onAction={() => handleClaim(slot)}
+                              />
+                            ))}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
                     );
                   })}
-                </div>
+                </Accordion>
               </section>
             )}
           </div>
@@ -494,6 +516,7 @@ function SlotCard({
   slot,
   variant,
   fieldColorClass,
+  requiresApproval,
   actionLabel,
   actionLoading,
   onAction,
@@ -501,6 +524,7 @@ function SlotCard({
   slot: PracticeSlot;
   variant: 'available' | 'claimed' | 'pending';
   fieldColorClass?: string;
+  requiresApproval?: boolean;
   actionLabel?: string;
   actionLoading?: boolean;
   onAction?: () => void;
@@ -529,6 +553,16 @@ function SlotCard({
               <Badge className={cn('text-xs border font-medium px-2 py-0.5', fieldColorClass)}>
                 {slot.fieldName}
               </Badge>
+            )}
+            {variant === 'available' && requiresApproval && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium">
+                2nd Claim · May Need Approval
+              </span>
+            )}
+            {variant === 'available' && !requiresApproval && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-100 font-medium">
+                Instant Claim
+              </span>
             )}
             {variant === 'claimed' && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium flex items-center gap-1">

@@ -15,6 +15,8 @@ import {
   getDocs,
   query,
   where,
+  writeBatch,
+  Timestamp,
 } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import {
   MapPin,
   Plus,
@@ -38,7 +41,7 @@ import {
   CloudRain,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { Field, FieldType, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument } from '@/types/scheduling';
+import type { Field, FieldType, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, PracticeSlot } from '@/types/scheduling';
 
 // ─── Empty state factories ──────────────────────────────────────────────────
 
@@ -103,6 +106,10 @@ export default function FieldManagementPage() {
   // ── Complex closure form ──────────────────────────────────────────────────
   const [complexForm, setComplexForm] = useState(emptyComplexForm);
   const [savingComplex, setSavingComplex] = useState(false);
+
+  // ── Rainout tool toggles ──────────────────────────────────────────────────
+  const [closureCancelPractices, setClosureCancelPractices] = useState(false);
+  const [complexCancelPractices, setComplexCancelPractices] = useState(false);
 
   // ── Firestore queries — ALL before any early return ───────────────────────
   const fieldsQuery = useMemoFirebase(() => {
@@ -211,9 +218,62 @@ export default function FieldManagementPage() {
       const closure: MaintenanceClosure = { date: closureForm.date };
       if (closureForm.reason.trim()) closure.reason = closureForm.reason.trim();
       await updateDoc(fieldRef, { maintenanceClosures: arrayUnion(closure) });
-      toast({ title: 'Closure Added', description: 'Maintenance closure has been scheduled.' });
+
+      if (closureCancelPractices && closureDialog.field) {
+        const slotsSnap = await getDocs(query(
+          collection(db, 'practiceSlots'),
+          where('fieldId', '==', closureDialog.field.id),
+          where('date', '==', closureForm.date),
+          where('status', 'in', ['available', 'claimed', 'pending'])
+        ));
+
+        if (slotsSnap.size > 0) {
+          const batch = writeBatch(db);
+          let notifyCount = 0;
+          const fieldName = closureDialog.field.name;
+          const reason = closureForm.reason.trim();
+          for (const slotDoc of slotsSnap.docs) {
+            const slotData = slotDoc.data() as PracticeSlot;
+            batch.update(doc(db, 'practiceSlots', slotDoc.id), {
+              status: 'cancelled',
+              updatedAt: Timestamp.now(),
+            });
+            if (slotData.teamId && slotData.teamGameId) {
+              batch.update(doc(db, 'teams', slotData.teamId, 'games', slotData.teamGameId), {
+                cancelled: true,
+                cancellationReason: `Field closure${reason ? `: ${reason}` : '.'}`,
+              });
+            }
+            const coachId = slotData.coachId ?? slotData.pendingCoachId;
+            if (coachId) {
+              batch.set(doc(db, 'notifications', crypto.randomUUID()), {
+                userId: coachId,
+                type: 'practiceSlotCancelled',
+                title: 'Practice Slot Cancelled — Field Closure',
+                body: `Your practice at ${fieldName} on ${closureForm.date} has been cancelled due to a field closure${reason ? `: ${reason}` : ''}.`,
+                relatedDocId: slotDoc.id,
+                relatedDocType: 'practiceSlot',
+                read: false,
+                createdAt: Timestamp.now(),
+              });
+              notifyCount++;
+            }
+          }
+          await batch.commit();
+          toast({
+            title: 'Closure Added + Practices Cancelled',
+            description: `${slotsSnap.size} practice slot${slotsSnap.size !== 1 ? 's' : ''} cancelled. ${notifyCount} coach${notifyCount !== 1 ? 'es' : ''} notified.`,
+          });
+        } else {
+          toast({ title: 'Closure Added', description: 'No practice slots were scheduled on this date.' });
+        }
+      } else {
+        toast({ title: 'Closure Added', description: 'Maintenance closure has been scheduled.' });
+      }
+
       setClosureDialog({ open: false, field: null });
       setClosureForm(emptyClosureForm);
+      setClosureCancelPractices(false);
     } catch (err: unknown) {
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
@@ -244,8 +304,59 @@ export default function FieldManagementPage() {
         closures: arrayUnion(closure),
         updatedAt: new Date().toISOString(),
       }, { merge: true });
-      toast({ title: 'Complex Closure Added', description: 'All fields will be marked closed on this date.' });
+
+      if (complexCancelPractices) {
+        const slotsSnap = await getDocs(query(
+          collection(db, 'practiceSlots'),
+          where('date', '==', complexForm.date),
+          where('status', 'in', ['available', 'claimed', 'pending'])
+        ));
+
+        if (slotsSnap.size > 0) {
+          const batch = writeBatch(db);
+          let notifyCount = 0;
+          const reason = complexForm.reason.trim();
+          for (const slotDoc of slotsSnap.docs) {
+            const slotData = slotDoc.data() as PracticeSlot;
+            batch.update(doc(db, 'practiceSlots', slotDoc.id), {
+              status: 'cancelled',
+              updatedAt: Timestamp.now(),
+            });
+            if (slotData.teamId && slotData.teamGameId) {
+              batch.update(doc(db, 'teams', slotData.teamId, 'games', slotData.teamGameId), {
+                cancelled: true,
+                cancellationReason: `Complex closure${reason ? `: ${reason}` : ' — all fields closed.'}`,
+              });
+            }
+            const coachId = slotData.coachId ?? slotData.pendingCoachId;
+            if (coachId) {
+              batch.set(doc(db, 'notifications', crypto.randomUUID()), {
+                userId: coachId,
+                type: 'practiceSlotCancelled',
+                title: 'Practice Slot Cancelled — Complex Closed',
+                body: `Your practice on ${complexForm.date} has been cancelled. The entire complex is closed${reason ? `: ${reason}` : ''}.`,
+                relatedDocId: slotDoc.id,
+                relatedDocType: 'practiceSlot',
+                read: false,
+                createdAt: Timestamp.now(),
+              });
+              notifyCount++;
+            }
+          }
+          await batch.commit();
+          toast({
+            title: 'Complex Closed + Practices Cancelled',
+            description: `${slotsSnap.size} practice slot${slotsSnap.size !== 1 ? 's' : ''} cancelled across all fields. ${notifyCount} coach${notifyCount !== 1 ? 'es' : ''} notified.`,
+          });
+        } else {
+          toast({ title: 'Complex Closure Added', description: 'No practice slots were scheduled on this date.' });
+        }
+      } else {
+        toast({ title: 'Complex Closure Added', description: 'All fields will be marked closed on this date.' });
+      }
+
       setComplexForm(emptyComplexForm);
+      setComplexCancelPractices(false);
     } catch (err: unknown) {
       toast({ title: 'Error', description: (err as Error).message, variant: 'destructive' });
     } finally {
@@ -451,6 +562,20 @@ export default function FieldManagementPage() {
                   <CloudRain className="mr-2 h-4 w-4" /> Close Complex
                 </Button>
               </div>
+              <div className="flex items-center justify-between rounded-xl border px-4 py-3 bg-amber-50 border-amber-200">
+                <div>
+                  <p className="text-sm font-medium text-amber-900 flex items-center gap-1.5">
+                    <CloudRain className="h-4 w-4" /> Auto-cancel ALL practices on this date?
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Practice slots across all fields on this date will be cancelled and coaches notified.
+                  </p>
+                </div>
+                <Switch
+                  checked={complexCancelPractices}
+                  onCheckedChange={setComplexCancelPractices}
+                />
+              </div>
 
               {complexClosures.length > 0 && (
                 <div className="space-y-2 pt-2 border-t">
@@ -623,9 +748,23 @@ export default function FieldManagementPage() {
               <Input placeholder="e.g. Field maintenance, irrigation repair" value={closureForm.reason}
                 onChange={e => setClosureForm(prev => ({ ...prev, reason: e.target.value }))} />
             </div>
+            <div className="flex items-center justify-between rounded-xl border px-4 py-3 bg-amber-50 border-amber-200">
+              <div>
+                <p className="text-sm font-medium text-amber-900 flex items-center gap-1.5">
+                  <CloudRain className="h-4 w-4" /> Auto-cancel practices on this date?
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Any practice slots at {closureDialog.field?.name} on this date will be cancelled and coaches notified.
+                </p>
+              </div>
+              <Switch
+                checked={closureCancelPractices}
+                onCheckedChange={setClosureCancelPractices}
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setClosureDialog({ open: false, field: null }); setClosureForm(emptyClosureForm); }} disabled={savingClosure}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setClosureDialog({ open: false, field: null }); setClosureForm(emptyClosureForm); setClosureCancelPractices(false); }} disabled={savingClosure}>Cancel</Button>
             <Button onClick={handleAddClosure} disabled={savingClosure || !closureForm.date} className="bg-amber-600 hover:bg-amber-700">
               {savingClosure && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Add Closure
             </Button>
