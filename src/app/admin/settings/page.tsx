@@ -7,11 +7,14 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
 import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
-import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check } from 'lucide-react';
+import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { OFFICER_TITLES } from '@/data/officers';
+import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
+import { clearUserNotifications } from '@/lib/maintenance-actions';
 
 interface OfficerRecord {
   id: string;
@@ -124,9 +127,12 @@ function OfficerRow({ officer, onSave }: { officer: OfficerRecord; onSave: (id: 
 }
 
 export default function AdminSettingsPage() {
-  const { isBoardMember } = useUser();
+  const { isBoardMember, isAdmin, isSiteAdmin } = useUser();
   const db = useFirestore();
+  const auth = useAuth();
   const { toast } = useToast();
+
+  const [notifEmail, setNotifEmail] = useState('');
 
   const officersQuery = useMemoFirebase(() => {
     if (!db) return null;
@@ -160,6 +166,26 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const handleClearNotifications = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      toast({ variant: 'destructive', title: 'Not authenticated', description: 'Please sign in and try again.' });
+      return;
+    }
+    try {
+      const { deleted } = await clearUserNotifications(token, notifEmail.trim());
+      toast({
+        title: 'Notifications cleared',
+        description: `Deleted ${deleted} notification${deleted !== 1 ? 's' : ''} for ${notifEmail.trim()}.`,
+      });
+      setNotifEmail('');
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Action failed', description: err.message });
+    }
+  };
+
+  const canAccessMaintenance = isAdmin || isSiteAdmin;
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -172,84 +198,125 @@ export default function AdminSettingsPage() {
           <p className="text-muted-foreground">Manage officer directory and system configuration.</p>
         </header>
 
-        <div className="space-y-8 max-w-4xl">
-
-          {/* Officer Directory */}
-          <Card className="border-none shadow-md">
-            <CardHeader className="flex flex-row items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <Users className="h-5 w-5" />
-              </div>
-              <div>
-                <CardTitle>Officer Directory</CardTitle>
-                <CardDescription>
-                  Names and emails update immediately across the parent portal and public homepage. Leave email blank to hide the mailto link.
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="flex justify-center py-10">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {(officers && officers.length > 0 ? officers : DEFAULT_OFFICERS.map((o, i) => ({ ...o, id: titleToId(o.title) }))).map((officer) => (
-                    <OfficerRow key={officer.id} officer={officer as OfficerRecord} onSave={handleSave} />
-                  ))}
-                </div>
+        <div className="max-w-4xl">
+          <Tabs defaultValue="general">
+            <TabsList className="mb-6">
+              <TabsTrigger value="general">General</TabsTrigger>
+              {canAccessMaintenance && (
+                <TabsTrigger value="maintenance" className="flex items-center gap-1.5">
+                  <Wrench className="h-3.5 w-3.5" />
+                  Maintenance
+                </TabsTrigger>
               )}
-            </CardContent>
-          </Card>
+            </TabsList>
 
-          {/* Notifications (read-only preview) */}
-          <Card className="border-none shadow-md opacity-60">
-            <CardHeader className="flex flex-row items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <Bell className="h-5 w-5" />
-              </div>
-              <div>
-                <CardTitle>Notifications</CardTitle>
-                <CardDescription>Automated broadcast settings — coming soon</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Email Alerts</Label>
-                  <p className="text-xs text-muted-foreground">Send automated emails for game rainouts</p>
+            {/* General Tab */}
+            <TabsContent value="general" className="space-y-8">
+
+              {/* Officer Directory */}
+              <Card className="border-none shadow-md">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                    <Users className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Officer Directory</CardTitle>
+                    <CardDescription>
+                      Names and emails update immediately across the parent portal and public homepage. Leave email blank to hide the mailto link.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? (
+                    <div className="flex justify-center py-10">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(officers && officers.length > 0 ? officers : DEFAULT_OFFICERS.map((o, i) => ({ ...o, id: titleToId(o.title) }))).map((officer) => (
+                        <OfficerRow key={officer.id} officer={officer as OfficerRecord} onSave={handleSave} />
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Notifications (read-only preview) */}
+              <Card className="border-none shadow-md opacity-60">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                    <Bell className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Notifications</CardTitle>
+                    <CardDescription>Automated broadcast settings — coming soon</CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Email Alerts</Label>
+                      <p className="text-xs text-muted-foreground">Send automated emails for game rainouts</p>
+                    </div>
+                    <Switch defaultChecked disabled />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Payments (read-only preview) */}
+              <Card className="border-none shadow-md opacity-60">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                    <CreditCard className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Payments</CardTitle>
+                    <CardDescription>Stripe integration — coming soon</CardDescription>
+                  </div>
+                </CardHeader>
+              </Card>
+
+              {/* Security (read-only preview) */}
+              <Card className="border-none shadow-md opacity-60">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600">
+                    <Lock className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Security</CardTitle>
+                    <CardDescription>System access rules — coming soon</CardDescription>
+                  </div>
+                </CardHeader>
+              </Card>
+
+            </TabsContent>
+
+            {/* Maintenance Tab — Admin / Site Admin only */}
+            {canAccessMaintenance && (
+              <TabsContent value="maintenance" className="space-y-6">
+                <div>
+                  <h2 className="text-lg font-semibold mb-1">Data Maintenance</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Internal tools for managing test data and system state. All actions are permanent and cannot be undone.
+                  </p>
                 </div>
-                <Switch defaultChecked disabled />
-              </div>
-            </CardContent>
-          </Card>
 
-          {/* Payments (read-only preview) */}
-          <Card className="border-none shadow-md opacity-60">
-            <CardHeader className="flex flex-row items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                <CreditCard className="h-5 w-5" />
-              </div>
-              <div>
-                <CardTitle>Payments</CardTitle>
-                <CardDescription>Stripe integration — coming soon</CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
-
-          {/* Security (read-only preview) */}
-          <Card className="border-none shadow-md opacity-60">
-            <CardHeader className="flex flex-row items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600">
-                <Lock className="h-5 w-5" />
-              </div>
-              <div>
-                <CardTitle>Security</CardTitle>
-                <CardDescription>System access rules — coming soon</CardDescription>
-              </div>
-            </CardHeader>
-          </Card>
-
+                <MaintenanceCard
+                  title="Clear User Notifications"
+                  description="Permanently delete all notification records for a specific user. Use this to clean up test data or reset a user's notification inbox."
+                  inputLabel="User Email"
+                  inputPlaceholder="user@example.com"
+                  inputValue={notifEmail}
+                  onInputChange={setNotifEmail}
+                  buttonLabel="Clear Notifications"
+                  buttonVariant="destructive"
+                  confirmMessage="Warning: This will permanently delete all notifications for this user. This action cannot be undone. Are you sure you want to proceed?"
+                  onExecute={handleClearNotifications}
+                  disabled={!notifEmail.trim()}
+                />
+              </TabsContent>
+            )}
+          </Tabs>
         </div>
       </main>
     </div>
