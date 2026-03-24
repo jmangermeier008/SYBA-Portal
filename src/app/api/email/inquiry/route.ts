@@ -34,7 +34,7 @@ function getRecipientEmail(topic: string, assignedToRole: string): string | null
 
 export async function POST(req: Request) {
   try {
-    const { senderName, topic, subject, message, assignedToRole } = await req.json();
+    const { senderName, topic, subject, message, assignedToRole, inquiryId } = await req.json();
 
     const toEmail = getRecipientEmail(topic, assignedToRole);
     if (!toEmail) {
@@ -48,20 +48,24 @@ export async function POST(req: Request) {
       recipients.push(siteAdminEmail);
     }
 
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+    const portalUrl = inquiryId
+      ? `${appUrl}/admin/inquiries?id=${inquiryId}`
+      : `${appUrl}/admin/inquiries`;
+
     const emailSubject = `[${topic}] New Inquiry: ${subject}`;
     const emailBody = [
-      `New inquiry submitted via the SYBA Portal.`,
+      `New inquiry received.`,
       ``,
-      `From: ${senderName}`,
-      `Topic: ${topic}`,
-      `Assigned To: ${assignedToRole}`,
+      `From:    ${senderName}`,
+      `Topic:   ${topic}`,
       `Subject: ${subject}`,
       ``,
-      `Message:`,
+      `--- Message ---`,
       message,
+      `---------------`,
       ``,
-      `---`,
-      `Log in to the SYBA Portal to view and respond to this inquiry.`,
+      `Reply in Portal: ${portalUrl}`,
     ].join('\n');
 
     const response = await fetch('https://api.resend.com/emails', {
@@ -71,7 +75,7 @@ export async function POST(req: Request) {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <onboarding@resend.dev>',
+        from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <notifications@syba.blue>',
         to: recipients,
         subject: emailSubject,
         text: emailBody,

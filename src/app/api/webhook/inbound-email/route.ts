@@ -99,23 +99,46 @@ export async function POST(req: Request) {
     const db = getAdminFirestore();
     const now = new Date().toISOString();
 
-    await db.collection('inquiries').add({
+    const assignedToRole = INBOUND_ROLE_OVERRIDE_MAP[recipientEmail] ?? topicConfig.assignedToRole;
+    const message = text.trim();
+
+    const docRef = await db.collection('inquiries').add({
       senderId: null,
       senderName: senderName || senderEmail,
       senderEmail,
       senderRole: 'Email',
       topic,
       subject: subject.slice(0, 100),
-      message: text.trim(),
+      message,
       messageHtml: rawHtml || null,
       status: 'open',
-      assignedToRole: INBOUND_ROLE_OVERRIDE_MAP[recipientEmail] ?? topicConfig.assignedToRole,
+      assignedToRole,
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
       replies: [],
       inboundRecipient: recipientEmail,
     });
+
+    // Notify the assigned board member — fire-and-forget after confirmed Firestore write
+    try {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+      await fetch(`${appUrl}/api/email/inquiry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderName: senderName || senderEmail,
+          topic,
+          subject: subject.slice(0, 100),
+          message,
+          assignedToRole,
+          inquiryId: docRef.id,
+        }),
+      });
+    } catch (notifyErr: any) {
+      console.error('[inbound-email] Notification dispatch failed:', notifyErr.message);
+      // Do not rethrow — record is saved, return 200 regardless
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
