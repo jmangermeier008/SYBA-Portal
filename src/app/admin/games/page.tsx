@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, limit } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
@@ -43,6 +43,8 @@ interface Game {
   homeTeamName?: string;
   awayTeamId?: string;
   awayTeamName?: string;
+  division?: string;
+  divisionId?: string;
   teamId?: string;
   teamName?: string;
   notes?: string;
@@ -51,8 +53,10 @@ interface Game {
   awayScore?: number;
 }
 
-interface Team { id: string; name: string; }
+interface Team { id: string; name: string; divisionId?: string; }
 interface Field { id: string; name: string; }
+interface Division { id: string; name: string; ageGroup?: string; }
+interface Season { id: string; name: string; status: string; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +70,7 @@ function formatTime(t: string) {
 const EMPTY_FORM = {
   type: 'game' as GameType,
   date: '', time: '', fieldId: '',
+  divisionId: '',
   homeTeamId: '', awayTeamId: '', teamId: '', notes: '',
 };
 
@@ -163,6 +168,8 @@ export default function AdminGamesPage() {
       status: g.status ?? 'scheduled',
       fieldName: g.fieldName,
       notes: g.notes,
+      division: g.division,
+      divisionId: g.divisionId,
       sourceType: 'global-game' as const,
       sourceId: g.id,
     }));
@@ -178,6 +185,19 @@ export default function AdminGamesPage() {
     return collection(db, 'fields');
   }, [db, isAdmin, isBoardMember]);
 
+  const activeSeasonQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
+  }, [db, isAdmin, isBoardMember]);
+  const { data: activeSeasons } = useCollection<Season>(activeSeasonQuery);
+  const activeSeason = activeSeasons?.[0] ?? null;
+
+  const divisionsQuery = useMemoFirebase(() => {
+    if (!db || !activeSeason?.id) return null;
+    return collection(db, 'seasons', activeSeason.id, 'divisions');
+  }, [db, activeSeason?.id]);
+  const { data: divisions } = useCollection<Division>(divisionsQuery);
+
   const { data: upcomingGames, isLoading: loadingUpcoming } = useCollection<Game>(upcomingQuery);
   const { data: pastGames, isLoading: loadingPast } = useCollection<Game>(pastQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
@@ -189,6 +209,7 @@ export default function AdminGamesPage() {
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
   const buildGamePayload = () => {
+    const selectedDivision = (divisions ?? []).find(d => d.id === form.divisionId);
     const payload: Record<string, any> = {
       type: form.type,
       date: form.date,
@@ -196,6 +217,8 @@ export default function AdminGamesPage() {
       fieldId: form.fieldId,
       fieldName: fieldMap[form.fieldId] ?? '',
       notes: form.notes,
+      divisionId: form.divisionId || null,
+      division: selectedDivision?.name ?? '',
     };
     if (form.type === 'game') {
       payload.homeTeamId = form.homeTeamId;
@@ -230,6 +253,7 @@ export default function AdminGamesPage() {
       date: game.date,
       time: game.time,
       fieldId: game.fieldId,
+      divisionId: game.divisionId ?? '',
       homeTeamId: game.homeTeamId ?? '',
       awayTeamId: game.awayTeamId ?? '',
       teamId: game.teamId ?? '',
@@ -243,6 +267,10 @@ export default function AdminGamesPage() {
     if (!db) return;
     if (!form.date || !form.time || !form.fieldId) {
       toast({ title: 'Missing fields', description: 'Date, time, and field are required.', variant: 'destructive' });
+      return;
+    }
+    if (form.type === 'game' && !form.divisionId) {
+      toast({ title: 'Missing division', description: 'Please select a division before saving.', variant: 'destructive' });
       return;
     }
     if (form.type === 'game' && (!form.homeTeamId || !form.awayTeamId)) {
@@ -655,20 +683,47 @@ export default function AdminGamesPage() {
                   {form.type === 'game' && (
                     <>
                       <div className="space-y-1.5">
-                        <Label>Home Team</Label>
-                        <Select value={form.homeTeamId} onValueChange={v => setForm({ ...form, homeTeamId: v })}>
-                          <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select home team" /></SelectTrigger>
+                        <Label>Division</Label>
+                        <Select
+                          value={form.divisionId}
+                          onValueChange={v => setForm({ ...form, divisionId: v, homeTeamId: '', awayTeamId: '' })}
+                          disabled={!activeSeason}
+                        >
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue placeholder={activeSeason ? 'Select a division' : 'No active season'} />
+                          </SelectTrigger>
                           <SelectContent>
-                            {(teams ?? []).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                            {(divisions ?? []).map(d => (
+                              <SelectItem key={d.id} value={d.id}>
+                                {d.name}{d.ageGroup ? ` (${d.ageGroup})` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Home Team</Label>
+                        <Select
+                          value={form.homeTeamId}
+                          onValueChange={v => setForm({ ...form, homeTeamId: v })}
+                          disabled={!form.divisionId}
+                        >
+                          <SelectTrigger className="rounded-xl"><SelectValue placeholder={form.divisionId ? 'Select home team' : 'Select a division first'} /></SelectTrigger>
+                          <SelectContent>
+                            {(teams ?? []).filter(t => t.divisionId === form.divisionId).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-1.5">
                         <Label>Away Team</Label>
-                        <Select value={form.awayTeamId} onValueChange={v => setForm({ ...form, awayTeamId: v })}>
-                          <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select away team" /></SelectTrigger>
+                        <Select
+                          value={form.awayTeamId}
+                          onValueChange={v => setForm({ ...form, awayTeamId: v })}
+                          disabled={!form.divisionId}
+                        >
+                          <SelectTrigger className="rounded-xl"><SelectValue placeholder={form.divisionId ? 'Select away team' : 'Select a division first'} /></SelectTrigger>
                           <SelectContent>
-                            {(teams ?? []).filter(t => t.id !== form.homeTeamId).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                            {(teams ?? []).filter(t => t.divisionId === form.divisionId && t.id !== form.homeTeamId).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1037,6 +1092,9 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore }: {
             <p className="text-sm font-semibold truncate">
               {isGame ? `${game.homeTeamName} vs. ${game.awayTeamName}` : `${game.teamName} Practice`}
             </p>
+            {isGame && game.division && (
+              <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-primary/70 bg-primary/5 border-primary/20">{game.division}</span>
+            )}
             {statusBadge && (
               <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', statusBadge.className)}>{statusBadge.label}</span>
             )}

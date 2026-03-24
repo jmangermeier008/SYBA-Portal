@@ -9,6 +9,7 @@ import Image from 'next/image';
 import { Loader2, AlertTriangle, Megaphone, Calendar, Pin } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
 import type { ComplexClosuresDocument, Game } from '@/types/scheduling';
+import { cn } from '@/lib/utils';
 
 const CONTACT_EMAIL = 'info@syba.blue';
 
@@ -126,6 +127,23 @@ export default function Home() {
     return rawWeekGames.filter(g => g.type === 'game' && g.status !== 'cancelled');
   }, [rawWeekGames]);
 
+  // Derived: games grouped by division name, "Unassigned" last
+  const gamesByDivision = useMemo(() => {
+    const map = new Map<string, typeof visibleGames>();
+    for (const g of visibleGames) {
+      const key = g.division ?? 'Unassigned';
+      map.set(key, [...(map.get(key) ?? []), g]);
+    }
+    return map;
+  }, [visibleGames]);
+
+  const divisionOrder = useMemo(
+    () => Array.from(gamesByDivision.keys()).sort((a, b) =>
+      a === 'Unassigned' ? 1 : b === 'Unassigned' ? -1 : a.localeCompare(b)
+    ),
+    [gamesByDivision],
+  );
+
   // Derived: pinned announcements first, max 3
   const announcements = useMemo(() => {
     if (!rawAnnouncements) return [];
@@ -224,23 +242,32 @@ export default function Home() {
           <p className="text-sm text-muted-foreground text-center py-4">No games scheduled this week</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {visibleGames.map(g => (
-              <div
-                key={g.id}
-                className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1"
-              >
-                <div>
-                  <p className="font-medium text-sm">
-                    {g.homeTeamName ?? 'TBD'} vs. {g.awayTeamName ?? 'TBD'}
-                  </p>
-                  {g.division && <p className="text-xs text-muted-foreground">{g.division}</p>}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-medium">{formatGameDate(g.date)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatTime(g.time)}{g.fieldName ? ` · ${g.fieldName}` : ''}
-                  </p>
-                </div>
+            {divisionOrder.map((div, divIdx) => (
+              <div key={div}>
+                <p className={cn(
+                  'text-[11px] font-bold uppercase tracking-widest text-primary/60 mb-1.5 px-1',
+                  divIdx > 0 && 'mt-3',
+                )}>
+                  {div}
+                </p>
+                {(gamesByDivision.get(div) ?? []).map(g => (
+                  <div
+                    key={g.id}
+                    className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2 last:mb-0"
+                  >
+                    <div>
+                      <p className="font-medium text-sm">
+                        {g.homeTeamName ?? 'TBD'} vs. {g.awayTeamName ?? 'TBD'}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-medium">{formatGameDate(g.date)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatTime(g.time)}{g.fieldName ? ` · ${g.fieldName}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

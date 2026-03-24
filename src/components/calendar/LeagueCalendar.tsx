@@ -104,10 +104,13 @@ function getWeekDays(focusDate: Date): Date[] {
 export interface LeagueCalendarProps {
   events: CalendarEvent[];
   isLoading: boolean;
-  filters: { games: boolean; practices: boolean; concessions: boolean };
+  filters: { games: boolean; practices: boolean; concessions: boolean; divisions?: string[] };
   onFilterChange: (key: 'games' | 'practices' | 'concessions', val: boolean) => void;
   // Which filter checkboxes to show (undefined = show all three)
   visibleFilters?: ('games' | 'practices' | 'concessions')[];
+  // Division filter — optional; renders checkboxes when provided
+  availableDivisions?: Array<{ id: string; name: string }>;
+  onDivisionFilterChange?: (divisionIds: string[]) => void;
   // Role-specific action callbacks — undefined = hidden in popover
   onRsvp?: (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => void;
   onWeatherCancel?: (teamId: string, gameId: string) => void;
@@ -706,6 +709,8 @@ export function LeagueCalendar({
   filters,
   onFilterChange,
   visibleFilters,
+  availableDivisions,
+  onDivisionFilterChange,
   onRsvp,
   onWeatherCancel,
   onConcessionSignup,
@@ -725,7 +730,13 @@ export function LeagueCalendar({
   // Apply filters
   const filteredEvents = useMemo(() => {
     return events.filter(e => {
-      if (e.eventType === 'game') return filters.games;
+      if (e.eventType === 'game') {
+        if (!filters.games) return false;
+        if (filters.divisions && filters.divisions.length > 0) {
+          if (!e.divisionId || !filters.divisions.includes(e.divisionId)) return false;
+        }
+        return true;
+      }
       if (e.eventType === 'practice') return filters.practices;
       if (e.eventType === 'concession') return filters.concessions;
       return true;
@@ -836,7 +847,7 @@ export function LeagueCalendar({
           <div key={key} className="flex items-center gap-1.5">
             <Checkbox
               id={`filter-${key}`}
-              checked={filters[key as keyof typeof filters]}
+              checked={!!filters[key as 'games' | 'practices' | 'concessions']}
               onCheckedChange={(v) => onFilterChange(key as 'games' | 'practices' | 'concessions', !!v)}
             />
             <Label htmlFor={`filter-${key}`} className="flex items-center gap-1.5 cursor-pointer text-sm">
@@ -845,6 +856,33 @@ export function LeagueCalendar({
             </Label>
           </div>
         ))}
+
+        {/* Division filters (optional — only when availableDivisions provided) */}
+        {availableDivisions && availableDivisions.length > 0 && (
+          <>
+            <div className="h-4 w-px bg-border mx-1" />
+            {availableDivisions.map(div => {
+              const isChecked = !filters.divisions || filters.divisions.length === 0 || filters.divisions.includes(div.id);
+              return (
+                <div key={div.id} className="flex items-center gap-1.5">
+                  <Checkbox
+                    id={`div-filter-${div.id}`}
+                    checked={isChecked}
+                    onCheckedChange={(v) => {
+                      const allIds = availableDivisions.map(d => d.id);
+                      const current = filters.divisions && filters.divisions.length > 0 ? filters.divisions : allIds;
+                      const next = v ? [...current, div.id] : current.filter(id => id !== div.id);
+                      onDivisionFilterChange?.(next);
+                    }}
+                  />
+                  <Label htmlFor={`div-filter-${div.id}`} className="text-sm cursor-pointer">
+                    {div.name}
+                  </Label>
+                </div>
+              );
+            })}
+          </>
+        )}
 
         {/* Add Event button (coach only) */}
         {onAddEvent && (

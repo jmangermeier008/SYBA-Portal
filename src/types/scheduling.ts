@@ -115,6 +115,7 @@ export interface Game {
   awayTeamId?: string;
   awayTeamName?: string;
   division?: string;
+  divisionId?: string;
   // Practices (team-specific):
   teamId?: string;
   teamName?: string;
@@ -318,6 +319,7 @@ export interface CalendarEvent {
   teamId?: string;
   teamName?: string;
   division?: string;
+  divisionId?: string;
   notes?: string;
   // Concession-specific
   capacity?: number;
