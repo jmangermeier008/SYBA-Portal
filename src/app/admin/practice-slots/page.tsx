@@ -563,6 +563,13 @@ export default function PracticeSlotsAdminPage() {
       const batch = writeBatch(db);
       for (const id of ids) {
         batch.update(doc(db, 'practiceSlots', id), { status: 'cancelled', updatedAt: Timestamp.now() });
+        const slot = slots?.find(s => s.id === id);
+        if (slot?.teamId && slot?.teamGameId) {
+          batch.update(doc(db, 'teams', slot.teamId, 'games', slot.teamGameId), {
+            cancelled: true,
+            cancellationReason: 'Practice slot cancelled by board.',
+          });
+        }
       }
       await batch.commit();
       setSelectedSlotIds(new Set());
@@ -582,6 +589,13 @@ export default function PracticeSlotsAdminPage() {
       const batch = writeBatch(db);
       for (const id of ids) {
         batch.delete(doc(db, 'practiceSlots', id));
+        const slot = slots?.find(s => s.id === id);
+        if (slot?.teamId && slot?.teamGameId) {
+          batch.update(doc(db, 'teams', slot.teamId, 'games', slot.teamGameId), {
+            cancelled: true,
+            cancellationReason: 'Practice slot removed by board.',
+          });
+        }
       }
       await batch.commit();
       setSelectedSlotIds(new Set());
