@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import {
   collection, doc, query, where, orderBy, limit,
-  runTransaction, Timestamp, getDocs,
+  runTransaction, Timestamp, getDocs, deleteField,
 } from 'firebase/firestore';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Card, CardContent } from '@/components/ui/card';
@@ -55,6 +55,7 @@ export default function CoachPracticeSlotsPage() {
 
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [unclaimingId, setUnclaimingId] = useState<string | null>(null);
+  const [cancellingRequestId, setCancellingRequestId] = useState<string | null>(null);
 
   // ── Queries (all hooks before any guards) ─────────────────────────────────
 
@@ -104,25 +105,48 @@ export default function CoachPracticeSlotsPage() {
 
   const loadingSlots = loadingAvailable || loadingClaimed || loadingPending;
 
-  // ── Time-horizon grouping for available slots ─────────────────────────────
+  // ── Week-grouped available slots (week → date → slots) ───────────────────
 
-  const thisWeekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
-  const nextWeekStart = addWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), 1);
-  const nextWeekEnd = endOfWeek(nextWeekStart, { weekStartsOn: 1 });
-
-  const horizonGroups = useMemo(() => {
+  const weekGroups = useMemo(() => {
+    const today = new Date();
+    const thisWeekStart = startOfWeek(today, { weekStartsOn: 1 });
+    const thisWeekEnd = endOfWeek(today, { weekStartsOn: 1 });
+    const nextWeekStart = addWeeks(thisWeekStart, 1);
+    const nextWeekEnd = endOfWeek(nextWeekStart, { weekStartsOn: 1 });
     const thisWeekEndStr = format(thisWeekEnd, 'yyyy-MM-dd');
+    const nextWeekStartStr = format(nextWeekStart, 'yyyy-MM-dd');
     const nextWeekEndStr = format(nextWeekEnd, 'yyyy-MM-dd');
-    const thisWeek: PracticeSlot[] = [];
-    const nextWeek: PracticeSlot[] = [];
-    const later: PracticeSlot[] = [];
+
+    // Collect into ordered week buckets
+    const byLabel = new Map<string, PracticeSlot[]>();
     for (const slot of (available ?? [])) {
-      if (slot.date <= thisWeekEndStr) thisWeek.push(slot);
-      else if (slot.date <= nextWeekEndStr) nextWeek.push(slot);
-      else later.push(slot);
+      let label: string;
+      if (slot.date <= thisWeekEndStr) {
+        label = 'This Week';
+      } else if (slot.date >= nextWeekStartStr && slot.date <= nextWeekEndStr) {
+        label = 'Next Week';
+      } else {
+        const mon = startOfWeek(parseISO(slot.date), { weekStartsOn: 1 });
+        label = `Week of ${format(mon, 'MMM d')}`;
+      }
+      if (!byLabel.has(label)) byLabel.set(label, []);
+      byLabel.get(label)!.push(slot);
     }
-    return { thisWeek, nextWeek, later };
-  }, [available, thisWeekEnd, nextWeekEnd]);
+
+    // Sub-group each week by date
+    return [...byLabel.entries()].map(([label, slots]) => {
+      const byDate = new Map<string, PracticeSlot[]>();
+      for (const slot of slots) {
+        if (!byDate.has(slot.date)) byDate.set(slot.date, []);
+        byDate.get(slot.date)!.push(slot);
+      }
+      return {
+        label,
+        total: slots.length,
+        dateGroups: [...byDate.entries()].map(([date, s]) => ({ date, slots: s })),
+      };
+    });
+  }, [available]);
 
   // Sorted unique field names for deterministic color assignment
   const allFieldNames = useMemo(() => {
@@ -338,6 +362,38 @@ export default function CoachPracticeSlotsPage() {
     }
   };
 
+  // ── Cancel a pending request ──────────────────────────────────────────────
+
+  const handleCancelRequest = async (slot: PracticeSlot) => {
+    if (!db || !user) return;
+    setCancellingRequestId(slot.id);
+    try {
+      const slotRef = doc(db, 'practiceSlots', slot.id);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists()) throw new Error('Slot not found.');
+        if (snap.data()?.pendingCoachId !== user.uid) {
+          throw new Error('You cannot cancel a request you did not submit.');
+        }
+        tx.update(slotRef, {
+          status: 'available',
+          pendingTeamId: deleteField(),
+          pendingTeamName: deleteField(),
+          pendingCoachId: deleteField(),
+          pendingCoachName: deleteField(),
+          pendingRequestedAt: deleteField(),
+          pendingReason: deleteField(),
+          updatedAt: Timestamp.now(),
+        });
+      });
+      toast({ title: 'Request Cancelled', description: 'The slot is available for other teams again.' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setCancellingRequestId(null);
+    }
+  };
+
   // ── Guards ────────────────────────────────────────────────────────────────
 
   if (loadingUser || loadingTeam) {
@@ -386,12 +442,6 @@ export default function CoachPracticeSlotsPage() {
     (myClaimed ?? []).length > 0 ||
     (myPending ?? []).length > 0 ||
     (available ?? []).length > 0;
-
-  const horizonLabels: Array<{ label: string; slots: PracticeSlot[] }> = [
-    { label: 'This Week', slots: horizonGroups.thisWeek },
-    { label: 'Next Week', slots: horizonGroups.nextWeek },
-    { label: 'Later', slots: horizonGroups.later },
-  ];
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -457,48 +507,55 @@ export default function CoachPracticeSlotsPage() {
                       key={slot.id}
                       slot={slot}
                       variant="pending"
+                      actionLabel="Cancel Request"
+                      actionLoading={cancellingRequestId === slot.id}
+                      onAction={() => handleCancelRequest(slot)}
                     />
                   ))}
                 </div>
               </section>
             )}
 
-            {/* Available slots — grouped by time horizon in accordions */}
+            {/* Available slots — grouped by week → date */}
             {(available ?? []).length > 0 && (
               <section>
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                   Available to Claim
                 </h2>
                 <Accordion type="multiple" defaultValue={['This Week', 'Next Week']} className="space-y-2">
-                  {horizonLabels.map(({ label, slots }) => {
-                    if (slots.length === 0) return null;
-                    return (
-                      <AccordionItem key={label} value={label} className="border rounded-xl px-4">
-                        <AccordionTrigger className="hover:no-underline py-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm">{label}</span>
-                            <span className="text-xs text-muted-foreground">({slots.length})</span>
+                  {weekGroups.map(({ label, total, dateGroups }) => (
+                    <AccordionItem key={label} value={label} className="border rounded-xl px-4">
+                      <AccordionTrigger className="hover:no-underline py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">{label}</span>
+                          <span className="text-xs text-muted-foreground">({total})</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-3">
+                        {dateGroups.map(({ date, slots }) => (
+                          <div key={date} className="mb-4 last:mb-0">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                              {format(parseISO(date), 'EEEE, MMM d')}
+                            </p>
+                            <div className="space-y-2">
+                              {slots.map(slot => (
+                                <SlotCard
+                                  key={slot.id}
+                                  slot={slot}
+                                  variant="available"
+                                  fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
+                                  requiresApproval={slotApprovalHints[slot.id] ?? false}
+                                  actionLabel="Claim Slot"
+                                  actionLoading={claimingId === slot.id}
+                                  onAction={() => handleClaim(slot)}
+                                />
+                              ))}
+                            </div>
                           </div>
-                        </AccordionTrigger>
-                        <AccordionContent className="pb-3">
-                          <div className="space-y-2">
-                            {slots.map(slot => (
-                              <SlotCard
-                                key={slot.id}
-                                slot={slot}
-                                variant="available"
-                                fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
-                                requiresApproval={slotApprovalHints[slot.id] ?? false}
-                                actionLabel="Claim Slot"
-                                actionLoading={claimingId === slot.id}
-                                onAction={() => handleClaim(slot)}
-                              />
-                            ))}
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    );
-                  })}
+                        ))}
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
                 </Accordion>
               </section>
             )}
@@ -600,7 +657,7 @@ function SlotCard({
       {onAction && actionLabel && (
         <Button
           size="sm"
-          variant={variant === 'claimed' ? 'outline' : 'default'}
+          variant={variant === 'available' ? 'default' : 'outline'}
           className="rounded-xl shrink-0"
           onClick={onAction}
           disabled={actionLoading}
