@@ -1,10 +1,10 @@
 "use client";
 
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, query, orderBy, where, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, query, orderBy, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, Megaphone } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, Megaphone, Trash2 } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
@@ -88,6 +88,19 @@ export function NotificationsInbox() {
     await batch.commit();
   };
 
+  const handleDismiss = async (e: React.MouseEvent, notif: Notification) => {
+    e.stopPropagation();
+    if (!db) return;
+    await deleteDoc(doc(db, 'notifications', notif.id));
+  };
+
+  const handleClearAll = async () => {
+    if (!db || !notifications || notifications.length === 0) return;
+    const batch = writeBatch(db);
+    notifications.forEach(n => batch.delete(doc(db, 'notifications', n.id)));
+    await batch.commit();
+  };
+
   if (isLoading) {
     return (
       <div className="flex justify-center py-20">
@@ -110,16 +123,23 @@ export function NotificationsInbox() {
 
   return (
     <div className="space-y-4">
-      {unreadCount > 0 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">{unreadCount}</span> unread
-          </p>
-          <Button variant="ghost" size="sm" onClick={handleMarkAllRead} className="text-xs text-muted-foreground">
-            <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark all as read
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {unreadCount > 0 && (
+            <><span className="font-semibold text-foreground">{unreadCount}</span> unread</>
+          )}
+        </p>
+        <div className="flex items-center gap-1">
+          {unreadCount > 0 && (
+            <Button variant="ghost" size="sm" onClick={handleMarkAllRead} className="text-xs text-muted-foreground">
+              <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark all as read
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={handleClearAll} className="text-xs text-muted-foreground">
+            <Trash2 className="h-3.5 w-3.5 mr-1" /> Clear all
           </Button>
         </div>
-      )}
+      </div>
 
       <div className="space-y-2">
         {notifications.map(notif => {
@@ -147,9 +167,18 @@ export function NotificationsInbox() {
                   <p className={cn('text-sm', notif.read ? 'text-foreground' : 'font-semibold text-foreground')}>
                     {notif.title}
                   </p>
-                  {!notif.read && (
-                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1.5" />
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {!notif.read && (
+                      <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5" />
+                    )}
+                    <button
+                      onClick={(e) => handleDismiss(e, notif)}
+                      className="p-0.5 rounded text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors mt-0.5"
+                      aria-label="Dismiss notification"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground mt-0.5 leading-snug">{notif.body}</p>
                 {createdAt && (
