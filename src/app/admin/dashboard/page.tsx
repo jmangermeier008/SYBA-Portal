@@ -94,6 +94,8 @@ interface Game {
   notes?: string;
   status?: string;
   seasonId?: string;
+  umpireName?: string;
+  umpireNotified?: boolean;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -133,6 +135,8 @@ function normalizeGame(g: Game): CalendarEvent {
     awayTeamName: g.awayTeamName,
     division: g.division,
     notes: g.notes,
+    umpireName: g.umpireName,
+    umpireNotified: g.umpireNotified,
   };
 }
 
@@ -422,8 +426,35 @@ export default function AdminDashboard({
         href: '/admin/inquiries',
       });
     }
+
+    // Umpire alerts — check today's and this week's games
+    const now = new Date();
+    (thisWeekGames ?? []).forEach(g => {
+      if (g.type !== 'game') return;
+      const gameDateTime = new Date(`${g.date}T${g.time}`);
+      const hoursUntil = (gameDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      // Condition A: scheduled game today, starting in < 6 hours, no umpire assigned
+      if (g.status !== 'cancelled' && g.date === todayISO && hoursUntil < 6 && hoursUntil > 0 && !g.umpireName) {
+        items.push({
+          severity: 'red',
+          message: `Missing umpire: ${g.homeTeamName ?? ''} vs. ${g.awayTeamName ?? ''} at ${formatTime(g.time)}`,
+          href: '/admin/games',
+        });
+      }
+
+      // Condition B: cancelled game has umpire not yet notified
+      if (g.status === 'cancelled' && g.umpireName && !g.umpireNotified) {
+        items.push({
+          severity: 'orange',
+          message: `Notify umpire of cancellation: ${g.homeTeamName ?? ''} vs. ${g.awayTeamName ?? ''}`,
+          href: '/admin/games',
+        });
+      }
+    });
+
     return items;
-  }, [coachesWithIssues, undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries]);
+  }, [coachesWithIssues, undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries, thisWeekGames, todayISO]);
 
   // Calendar tab events
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
@@ -877,6 +908,7 @@ export default function AdminDashboard({
                   onFilterChange={(key, val) => setCalendarFilters(f => ({ ...f, [key]: val }))}
                   visibleFilters={['games', 'practices', 'concessions']}
                   defaultView="week"
+                  showUmpire
                   onViewRecord={(event) => {
                     if (event.sourceType === 'global-game' || event.sourceType === 'practice-slot') {
                       router.push(`/admin/games/${event.sourceId}`);

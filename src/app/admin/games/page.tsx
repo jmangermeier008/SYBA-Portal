@@ -17,8 +17,9 @@ import type { CalendarEvent } from '@/types/scheduling';
 import {
   Plus, Trash2, CalendarDays, Loader2, Lock, MapPin, Users, Trophy,
   Upload, Download, AlertCircle, CheckCircle2, ShoppingCart, XCircle, Pencil,
-  ArrowRight,
+  ArrowRight, UserCheck,
 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
@@ -51,6 +52,8 @@ interface Game {
   status?: GameStatus;
   homeScore?: number;
   awayScore?: number;
+  umpireName?: string;
+  umpireNotified?: boolean;
 }
 
 interface Team { id: string; name: string; divisionId?: string; }
@@ -448,7 +451,11 @@ export default function AdminGamesPage() {
     setCancelDialog(prev => ({ ...prev, isCancelling: true }));
     try {
       const batch = writeBatch(db);
-      batch.update(doc(db, 'games', game.id), { status: 'cancelled', updatedAt: Timestamp.now() });
+      batch.update(doc(db, 'games', game.id), {
+        status: 'cancelled',
+        ...(game.umpireName ? { umpireNotified: false } : {}),
+        updatedAt: Timestamp.now(),
+      });
 
       const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       const affectedParentIds = new Set<string>();
@@ -507,6 +514,29 @@ export default function AdminGamesPage() {
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
       setDeleteDialog(prev => ({ ...prev, isDeleting: false }));
+    }
+  };
+
+  const handleUmpireUpdate = async (game: Game, umpireName: string) => {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'games', game.id), { umpireName, updatedAt: Timestamp.now() });
+      // Mirror to team subcollections (setDoc+merge is safe if the doc doesn't exist yet)
+      const teamIds = [game.homeTeamId, game.awayTeamId].filter(Boolean) as string[];
+      for (const teamId of teamIds) {
+        await setDoc(doc(db, 'teams', teamId, 'games', game.id), { umpireName, updatedAt: Timestamp.now() }, { merge: true });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error saving umpire', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleUmpireNotifiedToggle = async (game: Game, checked: boolean) => {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'games', game.id), { umpireNotified: checked, updatedAt: Timestamp.now() });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -816,6 +846,7 @@ export default function AdminGamesPage() {
             onViewRecord={(event) => router.push(`/admin/games/${event.id}`)}
             availableDivisions={divisions ?? []}
             divisionColors={divisionColors}
+            showUmpire
           />
         ) : (
           <>
@@ -836,7 +867,9 @@ export default function AdminGamesPage() {
                         onEdit={() => handleOpenEdit(g)}
                         onCancel={() => handleInitiateCancel(g)}
                         onDelete={() => handleInitiateDelete(g)}
-                        onScore={() => handleOpenScoreDialog(g)} />
+                        onScore={() => handleOpenScoreDialog(g)}
+                        onUmpireUpdate={(name) => handleUmpireUpdate(g, name)}
+                        onUmpireNotifiedToggle={(checked) => handleUmpireNotifiedToggle(g, checked)} />
                     ))}
                   </div>
                 )}
@@ -866,7 +899,9 @@ export default function AdminGamesPage() {
                           onEdit={() => handleOpenEdit(g)}
                           onCancel={() => handleInitiateCancel(g)}
                           onDelete={() => handleInitiateDelete(g)}
-                          onScore={() => handleOpenScoreDialog(g)} />
+                          onScore={() => handleOpenScoreDialog(g)}
+                          onUmpireUpdate={(name) => handleUmpireUpdate(g, name)}
+                          onUmpireNotifiedToggle={(checked) => handleUmpireNotifiedToggle(g, checked)} />
                       ))}
                     </div>
                   )}
@@ -1075,13 +1110,16 @@ export default function AdminGamesPage() {
 
 // ─── Game Row ─────────────────────────────────────────────────────────────────
 
-function GameRow({ game, onEdit, onCancel, onDelete, onScore }: {
+function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, onUmpireNotifiedToggle }: {
   game: Game;
   onEdit: () => void;
   onCancel: () => void;
   onDelete: () => void;
   onScore: () => void;
+  onUmpireUpdate: (umpireName: string) => Promise<void>;
+  onUmpireNotifiedToggle: (checked: boolean) => Promise<void>;
 }) {
+  const [localUmpire, setLocalUmpire] = useState(game.umpireName ?? '');
   const isGame = game.type === 'game';
   const isCancelled = game.status === 'cancelled';
   const isCompleted = game.status === 'completed';
@@ -1090,11 +1128,12 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore }: {
 
   return (
     <div className={cn(
-      'flex items-center justify-between rounded-xl px-4 py-3 gap-3 border',
+      'rounded-xl border',
       isCancelled ? 'bg-gray-50 border-gray-200 opacity-60'
         : isGame ? 'bg-blue-50 border-blue-100'
         : 'bg-green-50 border-green-100'
     )}>
+      <div className="flex items-center justify-between px-4 py-3 gap-3">
       <div className="flex items-center gap-3 min-w-0">
         <div className={cn('p-2 rounded-lg shrink-0', isCancelled ? 'bg-gray-100' : isGame ? 'bg-blue-100' : 'bg-green-100')}>
           {isGame
@@ -1160,6 +1199,35 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore }: {
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
+      </div>
+
+      {/* Umpire row — league games only */}
+      {isGame && !isCompleted && (
+        <div className="flex items-center gap-3 px-4 pb-3 border-t border-dashed border-current/10 pt-2">
+          <UserCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <Input
+            className="h-7 text-xs rounded-lg max-w-[200px]"
+            placeholder="Umpire name…"
+            value={localUmpire}
+            onChange={e => setLocalUmpire(e.target.value)}
+            onBlur={() => onUmpireUpdate(localUmpire.trim())}
+          />
+          {isCancelled && localUmpire && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+              <Checkbox
+                checked={game.umpireNotified ?? false}
+                onCheckedChange={(checked) => onUmpireNotifiedToggle(checked === true)}
+              />
+              Umpire Notified?
+            </label>
+          )}
+          {isCancelled && localUmpire && !game.umpireNotified && (
+            <span className="text-[10px] font-semibold text-orange-600 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">
+              Needs notification
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -123,6 +123,9 @@ export interface Game {
   // Final scores (populated when status = 'completed'):
   homeScore?: number;
   awayScore?: number;
+  // Umpire assignment + notification tracking:
+  umpireName?: string;
+  umpireNotified?: boolean;
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;
@@ -331,6 +334,9 @@ export interface CalendarEvent {
   isSigned?: boolean;   // Whether the current parent has signed up
   // Parent RSVP
   myRsvpStatus?: 'Attending' | 'Not Attending' | 'Maybe' | null;
+  // Umpire (visible to Admin/Board/Coach only — never passed to parent-facing views)
+  umpireName?: string;
+  umpireNotified?: boolean;
 }
 
 export interface LeagueOfficer {

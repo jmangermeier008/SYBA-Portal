@@ -29,6 +29,7 @@ import {
   CalendarPlus,
   CloudRain,
   Calendar as CalendarIcon,
+  UserCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -180,6 +181,8 @@ export interface LeagueCalendarProps {
   childSelector?: React.ReactNode;
   // View full record link — board/admin use; undefined = hidden
   onViewRecord?: (event: CalendarEvent) => void;
+  // Show umpire name in game popovers — true for Admin/Board/Coach; omit for Parent
+  showUmpire?: boolean;
   // Override initial view (default: 'month')
   defaultView?: 'month' | 'week' | 'day';
 }
@@ -194,7 +197,8 @@ function EventPopoverContent({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
+  showUmpire,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const typeLabel =
@@ -264,6 +268,17 @@ function EventPopoverContent({
         )}
         {event.notes && (
           <p className="text-xs text-muted-foreground italic">{event.notes}</p>
+        )}
+        {showUmpire && event.umpireName && event.eventType === 'game' && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <UserCheck className="h-3.5 w-3.5 shrink-0" />
+            <span>Umpire: {event.umpireName}</span>
+            {event.umpireNotified === false && event.status === 'cancelled' && (
+              <span className="inline-flex items-center rounded-full bg-orange-100 border border-orange-300 text-orange-700 text-[10px] font-semibold px-1.5 py-0.5">
+                ⚠ Not Notified
+              </span>
+            )}
+          </div>
         )}
         {event.eventType === 'concession' && event.capacity !== undefined && (
           <div className="flex items-center gap-2 text-sm">
@@ -382,7 +397,8 @@ function EventPill({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
+  showUmpire,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const { className: pillCls, style: pillStyle } = getEventStyles(event, divisionColors);
@@ -409,6 +425,7 @@ function EventPill({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onViewRecord={onViewRecord}
+          showUmpire={showUmpire}
         />
       </PopoverContent>
     </Popover>
@@ -425,7 +442,8 @@ function EventDot({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
+  showUmpire,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const dotColor = getDotColor(event, divisionColors);
@@ -451,6 +469,7 @@ function EventDot({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onViewRecord={onViewRecord}
+          showUmpire={showUmpire}
         />
       </PopoverContent>
     </Popover>
@@ -472,6 +491,7 @@ function MonthGrid({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
+  showUmpire,
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
@@ -483,6 +503,7 @@ function MonthGrid({
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
+  showUmpire?: LeagueCalendarProps['showUmpire'];
 }) {
   const days = getMonthGridDays(focusDate);
   const MAX_PILLS = 3;
@@ -550,6 +571,7 @@ function MonthGrid({
                       onConcessionSignup={onConcessionSignup}
                       onConcessionCancel={onConcessionCancel}
                       onViewRecord={onViewRecord}
+                      showUmpire={showUmpire}
                     />
                   ))}
                   {dayEvents.length > MAX_DOTS && (
@@ -574,6 +596,7 @@ function MonthGrid({
                       onConcessionSignup={onConcessionSignup}
                       onConcessionCancel={onConcessionCancel}
                       onViewRecord={onViewRecord}
+                      showUmpire={showUmpire}
                     />
                   ))}
                   {overflow > 0 && (
@@ -605,6 +628,7 @@ function WeekStrip({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
+  showUmpire,
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
@@ -614,6 +638,7 @@ function WeekStrip({
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
+  showUmpire?: LeagueCalendarProps['showUmpire'];
 }) {
   const days = getWeekDays(focusDate);
 
@@ -673,6 +698,7 @@ function WeekStrip({
                       onConcessionSignup={onConcessionSignup}
                       onConcessionCancel={onConcessionCancel}
                       onViewRecord={onViewRecord}
+                      showUmpire={showUmpire}
                     />
                   ))
                 )}
@@ -695,7 +721,8 @@ function DayEventCard({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors'> & {
+  showUmpire,
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   return (
@@ -708,6 +735,7 @@ function DayEventCard({
         onConcessionSignup={onConcessionSignup}
         onConcessionCancel={onConcessionCancel}
         onViewRecord={onViewRecord}
+        showUmpire={showUmpire}
       />
     </div>
   );
@@ -722,6 +750,7 @@ function DayView({
   onConcessionSignup,
   onConcessionCancel,
   onViewRecord,
+  showUmpire,
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
@@ -731,6 +760,7 @@ function DayView({
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
+  showUmpire?: LeagueCalendarProps['showUmpire'];
 }) {
   const key = toDateKey(focusDate);
   const dayEvents = (eventsByDate.get(key) ?? []).sort(
@@ -775,6 +805,7 @@ function DayView({
               onConcessionSignup={onConcessionSignup}
               onConcessionCancel={onConcessionCancel}
               onViewRecord={onViewRecord}
+              showUmpire={showUmpire}
             />
           ))}
         </div>
@@ -801,6 +832,7 @@ export function LeagueCalendar({
   onAddEvent,
   childSelector,
   onViewRecord,
+  showUmpire,
   defaultView,
 }: LeagueCalendarProps) {
   const isMobile = useIsMobile();
@@ -1021,6 +1053,7 @@ export function LeagueCalendar({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onViewRecord={onViewRecord}
+          showUmpire={showUmpire}
         />
       ) : filteredEvents.length === 0 ? (
         <div className="border rounded-xl flex flex-col items-center justify-center py-20 text-center gap-3">
@@ -1042,6 +1075,7 @@ export function LeagueCalendar({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onViewRecord={onViewRecord}
+          showUmpire={showUmpire}
         />
       ) : (
         <WeekStrip
@@ -1053,6 +1087,7 @@ export function LeagueCalendar({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onViewRecord={onViewRecord}
+          showUmpire={showUmpire}
         />
       )}
     </div>
