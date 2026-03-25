@@ -12,45 +12,15 @@ import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '
 import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
 import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { OFFICER_TITLES } from '@/data/officers';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
-import { clearUserNotifications, seedOfficers } from '@/lib/maintenance-actions';
+import { clearUserNotifications } from '@/lib/maintenance-actions';
 import type { LeagueOfficer } from '@/types/scheduling';
 
 type OfficerRecord = LeagueOfficer;
 
-// Default seed data matching officers.ts
-const DEFAULT_OFFICERS: Omit<OfficerRecord, 'id'>[] = [
-  { title: 'President', name: 'John Heutsche', email: 'president@syba.blue', contactHint: 'Leadership questions', mappedTopic: 'general', order: 0 },
-  { title: 'Vice President', name: 'Tom Roskos', email: 'vicepresident@syba.blue', contactHint: 'Leadership questions', mappedTopic: 'general', order: 1 },
-  { title: 'Treasurer', name: 'Don Nelson', email: 'treasurer@syba.blue', contactHint: 'Payment questions', mappedTopic: 'general', order: 2 },
-  { title: 'Secretary', name: 'Russ Adkins', email: 'secretary@syba.blue', contactHint: 'Registration questions', mappedTopic: 'registration', order: 3 },
-  { title: 'Building/Grounds Committee Chair', name: null, email: 'grounds@syba.blue', contactHint: 'Field & concession questions', mappedTopic: 'field_maintenance', order: 4 },
-  { title: 'Competition Committee Chair', name: null, email: null, contactHint: 'Scheduling questions', mappedTopic: 'scheduling', order: 5 },
-  { title: 'Finance Committee Chair', name: null, email: null, contactHint: 'Fundraising questions', mappedTopic: 'fundraising', order: 6 },
-  { title: 'Equipment Coordinator', name: null, email: null, contactHint: 'Uniform & equipment questions', mappedTopic: 'uniforms', order: 7 },
-  { title: 'Umpire Coordinator', name: null, email: null, contactHint: 'Umpire questions', mappedTopic: 'general', order: 8 },
-  { title: 'Tee Ball Coordinator', name: null, email: null, contactHint: 'Tee ball division', mappedTopic: 'general', order: 9 },
-  { title: 'Coach Pitch Coordinator', name: null, email: null, contactHint: 'Coach pitch division', mappedTopic: 'general', order: 10 },
-  { title: 'Kid Pitch Coordinator', name: null, email: null, contactHint: 'Kid pitch division', mappedTopic: 'general', order: 11 },
-  { title: 'Senior Division Coordinator', name: null, email: null, contactHint: 'Senior division', mappedTopic: 'general', order: 12 },
-  { title: 'At-Large Board Member', name: 'Mandy Alfredo',  email: null, contactHint: 'Board member', mappedTopic: 'general', order: 13 },
-  { title: 'At-Large Board Member', name: 'Andy Barabas',   email: null, contactHint: 'Board member', mappedTopic: 'general', order: 14 },
-  { title: 'At-Large Board Member', name: 'Jared Grandy',   email: null, contactHint: 'Board member', mappedTopic: 'general', order: 15 },
-  { title: 'At-Large Board Member', name: 'Evan LaVanish',  email: null, contactHint: 'Board member', mappedTopic: 'general', order: 16 },
-  { title: 'At-Large Board Member', name: 'Evan Leary',     email: null, contactHint: 'Board member', mappedTopic: 'general', order: 17 },
-  { title: 'At-Large Board Member', name: 'Ken Rodgers',    email: null, contactHint: 'Board member', mappedTopic: 'general', order: 18 },
-  { title: 'At-Large Board Member', name: 'John Vasconi',   email: null, contactHint: 'Board member', mappedTopic: 'general', order: 19 },
-  { title: 'At-Large Board Member', name: 'Ryan Voisey',    email: null, contactHint: 'Board member', mappedTopic: 'general', order: 20 },
-  { title: 'At-Large Board Member', name: 'Mike Wilson',    email: null, contactHint: 'Board member', mappedTopic: 'general', order: 21 },
-];
-
-function titleToId(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
-}
 
 function OfficerRow({ officer, holderName, onSave }: {
   officer: OfficerRecord;
@@ -149,7 +119,7 @@ function OfficerRow({ officer, holderName, onSave }: {
 }
 
 export default function AdminSettingsPage() {
-  const { isBoardMember, isAdmin, isSiteAdmin } = useUser();
+  const { isAdmin, isSiteAdmin } = useUser();
   const db = useFirestore();
   const auth = useAuth();
   const { toast } = useToast();
@@ -174,17 +144,6 @@ export default function AdminSettingsPage() {
     return holders.length ? holders.map(u => u.displayName).filter(Boolean).join(', ') : null;
   }
 
-  // Seed Firestore from defaults if the collection is empty
-  useEffect(() => {
-    if (!db || !isBoardMember || officers == null || officers.length > 0) return;
-    const seed = async () => {
-      for (const o of DEFAULT_OFFICERS) {
-        const id = titleToId(o.title);
-        await setDoc(doc(db, 'officers', id), { ...o, id });
-      }
-    };
-    seed().catch(console.error);
-  }, [db, isBoardMember, officers]);
 
   const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
     if (!db) return;
@@ -217,24 +176,6 @@ export default function AdminSettingsPage() {
     }
   };
 
-  const handleSeedOfficers = async () => {
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) {
-      toast({ variant: 'destructive', title: 'Not authenticated', description: 'Please sign in and try again.' });
-      return;
-    }
-    try {
-      const { seeded } = await seedOfficers(token);
-      toast({
-        title: 'Officers seeded',
-        description: seeded > 0
-          ? `Added ${seeded} missing officer position${seeded !== 1 ? 's' : ''}.`
-          : 'All officer positions already exist — nothing to add.',
-      });
-    } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Seed failed', description: err.message });
-    }
-  };
 
   const canAccessMaintenance = isAdmin || isSiteAdmin;
 
@@ -285,7 +226,7 @@ export default function AdminSettingsPage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(officers && officers.length > 0 ? officers : DEFAULT_OFFICERS.map((o) => ({ ...o, id: titleToId(o.title) }))).map((officer) => (
+                      {(officers ?? []).map((officer) => (
                         <OfficerRow key={officer.id} officer={officer as OfficerRecord} holderName={getHolderName(officer.title)} onSave={handleSave} />
                       ))}
                     </div>
@@ -352,15 +293,6 @@ export default function AdminSettingsPage() {
                     Internal tools for managing test data and system state. All actions are permanent and cannot be undone.
                   </p>
                 </div>
-
-                <MaintenanceCard
-                  title="Seed Officer Directory"
-                  description="Add any missing officer positions to Firestore without overwriting existing entries."
-                  buttonLabel="Seed Officers"
-                  buttonVariant="default"
-                  confirmMessage="This will add missing officer positions to Firestore. Existing entries will not be changed. Continue?"
-                  onExecute={handleSeedOfficers}
-                />
 
                 <MaintenanceCard
                   title="Clear User Notifications"
