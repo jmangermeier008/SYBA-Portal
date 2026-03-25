@@ -2,8 +2,9 @@
 
 import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
@@ -152,13 +153,10 @@ export default function Home() {
     [gamesByDivision],
   );
 
-  const [showAllOfficers, setShowAllOfficers] = useState(false);
-
   const filteredOfficers = useMemo(() => {
     if (!officers) return [];
-    if (showAllOfficers) return officers;
     return officers.filter(o => EXECUTIVE_TITLES.includes(o.title) && o.name != null);
-  }, [officers, showAllOfficers]);
+  }, [officers]);
 
   // Derived: pinned announcements first, max 3
   const announcements = useMemo(() => {
@@ -350,14 +348,31 @@ export default function Home() {
             ))}
           </div>
           <div className="mt-3 flex justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs text-primary"
-              onClick={() => setShowAllOfficers(v => !v)}
-            >
-              {showAllOfficers ? 'Show Less ↑' : 'View Full Board →'}
-            </Button>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-xs text-primary">
+                  View Full Board →
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Full Board of Directors</DialogTitle>
+                </DialogHeader>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 py-2">
+                  {(officers ?? []).map((o) => (
+                    <div key={o.id} className="rounded-lg border bg-white/80 px-3 py-2">
+                      <p className="text-[11px] text-muted-foreground leading-tight">{o.title}</p>
+                      <p className="text-sm font-semibold leading-tight mt-0.5">{o.name ?? 'Vacant'}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-2 flex justify-center">
+                  <Button asChild size="sm">
+                    <Link href="/contact">Contact the Board</Link>
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       )}

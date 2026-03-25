@@ -19,6 +19,7 @@ export const OFFICER_TITLES = [
   'Coach Pitch Coordinator',
   'Kid Pitch Coordinator',
   'Senior Division Coordinator',
+  'At-Large Board Member',
 ] as const;
 
 export type OfficerTitle = typeof OFFICER_TITLES[number];
@@ -45,4 +46,16 @@ export const COORDINATORS: OfficerEntry[] = [
   { title: 'Coach Pitch Coordinator', name: null },
   { title: 'Kid Pitch Coordinator', name: null },
   { title: 'Senior Division Coordinator', name: null },
+];
+
+export const AT_LARGE_BOARD_MEMBERS: OfficerEntry[] = [
+  { title: 'At-Large Board Member', name: 'Mandy Alfredo' },
+  { title: 'At-Large Board Member', name: 'Andy Barabas' },
+  { title: 'At-Large Board Member', name: 'Jared Grandy' },
+  { title: 'At-Large Board Member', name: 'Evan LaVanish' },
+  { title: 'At-Large Board Member', name: 'Evan Leary' },
+  { title: 'At-Large Board Member', name: 'Ken Rodgers' },
+  { title: 'At-Large Board Member', name: 'John Vasconi' },
+  { title: 'At-Large Board Member', name: 'Ryan Voisey' },
+  { title: 'At-Large Board Member', name: 'Mike Wilson' },
 ];
