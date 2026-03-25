@@ -1,20 +1,21 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { updateDoc, doc, collection, setDoc, deleteDoc } from 'firebase/firestore';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ShieldCheck, User as UserIcon, Lock, Trash2, Plus, Mail, Pencil } from 'lucide-react';
+import { Loader2, ShieldCheck, User as UserIcon, Lock, Trash2, Plus, Mail, Pencil, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import Link from 'next/link';
 import { initializeApp, deleteApp } from 'firebase/app';
@@ -79,6 +80,22 @@ export default function RolesPage() {
   }, [db, isSiteAdmin]);
 
   const { data: users, isLoading } = useCollection<UserData>(usersQuery);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+
+  const filteredUsers = useMemo(() => {
+    if (!users) return [];
+    return users.filter((user) => {
+      const matchesSearch =
+        !searchQuery ||
+        user.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.email?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesRole =
+        roleFilter === 'all' || getUserRoles(user).includes(roleFilter);
+      return matchesSearch && matchesRole;
+    });
+  }, [users, searchQuery, roleFilter]);
 
   const handleRoleToggle = async (uid: string, role: Role, currentRoles: string[], checked: boolean) => {
     const newRoles = checked
@@ -243,6 +260,29 @@ export default function RolesPage() {
           </Button>
         </header>
 
+        <div className="mb-6 flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by name or email…"
+              className="pl-9"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <SelectTrigger className="w-full sm:w-48">
+              <SelectValue placeholder="All Roles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Roles</SelectItem>
+              {ALL_ROLES.map((r) => (
+                <SelectItem key={r} value={r}>{r}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Card className="border-none shadow-xl overflow-hidden">
           <CardHeader className="bg-primary text-primary-foreground">
             <div className="flex items-center gap-2">
@@ -250,7 +290,9 @@ export default function RolesPage() {
               <div>
                 <CardTitle className="text-xl font-headline">System Users</CardTitle>
                 <CardDescription className="text-primary-foreground/80">
-                  Manage the {users?.length || 0} registered accounts
+                  {roleFilter !== 'all' || searchQuery
+                    ? `Showing ${filteredUsers.length} of ${users?.length || 0} registered accounts`
+                    : `Manage the ${users?.length || 0} registered accounts`}
                 </CardDescription>
               </div>
             </div>
@@ -262,6 +304,8 @@ export default function RolesPage() {
               </div>
             ) : !users || users.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">No users found.</div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="text-center py-20 text-muted-foreground">No users match your filters.</div>
             ) : (
               <div className="overflow-x-auto w-full">
                 <Table>
@@ -277,7 +321,7 @@ export default function RolesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => {
+                    {filteredUsers.map((user) => {
                       const userRoles = getUserRoles(user);
                       const isBoardMember = userRoles.includes('Board Member');
                       return (
