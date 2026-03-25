@@ -85,7 +85,12 @@ function OfficerRow({ officer, holderName, onSave }: {
   return (
     <div className="border rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="font-semibold text-sm">{officer.title}</p>
+        <div className="flex items-center gap-2">
+          <p className="font-semibold text-sm">{officer.title}</p>
+          {(!holderName || holderName.trim() === '') && (
+            <span className="text-xs text-muted-foreground border rounded px-1.5 py-0.5">Hidden from public</span>
+          )}
+        </div>
         <span className="text-xs text-muted-foreground">{holderName ?? 'TBA'}</span>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">

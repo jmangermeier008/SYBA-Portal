@@ -88,13 +88,14 @@ export async function seedOfficers(idToken: string): Promise<{ seeded: number }>
   await verifyAdminCaller(idToken);
   const db = getAdminFirestore();
 
-  const existing = await db.collection('officers').listDocuments();
-  const existingIds = new Set(existing.map((d) => d.id));
+  const existingSnap = await db.collection('officers').get();
+  const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+  const existingTitles = new Set(existingSnap.docs.map((d) => (d.data().title as string) ?? ''));
 
   let seeded = 0;
   for (const o of SEED_OFFICERS) {
     const id = o.id ?? titleToId(o.title);
-    if (!existingIds.has(id)) {
+    if (!existingIds.has(id) && !existingTitles.has(o.title)) {
       const { id: _id, ...data } = o;
       await db.collection('officers').doc(id).set({ ...data, id });
       seeded++;

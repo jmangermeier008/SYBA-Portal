@@ -155,7 +155,12 @@ export default function Home() {
 
   const filteredOfficers = useMemo(() => {
     if (!officers) return [];
-    return officers.filter(o => EXECUTIVE_TITLES.includes(o.title) && o.name != null);
+    return officers.filter(o => EXECUTIVE_TITLES.includes(o.title) && o.name != null && o.name !== '');
+  }, [officers]);
+
+  const fullBoardOfficers = useMemo(() => {
+    if (!officers) return [];
+    return officers.filter(o => o.name != null && o.name !== '');
   }, [officers]);
 
   // Derived: pinned announcements first, max 3
@@ -322,7 +327,7 @@ export default function Home() {
       )}
 
       {/* ── League Leadership ── */}
-      {officers && officers.length > 0 && (
+      {filteredOfficers.length > 0 && (
         <div className="mt-10 w-full max-w-xl">
           <div className="flex items-center gap-2 mb-3">
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -359,10 +364,10 @@ export default function Home() {
                   <DialogTitle>Full Board of Directors</DialogTitle>
                 </DialogHeader>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 py-2">
-                  {(officers ?? []).map((o) => (
+                  {fullBoardOfficers.map((o) => (
                     <div key={o.id} className="rounded-lg border bg-white/80 px-3 py-2">
                       <p className="text-[11px] text-muted-foreground leading-tight">{o.title}</p>
-                      <p className="text-sm font-semibold leading-tight mt-0.5">{o.name ?? 'Vacant'}</p>
+                      <p className="text-sm font-semibold leading-tight mt-0.5">{o.name}</p>
                     </div>
                   ))}
                 </div>
