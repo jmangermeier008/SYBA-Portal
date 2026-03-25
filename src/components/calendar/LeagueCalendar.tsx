@@ -303,7 +303,7 @@ function EventPopoverContent({
                     key={s}
                     variant={event.myRsvpStatus === s ? 'default' : 'outline'}
                     size="sm"
-                    className="flex-1 text-xs h-7 px-1"
+                    className="flex-1 text-xs h-9 px-1"
                     onClick={() => onRsvp(event.sourceId, event.teamId!, s)}
                   >
                     {s === 'Attending' ? 'Yes' : s === 'Not Attending' ? 'No' : 'Maybe'}

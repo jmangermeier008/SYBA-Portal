@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
 import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -35,10 +36,11 @@ interface GameEvent {
   location: string;
   dateTime: string;
   teamId: string;
+  cancelled?: boolean;
 }
 
 export default function CoachDashboard() {
-  const { user, profile } = useUser();
+  const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
 
   // Query teams assigned to this coach
@@ -115,7 +117,7 @@ export default function CoachDashboard() {
         date: dateTime.slice(0, 10),
         startTime: dateTime.slice(11, 16),
         title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
-        status: 'scheduled' as const,
+        status: g.cancelled ? 'cancelled' as const : 'scheduled' as const,
         fieldName: g.location,
         sourceType: 'team-game' as const,
         sourceId: g.id,
@@ -123,6 +125,14 @@ export default function CoachDashboard() {
       };
     });
   }, [allGames, firstTeamId]);
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -149,10 +159,16 @@ export default function CoachDashboard() {
               <Users className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{loadingTeams ? '—' : (teams?.length ?? 0)}</div>
-              <p className="text-xs text-muted-foreground">
-                {teams?.map(t => t.name).join(', ') || 'No teams assigned'}
-              </p>
+              {loadingTeams ? (
+                <><Skeleton className="h-8 w-8 mb-1" /><Skeleton className="h-3 w-32" /></>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold">{teams?.length ?? 0}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {teams?.map(t => t.name).join(', ') || 'No teams assigned'}
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
           <Card className="border-none shadow-md">
@@ -286,8 +302,16 @@ export default function CoachDashboard() {
               </CardHeader>
               <CardContent>
                 {loadingAnnouncements ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <div className="space-y-3">
+                    {[0, 1].map(i => (
+                      <div key={i} className="flex items-start gap-4 p-3">
+                        <Skeleton className="w-10 h-10 rounded-full shrink-0" />
+                        <div className="flex-1 space-y-1.5">
+                          <Skeleton className="h-4 w-3/4" />
+                          <Skeleton className="h-3 w-full" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : announcements && announcements.length > 0 ? (
                   <div className="space-y-4">

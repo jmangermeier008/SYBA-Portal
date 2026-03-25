@@ -3,7 +3,7 @@
 import { firebaseConfig } from '@/firebase/config';
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 /**
@@ -37,11 +37,20 @@ export function initializeFirebase() {
  * @returns Object with auth, firestore, and storage SDK instances
  */
 export function getSdks(firebaseApp: FirebaseApp) {
+  let firestore;
+  try {
+    firestore = initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache(),
+    });
+  } catch {
+    // Already initialized (e.g. hot reload in dev) — get the existing instance
+    firestore = getFirestore(firebaseApp);
+  }
   return {
     firebaseApp,
     auth: getAuth(firebaseApp),
-    firestore: getFirestore(firebaseApp),
-    storage: getStorage(firebaseApp)
+    firestore,
+    storage: getStorage(firebaseApp),
   };
 }
 

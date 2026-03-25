@@ -7,6 +7,7 @@ import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebas
 import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { format } from 'date-fns';
@@ -44,7 +45,7 @@ export default function ParentDashboard({
   use(params);
   use(searchParams);
 
-  const { profile, user } = useUser();
+  const { profile, user, loading: loadingUser } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
   const [rsvpLoading, setRsvpLoading] = useState(false);
@@ -126,7 +127,7 @@ export default function ParentDashboard({
       orderBy('dateTime', 'asc')
     );
   }, [db, firstTeamId]);
-  const { data: allTeamGames, isLoading: loadingAllTeamGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(allTeamGamesQuery);
+  const { data: allTeamGames, isLoading: loadingAllTeamGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string; cancelled?: boolean }>(allTeamGamesQuery);
 
   const countdown = useCountdown(nextGame?.dateTime);
 
@@ -144,20 +145,24 @@ export default function ParentDashboard({
       )
     : undefined;
 
-  const handleDashboardRSVP = async (status: 'Attending' | 'Maybe' | 'Not Attending') => {
-    if (!user || !db || !firstTeamId || !firstPlayerId || !nextGame) return;
+  const handleDashboardRSVP = async (
+    status: 'Attending' | 'Maybe' | 'Not Attending',
+    gameId: string = nextGame?.id ?? '',
+    teamId: string = firstTeamId ?? ''
+  ) => {
+    if (!user || !db || !teamId || !firstPlayerId || !gameId) return;
     setRsvpLoading(true);
-    const rsvpId = `${firstPlayerId}_${nextGame.id}`;
-    const rsvpRef = doc(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps', rsvpId);
+    const rsvpId = `${firstPlayerId}_${gameId}`;
+    const rsvpRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId);
     try {
       await setDoc(rsvpRef, {
         id: rsvpId,
-        gameId: nextGame.id,
+        gameId,
         playerId: firstPlayerId,
         parentUserId: user.uid,
         status,
         timestamp: new Date().toISOString(),
-        teamId: firstTeamId,
+        teamId,
       }, { merge: true });
       toast({ title: "RSVP Updated", description: `Marked as ${status}.` });
     } catch (err: any) {
@@ -177,7 +182,7 @@ export default function ParentDashboard({
         date: dateTime.slice(0, 10),
         startTime: dateTime.slice(11, 16),
         title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
-        status: 'scheduled' as const,
+        status: g.cancelled ? 'cancelled' as const : 'scheduled' as const,
         fieldName: g.location,
         sourceType: 'team-game' as const,
         sourceId: g.id,
@@ -187,7 +192,7 @@ export default function ParentDashboard({
   }, [allTeamGames, firstTeamId]);
 
   const handleCalendarRsvp = (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
-    handleDashboardRSVP(status);
+    handleDashboardRSVP(status, gameId, teamId);
   };
 
   // Latest announcements
@@ -196,6 +201,14 @@ export default function ParentDashboard({
     return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(2));
   }, [db]);
   const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string }>(announcementsQuery);
+
+  if (loadingUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -219,7 +232,7 @@ export default function ParentDashboard({
             </CardHeader>
             <CardContent>
               {loadingPlayers ? (
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <><Skeleton className="h-8 w-12 mb-1" /><Skeleton className="h-3 w-28" /></>
               ) : (
                 <>
                   <div className="text-2xl font-bold">{players?.length ?? 0}</div>
@@ -238,7 +251,7 @@ export default function ParentDashboard({
             </CardHeader>
             <CardContent>
               {loadingGames ? (
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <><Skeleton className="h-8 w-24 mb-1" /><Skeleton className="h-3 w-32 mb-1" /><Skeleton className="h-3 w-20" /></>
               ) : nextGame ? (
                 <>
                   <div className="text-2xl font-bold">{countdown || format(new Date(nextGame.dateTime), 'MMM d')}</div>
@@ -264,7 +277,7 @@ export default function ParentDashboard({
                           <button
                             onClick={() => handleDashboardRSVP('Attending')}
                             className={cn(
-                              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                              "flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-full text-xs font-medium border transition-colors",
                               currentRsvp?.status === 'Attending'
                                 ? "bg-green-500 text-white border-green-500"
                                 : "border-green-300 text-green-700 hover:bg-green-50"
@@ -275,7 +288,7 @@ export default function ParentDashboard({
                           <button
                             onClick={() => handleDashboardRSVP('Maybe')}
                             className={cn(
-                              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                              "flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-full text-xs font-medium border transition-colors",
                               currentRsvp?.status === 'Maybe'
                                 ? "bg-yellow-400 text-white border-yellow-400"
                                 : "border-yellow-300 text-yellow-700 hover:bg-yellow-50"
@@ -286,7 +299,7 @@ export default function ParentDashboard({
                           <button
                             onClick={() => handleDashboardRSVP('Not Attending')}
                             className={cn(
-                              "flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                              "flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-full text-xs font-medium border transition-colors",
                               currentRsvp?.status === 'Not Attending'
                                 ? "bg-red-500 text-white border-red-500"
                                 : "border-red-300 text-red-700 hover:bg-red-50"
@@ -317,8 +330,16 @@ export default function ParentDashboard({
             </CardHeader>
             <CardContent>
               {loadingAnnouncements ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <div className="space-y-3">
+                  {[0, 1].map(i => (
+                    <div key={i} className="flex items-start gap-4 p-3">
+                      <Skeleton className="w-10 h-10 rounded-full shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-3 w-full" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : announcements && announcements.length > 0 ? (
                 <div className="space-y-4">
