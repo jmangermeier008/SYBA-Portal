@@ -1,3 +1,10 @@
+export const EXECUTIVE_TITLES: readonly string[] = [
+  'President',
+  'Vice President',
+  'Treasurer',
+  'Secretary',
+];
+
 export const OFFICER_TITLES = [
   'President',
   'Vice President',

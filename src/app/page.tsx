@@ -2,7 +2,7 @@
 
 import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -10,6 +10,7 @@ import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
 import type { ComplexClosuresDocument, Game, LeagueOfficer } from '@/types/scheduling';
 import { cn } from '@/lib/utils';
+import { EXECUTIVE_TITLES } from '@/data/officers';
 
 const CONTACT_EMAIL = 'info@syba.blue';
 
@@ -150,6 +151,14 @@ export default function Home() {
     ),
     [gamesByDivision],
   );
+
+  const [showAllOfficers, setShowAllOfficers] = useState(false);
+
+  const filteredOfficers = useMemo(() => {
+    if (!officers) return [];
+    if (showAllOfficers) return officers;
+    return officers.filter(o => EXECUTIVE_TITLES.includes(o.title) && o.name != null);
+  }, [officers, showAllOfficers]);
 
   // Derived: pinned announcements first, max 3
   const announcements = useMemo(() => {
@@ -324,7 +333,7 @@ export default function Home() {
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {officers.map((o) => (
+            {filteredOfficers.map((o) => (
               <div key={o.id} className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col gap-1.5">
                 <p className="text-xs text-muted-foreground font-medium">{o.title}</p>
                 <p className="text-sm font-semibold">{o.name ?? 'Position Vacant'}</p>
@@ -339,6 +348,16 @@ export default function Home() {
                 </Link>
               </div>
             ))}
+          </div>
+          <div className="mt-3 flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-primary"
+              onClick={() => setShowAllOfficers(v => !v)}
+            >
+              {showAllOfficers ? 'Show Less ↑' : 'View Full Board →'}
+            </Button>
           </div>
         </div>
       )}
