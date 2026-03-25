@@ -27,9 +27,6 @@ export default async function ContactPage({
             width={36}
             height={36}
             className="object-contain"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
           />
           <span className="text-xl font-bold font-headline tracking-tight text-primary">SYBA Portal</span>
         </Link>

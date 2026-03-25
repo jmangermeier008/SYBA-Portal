@@ -37,6 +37,15 @@ const DEFAULT_OFFICERS: Omit<OfficerRecord, 'id'>[] = [
   { title: 'Coach Pitch Coordinator', name: null, email: null, contactHint: 'Coach pitch division', mappedTopic: 'general', order: 10 },
   { title: 'Kid Pitch Coordinator', name: null, email: null, contactHint: 'Kid pitch division', mappedTopic: 'general', order: 11 },
   { title: 'Senior Division Coordinator', name: null, email: null, contactHint: 'Senior division', mappedTopic: 'general', order: 12 },
+  { title: 'At-Large Board Member', name: 'Mandy Alfredo',  email: null, contactHint: 'Board member', mappedTopic: 'general', order: 13 },
+  { title: 'At-Large Board Member', name: 'Andy Barabas',   email: null, contactHint: 'Board member', mappedTopic: 'general', order: 14 },
+  { title: 'At-Large Board Member', name: 'Jared Grandy',   email: null, contactHint: 'Board member', mappedTopic: 'general', order: 15 },
+  { title: 'At-Large Board Member', name: 'Evan LaVanish',  email: null, contactHint: 'Board member', mappedTopic: 'general', order: 16 },
+  { title: 'At-Large Board Member', name: 'Evan Leary',     email: null, contactHint: 'Board member', mappedTopic: 'general', order: 17 },
+  { title: 'At-Large Board Member', name: 'Ken Rodgers',    email: null, contactHint: 'Board member', mappedTopic: 'general', order: 18 },
+  { title: 'At-Large Board Member', name: 'John Vasconi',   email: null, contactHint: 'Board member', mappedTopic: 'general', order: 19 },
+  { title: 'At-Large Board Member', name: 'Ryan Voisey',    email: null, contactHint: 'Board member', mappedTopic: 'general', order: 20 },
+  { title: 'At-Large Board Member', name: 'Mike Wilson',    email: null, contactHint: 'Board member', mappedTopic: 'general', order: 21 },
 ];
 
 function titleToId(title: string): string {
