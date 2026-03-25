@@ -6,9 +6,9 @@ import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Loader2, AlertTriangle, Megaphone, Calendar, Pin } from 'lucide-react';
+import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
-import type { ComplexClosuresDocument, Game } from '@/types/scheduling';
+import type { ComplexClosuresDocument, Game, LeagueOfficer } from '@/types/scheduling';
 import { cn } from '@/lib/utils';
 
 const CONTACT_EMAIL = 'info@syba.blue';
@@ -101,6 +101,13 @@ export default function Home() {
     return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(10));
   }, [db]);
   const { data: rawAnnouncements } = useCollection<Announcement>(announcementsQuery);
+
+  // Officers (league leadership grid)
+  const officersQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'officers'), orderBy('order'));
+  }, [db]);
+  const { data: officers } = useCollection<LeagueOfficer>(officersQuery);
 
   // Derived: registration banner
   const registrationBanner = useMemo(() => {
@@ -304,6 +311,35 @@ export default function Home() {
               Sign in to see all announcements →
             </Link>
           </p>
+        </div>
+      )}
+
+      {/* ── League Leadership ── */}
+      {officers && officers.length > 0 && (
+        <div className="mt-10 w-full max-w-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+              League Leadership
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {officers.map((o) => (
+              <div key={o.id} className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col gap-1.5">
+                <p className="text-xs text-muted-foreground font-medium">{o.title}</p>
+                <p className="text-sm font-semibold">{o.name ?? 'Position Vacant'}</p>
+                {o.contactHint && (
+                  <p className="text-xs text-muted-foreground">{o.contactHint}</p>
+                )}
+                <Link
+                  href={`/contact?topic=${o.mappedTopic ?? 'general'}`}
+                  className="text-xs text-primary hover:underline font-medium mt-auto"
+                >
+                  Message →
+                </Link>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

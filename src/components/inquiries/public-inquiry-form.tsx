@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,13 +14,17 @@ import { Loader2, Send, CheckCircle2 } from 'lucide-react';
 import { INQUIRY_TOPICS, getTopicConfig } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
 
-export function PublicInquiryForm() {
+export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopic }) {
   const db = useFirestore();
   const { toast } = useToast();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [topic, setTopic] = useState<InquiryTopic | ''>('');
+  const [topic, setTopic] = useState<InquiryTopic | ''>(initialTopic ?? '');
+
+  useEffect(() => {
+    if (initialTopic) setTopic(initialTopic);
+  }, [initialTopic]);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);

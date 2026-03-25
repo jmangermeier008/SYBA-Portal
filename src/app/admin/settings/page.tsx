@@ -17,17 +17,10 @@ import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
-import { clearUserNotifications } from '@/lib/maintenance-actions';
+import { clearUserNotifications, seedOfficers } from '@/lib/maintenance-actions';
+import type { LeagueOfficer } from '@/types/scheduling';
 
-interface OfficerRecord {
-  id: string;
-  title: string;
-  name: string | null;
-  email: string | null;
-  contactHint: string;
-  mappedTopic?: InquiryTopic;
-  order: number;
-}
+type OfficerRecord = LeagueOfficer;
 
 // Default seed data matching officers.ts
 const DEFAULT_OFFICERS: Omit<OfficerRecord, 'id'>[] = [
@@ -210,6 +203,25 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const handleSeedOfficers = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      toast({ variant: 'destructive', title: 'Not authenticated', description: 'Please sign in and try again.' });
+      return;
+    }
+    try {
+      const { seeded } = await seedOfficers(token);
+      toast({
+        title: 'Officers seeded',
+        description: seeded > 0
+          ? `Added ${seeded} missing officer position${seeded !== 1 ? 's' : ''}.`
+          : 'All officer positions already exist — nothing to add.',
+      });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Seed failed', description: err.message });
+    }
+  };
+
   const canAccessMaintenance = isAdmin || isSiteAdmin;
 
   return (
@@ -326,6 +338,15 @@ export default function AdminSettingsPage() {
                     Internal tools for managing test data and system state. All actions are permanent and cannot be undone.
                   </p>
                 </div>
+
+                <MaintenanceCard
+                  title="Seed Officer Directory"
+                  description="Add any missing officer positions to Firestore without overwriting existing entries."
+                  buttonLabel="Seed Officers"
+                  buttonVariant="default"
+                  confirmMessage="This will add missing officer positions to Firestore. Existing entries will not be changed. Continue?"
+                  onExecute={handleSeedOfficers}
+                />
 
                 <MaintenanceCard
                   title="Clear User Notifications"

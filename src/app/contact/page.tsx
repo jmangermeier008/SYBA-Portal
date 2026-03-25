@@ -1,12 +1,22 @@
-"use client";
-
 import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { PublicInquiryForm } from '@/components/inquiries/public-inquiry-form';
 import { MessageSquare } from 'lucide-react';
+import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
+import type { InquiryTopic } from '@/data/inquiry-topics';
 
-export default function ContactPage() {
+export default async function ContactPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ topic?: string }>;
+}) {
+  const { topic: rawTopic } = await searchParams;
+  const validTopics = INQUIRY_TOPICS.map((t) => t.value);
+  const initialTopic = validTopics.includes(rawTopic as InquiryTopic)
+    ? (rawTopic as InquiryTopic)
+    : undefined;
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
@@ -45,7 +55,7 @@ export default function ContactPage() {
             </p>
           </header>
 
-          <PublicInquiryForm />
+          <PublicInquiryForm initialTopic={initialTopic} />
 
           <p className="text-center text-sm text-muted-foreground mt-8">
             Already have an account?{' '}

@@ -332,3 +332,13 @@ export interface CalendarEvent {
   // Parent RSVP
   myRsvpStatus?: 'Attending' | 'Not Attending' | 'Maybe' | null;
 }
+
+export interface LeagueOfficer {
+  id: string;
+  title: string;
+  name: string | null;
+  email: string | null;
+  contactHint: string;
+  mappedTopic?: import('@/data/inquiry-topics').InquiryTopic;
+  order: number;
+}
