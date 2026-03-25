@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,9 +22,10 @@ const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }>
 };
 
 function AdminInquiriesContent() {
-  const { isBoardMember, loading: loadingUser } = useUser();
+  const { user, isBoardMember, loading: loadingUser } = useUser();
   const db = useFirestore();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [topicFilter, setTopicFilter] = useState<InquiryTopic | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<InquiryStatus | 'all'>('all');
@@ -76,6 +77,13 @@ function AdminInquiriesContent() {
         </main>
       </div>
     );
+  }
+
+  if (!loadingUser && !user) {
+    const qs = searchParams.toString();
+    const returnUrl = `/admin/inquiries${qs ? '?' + qs : ''}`;
+    router.replace(`/login?redirect=${encodeURIComponent(returnUrl)}`);
+    return null;
   }
 
   if (!loadingUser && !isBoardMember) {

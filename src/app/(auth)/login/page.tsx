@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth, useFirestore, useUser } from '@/firebase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,20 +35,25 @@ function getAuthErrorMessage(code: string): string {
   }
 }
 
-export default function LoginPage() {
+function LoginContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const auth = useAuth();
   const db = useFirestore();
   const { user, profile, loading: loadingUser, isAdmin, isBoardMember, isCoach } = useUser();
 
-  // Redirect already-authenticated users to their dashboard
+  // Redirect already-authenticated users to their dashboard (or redirect param)
   useEffect(() => {
     if (!loadingUser && user && profile) {
-      if (isAdmin || isBoardMember) {
+      const redirectTo = searchParams.get('redirect');
+      const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : null;
+      if (destination) {
+        router.push(destination);
+      } else if (isAdmin || isBoardMember) {
         router.push('/admin/dashboard');
       } else if (isCoach) {
         router.push('/coach/dashboard');
@@ -56,7 +61,7 @@ export default function LoginPage() {
         router.push('/parent/dashboard');
       }
     }
-  }, [user, profile, loadingUser, router, isAdmin, isBoardMember, isCoach]);
+  }, [user, profile, loadingUser, router, searchParams, isAdmin, isBoardMember, isCoach]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +78,11 @@ export default function LoginPage() {
         const userData = docSnap.data();
         // H1: Support multi-role users — map roles to their correct dashboard paths
         const roles: string[] = userData.roles ?? [userData.role];
-        if (roles.some((r: string) => ['Admin', 'Site Admin', 'Board Member'].includes(r))) {
+        const redirectTo = searchParams.get('redirect');
+        const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : null;
+        if (destination) {
+          router.push(destination);
+        } else if (roles.some((r: string) => ['Admin', 'Site Admin', 'Board Member'].includes(r))) {
           router.push('/admin/dashboard');
         } else if (roles.includes('Coach')) {
           router.push('/coach/dashboard');
@@ -147,5 +156,17 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-background p-4">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }
