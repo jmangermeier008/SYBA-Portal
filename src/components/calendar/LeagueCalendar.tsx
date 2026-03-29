@@ -452,13 +452,17 @@ function EventDot({
       <PopoverTrigger asChild>
         <button
           aria-label={event.title}
-          className={cn(
-            'w-2.5 h-2.5 rounded-full shrink-0 hover:opacity-80 transition-opacity',
-            !divisionColors && dotColors[event.eventType],
-            event.status === 'cancelled' && 'opacity-40'
-          )}
-          style={divisionColors ? { backgroundColor: dotColor } : undefined}
-        />
+          className="p-2 -m-1 flex items-center justify-center shrink-0 hover:opacity-80 transition-opacity touch-manipulation"
+        >
+          <span
+            className={cn(
+              'w-2.5 h-2.5 rounded-full block',
+              !divisionColors && dotColors[event.eventType],
+              event.status === 'cancelled' && 'opacity-40'
+            )}
+            style={divisionColors ? { backgroundColor: dotColor } : undefined}
+          />
+        </button>
       </PopoverTrigger>
       <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-0 shadow-lg" align="start">
         <EventPopoverContent
@@ -577,7 +581,7 @@ function MonthGrid({
                   {dayEvents.length > MAX_DOTS && (
                     <button
                       onClick={() => onDayClick(day)}
-                      className="text-[9px] text-primary font-semibold leading-none"
+                      className="text-[11px] text-primary font-bold leading-none p-2 -m-1 touch-manipulation"
                     >
                       +{dayEvents.length - MAX_DOTS}
                     </button>

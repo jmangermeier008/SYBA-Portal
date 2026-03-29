@@ -62,7 +62,10 @@ export function useUser() {
     }, async (error) => {
       // Check if user is still logged in before emitting error
       const currentAuth = getAuth();
-      if (!currentAuth.currentUser) return;
+      if (!currentAuth.currentUser) {
+        setLoading(false);
+        return;
+      }
 
       // Emit contextual error for security rules debugging
       const permissionError = new FirestorePermissionError({

@@ -61,11 +61,14 @@ export default function Home() {
   const router = useRouter();
   const db = useFirestore();
 
-  const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayISO = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
   const weekEndISO = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
-    return d.toISOString().slice(0, 10);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }, []);
 
   // Active season — registration banner
@@ -114,7 +117,8 @@ export default function Home() {
   // Derived: registration banner
   const registrationBanner = useMemo(() => {
     if (!activeSeason) return null;
-    const today = new Date().toISOString().slice(0, 10);
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (today < activeSeason.registrationOpen) {
       return { text: `Registration opens ${formatDate(activeSeason.registrationOpen)} for ${activeSeason.name}`, closed: false };
     }
@@ -239,7 +243,7 @@ export default function Home() {
 
         {/* Registration banner */}
         {registrationBanner && (
-          <div className={`w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-center ${
+          <div className={`w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-center text-balance ${
             registrationBanner.closed
               ? 'bg-muted/20 border-muted/30 text-muted-foreground'
               : 'bg-primary/10 border-primary/20 text-primary'
