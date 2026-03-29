@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
 import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, limit } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
@@ -49,6 +49,7 @@ interface Game {
   teamId?: string;
   teamName?: string;
   notes?: string;
+  scrimmageNote?: string;
   status?: GameStatus;
   homeScore?: number;
   awayScore?: number;
@@ -74,7 +75,7 @@ const EMPTY_FORM = {
   type: 'game' as GameType,
   date: '', time: '', fieldId: '',
   divisionId: '',
-  homeTeamId: '', awayTeamId: '', teamId: '', notes: '',
+  homeTeamId: '', awayTeamId: '', teamId: '', notes: '', scrimmageNote: '',
 };
 
 const EMPTY_SHIFT_FORM = {
@@ -91,7 +92,8 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 
 export default function AdminGamesPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const router = useRouter();
 
@@ -143,19 +145,19 @@ export default function AdminGamesPage() {
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const upcomingQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'games'), where('date', '>=', todayISO), orderBy('date', 'asc'), orderBy('time', 'asc'));
-  }, [db, isAdmin, isBoardMember, todayISO]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport), where('date', '>=', todayISO), orderBy('date', 'asc'), orderBy('time', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport, todayISO]);
 
   const pastQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || !showPast) return null;
-    return query(collection(db, 'games'), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
-  }, [db, isAdmin, isBoardMember, showPast, todayISO]);
+    if (!db || (!isAdmin && !isBoardMember) || !showPast || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
+  }, [db, isAdmin, isBoardMember, showPast, activeSport, todayISO]);
 
   const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || view !== 'calendar') return null;
-    return query(collection(db, 'games'), orderBy('date', 'asc'));
-  }, [db, isAdmin, isBoardMember, view]);
+    if (!db || (!isAdmin && !isBoardMember) || view !== 'calendar' || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport), orderBy('date', 'asc'));
+  }, [db, isAdmin, isBoardMember, view, activeSport]);
   const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
 
   const calendarEvents = useMemo((): CalendarEvent[] => {
@@ -170,7 +172,7 @@ export default function AdminGamesPage() {
         : g.teamName ? `${g.teamName} Practice` : 'Practice',
       status: g.status ?? 'scheduled',
       fieldName: g.fieldName,
-      notes: g.notes,
+      notes: g.scrimmageNote || g.notes,
       division: g.division,
       divisionId: g.divisionId,
       sourceType: 'global-game' as const,
@@ -179,9 +181,9 @@ export default function AdminGamesPage() {
   }, [allGames]);
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'teams'), orderBy('name', 'asc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport), orderBy('name', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const fieldsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -189,9 +191,9 @@ export default function AdminGamesPage() {
   }, [db, isAdmin, isBoardMember]);
 
   const activeSeasonQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport), where('status', '==', 'active'), limit(1));
+  }, [db, isAdmin, isBoardMember, activeSport]);
   const { data: activeSeasons } = useCollection<Season>(activeSeasonQuery);
   const activeSeason = activeSeasons?.[0] ?? null;
 
@@ -233,6 +235,8 @@ export default function AdminGamesPage() {
       fieldId: form.fieldId,
       fieldName: fieldMap[form.fieldId] ?? '',
       notes: form.notes,
+      scrimmageNote: form.scrimmageNote.trim() || null,
+      sport: activeSport,
       divisionId: form.divisionId || null,
       division: selectedDivision?.name ?? '',
     };
@@ -274,6 +278,7 @@ export default function AdminGamesPage() {
       awayTeamId: game.awayTeamId ?? '',
       teamId: game.teamId ?? '',
       notes: game.notes ?? '',
+      scrimmageNote: game.scrimmageNote ?? '',
     });
     setShiftForm(EMPTY_SHIFT_FORM);
     setOpen(true);
@@ -788,6 +793,11 @@ export default function AdminGamesPage() {
                   <div className="space-y-1.5">
                     <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
                     <Input className="rounded-xl" placeholder="e.g. Rain makeup game" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Scrimmage Note <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                    <Input className="rounded-xl" placeholder="e.g. Wee Wee Scrimmage follows at 6:30 PM" value={form.scrimmageNote} onChange={e => setForm({ ...form, scrimmageNote: e.target.value })} />
                   </div>
 
                   {/* Concession shift — only when creating a game (not editing) */}

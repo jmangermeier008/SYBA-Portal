@@ -140,6 +140,7 @@ export interface Game {
   umpireNotified?: boolean;
   sport?: Sport;
   locationType?: LocationType;
+  scrimmageNote?: string; // Optional follow-on event note, e.g. "Wee Wee Scrimmage follows at 6:30 PM"
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;
@@ -283,7 +284,9 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   role?: UserRole;    // Legacy single-role field (backward compat)
-  roles?: UserRole[]; // Current multi-role field
+  roles?: UserRole[]; // Current multi-role field (kept for Site Admin bypass)
+  // Sport-specific roles: e.g. { baseball: ['Board Member'], football: ['Coach'] }
+  sportRoles?: Record<string, UserRole[]>;
   phoneNumber?: string | null;
   shareContactInfo?: boolean;
   // Parents — drives the combined family calendar query:
@@ -291,6 +294,7 @@ export interface UserProfile {
   // Coaches — all teams they are assigned to:
   teamIds?: string[];
   notificationPrefs?: NotificationPrefs;
+  preferredSport?: Sport;
   createdAt: string;
 }
 

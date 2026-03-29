@@ -257,7 +257,8 @@ function NavSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { profile, roles, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent } = useUser();
+  const { profile, roles } = useUser();
+  const { activeSport, setActiveSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent } = useSport();
   const auth = useAuth();
   const db = useFirestore();
   const router = useRouter();
@@ -416,8 +417,6 @@ export function Sidebar() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
-
-  const { activeSport, setActiveSport } = useSport();
 
   const roleLabel = roles.join(' · ') || profile?.role || '';
   const roleContexts = getRoleContexts(roles);

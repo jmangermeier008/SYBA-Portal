@@ -7,14 +7,25 @@ import { useFirestore } from './provider';
 import type { Sport } from '@/types/scheduling';
 
 interface SportContextState {
-  // null before auth/profile loads or before first selection — always check before using
+  // null before auth/profile loads or before first selection
   activeSport: Sport | null;
   setActiveSport: (sport: Sport) => Promise<void>;
+  // Sport-aware role flags — derived from profile.sportRoles[activeSport] with Site Admin bypass
+  isAdmin: boolean;
+  isSiteAdmin: boolean;
+  isBoardMember: boolean;
+  isCoach: boolean;
+  isParent: boolean;
 }
 
 const SportContext = createContext<SportContextState>({
   activeSport: null,
   setActiveSport: async () => {},
+  isAdmin: false,
+  isSiteAdmin: false,
+  isBoardMember: false,
+  isCoach: false,
+  isParent: false,
 });
 
 export function useSport(): SportContextState {
@@ -22,7 +33,7 @@ export function useSport(): SportContextState {
 }
 
 export function SportProvider({ children }: { children: ReactNode }) {
-  const { user, profile, loading } = useUser();
+  const { user, profile, loading, roles } = useUser();
   const db = useFirestore();
   const [activeSport, setActiveSportState] = useState<Sport | null>(null);
   const [selecting, setSelecting] = useState(false);
@@ -40,10 +51,23 @@ export function SportProvider({ children }: { children: ReactNode }) {
     await updatePreferredSport(db, user.uid, sport);
   };
 
+  // ── Sport-aware role derivation ───────────────────────────────────────────
+  // Site Admin / Admin in legacy roles[] = cross-sport superuser bypass
+  const isSiteAdmin = roles.includes('Site Admin') || roles.includes('Admin');
+
+  // For all other roles, check sportRoles[activeSport] if available
+  const sportRoleList: string[] = (activeSport && profile?.sportRoles?.[activeSport]) ?? [];
+
+  const isAdmin = isSiteAdmin || sportRoleList.includes('Admin');
+  const isBoardMember = isSiteAdmin || sportRoleList.includes('Board Member') || sportRoleList.includes('Admin');
+  const isCoach = isSiteAdmin || sportRoleList.includes('Coach');
+  // Parents are not sport-specific — fall back to legacy roles for parent check
+  const isParent = sportRoleList.includes('Parent') || roles.includes('Parent');
+
   const contextValue = useMemo(
-    () => ({ activeSport, setActiveSport }),
+    () => ({ activeSport, setActiveSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSport]
+    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent]
   );
 
   // Always render the provider so useSport() never throws regardless of tree position.

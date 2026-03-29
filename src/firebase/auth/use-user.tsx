@@ -14,8 +14,10 @@ export interface UserProfile {
   displayName: string | null;
   // Legacy single-role field — kept for backward compatibility
   role: 'Parent' | 'Coach' | 'Admin';
-  // New multi-role field — takes precedence when present
+  // Legacy multi-role field — kept; used for Site Admin / Admin bypass
   roles?: ('Parent' | 'Coach' | 'Board Member' | 'Admin' | 'Site Admin')[];
+  // Federated sport roles: { baseball: ['Board Member'], football: ['Coach'] }
+  sportRoles?: Record<string, ('Parent' | 'Coach' | 'Board Member' | 'Admin' | 'Site Admin')[]>;
   phoneNumber?: string | null;
   shareContactInfo?: boolean;
   enrolledPlayerIds?: string[];
@@ -104,5 +106,6 @@ export function useUser() {
     isCoach,
     isParent,
     preferredSport: profile?.preferredSport,
+    sportRoles: profile?.sportRoles,
   };
 }
