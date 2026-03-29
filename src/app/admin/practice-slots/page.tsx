@@ -30,6 +30,7 @@ import {
 } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { PracticeSlot } from '@/types/scheduling';
+import { BulkApproveDialog } from '@/components/admin/practice-slots/bulk-approve-dialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,14 @@ export default function PracticeSlotsAdminPage() {
   const [bulkCancelling, setBulkCancelling] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
+  // Pending-tab filters + selection
+  const [pendingFilterDivision, setPendingFilterDivision] = useState('all');
+  const [pendingFilterFieldId, setPendingFilterFieldId] = useState('all');
+  const [pendingFilterDateFrom, setPendingFilterDateFrom] = useState('');
+  const [pendingFilterDateTo, setPendingFilterDateTo] = useState('');
+  const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
+  const [bulkApproveOpen, setBulkApproveOpen] = useState(false);
+
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const slotsQuery = useMemoFirebase(() => {
@@ -244,6 +253,41 @@ export default function PracticeSlotsAdminPage() {
     }
     return map;
   }, [filteredSlots]);
+
+  // Map teamId → divisionId for pending-tab division filter
+  const teamDivisionMap = useMemo(
+    () => Object.fromEntries((teams ?? []).map(t => [t.id, t.divisionId ?? ''])),
+    [teams]
+  );
+
+  // Pending slots after applying the pending-tab filters
+  const filteredPendingSlots = useMemo(() => {
+    return pendingSlots.filter(slot => {
+      if (pendingFilterDivision !== 'all') {
+        const teamDivId = teamDivisionMap[slot.pendingTeamId ?? ''];
+        if (teamDivId !== pendingFilterDivision) return false;
+      }
+      if (pendingFilterFieldId !== 'all' && slot.fieldId !== pendingFilterFieldId) return false;
+      if (pendingFilterDateFrom && slot.date < pendingFilterDateFrom) return false;
+      if (pendingFilterDateTo && slot.date > pendingFilterDateTo) return false;
+      return true;
+    });
+  }, [pendingSlots, pendingFilterDivision, pendingFilterFieldId, pendingFilterDateFrom, pendingFilterDateTo, teamDivisionMap]);
+
+  // Unique field options derived from pending slots (for the field filter dropdown)
+  const pendingFieldOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const s of pendingSlots) {
+      if (s.fieldId && s.fieldName) seen.set(s.fieldId, s.fieldName);
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [pendingSlots]);
+
+  // The pending slots that are both visible (filtered) and checked
+  const selectedPendingSlots = useMemo(
+    () => filteredPendingSlots.filter(s => selectedPendingIds.has(s.id)),
+    [filteredPendingSlots, selectedPendingIds]
+  );
 
   // Preview dates for recurring creation
   const previewDates = useMemo(() => {
@@ -810,6 +854,65 @@ export default function PracticeSlotsAdminPage() {
 
           {/* ── Pending Requests Tab ──────────────────────────────────────────── */}
           <TabsContent value="pending">
+
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <Select value={pendingFilterDivision} onValueChange={setPendingFilterDivision}>
+                <SelectTrigger className="w-[160px] rounded-xl h-9 text-sm">
+                  <SelectValue placeholder="All Divisions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Divisions</SelectItem>
+                  {(divisions ?? []).map(d => (
+                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={pendingFilterFieldId} onValueChange={setPendingFilterFieldId}>
+                <SelectTrigger className="w-[160px] rounded-xl h-9 text-sm">
+                  <SelectValue placeholder="All Fields" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Fields</SelectItem>
+                  {pendingFieldOptions.map(f => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Input
+                type="date"
+                className="w-[150px] rounded-xl h-9 text-sm"
+                value={pendingFilterDateFrom}
+                onChange={e => setPendingFilterDateFrom(e.target.value)}
+                placeholder="From"
+              />
+              <Input
+                type="date"
+                className="w-[150px] rounded-xl h-9 text-sm"
+                value={pendingFilterDateTo}
+                onChange={e => setPendingFilterDateTo(e.target.value)}
+                placeholder="To"
+              />
+
+              {(pendingFilterDivision !== 'all' || pendingFilterFieldId !== 'all' || pendingFilterDateFrom || pendingFilterDateTo) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => {
+                    setPendingFilterDivision('all');
+                    setPendingFilterFieldId('all');
+                    setPendingFilterDateFrom('');
+                    setPendingFilterDateTo('');
+                  }}
+                >
+                  Clear Filters
+                </Button>
+              )}
+            </div>
+
             {pendingSlots.length === 0 ? (
               <Card className="border-none shadow-md border-dashed">
                 <CardContent className="flex flex-col items-center justify-center py-16 text-center">
@@ -820,68 +923,135 @@ export default function PracticeSlotsAdminPage() {
                   </p>
                 </CardContent>
               </Card>
+            ) : filteredPendingSlots.length === 0 ? (
+              <Card className="border-none shadow-md border-dashed">
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                  <p className="text-muted-foreground font-medium">No requests match the current filters</p>
+                </CardContent>
+              </Card>
             ) : (
-              <div className="space-y-2">
-                {pendingSlots.map(slot => (
-                  <div
-                    key={slot.id}
-                    className="flex items-center justify-between rounded-xl px-4 py-3 gap-3 border bg-amber-50 border-amber-200"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="p-2 rounded-lg shrink-0 bg-amber-100 text-amber-600">
-                        <Dumbbell className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold">{slot.fieldName}</p>
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 font-medium">
-                            {slot.pendingTeamName ?? 'Unknown Team'} · {slot.pendingCoachName ?? 'Coach'}
-                          </span>
-                          {(softLimitFlags[slot.id] ?? 0) >= 3 && (
-                            <Badge variant="destructive" className="text-xs">
-                              ⚠ {softLimitFlags[slot.id]} approved this week
-                            </Badge>
+              <>
+                {/* Select-all row + bulk approve button */}
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <Checkbox
+                      checked={
+                        filteredPendingSlots.length > 0 &&
+                        filteredPendingSlots.every(s => selectedPendingIds.has(s.id))
+                      }
+                      data-state={
+                        filteredPendingSlots.some(s => selectedPendingIds.has(s.id)) &&
+                        !filteredPendingSlots.every(s => selectedPendingIds.has(s.id))
+                          ? 'indeterminate'
+                          : undefined
+                      }
+                      onCheckedChange={(checked) => {
+                        setSelectedPendingIds(prev => {
+                          const next = new Set(prev);
+                          filteredPendingSlots.forEach(s =>
+                            checked ? next.add(s.id) : next.delete(s.id)
+                          );
+                          return next;
+                        });
+                      }}
+                    />
+                    <span className="text-muted-foreground">
+                      {filteredPendingSlots.every(s => selectedPendingIds.has(s.id))
+                        ? 'Deselect All'
+                        : 'Select All'}
+                    </span>
+                    {selectedPendingSlots.length > 0 && (
+                      <span className="text-xs text-primary font-medium">
+                        ({selectedPendingSlots.length} selected)
+                      </span>
+                    )}
+                  </label>
+
+                  {selectedPendingSlots.length > 0 && (
+                    <Button
+                      size="sm"
+                      className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => setBulkApproveOpen(true)}
+                    >
+                      <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                      Bulk Approve ({selectedPendingSlots.length})
+                    </Button>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  {filteredPendingSlots.map(slot => (
+                    <div
+                      key={slot.id}
+                      className="flex items-center justify-between rounded-xl px-4 py-3 gap-3 border bg-amber-50 border-amber-200"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Checkbox
+                          checked={selectedPendingIds.has(slot.id)}
+                          onCheckedChange={(checked) => {
+                            setSelectedPendingIds(prev => {
+                              const next = new Set(prev);
+                              checked ? next.add(slot.id) : next.delete(slot.id);
+                              return next;
+                            });
+                          }}
+                          className="shrink-0"
+                        />
+                        <div className="p-2 rounded-lg shrink-0 bg-amber-100 text-amber-600">
+                          <Dumbbell className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold">{slot.fieldName}</p>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 font-medium">
+                              {slot.pendingTeamName ?? 'Unknown Team'} · {slot.pendingCoachName ?? 'Coach'}
+                            </span>
+                            {(softLimitFlags[slot.id] ?? 0) >= 3 && (
+                              <Badge variant="destructive" className="text-xs">
+                                ⚠ {softLimitFlags[slot.id]} approved this week
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <CalendarDays className="h-3 w-3" />
+                              {format(parseISO(slot.date), 'EEE, MMM d')}
+                            </span>
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {formatTime(slot.startTime)} – {formatTime(slot.endTime)}
+                            </span>
+                          </div>
+                          {slot.pendingReason && (
+                            <p className="text-xs text-amber-700 mt-1">{slot.pendingReason}</p>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <CalendarDays className="h-3 w-3" />
-                            {format(parseISO(slot.date), 'EEE, MMM d')}
-                          </span>
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {formatTime(slot.startTime)} – {formatTime(slot.endTime)}
-                          </span>
-                        </div>
-                        {slot.pendingReason && (
-                          <p className="text-xs text-amber-700 mt-1">{slot.pendingReason}</p>
-                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl border-destructive text-destructive hover:bg-destructive/10"
+                          onClick={() => handleDeny(slot)}
+                          disabled={denyingId === slot.id || approvingId === slot.id}
+                        >
+                          {denyingId === slot.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                          Deny
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => handleApprove(slot)}
+                          disabled={approvingId === slot.id || denyingId === slot.id}
+                        >
+                          {approvingId === slot.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                          Approve
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="rounded-xl border-destructive text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeny(slot)}
-                        disabled={denyingId === slot.id || approvingId === slot.id}
-                      >
-                        {denyingId === slot.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                        Deny
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
-                        onClick={() => handleApprove(slot)}
-                        disabled={approvingId === slot.id || denyingId === slot.id}
-                      >
-                        {approvingId === slot.id && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                        Approve
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
           </TabsContent>
 
@@ -1365,6 +1535,22 @@ export default function PracticeSlotsAdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Bulk Approve Dialog ────────────────────────────────────────────────── */}
+      <BulkApproveDialog
+        open={bulkApproveOpen}
+        onOpenChange={setBulkApproveOpen}
+        selectedSlots={selectedPendingSlots}
+        allSlots={slots ?? []}
+        db={db}
+        onSuccess={() => {
+          setSelectedPendingIds(new Set());
+          toast({
+            title: `${selectedPendingSlots.length} slot${selectedPendingSlots.length !== 1 ? 's' : ''} approved`,
+            description: 'Coaches have been notified.',
+          });
+        }}
+      />
 
       {/* ── Delete Slot Dialog ─────────────────────────────────────────────────── */}
       <Dialog open={deleteDialog.open} onOpenChange={(o) => { if (!deleteDialog.isDeleting) setDeleteDialog(prev => ({ ...prev, open: o })); }}>
