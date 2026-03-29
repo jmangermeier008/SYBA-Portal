@@ -2,7 +2,8 @@
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, collectionGroup, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import type { Season } from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -60,15 +61,32 @@ export default function ParentConcessionsPage() {
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
 
+  const activeSeasonsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'seasons'), where('status', '==', 'active'));
+  }, [db]);
+  const { data: activeSeasons } = useCollection<Season>(activeSeasonsQuery);
+  const activeSeason = useMemo(() => activeSeasons?.[0] ?? null, [activeSeasons]);
+
   const slotsQuery = useMemoFirebase(() => {
-    if (!db || !profile) return null;
+    if (!db || !profile || !activeSeason) return null;
     return query(
       collection(db, 'concessionSlots'),
-      where('gameDate', '>=', todayISO),
+      where('gameDate', '>=', activeSeason.startDate),
     );
-  }, [db, profile, todayISO]);
+  }, [db, profile, activeSeason?.startDate]);
 
   const { data: slots, isLoading } = useCollection<ConcessionSlot>(slotsQuery);
+
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !profile || !activeSeason) return null;
+    return query(
+      collectionGroup(db, 'enrollments'),
+      where('parentUserId', '==', profile.id),
+      where('seasonId', '==', activeSeason.id),
+    );
+  }, [db, profile?.id, activeSeason?.id]);
+  const { data: enrollments } = useCollection<{ seasonId: string; parentUserId: string }>(enrollmentsQuery);
 
   // Only show upcoming, active slots (filter out cancelled shifts)
   const upcomingSlots = useMemo(() =>
@@ -90,10 +108,17 @@ export default function ParentConcessionsPage() {
     [upcomingSlots, showMySignupsOnly, profile?.id]
   );
 
+  // Count signups across all season slots (past + future) for compliance tracking
   const mySignupCount = useMemo(
-    () => upcomingSlots.filter(s => s.signups?.some(su => su.parentUserId === profile?.id)).length,
-    [upcomingSlots, profile?.id]
+    () => (slots ?? []).filter(s => s.signups?.some(su => su.parentUserId === profile?.id)).length,
+    [slots, profile?.id]
   );
+
+  const requiredSlots = useMemo(() => {
+    const count = enrollments?.length ?? 0;
+    const perPlayer = activeSeason?.volunteerSlotsRequired ?? 1;
+    return count * perPlayer;
+  }, [enrollments, activeSeason]);
 
   const handleSignUp = async (slot: ConcessionSlot) => {
     if (!db || !profile) return;
@@ -176,17 +201,34 @@ export default function ParentConcessionsPage() {
               <h1 className="text-3xl font-bold font-headline">Concessions</h1>
               <p className="text-muted-foreground">Sign up to volunteer at the concession stand during games.</p>
             </div>
-            {mySignupCount > 0 && (
-              <Button
-                variant={showMySignupsOnly ? 'default' : 'outline'}
-                size="sm"
-                className="rounded-full shrink-0"
-                onClick={() => setShowMySignupsOnly(v => !v)}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                My Sign-Ups ({mySignupCount})
-              </Button>
-            )}
+            <div className="flex items-center gap-3 flex-wrap">
+              {activeSeason && requiredSlots > 0 && (
+                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 min-w-[180px]">
+                  <p className="text-xs text-muted-foreground mb-1">Volunteer Commitment</p>
+                  <p className="text-sm font-semibold">{mySignupCount} / {requiredSlots} shifts</p>
+                  <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-1.5">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        mySignupCount >= requiredSlots ? 'bg-green-500' :
+                        mySignupCount > 0 ? 'bg-amber-500' : 'bg-destructive'
+                      }`}
+                      style={{ width: `${Math.min((mySignupCount / requiredSlots) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              {mySignupCount > 0 && (
+                <Button
+                  variant={showMySignupsOnly ? 'default' : 'outline'}
+                  size="sm"
+                  className="rounded-full shrink-0"
+                  onClick={() => setShowMySignupsOnly(v => !v)}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                  My Sign-Ups ({mySignupCount})
+                </Button>
+              )}
+            </div>
           </div>
         </header>
 
