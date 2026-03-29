@@ -26,7 +26,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import {
   format, parseISO, eachWeekOfInterval, addDays, isAfter,
-  isBefore, startOfDay,
+  isBefore, startOfDay, startOfWeek, endOfWeek,
 } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { PracticeSlot } from '@/types/scheduling';
@@ -191,6 +191,23 @@ export default function PracticeSlotsAdminPage() {
   const pendingSlots = useMemo(() =>
     (slots ?? []).filter(s => s.status === 'pending'),
   [slots]);
+
+  // For each pending request, count how many approved (claimed) slots that team
+  // already has in the same Sunday–Saturday calendar week — used for the Soft Limit badge.
+  const softLimitFlags = useMemo(() => {
+    const flags: Record<string, number> = {};
+    for (const pending of pendingSlots) {
+      if (!pending.pendingTeamId) continue;
+      const slotDate = parseISO(pending.date);
+      const weekStart = format(startOfWeek(slotDate, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      const weekEnd = format(endOfWeek(slotDate, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      flags[pending.id] = (slots ?? []).filter(
+        s => s.status === 'claimed' && s.teamId === pending.pendingTeamId
+          && s.date >= weekStart && s.date <= weekEnd
+      ).length;
+    }
+    return flags;
+  }, [pendingSlots, slots]);
 
   // Distribution tab data
   const distributionData = useMemo(() => {
@@ -820,6 +837,11 @@ export default function PracticeSlotsAdminPage() {
                           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 font-medium">
                             {slot.pendingTeamName ?? 'Unknown Team'} · {slot.pendingCoachName ?? 'Coach'}
                           </span>
+                          {(softLimitFlags[slot.id] ?? 0) >= 3 && (
+                            <Badge variant="destructive" className="text-xs">
+                              ⚠ {softLimitFlags[slot.id]} approved this week
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">

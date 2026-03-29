@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import {
   collection, doc, query, where, orderBy, limit,
-  runTransaction, Timestamp, getDocs, deleteField,
+  runTransaction, Timestamp, deleteField,
 } from 'firebase/firestore';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Card, CardContent } from '@/components/ui/card';
@@ -157,29 +157,13 @@ export default function CoachPracticeSlotsPage() {
     return [...names].sort();
   }, [available]);
 
-  // Per-slot approval hint: true if this team already has ≥1 claimed/pending slot
-  // in the same Mon–Sun week as the slot. Client-side estimate — no extra queries.
-  const slotApprovalHints = useMemo(() => {
-    const hints: Record<string, boolean> = {};
-    for (const slot of (available ?? [])) {
-      const slotDate = parseISO(slot.date);
-      const weekStart = format(startOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-      const weekEnd = format(endOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-      const hasExistingThisWeek = [...(myClaimed ?? []), ...(myPending ?? [])].some(
-        s => s.date >= weekStart && s.date <= weekEnd
-      );
-      hints[slot.id] = hasExistingThisWeek;
-    }
-    return hints;
-  }, [available, myClaimed, myPending]);
-
-  // ── Claim a slot (also writes to teams/{teamId}/games) ────────────────────
+  // ── Request a slot (always submits a pending request for board approval) ──
 
   const handleClaim = async (slot: PracticeSlot) => {
     if (!db || !user || !profile || !activeTeam) return;
     setClaimingId(slot.id);
     try {
-      // Phase 1 — Same-day check (client-side, instant)
+      // Same-day check (client-side, instant)
       const sameDay = [...(myClaimed ?? []), ...(myPending ?? [])]
         .some(s => s.date === slot.date && s.id !== slot.id);
       if (sameDay) {
@@ -191,131 +175,33 @@ export default function CoachPracticeSlotsPage() {
         return;
       }
 
-      // Phase 2 — Weekly fairness pre-check (scoped to Mon–Sun of target slot's week)
-      let needsApproval = false;
-      if (activeTeam.divisionId) {
-        // Compute the Monday–Sunday window for this slot's date
-        const slotDate = parseISO(slot.date);
-        const weekStart = format(startOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-        const weekEnd = format(endOfWeek(slotDate, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-
-        const [claimedSlotsSnap, divTeamsSnap] = await Promise.all([
-          getDocs(query(
-            collection(db, 'practiceSlots'),
-            where('divisionIds', 'array-contains', activeTeam.divisionId),
-            where('status', '==', 'claimed')
-          )),
-          getDocs(query(
-            collection(db, 'teams'),
-            where('divisionId', '==', activeTeam.divisionId)
-          )),
-        ]);
-
-        // Filter to only slots within this week's window
-        const weekClaimedDocs = claimedSlotsSnap.docs.filter(d => {
-          const date = d.data().date as string;
-          return date >= weekStart && date <= weekEnd;
-        });
-
-        // Count claimed slots per team in this week
-        const claimedByTeam: Record<string, number> = {};
-        weekClaimedDocs.forEach(d => {
-          const tid = d.data().teamId as string | undefined;
-          if (tid) claimedByTeam[tid] = (claimedByTeam[tid] ?? 0) + 1;
-        });
-
-        // Also count this team's pending requests in the same week
-        const myPendingThisWeek = (myPending ?? []).filter(
-          s => s.date >= weekStart && s.date <= weekEnd
-        );
-
-        // Only consider teams participating in the fairness rotation (not opted out)
-        const participatingTeams = divTeamsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Team))
-          .filter(t => !t.practiceOptOut);
-
-        const myTeamCount = (claimedByTeam[activeTeam.id] ?? 0) + myPendingThisWeek.length;
-        const anyOtherHasZero = participatingTeams.some(
-          t => t.id !== activeTeam.id && (claimedByTeam[t.id] ?? 0) === 0
-        );
-        needsApproval = myTeamCount >= 1 && anyOtherHasZero;
-      }
-
-      // Phase 3 — Transaction (branches on needsApproval)
+      // Submit a pending request — board will approve or deny
       const slotRef = doc(db, 'practiceSlots', slot.id);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists()) throw new Error('This slot no longer exists.');
+        if (snap.data()?.status !== 'available') {
+          throw new Error('This slot was just claimed by someone else. Please pick another.');
+        }
 
-      if (needsApproval) {
-        // Submit a pending request — admin will approve or deny
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(slotRef);
-          if (!snap.exists()) throw new Error('This slot no longer exists.');
-          if (snap.data()?.status !== 'available') {
-            throw new Error('This slot was just claimed by someone else. Please pick another.');
-          }
-
-          tx.update(slotRef, {
-            status: 'pending',
-            pendingTeamId: activeTeam.id,
-            pendingTeamName: activeTeam.name,
-            pendingCoachId: user.uid,
-            pendingCoachName: profile.displayName ?? 'Coach',
-            pendingRequestedAt: Timestamp.now(),
-            pendingReason: 'Fairness: other teams in your division have not yet claimed a slot this week.',
-            updatedAt: Timestamp.now(),
-          });
+        tx.update(slotRef, {
+          status: 'pending',
+          pendingTeamId: activeTeam.id,
+          pendingTeamName: activeTeam.name,
+          pendingCoachId: user.uid,
+          pendingCoachName: profile.displayName ?? 'Coach',
+          pendingRequestedAt: Timestamp.now(),
+          pendingReason: 'Pending board review.',
+          updatedAt: Timestamp.now(),
         });
+      });
 
-        toast({
-          title: 'Request Submitted',
-          description: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been sent to the board for review. Since your team already has a slot this week and other teams don't, it needs approval. You'll be notified when it's decided.`,
-        });
-      } else {
-        // Direct claim — no fairness conflict this week
-        const teamGameId = crypto.randomUUID();
-        const teamGameRef = doc(db, 'teams', activeTeam.id, 'games', teamGameId);
-        const dateTime = `${slot.date}T${slot.startTime}:00`;
-
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(slotRef);
-          if (!snap.exists()) throw new Error('This slot no longer exists.');
-          const current = snap.data() as PracticeSlot;
-          if (current.status !== 'available') {
-            throw new Error('This slot was just claimed by someone else. Please pick another.');
-          }
-
-          tx.update(slotRef, {
-            coachId: user.uid,
-            coachName: profile.displayName ?? 'Coach',
-            teamId: activeTeam.id,
-            teamName: activeTeam.name,
-            teamGameId,
-            status: 'claimed',
-            claimedAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-          });
-
-          // Create a practice event in the team subcollection so it shows on calendars
-          tx.set(teamGameRef, {
-            id: teamGameId,
-            teamId: activeTeam.id,
-            seasonId: activeTeam.seasonId ?? slot.seasonId ?? '',
-            type: 'Practice',     // capitalized — team subcollection convention
-            dateTime,             // combined ISO string — team subcollection convention
-            location: slot.fieldName,
-            fieldId: slot.fieldId,
-            cancelled: false,
-            practiceSlotId: slot.id,
-            coachUserId: user.uid,
-          });
-        });
-
-        toast({
-          title: 'Practice Slot Claimed',
-          description: `${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} is confirmed. It will appear on your team calendar.`,
-        });
-      }
+      toast({
+        title: 'Request Submitted',
+        description: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been sent to the board for review. You'll be notified when it's decided.`,
+      });
     } catch (err: any) {
-      toast({ title: 'Could Not Claim Slot', description: err.message, variant: 'destructive' });
+      toast({ title: 'Could Not Submit Request', description: err.message, variant: 'destructive' });
     } finally {
       setClaimingId(null);
     }
@@ -544,8 +430,7 @@ export default function CoachPracticeSlotsPage() {
                                   slot={slot}
                                   variant="available"
                                   fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
-                                  requiresApproval={slotApprovalHints[slot.id] ?? false}
-                                  actionLabel="Claim Slot"
+                                  actionLabel="Request Slot"
                                   actionLoading={claimingId === slot.id}
                                   onAction={() => handleClaim(slot)}
                                 />
@@ -573,7 +458,6 @@ function SlotCard({
   slot,
   variant,
   fieldColorClass,
-  requiresApproval,
   actionLabel,
   actionLoading,
   onAction,
@@ -581,7 +465,6 @@ function SlotCard({
   slot: PracticeSlot;
   variant: 'available' | 'claimed' | 'pending';
   fieldColorClass?: string;
-  requiresApproval?: boolean;
   actionLabel?: string;
   actionLoading?: boolean;
   onAction?: () => void;
@@ -611,14 +494,9 @@ function SlotCard({
                 {slot.fieldName}
               </Badge>
             )}
-            {variant === 'available' && requiresApproval && (
+            {variant === 'available' && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium">
-                2nd Claim · May Need Approval
-              </span>
-            )}
-            {variant === 'available' && !requiresApproval && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-100 font-medium">
-                Instant Claim
+                Board Approval Required
               </span>
             )}
             {variant === 'claimed' && (
