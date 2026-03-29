@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged, User, getAuth } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, Firestore } from 'firebase/firestore';
 import { useAuth, useFirestore } from '../provider';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import type { Sport } from '@/types/scheduling';
 
 export interface UserProfile {
   id: string;
@@ -18,7 +19,12 @@ export interface UserProfile {
   phoneNumber?: string | null;
   shareContactInfo?: boolean;
   enrolledPlayerIds?: string[];
+  preferredSport?: Sport;
   createdAt: string;
+}
+
+export async function updatePreferredSport(db: Firestore, userId: string, sport: Sport): Promise<void> {
+  await updateDoc(doc(db, 'userProfiles', userId), { preferredSport: sport });
 }
 
 function deriveRoles(profile: UserProfile): string[] {
@@ -97,5 +103,6 @@ export function useUser() {
     isBoardMember,
     isCoach,
     isParent,
+    preferredSport: profile?.preferredSport,
   };
 }

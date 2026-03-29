@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useUser, useAuth, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useAuth, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, orderBy, limit } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -417,6 +417,8 @@ export function Sidebar() {
     return () => document.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
 
+  const { activeSport, setActiveSport } = useSport();
+
   const roleLabel = roles.join(' · ') || profile?.role || '';
   const roleContexts = getRoleContexts(roles);
 
@@ -634,6 +636,42 @@ export function Sidebar() {
             </div>
           </div>
         )}
+
+        {/* Sport switcher — only shown once sport is selected */}
+        {activeSport && (collapsed && !isMobile ? (
+          <button
+            onClick={() => setActiveSport(activeSport === 'baseball' ? 'football' : 'baseball')}
+            title={`Switch to ${activeSport === 'baseball' ? 'Football' : 'Baseball'}`}
+            className="w-full flex items-center justify-center p-2 rounded-lg text-muted-foreground hover:bg-secondary hover:text-primary transition-colors text-base"
+          >
+            {activeSport === 'baseball' ? '⚾' : '🏈'}
+          </button>
+        ) : (
+          <div className="flex gap-1">
+            <button
+              onClick={() => setActiveSport('baseball')}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                activeSport === 'baseball'
+                  ? "bg-primary text-white"
+                  : "bg-secondary text-muted-foreground hover:text-primary"
+              )}
+            >
+              <span>⚾</span> Baseball
+            </button>
+            <button
+              onClick={() => setActiveSport('football')}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                activeSport === 'football'
+                  ? "bg-primary text-white"
+                  : "bg-secondary text-muted-foreground hover:text-primary"
+              )}
+            >
+              <span>🏈</span> Football
+            </button>
+          </div>
+        ))}
 
         {/* Sign out */}
         {collapsed && !isMobile ? (

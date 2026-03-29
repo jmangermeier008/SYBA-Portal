@@ -18,6 +18,16 @@ export type UserRole =
   | 'Site Admin';
 
 // ---------------------------------------------------------------------------
+// Sports
+// ---------------------------------------------------------------------------
+
+/** The sports supported by the portal. */
+export type Sport = 'baseball' | 'football';
+
+/** Whether a game is played at the home or away venue. */
+export type LocationType = 'home' | 'away';
+
+// ---------------------------------------------------------------------------
 // Seasons
 // ---------------------------------------------------------------------------
 
@@ -34,6 +44,7 @@ export interface Season {
   createdBy: string;
   createdAt: string;
   volunteerSlotsRequired?: number; // min concession slots required per enrolled player
+  sport?: Sport;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +97,7 @@ export interface Team {
   player_ids?: string[]; // Legacy field — kept for backward compatibility
   createdAt: string;
   practiceOptOut?: boolean; // When true, excluded from fairness rotation count
+  sport?: Sport;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +138,8 @@ export interface Game {
   // Umpire assignment + notification tracking:
   umpireName?: string;
   umpireNotified?: boolean;
+  sport?: Sport;
+  locationType?: LocationType;
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;
@@ -163,6 +177,7 @@ export interface ConcessionSlot {
   cancelCutoffHours: number;
   description?: string;
   status: 'active' | 'cancelled';
+  locationType?: LocationType;
   // --- Legacy signup array ---
   // Existing signup records live here. New signups continue to use this array
   // via transaction. A future migration may move these to a claims subcollection.
@@ -212,6 +227,7 @@ export interface PracticeSlot {
   pendingCoachName?: string;
   pendingRequestedAt?: string;
   pendingReason?: string; // Human-readable reason why approval is needed
+  sport?: Sport;
   createdBy: string;
   createdAt: string;
   updatedAt?: string;

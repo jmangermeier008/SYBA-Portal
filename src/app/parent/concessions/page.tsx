@@ -35,6 +35,7 @@ interface ConcessionSlot {
   description?: string;
   signups: ConcessionSignup[];
   status?: 'active' | 'cancelled'; // undefined = active (backward compat)
+  locationType?: 'home' | 'away';
   createdAt: string;
 }
 
@@ -314,17 +315,28 @@ export default function ParentConcessionsPage() {
                       </div>
                     </div>
 
-                    {isSignedUp ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full rounded-xl"
-                        onClick={() => handleCancel(slot)}
-                        disabled={pastCutoff}
-                        title={pastCutoff ? `Cancellation closed ${slot.cancelCutoffHours}h before start` : undefined}
-                      >
-                        {pastCutoff ? `Cancellation Closed` : 'Cancel Sign-Up'}
-                      </Button>
+                    {slot.locationType === 'away' ? (
+                      <p className="text-sm text-muted-foreground italic py-2 text-center">
+                        Away Game — No volunteer shifts required for Sharpsville parents.
+                      </p>
+                    ) : isSignedUp ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full rounded-xl"
+                          onClick={() => handleCancel(slot)}
+                          disabled={pastCutoff}
+                          title={pastCutoff ? `Cancellation closed ${slot.cancelCutoffHours}h before start` : undefined}
+                        >
+                          {pastCutoff ? `Cancellation Closed` : 'Cancel Sign-Up'}
+                        </Button>
+                        {pastCutoff && (
+                          <p className="text-[10px] text-muted-foreground text-center">
+                            Cancellation window closed. Contact admin to cancel.
+                          </p>
+                        )}
+                      </>
                     ) : (
                       <Button
                         size="sm"
@@ -334,12 +346,6 @@ export default function ParentConcessionsPage() {
                       >
                         {isFull ? 'Slot Full' : 'Sign Up to Volunteer'}
                       </Button>
-                    )}
-
-                    {isSignedUp && pastCutoff && (
-                      <p className="text-[10px] text-muted-foreground text-center">
-                        Cancellation window closed. Contact admin to cancel.
-                      </p>
                     )}
                   </CardContent>
                 </Card>

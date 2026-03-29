@@ -2,6 +2,7 @@
 
 import React, { useMemo, type ReactNode } from 'react';
 import { FirebaseProvider } from '@/firebase/provider';
+import { SportProvider } from '@/firebase/sport-context';
 import { initializeFirebase } from '@/firebase';
 
 interface FirebaseClientProviderProps {
@@ -20,7 +21,9 @@ export function FirebaseClientProvider({ children }: FirebaseClientProviderProps
       firestore={firebaseServices.firestore}
       storage={firebaseServices.storage}
     >
-      {children}
+      <SportProvider>
+        {children}
+      </SportProvider>
     </FirebaseProvider>
   );
 }
