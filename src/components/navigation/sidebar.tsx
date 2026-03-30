@@ -522,7 +522,7 @@ export function Sidebar() {
             <NavSection
               label="Season Management"
               sectionIcon={CalendarDays}
-              items={adminSeasonItems}
+              items={adminSeasonItems.filter(item => activeSport !== 'football' || item.href !== '/admin/practice-slots')}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['Season Management']}
@@ -533,7 +533,7 @@ export function Sidebar() {
             <NavSection
               label="People & Teams"
               sectionIcon={Users}
-              items={adminPeopleItems}
+              items={adminPeopleItems.filter(item => activeSport !== 'football' || item.href !== '/admin/teams')}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['People & Teams']}

@@ -57,6 +57,47 @@ async function backfillCollection(
   return updated;
 }
 
+/** Backfills documents in a Firestore collection group (handles subcollections). */
+async function backfillCollectionGroup(
+  collectionName: string,
+  updates: Record<string, unknown>
+): Promise<number> {
+  const db = getAdminFirestore();
+  const snap = await db.collectionGroup(collectionName).get();
+  const docs = snap.docs.filter(d => {
+    const data = d.data();
+    return Object.keys(updates).some(key => data[key] === undefined || data[key] === null);
+  });
+
+  if (docs.length === 0) {
+    console.log(`  ${collectionName} (group): already up to date (0 docs to update)`);
+    return 0;
+  }
+
+  let updated = 0;
+  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+    const batch = db.batch();
+    const chunk = docs.slice(i, i + BATCH_SIZE);
+    for (const d of chunk) {
+      const data = d.data();
+      const patch: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(updates)) {
+        if (data[key] === undefined || data[key] === null) {
+          patch[key] = val;
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        batch.update(d.ref, patch as Record<string, string>);
+        updated++;
+      }
+    }
+    await batch.commit();
+  }
+
+  console.log(`  ${collectionName} (group): updated ${updated} doc(s)`);
+  return updated;
+}
+
 async function main() {
   console.log('Starting sport backfill...\n');
 
@@ -65,6 +106,7 @@ async function main() {
   await backfillCollection('games', { sport: 'baseball', locationType: 'home' });
   await backfillCollection('practiceSlots', { sport: 'baseball' });
   await backfillCollection('concessionSlots', { sport: 'baseball', locationType: 'home' });
+  await backfillCollectionGroup('enrollments', { sport: 'baseball' });
 
   console.log('\nBackfill complete.');
 }

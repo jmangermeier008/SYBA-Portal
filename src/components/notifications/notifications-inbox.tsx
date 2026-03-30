@@ -1,6 +1,7 @@
 "use client";
 
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, doc, query, orderBy, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, i
 export function NotificationsInbox() {
   const db = useFirestore();
   const { user, isCoach } = useUser();
+  const { activeSport } = useSport();
   const router = useRouter();
 
   const notifQuery = useMemoFirebase(() => {
@@ -54,7 +56,14 @@ export function NotificationsInbox() {
     );
   }, [db, user?.uid]);
 
-  const { data: notifications, isLoading } = useCollection<Notification>(notifQuery);
+  const { data: rawNotifications, isLoading } = useCollection<Notification>(notifQuery);
+
+  // Client-side sport filter: show notifications scoped to activeSport, plus legacy notifications
+  // that predate the sport field (sport === undefined).
+  const notifications = useMemo(
+    () => (rawNotifications ?? []).filter(n => !n.sport || n.sport === activeSport),
+    [rawNotifications, activeSport]
+  );
 
   const unreadCount = (notifications ?? []).filter(n => !n.read).length;
 

@@ -141,6 +141,8 @@ export interface Game {
   sport?: Sport;
   locationType?: LocationType;
   scrimmageNote?: string; // Optional follow-on event note, e.g. "Wee Wee Scrimmage follows at 6:30 PM"
+  isRecurring?: boolean;   // True when created as part of a recurring series
+  recurrenceId?: string;   // Shared UUID across all games in the same recurring series
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;
@@ -267,6 +269,7 @@ export interface Notification {
   relatedDocType?: NotificationRelatedDocType;
   read: boolean;
   createdAt: string;
+  sport?: Sport;  // Set when the notification is sport-scoped
 }
 
 // ---------------------------------------------------------------------------
