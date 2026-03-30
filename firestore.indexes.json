@@ -75,14 +75,6 @@
       ]
     },
     {
-      "collectionGroup": "boardMeetings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "date", "order": "ASCENDING" },
-        { "fieldPath": "__name__", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "inquiries",
       "queryScope": "COLLECTION",
       "fields": [
