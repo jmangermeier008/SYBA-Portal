@@ -45,7 +45,7 @@ export function useDoc<T = any>(
   type StateDataType = WithId<T> | null;
 
   const [data, setData] = useState<StateDataType>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<FirestoreError | Error | null>(null);
 
   useEffect(() => {
@@ -54,6 +54,16 @@ export function useDoc<T = any>(
       setIsLoading(false);
       setError(null);
       return;
+    }
+
+    // Runtime guard: enforce that callers memoize the DocumentReference with useMemoFirebase.
+    // An unmemoized ref is recreated on every render, causing the effect to re-run on every
+    // frame — a silent infinite subscription loop with no visible error.
+    if (!(memoizedDocRef as any).__memo) {
+      throw new Error(
+        'A Firestore DocumentReference passed to useDoc was not memoized with useMemoFirebase. ' +
+        'Wrap the ref creation in useMemoFirebase(() => doc(db, ...), [deps]) to prevent infinite re-renders.'
+      );
     }
 
     setIsLoading(true);

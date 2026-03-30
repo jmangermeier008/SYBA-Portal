@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { collection, doc, setDoc, query, where, getDocs, collectionGroup } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, query, where, getDocs, collectionGroup } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -14,34 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
-
-interface Player {
-  id: string;
-  firstName: string;
-  lastName: string;
-  emergencyContacts?: EmergencyContact[];
-  medicalNotes?: string;
-}
-
-interface Season {
-  id: string;
-  name: string;
-}
-
-interface Division {
-  id: string;
-  name: string;
-  fee: number;
-  capacity?: number;
-  waitlistEnabled?: boolean;
-  registeredCount?: number;
-}
-
-interface EmergencyContact {
-  name: string;
-  phone: string;
-  relationship: string;
-}
+import type { Player, Season, Division, EmergencyContact } from '@/types/scheduling';
 
 interface StepperState {
   step: 1 | 2 | 3;
@@ -78,6 +51,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const [submitting, setSubmitting] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [isDuplicate, setIsDuplicate] = useState(false);
+  // Non-null when a pending_payment enrollment with no stripe_payment_id exists — ghost enrollment.
+  // Surfaces a "Resume Payment" prompt instead of blocking with a duplicate error.
+  const [resumableEnrollmentId, setResumableEnrollmentId] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   const playersQuery = useMemoFirebase(() => {
@@ -131,8 +107,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     return isFull && !selectedDivision.waitlistEnabled;
   };
 
-  const checkDuplicate = async () => {
-    if (!db || !state.playerId || !state.seasonId) return false;
+  const checkDuplicate = async (): Promise<'none' | 'paid' | 'resumable'> => {
+    if (!db || !state.playerId || !state.seasonId) return 'none';
     setCheckingDuplicate(true);
     try {
       const q = query(
@@ -141,10 +117,21 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         where('seasonId', '==', state.seasonId)
       );
       const snap = await getDocs(q);
-      return !snap.empty;
+      if (snap.empty) return 'none';
+      // Distinguish ghost enrollments (abandoned Stripe checkout) from confirmed ones.
+      for (const docSnap of snap.docs) {
+        const d = docSnap.data();
+        const status = d.paymentStatus ?? d.payment_status ?? '';
+        if (status === 'pending_payment' && !d.stripe_payment_id) {
+          // Ghost enrollment — user abandoned Stripe. Offer resume instead of blocking.
+          setResumableEnrollmentId(d.id ?? docSnap.id);
+          return 'resumable';
+        }
+      }
+      return 'paid';
     } catch (err) {
       console.error('[enroll] Duplicate check error:', err);
-      return false;
+      return 'none';
     } finally {
       setCheckingDuplicate(false);
     }
@@ -152,12 +139,17 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
   const handleNext = async () => {
     if (state.step === 1) {
-      const dup = await checkDuplicate();
-      if (dup) {
+      const result = await checkDuplicate();
+      if (result === 'paid') {
         setIsDuplicate(true);
         return;
       }
+      if (result === 'resumable') {
+        // Show the resume banner — stay on step 1 so the user sees it.
+        return;
+      }
       setIsDuplicate(false);
+      setResumableEnrollmentId(null);
       setState(prev => ({ ...prev, step: 2 }));
     } else if (state.step === 2) {
       setState(prev => ({ ...prev, step: 3 }));
@@ -251,6 +243,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       const data = await resp.json();
 
       if (data.url) {
+        // Persist the Stripe session ID so orphaned enrollments can be reconciled
+        // if the user abandons checkout. This enables the "resume payment" flow on return.
+        if (data.sessionId) {
+          await updateDoc(enrollmentRef, { stripeSessionId: data.sessionId });
+        }
         toast({ title: "Redirecting to Payment", description: "Secure checkout via Stripe." });
         router.push(data.url);
       } else {
@@ -268,6 +265,41 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         console.error('[enroll] Submit error:', error);
         toast({ variant: "destructive", title: "Error", description: error.message });
       }
+      setSubmitting(false);
+    }
+  };
+
+  const handleResumePayment = async () => {
+    if (!user || !db || !selectedDivision || !resumableEnrollmentId) return;
+    setSubmitting(true);
+    try {
+      const idToken = await user.getIdToken();
+      const resp = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+        body: JSON.stringify({
+          enrollmentId: resumableEnrollmentId,
+          userId: user.uid,
+          fee: selectedDivision.fee,
+          divisionName: selectedDivision.name,
+          playerName: selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Player',
+        }),
+      });
+      const data = await resp.json();
+      if (data.url) {
+        if (data.sessionId) {
+          const enrollmentRef = doc(db, 'userProfiles', user.uid, 'enrollments', resumableEnrollmentId);
+          await updateDoc(enrollmentRef, { stripeSessionId: data.sessionId });
+        }
+        toast({ title: "Redirecting to Payment", description: "Secure checkout via Stripe." });
+        router.push(data.url);
+      } else {
+        toast({ variant: "destructive", title: "Checkout Error", description: data.error || "Could not initiate payment." });
+        setSubmitting(false);
+      }
+    } catch (error: any) {
+      console.error('[enroll] Resume payment error:', error);
+      toast({ variant: "destructive", title: "Error", description: error.message });
       setSubmitting(false);
     }
   };
@@ -422,6 +454,25 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               {isDuplicate && (
                 <div className="flex items-center gap-2 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
                   This player is already registered for this season.
+                </div>
+              )}
+
+              {resumableEnrollmentId && !isDuplicate && (
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 shrink-0" />
+                    <p className="font-medium">You started an enrollment for this player and season but didn't complete payment.</p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full w-full"
+                    onClick={handleResumePayment}
+                    disabled={submitting || !selectedDivision}
+                  >
+                    {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" />}
+                    Resume Payment
+                  </Button>
                 </div>
               )}
             </>
