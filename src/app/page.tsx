@@ -228,29 +228,9 @@ export default function Home() {
           </h1>
           <p className="text-muted-foreground text-sm">The online home for Sharpsville Youth Athletics</p>
         </div>
-
-        <div className="flex gap-3 w-full justify-center">
-          <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
-            <Link href="/login">Sign In</Link>
-          </Button>
-          <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
-            <Link href="/signup">Register Player</Link>
-          </Button>
-        </div>
-
-        {/* Contact */}
-        <p className="text-sm text-muted-foreground">
-          Have a question?{' '}
-          <Link href="/contact" className="text-primary hover:underline font-medium">Contact us</Link>
-          {' '}or email{' '}
-          <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary hover:underline font-medium">
-            {CONTACT_EMAIL}
-          </a>
-        </p>
-
       </div>
 
-      {/* ── Sport Selection Gate ── */}
+      {/* ── Sport Selection Gate — must pick a sport before seeing anything else ── */}
       {!publicSport ? (
         <div className="mt-10 w-full max-w-lg text-center">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-4">
@@ -273,21 +253,44 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        <div className="mt-6 flex items-center justify-center gap-2">
-          <span className="text-lg" role="img" aria-label={SPORT_CONFIG[publicSport].label}>
-            {SPORT_CONFIG[publicSport].icon}
-          </span>
-          <span className="text-sm font-semibold text-primary">{SPORT_CONFIG[publicSport].label}</span>
-          <button
-            onClick={() => {
-              setPublicSportState(null);
-              localStorage.removeItem('publicSport');
-            }}
-            className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
-          >
-            Change
-          </button>
-        </div>
+        <>
+          {/* Sport indicator + change link */}
+          <div className="mt-6 flex items-center justify-center gap-2">
+            <span className="text-lg" role="img" aria-label={SPORT_CONFIG[publicSport].label}>
+              {SPORT_CONFIG[publicSport].icon}
+            </span>
+            <span className="text-sm font-semibold text-primary">{SPORT_CONFIG[publicSport].label}</span>
+            <button
+              onClick={() => {
+                setPublicSportState(null);
+                localStorage.removeItem('publicSport');
+              }}
+              className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
+            >
+              Change
+            </button>
+          </div>
+
+          {/* Sign In / Register — visible only after sport selection */}
+          <div className="mt-6 flex gap-3 justify-center">
+            <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
+              <Link href="/login">Sign In</Link>
+            </Button>
+            <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
+              <Link href="/signup">Register Player</Link>
+            </Button>
+          </div>
+
+          {/* Contact */}
+          <p className="mt-4 text-sm text-muted-foreground text-center">
+            Have a question?{' '}
+            <Link href="/contact" className="text-primary hover:underline font-medium">Contact us</Link>
+            {' '}or email{' '}
+            <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary hover:underline font-medium">
+              {CONTACT_EMAIL}
+            </a>
+          </p>
+        </>
       )}
 
       {/* ── Schedule & Content (visible only after sport selection) ── */}
