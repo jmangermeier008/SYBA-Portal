@@ -1,14 +1,20 @@
 import { NextResponse } from 'next/server';
 
+function sportPrefix(sport?: string): string {
+  if (sport === 'baseball') return '[SYBA Baseball] ';
+  if (sport === 'football') return '[SYFA Football] ';
+  return '';
+}
+
 export async function POST(req: Request) {
   try {
-    const { toEmail, replierName, originalSubject, replyMessage, inquiryId } = await req.json();
+    const { toEmail, replierName, originalSubject, replyMessage, inquiryId, sport } = await req.json();
 
     if (!toEmail) {
       return NextResponse.json({ error: 'Missing toEmail' }, { status: 400 });
     }
 
-    const subject = `Re: ${originalSubject}`;
+    const subject = `${sportPrefix(sport)}Re: ${originalSubject}`;
     const body = [
       `${replierName} from SYBA has replied to your inquiry:`,
       ``,

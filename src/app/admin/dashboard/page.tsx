@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { useFirestore, useCollection, useUser } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
+import { useSport } from '@/firebase/sport-context';
 import { use } from 'react';
 import { collection, collectionGroup, query, orderBy, limit, where } from 'firebase/firestore';
 import {
@@ -189,6 +190,7 @@ export default function AdminDashboard({
   const db = useFirestore();
   const router = useRouter();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('calendar');
@@ -208,9 +210,9 @@ export default function AdminDashboard({
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'seasons'), orderBy('name', 'desc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport), orderBy('name', 'desc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -229,14 +231,15 @@ export default function AdminDashboard({
 
   // This week's concession slots (for Concessions tab)
   const concessionSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
     return query(
       collection(db, 'concessionSlots'),
+      where('sport', '==', activeSport),
       where('gameDate', '>=', todayISO),
       where('gameDate', '<=', nextWeekISO),
       orderBy('gameDate', 'asc')
     );
-  }, [db, isAdmin, isBoardMember, todayISO, nextWeekISO]);
+  }, [db, isAdmin, isBoardMember, activeSport, todayISO, nextWeekISO]);
 
   const fieldsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -255,15 +258,16 @@ export default function AdminDashboard({
 
   // This week's games (for Games tab)
   const gamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
     return query(
       collection(db, 'games'),
+      where('sport', '==', activeSport),
       where('date', '>=', todayISO),
       where('date', '<=', nextWeekISO),
       orderBy('date', 'asc'),
       orderBy('time', 'asc')
     );
-  }, [db, isAdmin, isBoardMember, todayISO, nextWeekISO]);
+  }, [db, isAdmin, isBoardMember, activeSport, todayISO, nextWeekISO]);
 
   const inquiriesQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -272,24 +276,24 @@ export default function AdminDashboard({
 
   // All games, practice slots, all concession slots — for the Calendar tab only
   const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar') return null;
-    return collection(db, 'games');
-  }, [db, isAdmin, isBoardMember, activeTab]);
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
 
   const practiceSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar') return null;
-    return collection(db, 'practiceSlots');
-  }, [db, isAdmin, isBoardMember, activeTab]);
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
+    return query(collection(db, 'practiceSlots'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
 
   const allTeamsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'teams');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const allConcessionSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar') return null;
-    return collection(db, 'concessionSlots');
-  }, [db, isAdmin, isBoardMember, activeTab]);
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
+    return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);

@@ -58,10 +58,10 @@ export function NotificationsInbox() {
 
   const { data: rawNotifications, isLoading } = useCollection<Notification>(notifQuery);
 
-  // Client-side sport filter: show notifications scoped to activeSport, plus legacy notifications
-  // that predate the sport field (sport === undefined).
+  // Client-side sport filter: show notifications scoped to activeSport, global alerts (isGlobal),
+  // and legacy notifications that predate the sport field (sport === undefined).
   const notifications = useMemo(
-    () => (rawNotifications ?? []).filter(n => !n.sport || n.sport === activeSport),
+    () => (rawNotifications ?? []).filter(n => n.isGlobal || !n.sport || n.sport === activeSport),
     [rawNotifications, activeSport]
   );
 

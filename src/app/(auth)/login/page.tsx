@@ -118,9 +118,17 @@ function LoginContent() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
       <div className="w-full max-w-md">
-        <Link href="/" className="flex items-center justify-center gap-2 mb-8">
-          <Trophy className="h-8 w-8 text-primary" />
-          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">SYBA Portal</span>
+        <Link href="/" className="flex flex-col items-center justify-center gap-1 mb-8">
+          <div className="flex items-center gap-2">
+            <Trophy className="h-8 w-8 text-primary" />
+            <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">SYBA Portal</span>
+          </div>
+          {searchParams.get('sport') === 'baseball' && (
+            <span className="text-sm text-muted-foreground">Baseball</span>
+          )}
+          {searchParams.get('sport') === 'football' && (
+            <span className="text-sm text-muted-foreground">Football</span>
+          )}
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">

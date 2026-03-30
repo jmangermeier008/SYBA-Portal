@@ -185,6 +185,7 @@ export interface ConcessionSlot {
   // Existing signup records live here. New signups continue to use this array
   // via transaction. A future migration may move these to a claims subcollection.
   signups: ConcessionSignup[];
+  sport?: Sport;
   createdAt: string;
   updatedAt?: string;
 }
@@ -269,7 +270,8 @@ export interface Notification {
   relatedDocType?: NotificationRelatedDocType;
   read: boolean;
   createdAt: string;
-  sport?: Sport;  // Set when the notification is sport-scoped
+  sport?: Sport;      // Set when the notification is sport-scoped
+  isGlobal?: boolean; // When true, shown in all sport modes (association-wide alerts)
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +362,7 @@ export interface CalendarEvent {
   // Umpire (visible to Admin/Board/Coach only — never passed to parent-facing views)
   umpireName?: string;
   umpireNotified?: boolean;
+  sport?: Sport;
 }
 
 export interface LeagueOfficer {

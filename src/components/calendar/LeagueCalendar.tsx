@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from 'react';
+import { useSport } from '@/firebase/sport-context';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   format,
@@ -840,15 +841,18 @@ export function LeagueCalendar({
   defaultView,
 }: LeagueCalendarProps) {
   const isMobile = useIsMobile();
+  const { activeSport } = useSport();
   const [view, setView] = useState<'month' | 'week' | 'day'>(defaultView ?? 'month');
   const [hasUserSetView, setHasUserSetView] = useState(defaultView !== undefined);
   // On mobile, default to day view unless the user has explicitly chosen (or caller passed defaultView)
   const effectiveView = !hasUserSetView && isMobile ? 'day' : view;
   const [focusDate, setFocusDate] = useState<Date>(new Date());
 
-  // Apply filters
+  // Apply filters — includes a sport safety net to prevent cross-sport data bleed
   const filteredEvents = useMemo(() => {
     return events.filter(e => {
+      // Safety net: drop events tagged with a different sport than the active one
+      if (activeSport && e.sport && e.sport !== activeSport) return false;
       if (e.eventType === 'game') {
         if (!filters.games) return false;
         if (filters.divisions && filters.divisions.length > 0) {
@@ -860,7 +864,7 @@ export function LeagueCalendar({
       if (e.eventType === 'concession') return filters.concessions;
       return true;
     });
-  }, [events, filters]);
+  }, [events, filters, activeSport]);
 
   const eventsByDate = useMemo(() => groupByDate(filteredEvents), [filteredEvents]);
 

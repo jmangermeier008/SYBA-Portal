@@ -1,7 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback, ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { doc, getDoc } from 'firebase/firestore';
 import { useUser, updatePreferredSport } from './auth/use-user';
 import { useFirestore } from './provider';
 import type { Sport } from '@/types/scheduling';
@@ -35,21 +37,74 @@ export function useSport(): SportContextState {
 export function SportProvider({ children }: { children: ReactNode }) {
   const { user, profile, loading, roles } = useUser();
   const db = useFirestore();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const [activeSport, setActiveSportState] = useState<Sport | null>(null);
   const [selecting, setSelecting] = useState(false);
 
-  // Sync activeSport from profile whenever profile changes (e.g. other device update)
+  // Track whether the URL param has been applied on mount (prevents profile from overriding it)
+  const urlParamApplied = useRef(false);
+  // Track which entity ID we've already resolved to prevent re-running deep link detection
+  const deepLinkResolved = useRef<string>('');
+
+  // ── URL param sync — highest priority, runs once on mount ─────────────────
   useEffect(() => {
-    if (profile?.preferredSport) {
+    const sportParam = searchParams.get('sport');
+    if (sportParam === 'baseball' || sportParam === 'football') {
+      urlParamApplied.current = true;
+      setActiveSportState(sportParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Intentionally runs once on mount only
+
+  // ── Profile sync — only when no URL param override ────────────────────────
+  useEffect(() => {
+    if (!urlParamApplied.current && profile?.preferredSport) {
       setActiveSportState(profile.preferredSport);
     }
   }, [profile?.preferredSport]);
 
-  const setActiveSport = async (sport: Sport) => {
+  // ── setActiveSport — updates state, URL, and Firestore ───────────────────
+  const setActiveSport = useCallback(async (sport: Sport) => {
     if (!user) return;
     setActiveSportState(sport);
+    // Sync sport to URL without triggering a navigation/scroll
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('sport', sport);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     await updatePreferredSport(db, user.uid, sport);
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, db, pathname, searchParams]);
+
+  // ── Deep Link Resolver — auto-switch sport when navigating to an entity ──
+  // Detects game/team IDs in the URL and fetches their sport from Firestore.
+  useEffect(() => {
+    if (!db || !activeSport) return;
+
+    // Match patterns: /games/[id] or /teams/[id]
+    const gamesMatch = pathname.match(/\/games\/([^/?]+)/);
+    const teamsMatch = pathname.match(/\/teams\/([^/?]+)/);
+
+    const entityId = gamesMatch?.[1] ?? teamsMatch?.[1] ?? null;
+    if (!entityId || deepLinkResolved.current === entityId) return;
+
+    deepLinkResolved.current = entityId;
+
+    const entityRef = gamesMatch
+      ? doc(db, 'games', entityId)
+      : doc(db, 'teams', entityId);
+
+    getDoc(entityRef)
+      .then((snap) => {
+        if (!snap.exists()) return;
+        const entitySport = snap.data()?.sport as Sport | undefined;
+        if (entitySport && entitySport !== activeSport) {
+          setActiveSport(entitySport);
+        }
+      })
+      .catch(() => {});
+  }, [pathname, db, activeSport, setActiveSport]);
 
   // ── Sport-aware role derivation ───────────────────────────────────────────
   // Site Admin / Admin in legacy roles[] = cross-sport superuser bypass

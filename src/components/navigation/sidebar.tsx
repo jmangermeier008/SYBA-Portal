@@ -358,19 +358,23 @@ export function Sidebar() {
   }, [pathname]);
 
   // Unread in-app notifications badge (parents + coaches)
+  // Fetches recent unread notifications, then filters client-side by activeSport or isGlobal.
   const unreadNotifsQuery = useMemoFirebase(() => {
     if (!db || !profile || (!isParent && !isCoach)) return null;
     return query(
       collection(db, 'notifications'),
       where('userId', '==', profile.id),
       where('read', '==', false),
-      firestoreLimit(1)
+      firestoreLimit(50)
     );
   }, [db, profile?.id, isParent, isCoach]);
-  const { data: unreadNotifs } = useCollection<{ id: string }>(unreadNotifsQuery);
+  const { data: unreadNotifs } = useCollection<{ id: string; sport?: string; isGlobal?: boolean }>(unreadNotifsQuery);
   useEffect(() => {
-    setHasUnreadNotifs((unreadNotifs?.length ?? 0) > 0);
-  }, [unreadNotifs]);
+    const sportFiltered = (unreadNotifs ?? []).filter(
+      n => (n as any).isGlobal || !(n as any).sport || (n as any).sport === activeSport
+    );
+    setHasUnreadNotifs(sportFiltered.length > 0);
+  }, [unreadNotifs, activeSport]);
 
   // Unread announcements badge (shared query for both parent and coach)
   const latestAnnouncementQuery = useMemoFirebase(() => {
