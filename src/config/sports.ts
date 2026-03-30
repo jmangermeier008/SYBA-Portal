@@ -1,9 +1,12 @@
 import type { Sport } from '@/types/scheduling';
 import { useSport } from '@/firebase/sport-context';
 
+export const HUB_LOGO_URL = '/logo-hub.png';
+
 export interface SportConfig {
   label: string;
   icon: string;
+  logoUrl: string;
   // Officials / Umpires
   umpireLabel: string;
   umpiresLabel: string;
@@ -21,6 +24,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
   baseball: {
     label: 'Baseball',
     icon: '⚾',
+    logoUrl: '/logos/baseball.png',
     umpireLabel: 'Umpire',
     umpiresLabel: 'Umpires',
     gameLabel: 'Game',
@@ -33,6 +37,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
   football: {
     label: 'Football',
     icon: '🏈',
+    logoUrl: '/logos/football.png',
     umpireLabel: 'Official',
     umpiresLabel: 'Officials',
     gameLabel: 'Game',

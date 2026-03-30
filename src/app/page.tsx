@@ -11,7 +11,7 @@ import Image from 'next/image';
 import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
 import type { Announcement, ComplexClosuresDocument, Game, LeagueOfficer, Sport } from '@/types/scheduling';
-import { SPORT_CONFIG } from '@/config/sports';
+import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_TITLES } from '@/data/officers';
 
@@ -208,7 +208,7 @@ export default function Home() {
       {/* ── Hero ── */}
       <div className="flex flex-col items-center text-center space-y-6 max-w-sm w-full">
         <Image
-          src="/contentrotator637479479383661633.png"
+          src={HUB_LOGO_URL}
           alt="Sharpsville Youth Athletics Hub"
           width={120}
           height={120}
@@ -234,9 +234,22 @@ export default function Home() {
               <button
                 key={sport}
                 onClick={() => selectPublicSport(sport)}
-                className="flex flex-col items-center gap-3 p-8 rounded-2xl border-2 border-border bg-white/80 shadow-sm hover:border-primary hover:shadow-md transition-all"
+                className="flex flex-col items-center gap-3 p-6 md:p-8 rounded-2xl border-2 border-border bg-white/80 shadow-sm hover:border-primary hover:shadow-md transition-all"
               >
-                <span className="text-5xl" role="img" aria-label={cfg.label}>{cfg.icon}</span>
+                <Image
+                  src={cfg.logoUrl}
+                  alt={cfg.label}
+                  width={64}
+                  height={64}
+                  className="object-contain"
+                  onError={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    img.style.display = 'none';
+                    const fallback = img.nextElementSibling as HTMLElement | null;
+                    if (fallback) fallback.style.display = 'block';
+                  }}
+                />
+                <span className="text-5xl hidden" role="img" aria-label={cfg.label}>{cfg.icon}</span>
                 <div>
                   <p className="text-xl font-bold font-headline">{cfg.label}</p>
                   <p className="text-sm text-muted-foreground">Youth {cfg.label} Association</p>
@@ -247,12 +260,27 @@ export default function Home() {
         </div>
       ) : (
         <>
-          {/* Sport indicator + change link */}
-          <div className="mt-6 flex items-center justify-center gap-2">
-            <span className="text-lg" role="img" aria-label={SPORT_CONFIG[publicSport].label}>
-              {SPORT_CONFIG[publicSport].icon}
-            </span>
-            <span className="text-sm font-semibold text-primary">{SPORT_CONFIG[publicSport].label}</span>
+          {/* Dual brand lockup + change link */}
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <div className="flex flex-col md:flex-row items-center gap-3">
+              <Image
+                src={HUB_LOGO_URL}
+                alt="Sharpsville Youth Athletics Hub"
+                width={48}
+                height={48}
+                className="object-contain"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+              <div className="hidden md:block h-10 w-px bg-border" />
+              <Image
+                src={SPORT_CONFIG[publicSport].logoUrl}
+                alt={SPORT_CONFIG[publicSport].label}
+                width={48}
+                height={48}
+                className="object-contain"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            </div>
             <button
               onClick={() => {
                 setPublicSportState(null);
@@ -260,7 +288,7 @@ export default function Home() {
               }}
               className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
             >
-              Change
+              Change sport
             </button>
           </div>
 

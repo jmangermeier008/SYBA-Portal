@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useUser, useAuth, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
+import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import { collection, query, orderBy, limit } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -434,7 +435,14 @@ export function Sidebar() {
     )}>
       <div className={cn("p-4 flex items-center", collapsed && !isMobile ? "justify-center" : "justify-between px-6")}>
         <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
-          <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={36} height={36} className="object-contain shrink-0" />
+          <Image
+            src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
+            alt="SYBA"
+            width={36}
+            height={36}
+            className="object-contain shrink-0"
+            onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
+          />
           {(!collapsed || isMobile) && (
             <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
           )}
@@ -700,7 +708,14 @@ export function Sidebar() {
             )}
           </button>
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={30} height={30} className="object-contain" />
+            <Image
+              src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
+              alt="SYBA"
+              width={30}
+              height={30}
+              className="object-contain"
+              onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
+            />
             <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
           </Link>
           {activeContext && roleContexts.length > 1 && (
