@@ -24,7 +24,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
   baseball: {
     label: 'Baseball',
     icon: '⚾',
-    logoUrl: '/logos/baseball.png',
+    logoUrl: '/baseball.png',
     umpireLabel: 'Umpire',
     umpiresLabel: 'Umpires',
     gameLabel: 'Game',
@@ -37,7 +37,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
   football: {
     label: 'Football',
     icon: '🏈',
-    logoUrl: '/logos/football.png',
+    logoUrl: '/football.png',
     umpireLabel: 'Official',
     umpiresLabel: 'Officials',
     gameLabel: 'Game',
