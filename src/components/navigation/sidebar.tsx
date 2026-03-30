@@ -371,7 +371,7 @@ export function Sidebar() {
   const { data: unreadNotifs } = useCollection<{ id: string; sport?: string; isGlobal?: boolean }>(unreadNotifsQuery);
   useEffect(() => {
     const sportFiltered = (unreadNotifs ?? []).filter(
-      n => (n as any).isGlobal || !(n as any).sport || (n as any).sport === activeSport
+      n => n.isGlobal || !n.sport || n.sport === activeSport
     );
     setHasUnreadNotifs(sportFiltered.length > 0);
   }, [unreadNotifs, activeSport]);

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star, Pencil } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch, updateDoc } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +31,7 @@ export default function SeasonsAdminPage() {
   const db = useFirestore();
   const { toast } = useToast();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [editingSeason, setEditingSeason] = useState<Season | null>(null);
@@ -47,9 +49,9 @@ export default function SeasonsAdminPage() {
   });
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'seasons'), orderBy('name', 'desc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport), orderBy('name', 'desc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const { data: seasons, isLoading } = useCollection<Season>(seasonsQuery);
 
@@ -72,6 +74,7 @@ export default function SeasonsAdminPage() {
       id: seasonId,
       ...formData,
       volunteerSlotsRequired: Number(formData.volunteerSlotsRequired),
+      sport: activeSport,
     };
 
     try {

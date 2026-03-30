@@ -75,12 +75,13 @@ export function SportProvider({ children }: { children: ReactNode }) {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     await updatePreferredSport(db, user.uid, sport);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, db, pathname, searchParams]);
+  }, [user, db, router, pathname, searchParams]);
 
   // ── Deep Link Resolver — auto-switch sport when navigating to an entity ──
   // Detects game/team IDs in the URL and fetches their sport from Firestore.
+  // Runs even when activeSport is null so deep links can bootstrap the sport selection.
   useEffect(() => {
-    if (!db || !activeSport) return;
+    if (!db) return;
 
     // Match patterns: /games/[id] or /teams/[id]
     const gamesMatch = pathname.match(/\/games\/([^/?]+)/);
