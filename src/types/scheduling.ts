@@ -308,6 +308,13 @@ export interface UserProfile {
 // Players  (subcollection: userProfiles/{userId}/players)
 // ---------------------------------------------------------------------------
 
+/** Emergency contact for a player — stored on the player document and copied into enrollments. */
+export interface EmergencyContact {
+  name: string;
+  phone: string;
+  relationship: string;
+}
+
 /** A player profile stored as a subcollection under the parent's userProfile document. */
 export interface Player {
   id: string;
@@ -321,6 +328,69 @@ export interface Player {
   secondaryParentId?: string; // UID of linked second parent
   dateOfBirth: string;
   clearanceUrl?: string;
+  emergencyContacts?: EmergencyContact[];
+  medicalNotes?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Divisions  (subcollection or standalone collection depending on sport config)
+// ---------------------------------------------------------------------------
+
+/** A competitive division within a season (e.g. T-Ball, Coach Pitch, Kid Pitch). */
+export interface Division {
+  id: string;
+  name: string;
+  fee: number;              // Registration fee in dollars
+  capacity?: number;        // Max enrolled players; absent = unlimited
+  waitlistEnabled?: boolean;
+  registeredCount?: number; // Denormalized count — updated on each enrollment write
+  sport?: Sport;
+}
+
+// ---------------------------------------------------------------------------
+// Enrollments  (subcollection: userProfiles/{userId}/enrollments)
+// ---------------------------------------------------------------------------
+
+export type EnrollmentPaymentStatus =
+  | 'pending_payment'  // Written before Stripe redirect; payment not yet confirmed
+  | 'paid'             // Stripe webhook confirmed payment
+  | 'waitlisted'       // Division at capacity; player is on the waitlist
+  | 'fee_waived';      // Admin manually waived the registration fee
+
+/**
+ * An enrollment record written when a parent registers a player for a season.
+ * Stored at: userProfiles/{parentUserId}/enrollments/{enrollmentId}
+ *
+ * Ghost-enrollment note: records with paymentStatus = 'pending_payment' and
+ * an empty stripe_payment_id are orphans created when the parent abandoned
+ * the Stripe checkout. Surface these in the enrollment page as "resume payment"
+ * prompts rather than allowing a second enrollment to be created.
+ */
+export interface Enrollment {
+  id: string;
+  playerId: string;
+  seasonId: string;
+  divisionId: string;
+  parentUserId: string;
+  // Uniform / sizing
+  shirtSize: string;
+  jerseySize: string;          // Backward-compat alias for shirtSize — keep in sync
+  uniformNumberPreference: string;
+  // Medical / safety
+  emergencyContacts: EmergencyContact[];
+  medicalNotes: string;
+  // Payment
+  paymentStatus: EnrollmentPaymentStatus;
+  payment_status: EnrollmentPaymentStatus; // Backward-compat alias — keep in sync
+  stripe_payment_id: string;   // Empty string until Stripe webhook confirms payment
+  stripeSessionId?: string;    // Stripe Checkout Session ID — used for orphan reconciliation
+  fee_waived: boolean;
+  waiver_reason: string;
+  registrationFeeAmount: number;
+  // Timestamps
+  registered_at: string;       // ISO datetime
+  enrollmentDate: string;      // ISO datetime — backward-compat alias for registered_at
+  waitlisted_at?: string;      // ISO datetime — set only when paymentStatus = 'waitlisted'
 }
 
 // ---------------------------------------------------------------------------
@@ -374,6 +444,7 @@ export interface LeagueOfficer {
   contactHint: string;
   mappedTopic?: import('@/data/inquiry-topics').InquiryTopic;
   order: number;
+  sport?: Sport | 'hub';
 }
 
 // ---------------------------------------------------------------------------

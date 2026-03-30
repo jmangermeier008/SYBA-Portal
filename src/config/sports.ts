@@ -7,6 +7,8 @@ export interface SportConfig {
   label: string;
   icon: string;
   logoUrl: string;
+  acronym: string;
+  contactEmail: string; // public contact / reply-to address for this sport
   // Officials / Umpires
   umpireLabel: string;
   umpiresLabel: string;
@@ -25,6 +27,8 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     label: 'Baseball',
     icon: '⚾',
     logoUrl: '/baseball.png',
+    acronym: 'SYBA',
+    contactEmail: 'info@syba.blue',
     umpireLabel: 'Umpire',
     umpiresLabel: 'Umpires',
     gameLabel: 'Game',
@@ -38,6 +42,8 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     label: 'Football',
     icon: '🏈',
     logoUrl: '/football.png',
+    acronym: 'SYFA',
+    contactEmail: 'football@sharpsvillesports.com',
     umpireLabel: 'Official',
     umpiresLabel: 'Officials',
     gameLabel: 'Game',

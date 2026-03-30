@@ -149,7 +149,7 @@ function NavSection({
   sectionIcon,
 }: {
   label: string;
-  items: { label: string; icon: React.ElementType; href: string; badge?: boolean }[];
+  items: { label: string; icon: React.ElementType; href: string; badge?: boolean; comingSoon?: boolean }[];
   pathname: string;
   onNavigate: () => void;
   isOpen: boolean;
@@ -189,25 +189,36 @@ function NavSection({
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-3 py-1.5 border-b border-border/40">
               {label}
             </p>
-            {items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => { onNavigate(); setFlyoutOpen(false); }}
-                className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-colors",
-                  pathname === item.href || pathname.startsWith(item.href + '/')
-                    ? "bg-primary text-white"
-                    : "text-muted-foreground hover:bg-secondary hover:text-primary"
-                )}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {item.label}
-                {item.badge && (
-                  <span aria-hidden="true" className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
-                )}
-              </Link>
-            ))}
+            {items.map((item) =>
+              item.comingSoon ? (
+                <div
+                  key={item.href}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm font-medium text-muted-foreground/40 cursor-not-allowed"
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {item.label}
+                  <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/50">Soon</span>
+                </div>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => { onNavigate(); setFlyoutOpen(false); }}
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-colors",
+                    pathname === item.href || pathname.startsWith(item.href + '/')
+                      ? "bg-primary text-white"
+                      : "text-muted-foreground hover:bg-secondary hover:text-primary"
+                  )}
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {item.label}
+                  {item.badge && (
+                    <span aria-hidden="true" className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
+                  )}
+                </Link>
+              )
+            )}
           </div>
         )}
       </div>
@@ -232,25 +243,36 @@ function NavSection({
         "overflow-hidden transition-all duration-200",
         isOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
       )}>
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              pathname === item.href || pathname.startsWith(item.href + '/')
-                ? "bg-primary text-white shadow-md shadow-primary/20"
-                : "text-muted-foreground hover:bg-secondary hover:text-primary"
-            )}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {item.label}
-            {item.badge && (
-              <span aria-hidden="true" className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
-            )}
-          </Link>
-        ))}
+        {items.map((item) =>
+          item.comingSoon ? (
+            <div
+              key={item.href}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground/40 cursor-not-allowed"
+            >
+              <item.icon className="h-4 w-4 shrink-0" />
+              {item.label}
+              <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/50">Coming Soon</span>
+            </div>
+          ) : (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onNavigate}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                pathname === item.href || pathname.startsWith(item.href + '/')
+                  ? "bg-primary text-white shadow-md shadow-primary/20"
+                  : "text-muted-foreground hover:bg-secondary hover:text-primary"
+              )}
+            >
+              <item.icon className="h-4 w-4 shrink-0" />
+              {item.label}
+              {item.badge && (
+                <span aria-hidden="true" className="ml-auto w-2 h-2 bg-red-500 rounded-full shrink-0" />
+              )}
+            </Link>
+          )
+        )}
       </div>
     </>
   );
@@ -434,17 +456,19 @@ export function Sidebar() {
       collapsed && !isMobile ? "w-16" : "w-64"
     )}>
       <div className={cn("p-4 flex items-center", collapsed && !isMobile ? "justify-center" : "justify-between px-6")}>
-        <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
+        <Link href="/" className="flex flex-col items-center gap-1" onClick={closeMenu}>
           <Image
             src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
-            alt="SYBA"
+            alt={activeSport ? SPORT_CONFIG[activeSport].acronym : 'Hub'}
             width={36}
             height={36}
             className="object-contain shrink-0"
             onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
           />
-          {(!collapsed || isMobile) && (
-            <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+          {(!collapsed || isMobile) && activeSport && (
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              {SPORT_CONFIG[activeSport].acronym}
+            </span>
           )}
         </Link>
         {isMobile && (
@@ -534,7 +558,11 @@ export function Sidebar() {
             <NavSection
               label="Season Management"
               sectionIcon={CalendarDays}
-              items={adminSeasonItems.filter(item => activeSport !== 'football' || item.href !== '/admin/practice-slots')}
+              items={adminSeasonItems.map(item =>
+                activeSport === 'football' && item.href === '/admin/practice-slots'
+                  ? { ...item, comingSoon: true }
+                  : item
+              )}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['Season Management']}
@@ -545,7 +573,11 @@ export function Sidebar() {
             <NavSection
               label="People & Teams"
               sectionIcon={Users}
-              items={adminPeopleItems.filter(item => activeSport !== 'football' || item.href !== '/admin/teams')}
+              items={adminPeopleItems.map(item =>
+                activeSport === 'football' && item.href === '/admin/teams'
+                  ? { ...item, comingSoon: true }
+                  : item
+              )}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['People & Teams']}
@@ -707,16 +739,20 @@ export function Sidebar() {
               <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
             )}
           </button>
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/" className="flex flex-col items-center gap-0.5">
             <Image
               src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
-              alt="SYBA"
+              alt={activeSport ? SPORT_CONFIG[activeSport].acronym : 'Hub'}
               width={30}
               height={30}
               className="object-contain"
               onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
             />
-            <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+            {activeSport && (
+              <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                {SPORT_CONFIG[activeSport].acronym}
+              </span>
+            )}
           </Link>
           {activeContext && roleContexts.length > 1 && (
             <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium shrink-0">

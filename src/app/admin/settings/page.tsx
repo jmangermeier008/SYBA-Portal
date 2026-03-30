@@ -25,11 +25,12 @@ type OfficerRecord = LeagueOfficer;
 function OfficerRow({ officer, holderName, onSave }: {
   officer: OfficerRecord;
   holderName: string | null;
-  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => Promise<void>;
+  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState(officer.email ?? '');
   const [hint, setHint] = useState(officer.contactHint ?? '');
   const [mappedTopic, setMappedTopic] = useState(officer.mappedTopic ?? 'general');
+  const [sport, setSport] = useState(officer.sport ?? 'baseball');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -37,11 +38,12 @@ function OfficerRow({ officer, holderName, onSave }: {
     setEmail(officer.email ?? '');
     setHint(officer.contactHint ?? '');
     setMappedTopic(officer.mappedTopic ?? 'general');
-  }, [officer.email, officer.contactHint, officer.mappedTopic]);
+    setSport(officer.sport ?? 'baseball');
+  }, [officer.email, officer.contactHint, officer.mappedTopic, officer.sport]);
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(officer.id, holderName, email, hint, mappedTopic);
+    await onSave(officer.id, holderName, email, hint, mappedTopic, sport);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -50,7 +52,8 @@ function OfficerRow({ officer, holderName, onSave }: {
   const dirty =
     email !== (officer.email ?? '') ||
     hint !== (officer.contactHint ?? '') ||
-    mappedTopic !== (officer.mappedTopic ?? 'general');
+    mappedTopic !== (officer.mappedTopic ?? 'general') ||
+    sport !== (officer.sport ?? 'baseball');
 
   return (
     <div className="border rounded-xl p-4 space-y-3">
@@ -63,9 +66,22 @@ function OfficerRow({ officer, holderName, onSave }: {
         </div>
         <span className="text-xs text-muted-foreground">{holderName ?? 'TBA'}</span>
       </div>
-      <div className="grid sm:grid-cols-2 gap-3">
+      <div className="grid sm:grid-cols-3 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Email (syba.blue address)</Label>
+          <Label className="text-xs text-muted-foreground">Sport</Label>
+          <Select value={sport} onValueChange={(v) => setSport(v as 'baseball' | 'football' | 'hub')}>
+            <SelectTrigger className="rounded-xl text-xs h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="baseball">⚾ Baseball</SelectItem>
+              <SelectItem value="football">🏈 Football</SelectItem>
+              <SelectItem value="hub">Hub (both)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Email</Label>
           <Input
             placeholder="e.g. president@syba.blue"
             type="email"
@@ -89,7 +105,7 @@ function OfficerRow({ officer, holderName, onSave }: {
         </div>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs text-muted-foreground">Contact hint shown to parents</Label>
+        <Label className="text-xs text-muted-foreground">Contact hint shown to public</Label>
         <Input
           placeholder="e.g. Payment questions"
           value={hint}
@@ -145,12 +161,12 @@ export default function AdminSettingsPage() {
   }
 
 
-  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
+  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => {
     if (!db) return;
     try {
       await setDoc(
         doc(db, 'officers', id),
-        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general' },
+        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport: sport || 'baseball' },
         { merge: true }
       );
     } catch (err: any) {

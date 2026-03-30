@@ -44,6 +44,8 @@ export default function CoachDashboard() {
   const db = useFirestore();
   const { activeSport } = useSport();
 
+  const [selectedTeamIndex, setSelectedTeamIndex] = useState(0);
+
   // Query teams assigned to this coach, scoped to the active sport
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user || !activeSport) return null;
@@ -61,8 +63,9 @@ export default function CoachDashboard() {
 
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
 
-  // Get upcoming games for the first team
-  const firstTeamId = teams?.[0]?.id;
+  // Get upcoming games for the selected team (supports multi-team coaches)
+  const clampedTeamIndex = Math.min(selectedTeamIndex, Math.max(0, (teams?.length ?? 1) - 1));
+  const firstTeamId = teams?.[clampedTeamIndex]?.id;
   const gamesQuery = useMemoFirebase(() => {
     if (!db || !firstTeamId) return null;
     return query(
@@ -139,12 +142,29 @@ export default function CoachDashboard() {
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex justify-between items-center">
+        <header className="mb-8 flex flex-wrap justify-between items-start gap-4">
           <div>
             <h1 className="text-3xl font-bold font-headline">Coach Dashboard</h1>
             <p className="text-muted-foreground">Manage your teams and plan your next practice.</p>
           </div>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Team selector — only shown when coach has multiple teams */}
+            {teams && teams.length > 1 && (
+              <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
+                {teams.map((team, i) => (
+                  <button
+                    key={team.id}
+                    onClick={() => setSelectedTeamIndex(i)}
+                    className={cn(
+                      'px-3 py-2 min-h-[44px] rounded-full transition-colors text-xs font-semibold',
+                      clampedTeamIndex === i ? 'bg-white shadow text-foreground' : 'text-muted-foreground'
+                    )}
+                  >
+                    {team.name}
+                  </button>
+                ))}
+              </div>
+            )}
             <Button variant="outline" asChild className="rounded-full">
               <Link href="/coach/drills">
                 <Dumbbell className="mr-2 h-4 w-4" /> Drill Library
@@ -229,16 +249,16 @@ export default function CoachDashboard() {
             <CardHeader className="flex flex-row items-start justify-between">
               <div>
                 <CardTitle className="font-headline">Team Schedule</CardTitle>
-                <CardDescription>Upcoming games and practices{teams?.[0] ? ` for ${teams[0].name}` : ''}</CardDescription>
+                <CardDescription>Upcoming games and practices{teams?.[clampedTeamIndex] ? ` for ${teams[clampedTeamIndex].name}` : ''}</CardDescription>
               </div>
               <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm shrink-0">
                 <button
                   onClick={() => setScheduleView('list')}
-                  className={cn('px-3 py-1 rounded-full transition-colors', scheduleView === 'list' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                  className={cn('px-3 py-2 min-h-[44px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'list' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
                 >List</button>
                 <button
                   onClick={() => setScheduleView('calendar')}
-                  className={cn('px-3 py-1 rounded-full transition-colors', scheduleView === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                  className={cn('px-3 py-2 min-h-[44px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'calendar' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
                 >Calendar</button>
               </div>
             </CardHeader>
@@ -354,7 +374,7 @@ export default function CoachDashboard() {
                   <Link href="/coach/drills">
                     <div className="text-left">
                       <p className="font-semibold flex items-center gap-2"><Dumbbell className="h-4 w-4" /> Practice Drills</p>
-                      <p className="text-xs text-muted-foreground">Browse age-grouped baseball drills</p>
+                      <p className="text-xs text-muted-foreground">Browse age-grouped {activeSport ?? 'baseball'} drills</p>
                     </div>
                   </Link>
                 </Button>
