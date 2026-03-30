@@ -4,16 +4,18 @@
  * One-time migration script to backfill all existing production data to the
  * 'baseball' tenant and promote legacy role fields to sport-scoped sportRoles.
  *
- * Run via:
- *   FIREBASE_SERVICE_ACCOUNT_KEY='...' npx ts-node --project tsconfig.json scripts/migrate-to-multitenant.ts
+ * Run from project root:
+ *   npx tsx --env-file=.env.local scripts/migrate-to-multitenant.ts
+ *
+ * Requires FIREBASE_SERVICE_ACCOUNT_KEY in .env.local (or environment).
  *
  * The script is fully idempotent — it skips documents that already have
  * `sport === 'baseball'` (for data docs) or `sportRoles.baseball` already set
  * (for user profiles). Safe to re-run.
  */
 
-import { initializeApp, cert, getApps, App } from 'firebase-admin/app';
-import { getFirestore, Firestore, WriteBatch } from 'firebase-admin/firestore';
+import { getAdminFirestore } from '../src/lib/firebase-admin';
+import type { Firestore, WriteBatch } from 'firebase-admin/firestore';
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -30,19 +32,6 @@ const DATA_COLLECTIONS = [
   'concessionSlots',
   'practiceSlots',
 ];
-
-// ─── Init ──────────────────────────────────────────────────────────────────────
-
-function initAdminApp(): App {
-  if (getApps().length > 0) return getApps()[0];
-
-  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  if (!serviceAccountKey) {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY env var is not set');
-  }
-
-  return initializeApp({ credential: cert(JSON.parse(serviceAccountKey)) });
-}
 
 // ─── Batch helper ──────────────────────────────────────────────────────────────
 
@@ -61,7 +50,7 @@ class BatchWriter {
     this.batch = db.batch();
   }
 
-  update(ref: FirebaseFirestore.DocumentReference, data: object) {
+  update(ref: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>, data: object) {
     this.batch.update(ref, data);
     this.count++;
     if (this.count >= BATCH_FLUSH_SIZE) {
@@ -212,8 +201,7 @@ async function main() {
   console.log(`Target sport: "${SPORT}"`);
   console.log('Starting...\n');
 
-  const app = initAdminApp();
-  const db = getFirestore(app);
+  const db = getAdminFirestore();
 
   let totalUpdated = 0;
 
