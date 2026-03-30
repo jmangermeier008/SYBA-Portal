@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useUser } from './auth/use-user';
@@ -47,19 +47,19 @@ function RedirectToHome() {
 export function SportProvider({ children }: { children: ReactNode }) {
   const { user, profile, loading, roles } = useUser();
   const [activeSport, setActiveSportState] = useState<Sport | null>(null);
+  // Tracks whether the localStorage read has completed (always synchronous, but effect is async).
+  // We must not show the gate until we've checked — otherwise a brief null activeSport
+  // would flash the redirect for users who DO have a sport stored.
+  const [sportLoaded, setSportLoaded] = useState(false);
 
   // Read sport from localStorage on mount — this is the sole source of truth for the active sport.
   // Sport is set pre-login on the home page and locked for the session.
-  const mounted = useRef(false);
   useEffect(() => {
-    if (mounted.current) return;
-    mounted.current = true;
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('syba_active_sport');
-      if (stored === 'baseball' || stored === 'football') {
-        setActiveSportState(stored);
-      }
+    const stored = localStorage.getItem('syba_active_sport');
+    if (stored === 'baseball' || stored === 'football') {
+      setActiveSportState(stored);
     }
+    setSportLoaded(true);
   }, []);
 
   // ── Sport-aware role derivation ───────────────────────────────────────────
@@ -84,8 +84,9 @@ export function SportProvider({ children }: { children: ReactNode }) {
   // Always render the provider so useSport() never throws regardless of tree position.
   return (
     <SportContext.Provider value={contextValue}>
-      {loading ? (
-        // Wait for auth + profile before deciding gate state
+      {loading || !sportLoaded ? (
+        // Wait for both auth AND localStorage read before evaluating the gate.
+        // sportLoaded prevents flashing the redirect for users who have a stored sport.
         <div className="flex min-h-screen items-center justify-center bg-background">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
         </div>
