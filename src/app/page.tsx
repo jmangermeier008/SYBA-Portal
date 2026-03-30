@@ -1,6 +1,7 @@
 "use client";
 
 import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
+import { setActiveSport as writeActiveSport, clearActiveSport } from '@/hooks/use-active-sport';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
@@ -72,7 +73,7 @@ export default function Home() {
   }, []);
   function selectPublicSport(sport: Sport) {
     setPublicSportState(sport);
-    localStorage.setItem('syba_active_sport', sport);
+    writeActiveSport(sport);
   }
 
   const todayISO = useMemo(() => {
@@ -263,7 +264,7 @@ export default function Home() {
             <button
               onClick={() => {
                 setPublicSportState(null);
-                localStorage.removeItem('publicSport');
+                clearActiveSport();
               }}
               className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
             >

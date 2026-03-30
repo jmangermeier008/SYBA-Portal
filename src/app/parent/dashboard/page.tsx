@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard } from 'lucide-react';
@@ -46,6 +46,7 @@ export default function ParentDashboard({
   use(searchParams);
 
   const { profile, user, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
   const [rsvpLoading, setRsvpLoading] = useState(false);
@@ -217,7 +218,7 @@ export default function ParentDashboard({
         <header className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold font-headline">Welcome back, {profile?.displayName?.split(' ')[0]}</h1>
-            <p className="text-muted-foreground">Here's what's happening with your family's baseball activities.</p>
+            <p className="text-muted-foreground">Here's what's happening with your family's {activeSport ?? 'baseball'} activities.</p>
           </div>
           <Button asChild className="rounded-full">
             <Link href="/parent/family">Add New Player</Link>

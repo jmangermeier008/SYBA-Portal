@@ -5,7 +5,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
 import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -42,12 +42,13 @@ interface GameEvent {
 export default function CoachDashboard() {
   const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
 
-  // Query teams assigned to this coach
+  // Query teams assigned to this coach, scoped to the active sport
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid));
-  }, [db, user?.uid]);
+    if (!db || !user || !activeSport) return null;
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), where('sport', '==', activeSport));
+  }, [db, user?.uid, activeSport]);
 
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
 
