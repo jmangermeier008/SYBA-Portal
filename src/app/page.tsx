@@ -118,11 +118,11 @@ export default function Home() {
   // Derived: sport-specific contact email (falls back to hub address when no sport selected)
   const contactEmail = publicSport ? SPORT_CONFIG[publicSport].contactEmail : HUB_contactEmail;
 
-  // Officers (league leadership grid) — filtered by selected sport; hidden when no sport selected
+  // Officers (league leadership grid) — all officers, filtered client-side by sport
   const officersQuery = useMemoFirebase(() => {
-    if (!db || !publicSport) return null;
-    return query(collection(db, 'officers'), where('sport', '==', publicSport), orderBy('order'));
-  }, [db, publicSport]);
+    if (!db) return null;
+    return query(collection(db, 'officers'), orderBy('order'));
+  }, [db]);
   const { data: officers } = useCollection<LeagueOfficer>(officersQuery);
 
   // Derived: registration banner
@@ -170,13 +170,20 @@ export default function Home() {
 
   const filteredOfficers = useMemo(() => {
     if (!officers) return [];
-    return officers.filter(o => EXECUTIVE_TITLES.includes(o.title) && o.name != null && o.name !== '');
-  }, [officers]);
+    return officers.filter(o =>
+      EXECUTIVE_TITLES.includes(o.title) &&
+      o.name != null && o.name !== '' &&
+      (!publicSport || !o.sport || o.sport === publicSport)
+    );
+  }, [officers, publicSport]);
 
   const fullBoardOfficers = useMemo(() => {
     if (!officers) return [];
-    return officers.filter(o => o.name != null && o.name !== '');
-  }, [officers]);
+    return officers.filter(o =>
+      o.name != null && o.name !== '' &&
+      (!publicSport || !o.sport || o.sport === publicSport)
+    );
+  }, [officers, publicSport]);
 
   // Derived: pinned announcements first, max 3
   const announcements = useMemo(() => {
