@@ -2,6 +2,7 @@
 
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, collectionGroup, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import type { Season } from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,25 +58,27 @@ function getSlotStartDateTime(slot: ConcessionSlot): Date {
 export default function ParentConcessionsPage() {
   const db = useFirestore();
   const { profile, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
   const [showMySignupsOnly, setShowMySignupsOnly] = useState(false);
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
 
   const activeSeasonsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'seasons'), where('status', '==', 'active'));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('status', '==', 'active'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
   const { data: activeSeasons } = useCollection<Season>(activeSeasonsQuery);
   const activeSeason = useMemo(() => activeSeasons?.[0] ?? null, [activeSeasons]);
 
   const slotsQuery = useMemoFirebase(() => {
-    if (!db || !profile || !activeSeason) return null;
+    if (!db || !profile || !activeSeason || !activeSport) return null;
     return query(
       collection(db, 'concessionSlots'),
+      where('sport', '==', activeSport),
       where('gameDate', '>=', activeSeason.startDate),
     );
-  }, [db, profile, activeSeason?.startDate]);
+  }, [db, profile, activeSeason?.startDate, activeSport]);
 
   const { data: slots, isLoading } = useCollection<ConcessionSlot>(slotsQuery);
 

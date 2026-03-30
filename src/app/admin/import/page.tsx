@@ -16,6 +16,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import type { Announcement } from '@/types/scheduling';
 
 interface Team {
   id: string;
@@ -28,12 +29,6 @@ interface Season {
   id: string;
   name: string;
   status?: string;
-}
-
-interface Announcement {
-  id: string;
-  title: string;
-  publishedAt?: string;
 }
 
 interface BoardMeeting {

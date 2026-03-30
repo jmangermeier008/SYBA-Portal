@@ -10,7 +10,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
-import type { ComplexClosuresDocument, Game, LeagueOfficer, Sport } from '@/types/scheduling';
+import type { Announcement, ComplexClosuresDocument, Game, LeagueOfficer, Sport } from '@/types/scheduling';
 import { SPORT_CONFIG } from '@/config/sports';
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_TITLES } from '@/data/officers';
@@ -23,14 +23,6 @@ const SPONSOR_IMAGES = [
   '/sponsors/sponsor2.png',
   '/sponsors/sponsor3.png',
 ];
-
-interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  pinned: boolean;
-  publishedAt: string;
-}
 
 interface ActiveSeason {
   id: string;
@@ -94,11 +86,11 @@ export default function Home() {
   const { data: activeSeasons } = useCollection<ActiveSeason>(activeSeasonQuery);
   const activeSeason = activeSeasons?.[0] ?? null;
 
-  // Complex closure singleton
+  // Complex closure — per-sport document (only loaded when a sport is selected)
   const closuresRef = useMemoFirebase(() => {
-    if (!db) return null;
-    return doc(db, 'settings', 'complexClosures');
-  }, [db]);
+    if (!db || !publicSport) return null;
+    return doc(db, 'settings', `complexClosures_${publicSport}`);
+  }, [db, publicSport]);
   const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(closuresRef);
 
   // This week's games — only runs after a sport is selected
@@ -116,11 +108,11 @@ export default function Home() {
   }, [db, publicSport, todayISO, weekEndISO]);
   const { data: rawWeekGames } = useCollection<Game>(gamesQuery);
 
-  // Announcements
+  // Announcements — scoped to selected sport (only loads after sport is chosen)
   const announcementsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(10));
-  }, [db]);
+    if (!db || !publicSport) return null;
+    return query(collection(db, 'announcements'), where('sport', '==', publicSport), orderBy('publishedAt', 'desc'), limit(10));
+  }, [db, publicSport]);
   const { data: rawAnnouncements } = useCollection<Announcement>(announcementsQuery);
 
   // Officers (league leadership grid)

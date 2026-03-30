@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, query, orderBy, doc, updateDoc, where, limit } from 'firebase/firestore';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -53,6 +54,7 @@ function normalizeTeamGame(g: GameEvent, teamId: string): CalendarEvent {
 export default function CoachSchedulesPage() {
   const { user, loading: loadingUser } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   // ── Filter state ────────────────────────────────────────────────────────────
@@ -60,9 +62,9 @@ export default function CoachSchedulesPage() {
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), limit(1));
-  }, [db, user?.uid]);
+    if (!db || !user || !activeSport) return null;
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), where('sport', '==', activeSport), limit(1));
+  }, [db, user?.uid, activeSport]);
 
   const { data: userTeams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const activeTeam = userTeams?.[0];

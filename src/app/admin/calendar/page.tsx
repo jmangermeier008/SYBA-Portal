@@ -143,14 +143,14 @@ export default function AdminCalendarPage() {
   }, [db, activeSport]);
 
   const fieldsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'fields');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'fields'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const complexClosuresRef = useMemoFirebase(() => {
-    if (!db) return null;
-    return doc(db, 'settings', 'complexClosures');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return doc(db, 'settings', `complexClosures_${activeSport}`);
+  }, [db, activeSport]);
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;

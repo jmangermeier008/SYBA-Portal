@@ -101,11 +101,11 @@ export default function CoachDashboard() {
   const totalRsvpCount = rsvps?.length ?? 0;
   const attendanceRate = totalRsvpCount > 0 ? Math.round((attendingCount / totalRsvpCount) * 100) : null;
 
-  // Latest announcements
+  // Latest announcements — scoped to active sport
   const announcementsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'), limit(2));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(2));
+  }, [db, activeSport]);
   const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string }>(announcementsQuery);
 
   const calendarEvents = useMemo((): CalendarEvent[] => {

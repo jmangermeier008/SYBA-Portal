@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useDoc, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import {
   collection,
   doc,
@@ -82,6 +83,7 @@ const fieldTypeLabels: Record<FieldType, string> = {
 export default function FieldManagementPage() {
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   // ── Add field dialog ──────────────────────────────────────────────────────
@@ -113,14 +115,14 @@ export default function FieldManagementPage() {
 
   // ── Firestore queries — ALL before any early return ───────────────────────
   const fieldsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'fields');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'fields'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const complexClosuresRef = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return doc(db, 'settings', 'complexClosures');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return doc(db, 'settings', `complexClosures_${activeSport}`);
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const { data: fields, isLoading } = useCollection<Field>(fieldsQuery);
   const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(complexClosuresRef);
@@ -141,6 +143,7 @@ export default function FieldManagementPage() {
         availabilityStart: sliceTime(addForm.availabilityStart),
         availabilityEnd: sliceTime(addForm.availabilityEnd),
         maintenanceClosures: [],
+        sport: activeSport,
         createdAt: new Date().toISOString(),
       });
       toast({ title: 'Field Added', description: `${addForm.name} has been added.` });
@@ -294,10 +297,10 @@ export default function FieldManagementPage() {
   };
 
   const handleAddComplexClosure = async () => {
-    if (!complexForm.date || !db) return;
+    if (!complexForm.date || !db || !activeSport) return;
     setSavingComplex(true);
     try {
-      const ref = doc(db, 'settings', 'complexClosures');
+      const ref = doc(db, 'settings', `complexClosures_${activeSport}`);
       const closure: ComplexClosure = { date: complexForm.date };
       if (complexForm.reason.trim()) closure.reason = complexForm.reason.trim();
       await setDoc(ref, {
@@ -365,9 +368,9 @@ export default function FieldManagementPage() {
   };
 
   const handleRemoveComplexClosure = async (closure: ComplexClosure) => {
-    if (!db) return;
+    if (!db || !activeSport) return;
     try {
-      const ref = doc(db, 'settings', 'complexClosures');
+      const ref = doc(db, 'settings', `complexClosures_${activeSport}`);
       await updateDoc(ref, {
         closures: arrayRemove(closure),
         updatedAt: new Date().toISOString(),

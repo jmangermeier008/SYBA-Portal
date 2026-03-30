@@ -6,21 +6,15 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy } from 'firebase/firestore';
+import { collection, query, orderBy, where } from 'firebase/firestore';
 import { Megaphone, Loader2, Clock, Pin, Search } from 'lucide-react';
 import { format } from 'date-fns';
-
-interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  pinned: boolean;
-  publishedAt: string;
-  publishedBy: string;
-}
+import type { Announcement } from '@/types/scheduling';
+import { useSport } from '@/firebase/sport-context';
 
 export default function ParentAnnouncementsPage() {
   const db = useFirestore();
+  const { activeSport } = useSport();
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
@@ -33,9 +27,9 @@ export default function ParentAnnouncementsPage() {
   }, []);
 
   const announcementsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'));
+  }, [db, activeSport]);
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 

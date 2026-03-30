@@ -69,6 +69,7 @@ export interface Field {
   availabilityEnd: string;   // HH:MM
   maintenanceClosures: MaintenanceClosure[];
   createdAt: string;
+  sport?: Sport;
 }
 
 /** A single date on which the entire sports complex is closed (weather, events, etc.). */
@@ -373,4 +374,19 @@ export interface LeagueOfficer {
   contactHint: string;
   mappedTopic?: import('@/data/inquiry-topics').InquiryTopic;
   order: number;
+}
+
+// ---------------------------------------------------------------------------
+// Announcements  (collection: announcements)
+// ---------------------------------------------------------------------------
+
+/** A league-wide announcement published by an admin or board member. */
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  publishedAt: string; // ISO datetime string
+  pinned?: boolean;
+  publishedBy?: string;
+  sport?: Sport;
 }

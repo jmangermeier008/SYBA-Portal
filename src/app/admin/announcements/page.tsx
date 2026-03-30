@@ -16,15 +16,7 @@ import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-
-interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  pinned: boolean;
-  publishedAt: string;
-  publishedBy: string;
-}
+import type { Announcement } from '@/types/scheduling';
 
 export default function AdminAnnouncementsPage() {
   const { isAdmin, isBoardMember, profile, loading: loadingUser } = useUser();
@@ -40,9 +32,9 @@ export default function AdminAnnouncementsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const announcementsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'));
+  }, [db, activeSport]);
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 
