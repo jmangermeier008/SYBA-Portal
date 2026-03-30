@@ -50,15 +50,17 @@ function LoginContent() {
   useEffect(() => {
     if (!loadingUser && user && profile) {
       const redirectTo = searchParams.get('redirect');
+      const sportParam = searchParams.get('sport');
+      const sportQuery = sportParam === 'baseball' || sportParam === 'football' ? `?sport=${sportParam}` : '';
       const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : null;
       if (destination) {
         router.push(destination);
       } else if (isAdmin || isBoardMember) {
-        router.push('/admin/dashboard');
+        router.push(`/admin/dashboard${sportQuery}`);
       } else if (isCoach) {
-        router.push('/coach/dashboard');
+        router.push(`/coach/dashboard${sportQuery}`);
       } else {
-        router.push('/parent/dashboard');
+        router.push(`/parent/dashboard${sportQuery}`);
       }
     }
   }, [user, profile, loadingUser, router, searchParams, isAdmin, isBoardMember, isCoach]);

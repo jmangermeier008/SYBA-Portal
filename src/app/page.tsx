@@ -274,7 +274,7 @@ export default function Home() {
           {/* Sign In / Register — visible only after sport selection */}
           <div className="mt-6 flex gap-3 justify-center">
             <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
-              <Link href="/login">Sign In</Link>
+              <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
             </Button>
             <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
               <Link href="/signup">Register Player</Link>
