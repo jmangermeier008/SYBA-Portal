@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import {
   collection,
   query,
@@ -105,6 +106,7 @@ function normalizeConcessionSlot(s: ConcessionSlot, userId: string): CalendarEve
 export default function ParentSchedulesPage() {
   const { user, profile } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
@@ -186,12 +188,13 @@ export default function ParentSchedulesPage() {
 
   // ── Concession slots ────────────────────────────────────────────────────────
   const concessionsQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !activeSport) return null;
     return query(
       collection(db, 'concessionSlots'),
+      where('sport', '==', activeSport),
       where('gameDate', '>=', todayISO),
     );
-  }, [db, todayISO]);
+  }, [db, activeSport, todayISO]);
 
   const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionsQuery);
 

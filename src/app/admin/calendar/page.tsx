@@ -3,7 +3,8 @@
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useMemoFirebase, useCollection, useDoc } from '@/firebase';
-import { collection, doc } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
+import { collection, doc, query, where } from 'firebase/firestore';
 import { CalendarDays } from 'lucide-react';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, Team } from '@/types/scheduling';
@@ -122,43 +123,44 @@ interface Division {
 
 export default function AdminCalendarPage() {
   const db = useFirestore();
+  const { activeSport } = useSport();
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: true });
 
   // ── Fetch all collections ────────────────────────────────────────────────────
   const gamesQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'games');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const practiceSlotsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'practiceSlots');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'practiceSlots'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const concessionSlotsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'concessionSlots');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const fieldsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'fields');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'fields'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const complexClosuresRef = useMemoFirebase(() => {
-    if (!db) return null;
-    return doc(db, 'settings', 'complexClosures');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return doc(db, 'settings', `complexClosures_${activeSport}`);
+  }, [db, activeSport]);
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'teams');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'seasons');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
 
   const { data: games, isLoading: loadingGames } = useCollection<Game>(gamesQuery);
   const { data: practiceSlots, isLoading: loadingPractice } = useCollection<PracticeSlot>(practiceSlotsQuery);

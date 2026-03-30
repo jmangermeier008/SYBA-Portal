@@ -9,38 +9,32 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, query, orderBy, doc, addDoc, deleteDoc, getDocs, writeBatch, where, Timestamp } from 'firebase/firestore';
 import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-
-interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  pinned: boolean;
-  publishedAt: string;
-  publishedBy: string;
-}
+import type { Announcement } from '@/types/scheduling';
 
 export default function AdminAnnouncementsPage() {
   const { isAdmin, isBoardMember, profile, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
 
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ title: '', body: '', pinned: false });
+  const [form, setForm] = useState({ title: '', body: '', pinned: false, isGlobal: false });
   const [saving, setSaving] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const announcementsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'announcements'), orderBy('publishedAt', 'desc'));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'));
+  }, [db, activeSport]);
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 
@@ -52,6 +46,8 @@ export default function AdminAnnouncementsPage() {
         title: form.title.trim(),
         body: form.body.trim(),
         pinned: form.pinned,
+        isGlobal: form.isGlobal,
+        ...(form.isGlobal ? {} : { sport: activeSport }),
         publishedAt: new Date().toISOString(),
         publishedBy: profile?.displayName || 'Admin',
       });
@@ -73,6 +69,8 @@ export default function AdminAnnouncementsPage() {
             relatedDocType: 'announcement',
             read: false,
             createdAt: Timestamp.now(),
+            isGlobal: form.isGlobal,
+            ...(form.isGlobal ? {} : { sport: activeSport }),
           });
         });
         await notifBatch.commit();
@@ -80,7 +78,7 @@ export default function AdminAnnouncementsPage() {
 
       toast({ title: 'Announcement Published' });
       setAddOpen(false);
-      setForm({ title: '', body: '', pinned: false });
+      setForm({ title: '', body: '', pinned: false, isGlobal: false });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -234,6 +232,19 @@ export default function AdminAnnouncementsPage() {
               <Label htmlFor="pinned" className="cursor-pointer">
                 Pin to top of announcements
               </Label>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="isGlobal"
+                checked={form.isGlobal}
+                onCheckedChange={(v) => setForm(f => ({ ...f, isGlobal: v }))}
+              />
+              <div>
+                <Label htmlFor="isGlobal" className="cursor-pointer">
+                  Association-Wide Alert
+                </Label>
+                <p className="text-xs text-muted-foreground">Show this notification in all sport workspaces (Baseball &amp; Football).</p>
+              </div>
             </div>
           </div>
           <DialogFooter>

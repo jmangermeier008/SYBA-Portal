@@ -127,7 +127,9 @@ service cloud.firestore {
 
     match /seasons/{seasonId} {
       allow get, list: if true; // public — home page shows registration banner
-      allow create, update, delete: if isBoardMember();
+      allow create: if isBoardMember() &&
+        request.resource.data.sport is string;
+      allow update, delete: if isBoardMember();
 
       match /divisions/{divisionId} {
         allow get, list: if isSignedIn();
@@ -150,12 +152,17 @@ service cloud.firestore {
 
     match /games/{gameId} {
       allow get, list: if true; // public — home page shows this week's schedule
-      allow create, update, delete: if isBoardMember();
+      allow create: if isBoardMember() &&
+        request.resource.data.sport is string;
+      allow update: if isBoardMember() &&
+        request.resource.data.sport is string;
+      allow delete: if isBoardMember();
     }
 
     match /teams/{teamId} {
       allow get, list: if isSignedIn();
-      allow create: if isBoardMember();
+      allow create: if isBoardMember() &&
+        request.resource.data.sport is string;
       allow update: if isBoardMember() || (resource != null && request.auth.uid == resource.data.coach_uid);
       allow delete: if isBoardMember();
 

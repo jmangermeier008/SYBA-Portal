@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 
+function sportPrefix(sport?: string): string {
+  if (sport === 'baseball') return '[SYBA Baseball] ';
+  if (sport === 'football') return '[SYFA Football] ';
+  return '';
+}
+
 async function getRecipientEmails(assignedToRole: string): Promise<string[]> {
   const db = getAdminFirestore();
   const snap = await db.collection('userProfiles')
@@ -17,7 +23,7 @@ async function getRecipientEmails(assignedToRole: string): Promise<string[]> {
 
 export async function POST(req: Request) {
   try {
-    const { senderName, topic, subject, message, assignedToRole, inquiryId } = await req.json();
+    const { senderName, topic, subject, message, assignedToRole, inquiryId, sport } = await req.json();
 
     const recipients = await getRecipientEmails(assignedToRole);
 
@@ -40,7 +46,7 @@ export async function POST(req: Request) {
       ? `${appUrl}/admin/inquiries?id=${inquiryId}`
       : `${appUrl}/admin/inquiries`;
 
-    const emailSubject = `[${topic}] New Inquiry: ${subject}`;
+    const emailSubject = `${sportPrefix(sport)}[${topic}] New Inquiry: ${subject}`;
     const emailBody = [
       `New inquiry received.`,
       ``,

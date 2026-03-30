@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import {
   collection, doc, query, orderBy, where, limit,
   Timestamp, writeBatch, runTransaction, deleteField, updateDoc,
@@ -118,6 +119,7 @@ const EMPTY_FORM = {
 export default function PracticeSlotsAdminPage() {
   const db = useFirestore();
   const { profile, isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);
@@ -150,14 +152,14 @@ export default function PracticeSlotsAdminPage() {
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const slotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'practiceSlots'), orderBy('date', 'asc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'practiceSlots'), where('sport', '==', activeSport), orderBy('date', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'teams'), orderBy('name', 'asc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport), orderBy('name', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const fieldsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -165,9 +167,9 @@ export default function PracticeSlotsAdminPage() {
   }, [db, isAdmin, isBoardMember]);
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport), where('status', '==', 'active'), limit(1));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const { data: slots, isLoading } = useCollection<PracticeSlot>(slotsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);

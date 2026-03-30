@@ -1,18 +1,23 @@
 import { NextResponse } from 'next/server';
 
+function sportPrefix(sport?: string): string {
+  if (sport === 'baseball') return '[SYBA Baseball] ';
+  if (sport === 'football') return '[SYFA Football] ';
+  return '';
+}
+
 export async function POST(req: Request) {
   try {
-    const { toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived } = await req.json();
+    const { toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, sport } = await req.json();
 
     if (!toEmail) {
       return NextResponse.json({ error: 'Missing toEmail' }, { status: 400 });
     }
 
+    const prefix = sportPrefix(sport);
     const subject = isWaitlisted
-      ? `Waitlist Confirmation — ${seasonName} ${divisionName}`
-      : feeWaived
-      ? `Registration Confirmed — ${seasonName} ${divisionName}`
-      : `Registration Confirmed — ${seasonName} ${divisionName}`;
+      ? `${prefix}Waitlist Confirmation — ${seasonName} ${divisionName}`
+      : `${prefix}Registration Confirmed — ${seasonName} ${divisionName}`;
 
     const body = isWaitlisted
       ? `Hi! You've been added to the waitlist for ${divisionName} in ${seasonName} for ${playerName}. We'll reach out when a spot opens up.`

@@ -5,8 +5,8 @@ import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { Toaster } from '@/components/ui/toaster';
 
 export const metadata: Metadata = {
-  title: 'Sharpsville Youth Baseball Association | SYBA',
-  description: 'Official management portal for Sharpsville Youth Baseball Association. Manage teams, players, and registrations.',
+  title: 'Sharpsville Youth Athletics Hub',
+  description: 'Official management portal for Sharpsville Youth Athletics. Manage baseball and football teams, players, and registrations.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,

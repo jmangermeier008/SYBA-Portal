@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import {
   collection, doc, query, where, orderBy, limit,
   runTransaction, Timestamp, deleteField,
@@ -51,6 +52,7 @@ function getFieldColorClass(fieldName: string, allFieldNames: string[]): string 
 export default function CoachPracticeSlotsPage() {
   const db = useFirestore();
   const { user, profile, isCoach, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   const [claimingId, setClaimingId] = useState<string | null>(null);
@@ -61,9 +63,9 @@ export default function CoachPracticeSlotsPage() {
 
   // Find the coach's team using the coachIds array (not legacy coach_uid)
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), limit(1));
-  }, [db, user?.uid]);
+    if (!db || !user || !activeSport) return null;
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), where('sport', '==', activeSport), limit(1));
+  }, [db, user?.uid, activeSport]);
 
   const { data: userTeams, isLoading: loadingTeam } = useCollection<Team>(teamsQuery);
   const activeTeam = userTeams?.[0];

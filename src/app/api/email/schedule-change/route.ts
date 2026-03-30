@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 
+function sportPrefix(sport?: string): string {
+  if (sport === 'baseball') return '[SYBA Baseball] ';
+  if (sport === 'football') return '[SYFA Football] ';
+  return '';
+}
+
 /**
  * POST /api/email/schedule-change
  *
@@ -16,24 +22,25 @@ import { getAdminFirestore } from '@/lib/firebase-admin';
  */
 export async function POST(req: Request) {
   try {
-    const { type, userIds, gameLabel, oldDateLabel, newDateLabel } = await req.json();
+    const { type, userIds, gameLabel, oldDateLabel, newDateLabel, sport } = await req.json();
 
     if (!type || !Array.isArray(userIds) || userIds.length === 0) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
     // Build subject and body based on notification type
+    const prefix = sportPrefix(sport);
     let subject = '';
     let body = '';
 
     if (type === 'shiftMoved') {
-      subject = `Your Concession Shift Has Been Rescheduled — ${gameLabel}`;
+      subject = `${prefix}Your Concession Shift Has Been Rescheduled — ${gameLabel}`;
       body = `Hi,\n\nYour concession shift for ${gameLabel} has been moved from ${oldDateLabel} to ${newDateLabel}.\n\nPlease log in to the SYBA Portal to view the updated details.\n\nThank you for volunteering!`;
     } else if (type === 'shiftCancelled') {
-      subject = `Concession Shift Cancelled — ${gameLabel}`;
+      subject = `${prefix}Concession Shift Cancelled — ${gameLabel}`;
       body = `Hi,\n\nThe concession shift for ${gameLabel} on ${oldDateLabel} has been cancelled because the game was cancelled.\n\nYour volunteer slot has been released. Check the SYBA Portal for other available shifts.\n\nThank you for your willingness to help!`;
     } else if (type === 'practiceSlotCancelled') {
-      subject = `Practice Slot Cancelled — ${oldDateLabel}`;
+      subject = `${prefix}Practice Slot Cancelled — ${oldDateLabel}`;
       body = `Hi,\n\nYour practice slot at ${gameLabel} on ${oldDateLabel} has been cancelled by the board.\n\nPlease log in to the SYBA Portal to view other available slots.\n\nThank you.`;
     } else {
       return NextResponse.json({ error: 'Unknown notification type' }, { status: 400 });

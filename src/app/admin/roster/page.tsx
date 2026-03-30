@@ -5,7 +5,8 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch, deleteDoc, query, where } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -73,6 +74,7 @@ export default function MasterRosterPage() {
   const db = useFirestore();
   const router = useRouter();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
@@ -111,19 +113,19 @@ export default function MasterRosterPage() {
 
   // Guarded queries
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'teams');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collectionGroup(db, 'enrollments');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collectionGroup(db, 'enrollments'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const playersQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;

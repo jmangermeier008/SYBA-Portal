@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
 import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, limit } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
@@ -20,7 +20,7 @@ import {
   ArrowRight, UserCheck,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, startOfDay, eachWeekOfInterval, addDays, isBefore, isAfter } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   parseGameScheduleCSV, validateGameRows, downloadGameTemplate,
@@ -49,6 +49,7 @@ interface Game {
   teamId?: string;
   teamName?: string;
   notes?: string;
+  scrimmageNote?: string;
   status?: GameStatus;
   homeScore?: number;
   awayScore?: number;
@@ -63,6 +64,19 @@ interface Season { id: string; name: string; status: string; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Returns all dates between startDate and endDate (inclusive) that fall on the given weekday (0=Sun). */
+function getDatesForWeekday(startDate: string, endDate: string, weekday: number): string[] {
+  if (!startDate || !endDate) return [];
+  const start = startOfDay(parseISO(startDate));
+  const end = startOfDay(parseISO(endDate));
+  if (isAfter(start, end)) return [];
+  const weeks = eachWeekOfInterval({ start, end }, { weekStartsOn: 0 });
+  return weeks
+    .map(weekStart => addDays(weekStart, weekday))
+    .filter(d => !isBefore(d, start) && !isAfter(d, end))
+    .map(d => format(d, 'yyyy-MM-dd'));
+}
+
 function formatTime(t: string) {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
@@ -74,7 +88,12 @@ const EMPTY_FORM = {
   type: 'game' as GameType,
   date: '', time: '', fieldId: '',
   divisionId: '',
-  homeTeamId: '', awayTeamId: '', teamId: '', notes: '',
+  homeTeamId: '', awayTeamId: '', teamId: '', notes: '', scrimmageNote: '',
+  // Recurring practice fields
+  isRecurring: false,
+  recurringWeekdays: [] as number[],
+  recurringStartDate: '',
+  recurringEndDate: '',
 };
 
 const EMPTY_SHIFT_FORM = {
@@ -91,7 +110,8 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 
 export default function AdminGamesPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const router = useRouter();
 
@@ -140,22 +160,33 @@ export default function AdminGamesPage() {
   const [importErrors, setImportErrors] = useState<ValidationError[]>([]);
   const [isImporting, setIsImporting] = useState(false);
 
+  // Recurring practice
+  const [recurringStep, setRecurringStep] = useState<'configure' | 'preview'>('configure');
+  const previewDates = useMemo(() => {
+    if (!form.isRecurring || form.recurringWeekdays.length === 0) return [];
+    const allDates: string[] = [];
+    for (const wd of form.recurringWeekdays) {
+      allDates.push(...getDatesForWeekday(form.recurringStartDate, form.recurringEndDate, wd));
+    }
+    return allDates.sort();
+  }, [form.isRecurring, form.recurringWeekdays, form.recurringStartDate, form.recurringEndDate]);
+
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const upcomingQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'games'), where('date', '>=', todayISO), orderBy('date', 'asc'), orderBy('time', 'asc'));
-  }, [db, isAdmin, isBoardMember, todayISO]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport), where('date', '>=', todayISO), orderBy('date', 'asc'), orderBy('time', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport, todayISO]);
 
   const pastQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || !showPast) return null;
-    return query(collection(db, 'games'), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
-  }, [db, isAdmin, isBoardMember, showPast, todayISO]);
+    if (!db || (!isAdmin && !isBoardMember) || !showPast || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
+  }, [db, isAdmin, isBoardMember, showPast, activeSport, todayISO]);
 
   const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || view !== 'calendar') return null;
-    return query(collection(db, 'games'), orderBy('date', 'asc'));
-  }, [db, isAdmin, isBoardMember, view]);
+    if (!db || (!isAdmin && !isBoardMember) || view !== 'calendar' || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport), orderBy('date', 'asc'));
+  }, [db, isAdmin, isBoardMember, view, activeSport]);
   const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
 
   const calendarEvents = useMemo((): CalendarEvent[] => {
@@ -170,7 +201,7 @@ export default function AdminGamesPage() {
         : g.teamName ? `${g.teamName} Practice` : 'Practice',
       status: g.status ?? 'scheduled',
       fieldName: g.fieldName,
-      notes: g.notes,
+      notes: g.scrimmageNote || g.notes,
       division: g.division,
       divisionId: g.divisionId,
       sourceType: 'global-game' as const,
@@ -179,9 +210,9 @@ export default function AdminGamesPage() {
   }, [allGames]);
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'teams'), orderBy('name', 'asc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport), orderBy('name', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const fieldsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -189,9 +220,9 @@ export default function AdminGamesPage() {
   }, [db, isAdmin, isBoardMember]);
 
   const activeSeasonQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport), where('status', '==', 'active'), limit(1));
+  }, [db, isAdmin, isBoardMember, activeSport]);
   const { data: activeSeasons } = useCollection<Season>(activeSeasonQuery);
   const activeSeason = activeSeasons?.[0] ?? null;
 
@@ -233,6 +264,8 @@ export default function AdminGamesPage() {
       fieldId: form.fieldId,
       fieldName: fieldMap[form.fieldId] ?? '',
       notes: form.notes,
+      scrimmageNote: form.scrimmageNote.trim() || null,
+      sport: activeSport,
       divisionId: form.divisionId || null,
       division: selectedDivision?.name ?? '',
     };
@@ -253,6 +286,7 @@ export default function AdminGamesPage() {
     setForm(EMPTY_FORM);
     setShiftForm(EMPTY_SHIFT_FORM);
     setEditingGame(null);
+    setRecurringStep('configure');
   };
 
   const gameLabel = (game: Game) =>
@@ -261,6 +295,58 @@ export default function AdminGamesPage() {
       : game.teamName ?? 'the game';
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
+
+  const handleAddBulk = async () => {
+    if (!db || !activeSeason) return;
+    if (previewDates.length === 0) {
+      toast({ title: 'No dates generated', description: 'Check your weekday and date range selections.', variant: 'destructive' });
+      return;
+    }
+    if (!form.time || !form.fieldId || !form.teamId) {
+      toast({ title: 'Missing fields', description: 'Time, field, and team are required.', variant: 'destructive' });
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const CHUNK = 499;
+      const recurrenceId = crypto.randomUUID();
+      const selectedDivision = (divisions ?? []).find(d => d.id === form.divisionId);
+      const baseFields = {
+        type: 'practice' as GameType,
+        time: form.time,
+        fieldId: form.fieldId,
+        fieldName: fieldMap[form.fieldId] ?? '',
+        teamId: form.teamId,
+        teamName: teamMap[form.teamId] ?? '',
+        notes: form.notes.trim() || null,
+        scrimmageNote: form.scrimmageNote.trim() || null,
+        divisionId: form.divisionId || null,
+        division: selectedDivision?.name ?? '',
+        sport: activeSport,
+        seasonId: activeSeason.id,
+        status: 'scheduled',
+        isRecurring: true,
+        recurrenceId,
+      };
+      for (let i = 0; i < previewDates.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const date of previewDates.slice(i, i + CHUNK)) {
+          batch.set(doc(collection(db, 'games')), {
+            ...baseFields,
+            date,
+            createdAt: Timestamp.now(),
+          });
+        }
+        await batch.commit();
+      }
+      toast({ title: `${previewDates.length} Practices Created`, description: `Recurring practices added across ${previewDates.length} dates.` });
+      closeDialog();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleOpenEdit = (game: Game) => {
     setEditingGame(game);
@@ -274,6 +360,11 @@ export default function AdminGamesPage() {
       awayTeamId: game.awayTeamId ?? '',
       teamId: game.teamId ?? '',
       notes: game.notes ?? '',
+      scrimmageNote: game.scrimmageNote ?? '',
+      isRecurring: false,
+      recurringWeekdays: [],
+      recurringStartDate: '',
+      recurringEndDate: '',
     });
     setShiftForm(EMPTY_SHIFT_FORM);
     setOpen(true);
@@ -702,16 +793,90 @@ export default function AdminGamesPage() {
                     </Select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label>Date</Label>
-                      <Input type="date" className="rounded-xl" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                  {/* Make Recurring toggle — only for new practices */}
+                  {form.type === 'practice' && !editingGame && (
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.isRecurring}
+                        onChange={e => {
+                          setForm(prev => ({ ...prev, isRecurring: e.target.checked }));
+                          setRecurringStep('configure');
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm font-medium">Make Recurring</span>
+                    </label>
+                  )}
+
+                  {form.isRecurring && !editingGame ? (
+                    /* ── Recurring configure / preview ── */
+                    recurringStep === 'configure' ? (
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label>Day(s) of Week</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => setForm(prev => ({
+                                  ...prev,
+                                  recurringWeekdays: prev.recurringWeekdays.includes(i)
+                                    ? prev.recurringWeekdays.filter(d => d !== i)
+                                    : [...prev.recurringWeekdays, i],
+                                }))}
+                                className={cn(
+                                  'px-3 py-1.5 rounded-full text-sm border transition-colors',
+                                  form.recurringWeekdays.includes(i)
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-background text-foreground border-border hover:border-primary'
+                                )}
+                              >
+                                {day}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label>Start Date</Label>
+                            <Input type="date" className="rounded-xl" value={form.recurringStartDate} onChange={e => setForm(prev => ({ ...prev, recurringStartDate: e.target.value }))} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>End Date</Label>
+                            <Input type="date" className="rounded-xl" value={form.recurringEndDate} onChange={e => setForm(prev => ({ ...prev, recurringEndDate: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Time</Label>
+                          <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                        </div>
+                      </div>
+                    ) : (
+                      /* Preview step */
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Preview — {previewDates.length} practice{previewDates.length !== 1 ? 's' : ''}</p>
+                        <div className="max-h-40 overflow-y-auto rounded-xl border p-2 space-y-1">
+                          {previewDates.map(d => (
+                            <p key={d} className="text-sm text-muted-foreground">{format(parseISO(d), 'EEE, MMM d, yyyy')} at {form.time ? format(new Date(`2000-01-01T${form.time}`), 'h:mm a') : '—'}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    /* Single date / time */
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Date</Label>
+                        <Input type="date" className="rounded-xl" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Time</Label>
+                        <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label>Time</Label>
-                      <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
-                    </div>
-                  </div>
+                  )}
 
                   <div className="space-y-1.5">
                     <Label>Field</Label>
@@ -790,6 +955,11 @@ export default function AdminGamesPage() {
                     <Input className="rounded-xl" placeholder="e.g. Rain makeup game" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                   </div>
 
+                  <div className="space-y-1.5">
+                    <Label>Scrimmage Note <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                    <Input className="rounded-xl" placeholder="e.g. Wee Wee Scrimmage follows at 6:30 PM" value={form.scrimmageNote} onChange={e => setForm({ ...form, scrimmageNote: e.target.value })} />
+                  </div>
+
                   {/* Concession shift — only when creating a game (not editing) */}
                   {!editingGame && form.type === 'game' && (
                     <div className="rounded-xl border p-3 space-y-3">
@@ -826,10 +996,29 @@ export default function AdminGamesPage() {
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={closeDialog}>Cancel</Button>
-                  <Button onClick={handleSave} disabled={isSaving}>
-                    {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {editingGame ? 'Save Changes' : 'Save'}
-                  </Button>
+                  {form.isRecurring && !editingGame ? (
+                    recurringStep === 'configure' ? (
+                      <Button
+                        onClick={() => setRecurringStep('preview')}
+                        disabled={form.recurringWeekdays.length === 0 || !form.recurringStartDate || !form.recurringEndDate || !form.time || previewDates.length === 0}
+                      >
+                        Preview Dates <ArrowRight className="ml-2 h-4 w-4" />
+                      </Button>
+                    ) : (
+                      <>
+                        <Button variant="outline" onClick={() => setRecurringStep('configure')}>Back</Button>
+                        <Button onClick={handleAddBulk} disabled={isSaving || previewDates.length === 0}>
+                          {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Create {previewDates.length} Practice{previewDates.length !== 1 ? 's' : ''}
+                        </Button>
+                      </>
+                    )
+                  ) : (
+                    <Button onClick={handleSave} disabled={isSaving}>
+                      {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {editingGame ? 'Save Changes' : 'Save'}
+                    </Button>
+                  )}
                 </DialogFooter>
               </DialogContent>
             </Dialog>

@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useUser, useAuth, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useAuth, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
+import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import { collection, query, orderBy, limit } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -257,7 +258,8 @@ function NavSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { profile, roles, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent } = useUser();
+  const { profile, roles } = useUser();
+  const { activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent } = useSport();
   const auth = useAuth();
   const db = useFirestore();
   const router = useRouter();
@@ -357,19 +359,23 @@ export function Sidebar() {
   }, [pathname]);
 
   // Unread in-app notifications badge (parents + coaches)
+  // Fetches recent unread notifications, then filters client-side by activeSport or isGlobal.
   const unreadNotifsQuery = useMemoFirebase(() => {
     if (!db || !profile || (!isParent && !isCoach)) return null;
     return query(
       collection(db, 'notifications'),
       where('userId', '==', profile.id),
       where('read', '==', false),
-      firestoreLimit(1)
+      firestoreLimit(50)
     );
   }, [db, profile?.id, isParent, isCoach]);
-  const { data: unreadNotifs } = useCollection<{ id: string }>(unreadNotifsQuery);
+  const { data: unreadNotifs } = useCollection<{ id: string; sport?: string; isGlobal?: boolean }>(unreadNotifsQuery);
   useEffect(() => {
-    setHasUnreadNotifs((unreadNotifs?.length ?? 0) > 0);
-  }, [unreadNotifs]);
+    const sportFiltered = (unreadNotifs ?? []).filter(
+      n => n.isGlobal || !n.sport || n.sport === activeSport
+    );
+    setHasUnreadNotifs(sportFiltered.length > 0);
+  }, [unreadNotifs, activeSport]);
 
   // Unread announcements badge (shared query for both parent and coach)
   const latestAnnouncementQuery = useMemoFirebase(() => {
@@ -429,7 +435,14 @@ export function Sidebar() {
     )}>
       <div className={cn("p-4 flex items-center", collapsed && !isMobile ? "justify-center" : "justify-between px-6")}>
         <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
-          <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={36} height={36} className="object-contain shrink-0" />
+          <Image
+            src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
+            alt="SYBA"
+            width={36}
+            height={36}
+            className="object-contain shrink-0"
+            onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
+          />
           {(!collapsed || isMobile) && (
             <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
           )}
@@ -521,7 +534,7 @@ export function Sidebar() {
             <NavSection
               label="Season Management"
               sectionIcon={CalendarDays}
-              items={adminSeasonItems}
+              items={adminSeasonItems.filter(item => activeSport !== 'football' || item.href !== '/admin/practice-slots')}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['Season Management']}
@@ -532,7 +545,7 @@ export function Sidebar() {
             <NavSection
               label="People & Teams"
               sectionIcon={Users}
-              items={adminPeopleItems}
+              items={adminPeopleItems.filter(item => activeSport !== 'football' || item.href !== '/admin/teams')}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['People & Teams']}
@@ -695,7 +708,14 @@ export function Sidebar() {
             )}
           </button>
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/contentrotator637479479383661633.png" alt="SYBA" width={30} height={30} className="object-contain" />
+            <Image
+              src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
+              alt="SYBA"
+              width={30}
+              height={30}
+              className="object-contain"
+              onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
+            />
             <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
           </Link>
           {activeContext && roleContexts.length > 1 && (

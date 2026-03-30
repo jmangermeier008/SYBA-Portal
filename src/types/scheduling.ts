@@ -18,6 +18,16 @@ export type UserRole =
   | 'Site Admin';
 
 // ---------------------------------------------------------------------------
+// Sports
+// ---------------------------------------------------------------------------
+
+/** The sports supported by the portal. */
+export type Sport = 'baseball' | 'football';
+
+/** Whether a game is played at the home or away venue. */
+export type LocationType = 'home' | 'away';
+
+// ---------------------------------------------------------------------------
 // Seasons
 // ---------------------------------------------------------------------------
 
@@ -34,6 +44,7 @@ export interface Season {
   createdBy: string;
   createdAt: string;
   volunteerSlotsRequired?: number; // min concession slots required per enrolled player
+  sport?: Sport;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +69,7 @@ export interface Field {
   availabilityEnd: string;   // HH:MM
   maintenanceClosures: MaintenanceClosure[];
   createdAt: string;
+  sport?: Sport;
 }
 
 /** A single date on which the entire sports complex is closed (weather, events, etc.). */
@@ -86,6 +98,7 @@ export interface Team {
   player_ids?: string[]; // Legacy field — kept for backward compatibility
   createdAt: string;
   practiceOptOut?: boolean; // When true, excluded from fairness rotation count
+  sport?: Sport;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +139,11 @@ export interface Game {
   // Umpire assignment + notification tracking:
   umpireName?: string;
   umpireNotified?: boolean;
+  sport?: Sport;
+  locationType?: LocationType;
+  scrimmageNote?: string; // Optional follow-on event note, e.g. "Wee Wee Scrimmage follows at 6:30 PM"
+  isRecurring?: boolean;   // True when created as part of a recurring series
+  recurrenceId?: string;   // Shared UUID across all games in the same recurring series
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;
@@ -163,10 +181,12 @@ export interface ConcessionSlot {
   cancelCutoffHours: number;
   description?: string;
   status: 'active' | 'cancelled';
+  locationType?: LocationType;
   // --- Legacy signup array ---
   // Existing signup records live here. New signups continue to use this array
   // via transaction. A future migration may move these to a claims subcollection.
   signups: ConcessionSignup[];
+  sport?: Sport;
   createdAt: string;
   updatedAt?: string;
 }
@@ -212,6 +232,7 @@ export interface PracticeSlot {
   pendingCoachName?: string;
   pendingRequestedAt?: string;
   pendingReason?: string; // Human-readable reason why approval is needed
+  sport?: Sport;
   createdBy: string;
   createdAt: string;
   updatedAt?: string;
@@ -250,6 +271,8 @@ export interface Notification {
   relatedDocType?: NotificationRelatedDocType;
   read: boolean;
   createdAt: string;
+  sport?: Sport;      // Set when the notification is sport-scoped
+  isGlobal?: boolean; // When true, shown in all sport modes (association-wide alerts)
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +290,9 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   role?: UserRole;    // Legacy single-role field (backward compat)
-  roles?: UserRole[]; // Current multi-role field
+  roles?: UserRole[]; // Current multi-role field (kept for Site Admin bypass)
+  // Sport-specific roles: e.g. { baseball: ['Board Member'], football: ['Coach'] }
+  sportRoles?: Record<string, UserRole[]>;
   phoneNumber?: string | null;
   shareContactInfo?: boolean;
   // Parents — drives the combined family calendar query:
@@ -275,6 +300,7 @@ export interface UserProfile {
   // Coaches — all teams they are assigned to:
   teamIds?: string[];
   notificationPrefs?: NotificationPrefs;
+  preferredSport?: Sport;
   createdAt: string;
 }
 
@@ -337,6 +363,7 @@ export interface CalendarEvent {
   // Umpire (visible to Admin/Board/Coach only — never passed to parent-facing views)
   umpireName?: string;
   umpireNotified?: boolean;
+  sport?: Sport;
 }
 
 export interface LeagueOfficer {
@@ -347,4 +374,19 @@ export interface LeagueOfficer {
   contactHint: string;
   mappedTopic?: import('@/data/inquiry-topics').InquiryTopic;
   order: number;
+}
+
+// ---------------------------------------------------------------------------
+// Announcements  (collection: announcements)
+// ---------------------------------------------------------------------------
+
+/** A league-wide announcement published by an admin or board member. */
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  publishedAt: string; // ISO datetime string
+  pinned?: boolean;
+  publishedBy?: string;
+  sport?: Sport;
 }

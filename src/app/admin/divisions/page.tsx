@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Layers, Loader2, Trash2, Pencil, Lock, Check, X, Users } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, addDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
+import { collection, doc, addDoc, deleteDoc, updateDoc, setDoc, query, where, Timestamp } from 'firebase/firestore';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -41,7 +42,8 @@ interface Season {
 
 export default function DivisionsAdminPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
@@ -56,9 +58,9 @@ export default function DivisionsAdminPage() {
   // ── Queries (all hooks before any early return) ──────────────────────────────
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !selectedSeasonId || (!isAdmin && !isBoardMember)) return null;
@@ -92,6 +94,21 @@ export default function DivisionsAdminPage() {
       });
       // Store the auto-generated id inside the document for easy reference
       await updateDoc(ref, { id: ref.id });
+
+      // Football: auto-create the Division-as-Team (no manual team management in football)
+      if (activeSport === 'football') {
+        const teamRef = doc(collection(db, 'teams'));
+        await setDoc(teamRef, {
+          id: teamRef.id,
+          name: formData.name.trim(),
+          seasonId: selectedSeasonId,
+          divisionId: ref.id,
+          coachIds: [],
+          sport: 'football',
+          createdAt: Timestamp.now(),
+        });
+      }
+
       toast({ title: 'Division Created', description: `${formData.name} has been added.` });
       setOpen(false);
       setFormData({ name: '', ageGroup: '', fee: '', capacity: '' });

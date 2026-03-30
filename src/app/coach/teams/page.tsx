@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Users, ChevronRight, Loader2, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, query, where } from 'firebase/firestore';
 
 interface Team {
@@ -21,11 +22,12 @@ interface Team {
 export default function CoachTeamsPage() {
   const { user } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
 
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid));
-  }, [db, user?.uid]);
+    if (!db || !user || !activeSport) return null;
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), where('sport', '==', activeSport));
+  }, [db, user?.uid, activeSport]);
 
   const { data: teams, isLoading } = useCollection<Team>(teamsQuery);
 

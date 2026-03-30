@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collectionGroup, collection } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
+import { collectionGroup, collection, query, where } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -61,14 +61,15 @@ function formatCents(cents: number) {
 
 export default function RegistrationDashboardPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const [selectedSeason, setSelectedSeason] = useState<string>('');
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -84,11 +85,16 @@ export default function RegistrationDashboardPage() {
   const { data: allEnrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: players } = useCollection<Player>(playersQuery);
 
+  // Build a set of season IDs that belong to the active sport (from the filtered seasons query)
+  const sportSeasonIds = useMemo(() => new Set((seasons ?? []).map((s: any) => s.id as string)), [seasons]);
+
   const enrollments = useMemo(() => {
     if (!allEnrollments) return [];
-    if (!selectedSeason || selectedSeason === 'all-seasons') return allEnrollments;
-    return allEnrollments.filter(e => e.seasonId === selectedSeason);
-  }, [allEnrollments, selectedSeason]);
+    // First restrict to seasons matching the active sport
+    const sportFiltered = allEnrollments.filter(e => sportSeasonIds.has(e.seasonId));
+    if (!selectedSeason || selectedSeason === 'all-seasons') return sportFiltered;
+    return sportFiltered.filter(e => e.seasonId === selectedSeason);
+  }, [allEnrollments, selectedSeason, sportSeasonIds]);
 
   // Aggregate stats
   const stats = useMemo(() => {

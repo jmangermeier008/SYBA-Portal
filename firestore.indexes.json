@@ -1,6 +1,80 @@
 {
   "indexes": [
     {
+      "collectionGroup": "announcements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "publishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fields",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fields",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "teams",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "seasons",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "seasons",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "games",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "games",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "time", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "games",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" },
+        { "fieldPath": "time", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "games",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -46,6 +120,40 @@
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "gameDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "concessionSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "gameDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "concessionSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "gameDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practiceSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practiceSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
       ]
     },
     {
@@ -167,6 +275,16 @@
     {
       "collectionGroup": "enrollments",
       "fieldPath": "seasonId",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "enrollments",
+      "fieldPath": "sport",
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
         { "order": "DESCENDING", "queryScope": "COLLECTION" },

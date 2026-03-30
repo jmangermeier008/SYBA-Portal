@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock, ChevronRight, Check } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
-import { collection, collectionGroup, doc, setDoc, query, orderBy } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
+import { collection, collectionGroup, doc, setDoc, query, orderBy, where } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
@@ -42,6 +43,7 @@ interface Enrollment {
 export default function TeamsAdminPage() {
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
@@ -58,14 +60,14 @@ export default function TeamsAdminPage() {
 
   // Guarded queries
   const teamsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'teams'), orderBy('name', 'asc'));
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport), orderBy('name', 'asc'));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const usersQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -144,6 +146,7 @@ export default function TeamsAdminPage() {
       divisionId: formData.divisionId,
       coachIds: formData.coachIds,
       player_ids: [],
+      sport: activeSport,
       createdAt: new Date().toISOString()
     };
 

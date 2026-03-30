@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, doc, addDoc, deleteDoc, getDocs, getDoc, query, where, collectionGroup } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -93,6 +94,7 @@ function complianceStatus(family: FamilyCompliance) {
 export default function ConcessionsAdminPage() {
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   // Manage Slots state
@@ -112,23 +114,23 @@ export default function ConcessionsAdminPage() {
   const [calMonth, setCalMonth] = useState<Date>(new Date());
 
   const slotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'concessionSlots');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const { data: slots, isLoading } = useCollection<ConcessionSlot>(slotsQuery);
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
 
   const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'games');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
+    return query(collection(db, 'games'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   interface GameDate { id: string; date: string; }
   const { data: allGames } = useCollection<GameDate>(allGamesQuery);
