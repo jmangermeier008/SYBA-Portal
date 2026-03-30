@@ -58,9 +58,9 @@ export default function DivisionsAdminPage() {
   // ── Queries (all hooks before any early return) ──────────────────────────────
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'seasons');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !selectedSeasonId || (!isAdmin && !isBoardMember)) return null;

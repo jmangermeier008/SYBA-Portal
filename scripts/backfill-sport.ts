@@ -106,6 +106,7 @@ async function main() {
   await backfillCollection('games', { sport: 'baseball', locationType: 'home' });
   await backfillCollection('practiceSlots', { sport: 'baseball' });
   await backfillCollection('concessionSlots', { sport: 'baseball', locationType: 'home' });
+  await backfillCollection('sponsors', { sport: 'baseball' });
   await backfillCollectionGroup('enrollments', { sport: 'baseball' });
 
   console.log('\nBackfill complete.');

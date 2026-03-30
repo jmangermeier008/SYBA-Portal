@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collectionGroup, collection, doc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collectionGroup, collection, doc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,7 @@ import {
   AlertCircle,
   Star,
 } from 'lucide-react';
+import { useSport } from '@/firebase/sport-context';
 import { useToast } from '@/hooks/use-toast';
 
 type SponsorTier = 'Gold' | 'Silver' | 'Bronze' | 'In-Kind';
@@ -87,6 +88,7 @@ const emptyForm = {
 export default function SponsorshipsPage() {
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);
@@ -98,14 +100,14 @@ export default function SponsorshipsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const sponsorsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collection(db, 'sponsors');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collection(db, 'sponsors'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collectionGroup(db, 'enrollments');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
+    return query(collectionGroup(db, 'enrollments'), where('sport', '==', activeSport));
+  }, [db, activeSport, isAdmin, isBoardMember]);
 
   const { data: sponsors, isLoading } = useCollection<Sponsor>(sponsorsQuery);
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
@@ -169,6 +171,7 @@ export default function SponsorshipsPage() {
       pledgedAmount: dollarsToCents(formData.pledgedDollars),
       receivedAmount: dollarsToCents(formData.receivedDollars),
       notes: formData.notes.trim(),
+      sport: activeSport,
       updatedAt: new Date().toISOString(),
     };
     try {
