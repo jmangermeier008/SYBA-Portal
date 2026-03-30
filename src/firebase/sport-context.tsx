@@ -52,15 +52,19 @@ export function SportProvider({ children }: { children: ReactNode }) {
   // would flash the redirect for users who DO have a sport stored.
   const [sportLoaded, setSportLoaded] = useState(false);
 
-  // Read sport from localStorage on mount — this is the sole source of truth for the active sport.
-  // Sport is set pre-login on the home page and locked for the session.
+  // Read sport from localStorage whenever the logged-in user changes (login/logout/switch).
+  // The empty-array version only ran on mount, so switching sports after logout required a manual
+  // refresh because the layout stays mounted across Next.js navigations.
   useEffect(() => {
     const stored = localStorage.getItem('syba_active_sport');
     if (stored === 'baseball' || stored === 'football') {
       setActiveSportState(stored);
+    } else {
+      setActiveSportState(null);
     }
     setSportLoaded(true);
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   // ── Sport-aware role derivation ───────────────────────────────────────────
   // Site Admin / Admin in legacy roles[] = cross-sport superuser bypass
