@@ -2,14 +2,15 @@
 
 import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
-import type { ComplexClosuresDocument, Game, LeagueOfficer } from '@/types/scheduling';
+import type { ComplexClosuresDocument, Game, LeagueOfficer, Sport } from '@/types/scheduling';
+import { SPORT_CONFIG } from '@/config/sports';
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_TITLES } from '@/data/officers';
 
@@ -61,6 +62,19 @@ export default function Home() {
   const router = useRouter();
   const db = useFirestore();
 
+  // Public sport selector — localStorage-only (no auth required)
+  const [publicSport, setPublicSportState] = useState<Sport | null>(null);
+  useEffect(() => {
+    const saved = localStorage.getItem('publicSport') as Sport | null;
+    if (saved === 'baseball' || saved === 'football') {
+      setPublicSportState(saved);
+    }
+  }, []);
+  function selectPublicSport(sport: Sport) {
+    setPublicSportState(sport);
+    localStorage.setItem('publicSport', sport);
+  }
+
   const todayISO = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -71,11 +85,11 @@ export default function Home() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }, []);
 
-  // Active season — registration banner
+  // Active season — registration banner (sport-specific, only when a sport is selected)
   const activeSeasonQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'seasons'), where('status', '==', 'active'), limit(1));
-  }, [db]);
+    if (!db || !publicSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', publicSport), where('status', '==', 'active'), limit(1));
+  }, [db, publicSport]);
   const { data: activeSeasons } = useCollection<ActiveSeason>(activeSeasonQuery);
   const activeSeason = activeSeasons?.[0] ?? null;
 
@@ -86,18 +100,19 @@ export default function Home() {
   }, [db]);
   const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(closuresRef);
 
-  // This week's games (top-level collection, games only, date range)
+  // This week's games — only runs after a sport is selected
   const gamesQuery = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !publicSport) return null;
     return query(
       collection(db, 'games'),
+      where('sport', '==', publicSport),
       where('date', '>=', todayISO),
       where('date', '<=', weekEndISO),
       orderBy('date', 'asc'),
       orderBy('time', 'asc'),
       limit(20)
     );
-  }, [db, todayISO, weekEndISO]);
+  }, [db, publicSport, todayISO, weekEndISO]);
   const { data: rawWeekGames } = useCollection<Game>(gamesQuery);
 
   // Announcements
@@ -201,7 +216,7 @@ export default function Home() {
       <div className="flex flex-col items-center text-center space-y-6 max-w-sm w-full">
         <Image
           src="/contentrotator637479479383661633.png"
-          alt="Sharpsville Youth Baseball Association"
+          alt="Sharpsville Youth Athletics Hub"
           width={120}
           height={120}
           className="object-contain"
@@ -209,9 +224,9 @@ export default function Home() {
         />
         <div className="space-y-1">
           <h1 className="text-2xl font-bold font-headline tracking-tight text-primary">
-            Sharpsville Youth Baseball Association
+            Sharpsville Youth Athletics Hub
           </h1>
-          <p className="text-muted-foreground text-sm">The online home for Sharpsville Youth Baseball</p>
+          <p className="text-muted-foreground text-sm">The online home for Sharpsville Youth Athletics</p>
         </div>
 
         <div className="flex gap-3 w-full justify-center">
@@ -233,28 +248,72 @@ export default function Home() {
           </a>
         </p>
 
-        {/* Complex closure alert */}
-        {todayClosure && (
-          <div className="w-full rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive font-medium text-center flex items-center justify-center gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            Complex closed today{todayClosure.reason ? ` — ${todayClosure.reason}` : ''}
-          </div>
-        )}
-
-        {/* Registration banner */}
-        {registrationBanner && (
-          <div className={`w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-center text-balance ${
-            registrationBanner.closed
-              ? 'bg-muted/20 border-muted/30 text-muted-foreground'
-              : 'bg-primary/10 border-primary/20 text-primary'
-          }`}>
-            {registrationBanner.text}
-          </div>
-        )}
       </div>
 
+      {/* ── Sport Selection Gate ── */}
+      {!publicSport ? (
+        <div className="mt-10 w-full max-w-lg text-center">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-4">
+            Pick Your Sport
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            {(Object.entries(SPORT_CONFIG) as [Sport, typeof SPORT_CONFIG[Sport]][]).map(([sport, cfg]) => (
+              <button
+                key={sport}
+                onClick={() => selectPublicSport(sport)}
+                className="flex flex-col items-center gap-3 p-8 rounded-2xl border-2 border-border bg-white/80 shadow-sm hover:border-primary hover:shadow-md transition-all"
+              >
+                <span className="text-5xl" role="img" aria-label={cfg.label}>{cfg.icon}</span>
+                <div>
+                  <p className="text-xl font-bold font-headline">{cfg.label}</p>
+                  <p className="text-sm text-muted-foreground">Youth {cfg.label} Association</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-6 flex items-center justify-center gap-2">
+          <span className="text-lg" role="img" aria-label={SPORT_CONFIG[publicSport].label}>
+            {SPORT_CONFIG[publicSport].icon}
+          </span>
+          <span className="text-sm font-semibold text-primary">{SPORT_CONFIG[publicSport].label}</span>
+          <button
+            onClick={() => {
+              setPublicSportState(null);
+              localStorage.removeItem('publicSport');
+            }}
+            className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
+          >
+            Change
+          </button>
+        </div>
+      )}
+
+      {/* ── Schedule & Content (visible only after sport selection) ── */}
+      {publicSport && <>
+
+      {/* Complex closure alert */}
+      {todayClosure && (
+        <div className="mt-6 w-full max-w-sm rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive font-medium text-center flex items-center justify-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          Complex closed today{todayClosure.reason ? ` — ${todayClosure.reason}` : ''}
+        </div>
+      )}
+
+      {/* Registration banner */}
+      {registrationBanner && (
+        <div className={`mt-4 w-full max-w-sm rounded-xl border px-4 py-2.5 text-sm font-medium text-center text-balance ${
+          registrationBanner.closed
+            ? 'bg-muted/20 border-muted/30 text-muted-foreground'
+            : 'bg-primary/10 border-primary/20 text-primary'
+        }`}>
+          {registrationBanner.text}
+        </div>
+      )}
+
       {/* ── This Week's Games ── */}
-      <div className="mt-12 w-full max-w-xl">
+      <div className="mt-10 w-full max-w-xl">
         <div className="flex items-center gap-2 mb-3">
           <Calendar className="h-4 w-4 text-muted-foreground" />
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
@@ -407,9 +466,11 @@ export default function Home() {
         </div>
       )}
 
+      </>}
+
       {/* ── Footer ── */}
       <footer className="mt-12 text-xs text-muted-foreground text-center space-y-1">
-        <p>© {new Date().getFullYear()} SYBA. All rights reserved. Sharpsville, PA.</p>
+        <p>© {new Date().getFullYear()} Sharpsville Youth Athletics. All rights reserved. Sharpsville, PA.</p>
         <p>
           General inquiries:{' '}
           <a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-primary hover:underline transition-colors">

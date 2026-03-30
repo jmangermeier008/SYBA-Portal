@@ -91,6 +91,40 @@
       ]
     },
     {
+      "collectionGroup": "concessionSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "gameDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "concessionSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "gameDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practiceSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "practiceSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "practiceSlots",
       "queryScope": "COLLECTION",
       "fields": [

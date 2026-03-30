@@ -86,7 +86,7 @@ export function SportProvider({ children }: { children: ReactNode }) {
         // Logged in but no sport selected — block portal with selection gate
         <div className="flex min-h-screen items-center justify-center bg-background p-6">
           <div className="w-full max-w-lg text-center">
-            <h1 className="text-3xl font-bold font-headline text-primary mb-2">Welcome to SYBA Portal</h1>
+            <h1 className="text-3xl font-bold font-headline text-primary mb-2">Sharpsville Youth Athletics Hub</h1>
             <p className="text-muted-foreground mb-8">Select your sport to continue.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
