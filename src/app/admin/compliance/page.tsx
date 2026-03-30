@@ -218,8 +218,7 @@ export default function AdminCompliancePage() {
             // H6: Normalize type matching
             const hasCA = uc.some(c => ['ChildAbuse', 'child_abuse', 'childabuse'].includes(c.type) && c.status === 'Approved');
             const hasCR = uc.some(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type) && c.status === 'Approved');
-            const hasFBI = uc.some(c => ['FBI', 'fbi'].includes(c.type) && c.status === 'Approved');
-            return hasCA && hasCR && hasFBI;
+            return hasCA && hasCR;
           }).length;
           const pendingVerification = allPlayers?.filter(p => p.birthCertificateUrl && !p.ageVerified).length ?? 0;
           const isReady = fullyCleared === users.length && users.length > 0;
@@ -293,7 +292,6 @@ export default function AdminCompliancePage() {
                         <TableHead className="pl-6">Volunteer</TableHead>
                         <TableHead className="text-center">Child Abuse</TableHead>
                         <TableHead className="text-center">Criminal</TableHead>
-                        <TableHead className="text-center">FBI</TableHead>
                         <TableHead className="text-center">Overall</TableHead>
                         <TableHead className="pr-6 text-right">Actions</TableHead>
                       </TableRow>
@@ -304,8 +302,7 @@ export default function AdminCompliancePage() {
                         // H6: Normalize type matching to handle both camelCase and snake_case stored values
                         const ca = userClearances.find(c => ['ChildAbuse', 'child_abuse', 'childabuse'].includes(c.type));
                         const cr = userClearances.find(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type));
-                        const fbi = userClearances.find(c => ['FBI', 'fbi'].includes(c.type));
-                        const isFullyApproved = [ca, cr, fbi].every(c => c?.status === 'Approved');
+                        const isFullyApproved = [ca, cr].every(c => c?.status === 'Approved');
                         return (
                           <TableRow key={user.id}>
                             <TableCell className="pl-6 py-4">
@@ -314,7 +311,6 @@ export default function AdminCompliancePage() {
                             </TableCell>
                             <TableCell className="text-center"><div className="flex justify-center">{getStatusIcon(ca?.status)}</div></TableCell>
                             <TableCell className="text-center"><div className="flex justify-center">{getStatusIcon(cr?.status)}</div></TableCell>
-                            <TableCell className="text-center"><div className="flex justify-center">{getStatusIcon(fbi?.status)}</div></TableCell>
                             <TableCell className="text-center">
                               <Badge variant={isFullyApproved ? "default" : "outline"} className={isFullyApproved ? "bg-green-100 text-green-700 hover:bg-green-100 border-none" : ""}>
                                 {isFullyApproved ? "CLEARED" : "INCOMPLETE"}
@@ -333,7 +329,7 @@ export default function AdminCompliancePage() {
                                     </DialogHeader>
                                     <ScrollArea className="flex-1 p-6">
                                       <div className="space-y-6">
-                                        {[ca, cr, fbi].filter(Boolean).map((c) => (
+                                        {[ca, cr].filter(Boolean).map((c) => (
                                           <Card key={c.id} className="border bg-secondary/10">
                                             <CardContent className="p-4 space-y-4">
                                               <div className="flex items-center justify-between">

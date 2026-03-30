@@ -349,7 +349,7 @@ export default function AdminDashboard({
 
   const { clearedCoachCount, totalCoachCount, coachesWithIssues } = useMemo(() => {
     if (!coaches || !allClearances) return { clearedCoachCount: 0, totalCoachCount: 0, coachesWithIssues: false };
-    const REQUIRED = ['child_abuse', 'criminal', 'fbi'];
+    const REQUIRED = ['child_abuse', 'criminal'];
     const clearancesByCoach: Record<string, Record<string, string>> = {};
 
     allClearances.forEach((c) => {

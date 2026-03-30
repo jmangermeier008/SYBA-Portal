@@ -19,7 +19,6 @@ import { cn } from '@/lib/utils';
 const CLEARANCE_TYPES = [
   { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance', description: 'Mandatory state background check.' },
   { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check', description: 'State police criminal history report.' },
-  { id: 'FBI', label: 'FBI Fingerprint or Disclosure Statement', description: 'Federal background check for long-term residents.' },
 ];
 
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
