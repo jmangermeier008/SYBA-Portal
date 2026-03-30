@@ -15,7 +15,7 @@ import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_TITLES } from '@/data/officers';
 
-const CONTACT_EMAIL = 'info@syba.blue';
+const HUB_contactEmail = 'info@syba.blue';
 
 // Add sponsor image files to public/sponsors/ — images with load errors are auto-hidden.
 const SPONSOR_IMAGES = [
@@ -115,11 +115,14 @@ export default function Home() {
   }, [db, publicSport]);
   const { data: rawAnnouncements } = useCollection<Announcement>(announcementsQuery);
 
-  // Officers (league leadership grid)
+  // Derived: sport-specific contact email (falls back to hub address when no sport selected)
+  const contactEmail = publicSport ? SPORT_CONFIG[publicSport].contactEmail : HUB_contactEmail;
+
+  // Officers (league leadership grid) — filtered by selected sport; hidden when no sport selected
   const officersQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'officers'), orderBy('order'));
-  }, [db]);
+    if (!db || !publicSport) return null;
+    return query(collection(db, 'officers'), where('sport', '==', publicSport), orderBy('order'));
+  }, [db, publicSport]);
   const { data: officers } = useCollection<LeagueOfficer>(officersQuery);
 
   // Derived: registration banner
@@ -285,8 +288,8 @@ export default function Home() {
             Have a question?{' '}
             <Link href="/contact" className="text-primary hover:underline font-medium">Contact us</Link>
             {' '}or email{' '}
-            <a href={`mailto:${CONTACT_EMAIL}`} className="text-primary hover:underline font-medium">
-              {CONTACT_EMAIL}
+            <a href={`mailto:${contactEmail}`} className="text-primary hover:underline font-medium">
+              {contactEmail}
             </a>
           </p>
         </>
@@ -475,8 +478,8 @@ export default function Home() {
         <p>© {new Date().getFullYear()} Sharpsville Youth Athletics. All rights reserved. Sharpsville, PA.</p>
         <p>
           General inquiries:{' '}
-          <a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-primary hover:underline transition-colors">
-            {CONTACT_EMAIL}
+          <a href={`mailto:${contactEmail}`} className="hover:text-primary hover:underline transition-colors">
+            {contactEmail}
           </a>
         </p>
       </footer>

@@ -434,17 +434,19 @@ export function Sidebar() {
       collapsed && !isMobile ? "w-16" : "w-64"
     )}>
       <div className={cn("p-4 flex items-center", collapsed && !isMobile ? "justify-center" : "justify-between px-6")}>
-        <Link href="/" className="flex items-center gap-2" onClick={closeMenu}>
+        <Link href="/" className="flex flex-col items-center gap-1" onClick={closeMenu}>
           <Image
             src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
-            alt="SYBA"
+            alt={activeSport ? SPORT_CONFIG[activeSport].acronym : 'Hub'}
             width={36}
             height={36}
             className="object-contain shrink-0"
             onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
           />
-          {(!collapsed || isMobile) && (
-            <span className="text-xl font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+          {(!collapsed || isMobile) && activeSport && (
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              {SPORT_CONFIG[activeSport].acronym}
+            </span>
           )}
         </Link>
         {isMobile && (
@@ -707,16 +709,20 @@ export function Sidebar() {
               <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
             )}
           </button>
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/" className="flex flex-col items-center gap-0.5">
             <Image
               src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
-              alt="SYBA"
+              alt={activeSport ? SPORT_CONFIG[activeSport].acronym : 'Hub'}
               width={30}
               height={30}
               className="object-contain"
               onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
             />
-            <span className="text-lg font-bold font-headline text-primary tracking-tight">SYBA Portal</span>
+            {activeSport && (
+              <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                {SPORT_CONFIG[activeSport].acronym}
+              </span>
+            )}
           </Link>
           {activeContext && roleContexts.length > 1 && (
             <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium shrink-0">

@@ -1,11 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
-
-function sportPrefix(sport?: string): string {
-  if (sport === 'baseball') return '[SYBA Baseball] ';
-  if (sport === 'football') return '[SYFA Football] ';
-  return '';
-}
+import { SPORT_CONFIG } from '@/config/sports';
+import type { Sport } from '@/types/scheduling';
 
 async function getRecipientEmails(assignedToRole: string): Promise<string[]> {
   const db = getAdminFirestore();
@@ -46,7 +42,12 @@ export async function POST(req: Request) {
       ? `${appUrl}/admin/inquiries?id=${inquiryId}`
       : `${appUrl}/admin/inquiries`;
 
-    const emailSubject = `${sportPrefix(sport)}[${topic}] New Inquiry: ${subject}`;
+    const sportConfig = sport === 'baseball' || sport === 'football'
+      ? SPORT_CONFIG[sport as Sport]
+      : null;
+    const subjectPrefix = sportConfig ? `[${sportConfig.acronym} ${sportConfig.label}] ` : '';
+    const replyTo = sportConfig?.contactEmail;
+    const emailSubject = `${subjectPrefix}[${topic}] New Inquiry: ${subject}`;
     const emailBody = [
       `New inquiry received.`,
       ``,
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <notifications@syba.blue>',
         to: recipients,
+        ...(replyTo ? { reply_to: replyTo } : {}),
         subject: emailSubject,
         text: emailBody,
       }),
