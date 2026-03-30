@@ -31,6 +31,8 @@ import {
   CloudRain,
   Calendar as CalendarIcon,
   UserCheck,
+  AlertTriangle,
+  SlidersHorizontal,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -143,6 +145,18 @@ function groupByDate(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
   return map;
 }
 
+/** Returns true if any two events on the same day have overlapping start/end times */
+function hasTimeConflict(events: CalendarEvent[]): boolean {
+  const timed = events.filter(e => e.startTime && e.endTime && e.eventType !== 'concession');
+  for (let i = 0; i < timed.length; i++) {
+    for (let j = i + 1; j < timed.length; j++) {
+      const a = timed[i], b = timed[j];
+      if (a.startTime! < b.endTime! && a.endTime! > b.startTime!) return true;
+    }
+  }
+  return false;
+}
+
 function getMonthGridDays(focusDate: Date): Date[] {
   const monthStart = startOfMonth(focusDate);
   const monthEnd = endOfMonth(focusDate);
@@ -186,6 +200,8 @@ export interface LeagueCalendarProps {
   showUmpire?: boolean;
   // Override initial view (default: 'month')
   defaultView?: 'month' | 'week' | 'day';
+  // Parent "My Kids Only" filter — pass the parent's enrolled players' teamIds to enable
+  myTeamIds?: string[];
 }
 
 // ─── Event Popover Content ─────────────────────────────────────────────────────
@@ -202,6 +218,9 @@ function EventPopoverContent({
 }: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
+  const { activeSport } = useSport();
+  const officialLabel = activeSport === 'football' ? 'Referee' : 'Umpire';
+
   const typeLabel =
     event.eventType === 'game'
       ? 'League Game'
@@ -273,8 +292,8 @@ function EventPopoverContent({
         {showUmpire && event.umpireName && event.eventType === 'game' && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <UserCheck className="h-3.5 w-3.5 shrink-0" />
-            <span>Umpire: {event.umpireName}</span>
-            {event.umpireNotified === false && event.status === 'cancelled' && (
+            <span>{officialLabel}: {event.umpireName}</span>
+            {event.umpireNotified === false && event.status !== 'cancelled' && (
               <span className="inline-flex items-center rounded-full bg-orange-100 border border-orange-300 text-orange-700 text-[10px] font-semibold px-1.5 py-0.5">
                 ⚠ Not Notified
               </span>
@@ -511,8 +530,7 @@ function MonthGrid({
   showUmpire?: LeagueCalendarProps['showUmpire'];
 }) {
   const days = getMonthGridDays(focusDate);
-  const MAX_PILLS = 3;
-  const MAX_DOTS = 5;
+  const MAX_PILLS = isMobile ? 2 : 3;
 
   return (
     <div className="border rounded-xl overflow-hidden">
@@ -534,21 +552,20 @@ function MonthGrid({
           const overflow = dayEvents.length - MAX_PILLS;
           const inMonth = isSameMonth(day, focusDate);
           const today = isToday(day);
-
-          const dotEvents = dayEvents.slice(0, MAX_DOTS);
+          const hasConflict = dayEvents.length > 1 && hasTimeConflict(dayEvents);
 
           return (
             <div
               key={idx}
               className={cn(
-                'min-h-[70px] sm:min-h-[90px] p-1 border-b border-r flex flex-col gap-0.5',
+                'min-h-[90px] p-1 border-b border-r flex flex-col gap-0.5',
                 !inMonth && 'bg-secondary/20',
                 idx % 7 === 6 && 'border-r-0',
                 Math.floor(idx / 7) === Math.floor((days.length - 1) / 7) && 'border-b-0'
               )}
             >
-              {/* Day number */}
-              <div className={cn('flex mb-0.5', isMobile ? 'justify-center' : 'justify-end')}>
+              {/* Day number + optional conflict badge */}
+              <div className={cn('flex items-center mb-0.5', isMobile ? 'justify-center' : 'justify-end')}>
                 <span
                   className={cn(
                     'text-xs w-6 h-6 flex items-center justify-center rounded-full font-medium',
@@ -561,58 +578,34 @@ function MonthGrid({
                 >
                   {format(day, 'd')}
                 </span>
+                {hasConflict && (
+                  <span title="Schedule conflict — overlapping event times">
+                    <AlertTriangle className="h-3 w-3 text-amber-500 ml-0.5 shrink-0" />
+                  </span>
+                )}
               </div>
 
-              {isMobile ? (
-                /* Mobile: colored dots, tap each to see event details */
-                <div className="flex flex-wrap justify-center gap-0.5">
-                  {dotEvents.map(e => (
-                    <EventDot
-                      key={e.id}
-                      event={e}
-                      divisionColors={divisionColors}
-                      onRsvp={onRsvp}
-                      onWeatherCancel={onWeatherCancel}
-                      onConcessionSignup={onConcessionSignup}
-                      onConcessionCancel={onConcessionCancel}
-                      onViewRecord={onViewRecord}
-                      showUmpire={showUmpire}
-                    />
-                  ))}
-                  {dayEvents.length > MAX_DOTS && (
-                    <button
-                      onClick={() => onDayClick(day)}
-                      className="text-[11px] text-primary font-bold leading-none p-2 -m-1 touch-manipulation"
-                    >
-                      +{dayEvents.length - MAX_DOTS}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                /* Desktop: full text pills */
-                <>
-                  {visibleEvents.map(e => (
-                    <EventPill
-                      key={e.id}
-                      event={e}
-                      divisionColors={divisionColors}
-                      onRsvp={onRsvp}
-                      onWeatherCancel={onWeatherCancel}
-                      onConcessionSignup={onConcessionSignup}
-                      onConcessionCancel={onConcessionCancel}
-                      onViewRecord={onViewRecord}
-                      showUmpire={showUmpire}
-                    />
-                  ))}
-                  {overflow > 0 && (
-                    <button
-                      onClick={() => onDayClick(day)}
-                      className="text-[10px] text-primary hover:underline font-medium text-left px-1"
-                    >
-                      +{overflow} more
-                    </button>
-                  )}
-                </>
+              {/* Event pills — same on mobile and desktop (compact truncated pills) */}
+              {visibleEvents.map(e => (
+                <EventPill
+                  key={e.id}
+                  event={e}
+                  divisionColors={divisionColors}
+                  onRsvp={onRsvp}
+                  onWeatherCancel={onWeatherCancel}
+                  onConcessionSignup={onConcessionSignup}
+                  onConcessionCancel={onConcessionCancel}
+                  onViewRecord={onViewRecord}
+                  showUmpire={showUmpire}
+                />
+              ))}
+              {overflow > 0 && (
+                <button
+                  onClick={() => onDayClick(day)}
+                  className="text-[10px] text-primary hover:underline font-medium text-left px-1 touch-manipulation"
+                >
+                  +{overflow} more
+                </button>
               )}
             </div>
           );
@@ -839,6 +832,7 @@ export function LeagueCalendar({
   onViewRecord,
   showUmpire,
   defaultView,
+  myTeamIds,
 }: LeagueCalendarProps) {
   const isMobile = useIsMobile();
   const { activeSport } = useSport();
@@ -847,12 +841,17 @@ export function LeagueCalendar({
   // On mobile, default to day view unless the user has explicitly chosen (or caller passed defaultView)
   const effectiveView = !hasUserSetView && isMobile ? 'day' : view;
   const [focusDate, setFocusDate] = useState<Date>(new Date());
+  const [showMyKidsOnly, setShowMyKidsOnly] = useState(false);
 
   // Apply filters — includes a sport safety net to prevent cross-sport data bleed
   const filteredEvents = useMemo(() => {
     return events.filter(e => {
       // Safety net: drop events tagged with a different sport than the active one
       if (activeSport && e.sport && e.sport !== activeSport) return false;
+      // "My Kids Only" — only show events belonging to the parent's children's teams
+      if (showMyKidsOnly && myTeamIds && myTeamIds.length > 0) {
+        if (e.teamId && !myTeamIds.includes(e.teamId)) return false;
+      }
       if (e.eventType === 'game') {
         if (!filters.games) return false;
         if (filters.divisions && filters.divisions.length > 0) {
@@ -864,7 +863,7 @@ export function LeagueCalendar({
       if (e.eventType === 'concession') return filters.concessions;
       return true;
     });
-  }, [events, filters, activeSport]);
+  }, [events, filters, activeSport, showMyKidsOnly, myTeamIds]);
 
   const eventsByDate = useMemo(() => groupByDate(filteredEvents), [filteredEvents]);
 
@@ -980,30 +979,92 @@ export function LeagueCalendar({
           </div>
         ))}
 
-        {/* Division filters (optional — only when availableDivisions provided) */}
+        {/* "My Kids Only" toggle — parent view only, when myTeamIds provided */}
+        {myTeamIds && myTeamIds.length > 0 && (
+          <>
+            <div className="h-4 w-px bg-border mx-1" />
+            <button
+              onClick={() => setShowMyKidsOnly(v => !v)}
+              className={cn(
+                'flex items-center gap-1.5 text-sm font-medium rounded-full px-3 py-1 border transition-colors',
+                showMyKidsOnly
+                  ? 'bg-primary text-white border-primary'
+                  : 'text-muted-foreground border-border hover:border-primary/50'
+              )}
+            >
+              <Users className="h-3.5 w-3.5" />
+              My Family
+            </button>
+          </>
+        )}
+
+        {/* Division filters — inline on desktop, popover on mobile */}
         {availableDivisions && availableDivisions.length > 0 && (
           <>
             <div className="h-4 w-px bg-border mx-1" />
-            {availableDivisions.map(div => {
-              const isChecked = !filters.divisions || filters.divisions.length === 0 || filters.divisions.includes(div.id);
-              return (
-                <div key={div.id} className="flex items-center gap-1.5">
-                  <Checkbox
-                    id={`div-filter-${div.id}`}
-                    checked={isChecked}
-                    onCheckedChange={(v) => {
-                      const allIds = availableDivisions.map(d => d.id);
-                      const current = filters.divisions && filters.divisions.length > 0 ? filters.divisions : allIds;
-                      const next = v ? [...current, div.id] : current.filter(id => id !== div.id);
-                      onDivisionFilterChange?.(next);
-                    }}
-                  />
-                  <Label htmlFor={`div-filter-${div.id}`} className="text-sm cursor-pointer">
-                    {div.name}
-                  </Label>
-                </div>
-              );
-            })}
+            {isMobile ? (
+              /* Mobile: collapse division filters into a popover */
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs rounded-full">
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    Divisions
+                    {filters.divisions && filters.divisions.length > 0 && filters.divisions.length < availableDivisions.length && (
+                      <span className="ml-1 bg-primary text-white text-[10px] rounded-full px-1.5 py-0.5 font-bold">
+                        {filters.divisions.length}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-3" align="start">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Filter by Division</p>
+                  <div className="space-y-1.5">
+                    {availableDivisions.map(div => {
+                      const isChecked = !filters.divisions || filters.divisions.length === 0 || filters.divisions.includes(div.id);
+                      return (
+                        <div key={div.id} className="flex items-center gap-2">
+                          <Checkbox
+                            id={`div-filter-mobile-${div.id}`}
+                            checked={isChecked}
+                            onCheckedChange={(v) => {
+                              const allIds = availableDivisions.map(d => d.id);
+                              const current = filters.divisions && filters.divisions.length > 0 ? filters.divisions : allIds;
+                              const next = v ? [...current, div.id] : current.filter(id => id !== div.id);
+                              onDivisionFilterChange?.(next);
+                            }}
+                          />
+                          <Label htmlFor={`div-filter-mobile-${div.id}`} className="text-sm cursor-pointer">
+                            {div.name}
+                          </Label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : (
+              /* Desktop: inline checkboxes */
+              availableDivisions.map(div => {
+                const isChecked = !filters.divisions || filters.divisions.length === 0 || filters.divisions.includes(div.id);
+                return (
+                  <div key={div.id} className="flex items-center gap-1.5">
+                    <Checkbox
+                      id={`div-filter-${div.id}`}
+                      checked={isChecked}
+                      onCheckedChange={(v) => {
+                        const allIds = availableDivisions.map(d => d.id);
+                        const current = filters.divisions && filters.divisions.length > 0 ? filters.divisions : allIds;
+                        const next = v ? [...current, div.id] : current.filter(id => id !== div.id);
+                        onDivisionFilterChange?.(next);
+                      }}
+                    />
+                    <Label htmlFor={`div-filter-${div.id}`} className="text-sm cursor-pointer">
+                      {div.name}
+                    </Label>
+                  </div>
+                );
+              })
+            )}
           </>
         )}
 

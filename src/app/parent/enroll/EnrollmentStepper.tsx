@@ -451,7 +451,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 )}
               </div>
 
-              {isDuplicate && (
+              {checkingDuplicate && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-secondary/40 border border-border text-muted-foreground text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Checking for existing enrollment…
+                </div>
+              )}
+
+              {isDuplicate && !checkingDuplicate && (
                 <div className="flex items-center gap-2 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
                   This player is already registered for this season.
                 </div>
@@ -627,7 +634,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
         <CardFooter className="flex gap-3 justify-between sticky bottom-0 z-10 bg-card border-t shadow-sm rounded-b-xl">
           {state.step > 1 ? (
-            <Button type="button" variant="outline" className="rounded-xl" onClick={handleBack} disabled={submitting}>
+            <Button type="button" variant="outline" className="rounded-xl min-h-[44px] px-5" onClick={handleBack} disabled={submitting}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>
           ) : (
@@ -637,7 +644,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           {state.step < 3 ? (
             <Button
               type="button"
-              className="rounded-xl"
+              className="rounded-xl min-h-[44px] px-5"
               onClick={handleNext}
               disabled={
                 checkingDuplicate ||

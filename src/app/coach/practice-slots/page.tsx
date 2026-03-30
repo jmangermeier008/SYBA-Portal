@@ -434,6 +434,7 @@ export default function CoachPracticeSlotsPage() {
                                   fieldColorClass={getFieldColorClass(slot.fieldName, allFieldNames)}
                                   actionLabel="Request Slot"
                                   actionLoading={claimingId === slot.id}
+                                  actionDisabled={claimingId !== null && claimingId !== slot.id}
                                   onAction={() => handleClaim(slot)}
                                 />
                               ))}
@@ -462,6 +463,7 @@ function SlotCard({
   fieldColorClass,
   actionLabel,
   actionLoading,
+  actionDisabled,
   onAction,
 }: {
   slot: PracticeSlot;
@@ -469,6 +471,7 @@ function SlotCard({
   fieldColorClass?: string;
   actionLabel?: string;
   actionLoading?: boolean;
+  actionDisabled?: boolean;
   onAction?: () => void;
 }) {
   const colors = {
@@ -528,8 +531,10 @@ function SlotCard({
             )}
             {slot.notes && <span className="text-xs text-muted-foreground italic">{slot.notes}</span>}
           </div>
-          {variant === 'pending' && slot.pendingReason && (
-            <p className="text-xs text-amber-700 mt-1">{slot.pendingReason}</p>
+          {variant === 'pending' && (
+            <p className="text-xs text-amber-700 mt-1">
+              {slot.pendingReason || 'Pending board review.'} You'll be notified within 24–48 hours.
+            </p>
           )}
         </div>
       </div>
@@ -540,7 +545,7 @@ function SlotCard({
           variant={variant === 'available' ? 'default' : 'outline'}
           className="rounded-xl shrink-0"
           onClick={onAction}
-          disabled={actionLoading}
+          disabled={actionLoading || actionDisabled}
         >
           {actionLoading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
           {actionLabel}

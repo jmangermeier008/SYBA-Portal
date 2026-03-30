@@ -14,11 +14,18 @@ export const OFFICER_TITLES = [
   'Competition Committee Chair',
   'Finance Committee Chair',
   'Equipment Coordinator',
+  // Baseball-specific
   'Umpire Coordinator',
   'Tee Ball Coordinator',
   'Coach Pitch Coordinator',
   'Kid Pitch Coordinator',
   'Senior Division Coordinator',
+  // Football-specific
+  'Referee Coordinator',
+  '8U Coordinator',
+  'Flag Division Coordinator',
+  'Tackle Division Coordinator',
+  // Shared
   'At-Large Board Member',
 ] as const;
 
@@ -27,6 +34,8 @@ export type OfficerTitle = typeof OFFICER_TITLES[number];
 export interface OfficerEntry {
   title: OfficerTitle;
   name: string | null;
+  /** Which sport this title applies to. Omit for shared/executive roles. */
+  sport?: 'baseball' | 'football';
 }
 
 export const OFFICERS: OfficerEntry[] = [
@@ -36,17 +45,44 @@ export const OFFICERS: OfficerEntry[] = [
   { title: 'Secretary', name: 'Russ Adkins' },
 ];
 
-export const COORDINATORS: OfficerEntry[] = [
+/** Shared coordinators that apply to both sports */
+const SHARED_COORDINATORS: OfficerEntry[] = [
   { title: 'Building/Grounds Committee Chair', name: null },
   { title: 'Competition Committee Chair', name: null },
   { title: 'Finance Committee Chair', name: null },
   { title: 'Equipment Coordinator', name: null },
-  { title: 'Umpire Coordinator', name: null },
-  { title: 'Tee Ball Coordinator', name: null },
-  { title: 'Coach Pitch Coordinator', name: null },
-  { title: 'Kid Pitch Coordinator', name: null },
-  { title: 'Senior Division Coordinator', name: null },
 ];
+
+/** Baseball-specific coordinators */
+export const BASEBALL_COORDINATORS: OfficerEntry[] = [
+  ...SHARED_COORDINATORS,
+  { title: 'Umpire Coordinator', name: null, sport: 'baseball' },
+  { title: 'Tee Ball Coordinator', name: null, sport: 'baseball' },
+  { title: 'Coach Pitch Coordinator', name: null, sport: 'baseball' },
+  { title: 'Kid Pitch Coordinator', name: null, sport: 'baseball' },
+  { title: 'Senior Division Coordinator', name: null, sport: 'baseball' },
+];
+
+/** Football-specific coordinators */
+export const FOOTBALL_COORDINATORS: OfficerEntry[] = [
+  ...SHARED_COORDINATORS,
+  { title: 'Referee Coordinator', name: null, sport: 'football' },
+  { title: '8U Coordinator', name: null, sport: 'football' },
+  { title: 'Flag Division Coordinator', name: null, sport: 'football' },
+  { title: 'Tackle Division Coordinator', name: null, sport: 'football' },
+];
+
+/**
+ * Returns the coordinator list for the given sport.
+ * Falls back to baseball for backward compatibility.
+ */
+export function getCoordinators(sport?: string): OfficerEntry[] {
+  if (sport === 'football') return FOOTBALL_COORDINATORS;
+  return BASEBALL_COORDINATORS;
+}
+
+/** @deprecated Use getCoordinators(sport) instead */
+export const COORDINATORS: OfficerEntry[] = BASEBALL_COORDINATORS;
 
 export const AT_LARGE_BOARD_MEMBERS: OfficerEntry[] = [
   { title: 'At-Large Board Member', name: 'Mandy Alfredo' },
