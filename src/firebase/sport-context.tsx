@@ -54,6 +54,18 @@ export function SportProvider({ children }: { children: ReactNode }) {
     if (sportParam === 'baseball' || sportParam === 'football') {
       urlParamApplied.current = true;
       setActiveSportState(sportParam);
+      // Keep localStorage in sync so the selection survives OAuth redirects / refreshes
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('syba_active_sport', sportParam);
+      }
+    } else if (typeof window !== 'undefined') {
+      // No URL param — fall back to localStorage before Firestore profile preference.
+      // This bridges the auth boundary (e.g. Google OAuth full-page redirect drops URL params).
+      const stored = localStorage.getItem('syba_active_sport');
+      if (stored === 'baseball' || stored === 'football') {
+        urlParamApplied.current = true; // Prevents profile preference from overriding
+        setActiveSportState(stored);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Intentionally runs once on mount only
@@ -69,6 +81,10 @@ export function SportProvider({ children }: { children: ReactNode }) {
   const setActiveSport = useCallback(async (sport: Sport) => {
     if (!user) return;
     setActiveSportState(sport);
+    // Persist to localStorage so sport survives refresh and OAuth redirect boundaries
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('syba_active_sport', sport);
+    }
     // Sync sport to URL without triggering a navigation/scroll
     const params = new URLSearchParams(searchParams.toString());
     params.set('sport', sport);

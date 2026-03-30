@@ -65,14 +65,14 @@ export default function Home() {
   // Public sport selector — localStorage-only (no auth required)
   const [publicSport, setPublicSportState] = useState<Sport | null>(null);
   useEffect(() => {
-    const saved = localStorage.getItem('publicSport') as Sport | null;
+    const saved = localStorage.getItem('syba_active_sport') as Sport | null;
     if (saved === 'baseball' || saved === 'football') {
       setPublicSportState(saved);
     }
   }, []);
   function selectPublicSport(sport: Sport) {
     setPublicSportState(sport);
-    localStorage.setItem('publicSport', sport);
+    localStorage.setItem('syba_active_sport', sport);
   }
 
   const todayISO = useMemo(() => {
