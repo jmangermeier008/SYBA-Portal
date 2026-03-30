@@ -208,11 +208,11 @@ export default function Home() {
       {/* ── Hero ── */}
       <div className="flex flex-col items-center text-center space-y-6 max-w-sm w-full">
         <Image
-          src={HUB_LOGO_URL}
-          alt="Sharpsville Youth Athletics Hub"
-          width={120}
-          height={120}
-          className="object-contain"
+          src={publicSport ? SPORT_CONFIG[publicSport].logoUrl : HUB_LOGO_URL}
+          alt={publicSport ? SPORT_CONFIG[publicSport].label : 'Sharpsville Youth Athletics Hub'}
+          width={160}
+          height={160}
+          className="object-contain drop-shadow-md transition-all duration-300"
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
         <div className="space-y-1">
@@ -226,22 +226,22 @@ export default function Home() {
       {/* ── Sport Selection Gate — must pick a sport before seeing anything else ── */}
       {!publicSport ? (
         <div className="mt-10 w-full max-w-lg text-center">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-4">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-6">
             Pick Your Sport
           </p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-8">
             {(Object.entries(SPORT_CONFIG) as [Sport, typeof SPORT_CONFIG[Sport]][]).map(([sport, cfg]) => (
               <button
                 key={sport}
                 onClick={() => selectPublicSport(sport)}
-                className="flex flex-col items-center gap-3 p-6 md:p-8 rounded-2xl border-2 border-border bg-white/80 shadow-sm hover:border-primary hover:shadow-md transition-all"
+                className="flex flex-col items-center gap-3 p-4 rounded-2xl hover:scale-105 active:scale-95 transition-transform duration-150"
               >
                 <Image
                   src={cfg.logoUrl}
                   alt={cfg.label}
-                  width={64}
-                  height={64}
-                  className="object-contain"
+                  width={120}
+                  height={120}
+                  className="object-contain drop-shadow-md"
                   onError={(e) => {
                     const img = e.target as HTMLImageElement;
                     img.style.display = 'none';
@@ -260,37 +260,15 @@ export default function Home() {
         </div>
       ) : (
         <>
-          {/* Dual brand lockup + change link */}
-          <div className="mt-6 flex flex-col items-center gap-2">
-            <div className="flex flex-col md:flex-row items-center gap-3">
-              <Image
-                src={HUB_LOGO_URL}
-                alt="Sharpsville Youth Athletics Hub"
-                width={48}
-                height={48}
-                className="object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              />
-              <div className="hidden md:block h-10 w-px bg-border" />
-              <Image
-                src={SPORT_CONFIG[publicSport].logoUrl}
-                alt={SPORT_CONFIG[publicSport].label}
-                width={48}
-                height={48}
-                className="object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              />
-            </div>
-            <button
-              onClick={() => {
-                setPublicSportState(null);
-                clearActiveSport();
-              }}
-              className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
-            >
-              Change sport
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              setPublicSportState(null);
+              clearActiveSport();
+            }}
+            className="mt-2 text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
+          >
+            Change sport
+          </button>
 
           {/* Sign In / Register — visible only after sport selection */}
           <div className="mt-6 flex gap-3 justify-center">
