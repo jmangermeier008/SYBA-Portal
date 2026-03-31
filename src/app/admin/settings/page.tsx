@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
 import { useSport } from '@/firebase/sport-context';
 import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -19,22 +19,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
 import { clearUserNotifications } from '@/lib/maintenance-actions';
 import type { LeagueOfficer } from '@/types/scheduling';
-import { EXECUTIVE_TITLES, BASEBALL_COORDINATORS, FOOTBALL_COORDINATORS } from '@/data/officers';
+import { EXECUTIVE_TITLES } from '@/data/officers';
 
 type OfficerRecord = LeagueOfficer;
-
-function getExpectedTitles(sport: string): string[] {
-  const coordinators = sport === 'football'
-    ? FOOTBALL_COORDINATORS.map(c => c.title)
-    : BASEBALL_COORDINATORS.map(c => c.title);
-  return [...EXECUTIVE_TITLES, ...coordinators];
-}
-
 
 function OfficerRow({ officer, holderName, onSave }: {
   officer: OfficerRecord;
   holderName: string | null;
-  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => Promise<void>;
+  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState(officer.email ?? '');
   const [hint, setHint] = useState(officer.contactHint ?? '');
@@ -50,7 +42,7 @@ function OfficerRow({ officer, holderName, onSave }: {
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(officer.id, holderName, email, hint, mappedTopic, officer.sport ?? 'hub');
+    await onSave(officer.id, holderName, email, hint, mappedTopic);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -136,9 +128,10 @@ export default function AdminSettingsPage() {
 
   const [notifEmail, setNotifEmail] = useState('');
 
+  // Executives only — scoped to the active sport
   const officersQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
-    return query(collection(db, 'officers'), where('sport', 'in', [activeSport, 'hub']), orderBy('order'));
+    return query(collection(db, 'officers'), where('sport', '==', activeSport), orderBy('order'));
   }, [db, activeSport]);
 
   const usersQuery = useMemoFirebase(() => {
@@ -147,48 +140,88 @@ export default function AdminSettingsPage() {
   }, [db]);
 
   const { data: officers, isLoading } = useCollection<OfficerRecord>(officersQuery);
-  const { data: allUsers } = useCollection<{ id: string; displayName: string; officerTitles?: string[] }>(usersQuery);
+  const { data: allUsers } = useCollection<{
+    id: string;
+    displayName: string | null;
+    officerTitles?: string[];
+    roles?: string[];
+    sportRoles?: Record<string, string[]>;
+  }>(usersQuery);
 
+  // 4 executive rows — merge expected titles with any saved Firestore records
   const mergedOfficers = useMemo<OfficerRecord[]>(() => {
     if (!activeSport) return [];
-    const expected = getExpectedTitles(activeSport);
-    return expected.map((title, idx) => {
+    return (EXECUTIVE_TITLES as readonly string[]).map((title, idx) => {
       const existing = officers?.find(o => o.title === title);
       if (existing) return existing;
-      const isExec = EXECUTIVE_TITLES.includes(title);
-      const placeholderSport = isExec ? 'hub' : activeSport;
-      const idPrefix = isExec ? 'hub' : activeSport;
       return {
-        id: `${idPrefix}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        id: `${activeSport}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         title,
         name: null,
         email: null,
         contactHint: '',
         mappedTopic: 'general' as InquiryTopic,
         order: idx,
-        sport: placeholderSport,
+        sport: activeSport,
       } as OfficerRecord;
     });
   }, [activeSport, officers]);
 
-  // At-Large Board Members from Firestore (not in expected list — multi-record, managed separately)
-  const atLargeOfficers = useMemo<OfficerRecord[]>(() => {
-    if (!officers) return [];
-    return officers.filter(o => o.title === 'At-Large Board Member');
-  }, [officers]);
+  // At-large members — board members for this sport who don't hold an executive title
+  const atLargeMembers = useMemo(() => {
+    if (!allUsers || !activeSport) return [];
+    return allUsers.filter(u => {
+      const sportRoleList = u.sportRoles?.[activeSport] ?? [];
+      const isBoardMember =
+        sportRoleList.some(r => r === 'Board Member' || r === 'Admin') ||
+        u.roles?.includes('Board Member');
+      if (!isBoardMember) return false;
+      return !(u.officerTitles ?? []).some(t => EXECUTIVE_TITLES.includes(t));
+    });
+  }, [allUsers, activeSport]);
+
+  // Auto-sync at-large members to the officers collection so the public
+  // homepage can read them without requiring authentication.
+  useEffect(() => {
+    if (!db || !activeSport || !allUsers || officers === null) return;
+
+    const derivedIds = new Set(atLargeMembers.map(u => `${activeSport}-at-large-${u.id}`));
+    const existingAtLarge = officers.filter(o => o.title === 'At-Large Board Member');
+    const existingMap = new Map(existingAtLarge.map(o => [o.id, o.name]));
+
+    const needsAdd = atLargeMembers.filter(u => {
+      const id = `${activeSport}-at-large-${u.id}`;
+      return !existingMap.has(id) || existingMap.get(id) !== (u.displayName ?? null);
+    });
+    const needsRemove = existingAtLarge.filter(o => !derivedIds.has(o.id));
+
+    if (needsAdd.length === 0 && needsRemove.length === 0) return;
+
+    (async () => {
+      for (const u of needsAdd) {
+        await setDoc(
+          doc(db, 'officers', `${activeSport}-at-large-${u.id}`),
+          { title: 'At-Large Board Member', name: u.displayName ?? null, sport: activeSport, order: 100 },
+          { merge: true }
+        );
+      }
+      for (const o of needsRemove) {
+        await deleteDoc(doc(db, 'officers', o.id));
+      }
+    })();
+  }, [db, activeSport, allUsers, officers, atLargeMembers]);
 
   function getHolderName(title: string): string | null {
     const holders = allUsers?.filter(u => u.officerTitles?.includes(title)) ?? [];
     return holders.length ? holders.map(u => u.displayName).filter(Boolean).join(', ') : null;
   }
 
-
-  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => {
+  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
     if (!db || !activeSport) return;
     try {
       await setDoc(
         doc(db, 'officers', id),
-        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport },
+        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport: activeSport },
         { merge: true }
       );
     } catch (err: any) {
@@ -213,7 +246,6 @@ export default function AdminSettingsPage() {
       toast({ variant: 'destructive', title: 'Action failed', description: err.message });
     }
   };
-
 
   const canAccessMaintenance = isAdmin || isSiteAdmin;
 
@@ -270,12 +302,23 @@ export default function AdminSettingsPage() {
                       {mergedOfficers.map((officer) => (
                         <OfficerRow key={officer.id} officer={officer} holderName={getHolderName(officer.title)} onSave={handleSave} />
                       ))}
-                      {atLargeOfficers.length > 0 && (
+
+                      {/* At-large board members — auto-derived from user accounts */}
+                      {atLargeMembers.length > 0 && (
                         <>
-                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest pt-2">At-Large Board Members</p>
-                          {atLargeOfficers.map((officer) => (
-                            <OfficerRow key={officer.id} officer={officer} holderName={getHolderName(officer.title)} onSave={handleSave} />
-                          ))}
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest pt-2">
+                            At-Large Board Members
+                          </p>
+                          <p className="text-xs text-muted-foreground -mt-1">
+                            Automatically derived from board member accounts without a specific officer title.
+                          </p>
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {atLargeMembers.map(u => (
+                              <span key={u.id} className="text-xs border rounded px-2 py-1 bg-muted/40">
+                                {u.displayName ?? 'Unnamed'}
+                              </span>
+                            ))}
+                          </div>
                         </>
                       )}
                     </div>

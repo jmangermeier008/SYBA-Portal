@@ -118,10 +118,10 @@ export default function Home() {
   // Derived: sport-specific contact email (falls back to hub address when no sport selected)
   const contactEmail = publicSport ? SPORT_CONFIG[publicSport].contactEmail : HUB_contactEmail;
 
-  // Officers (league leadership grid) — sport-scoped at Firestore level
+  // Officers (league leadership grid) — scoped to selected sport
   const officersQuery = useMemoFirebase(() => {
     if (!db || !publicSport) return null;
-    return query(collection(db, 'officers'), where('sport', 'in', [publicSport, 'hub']), orderBy('order'));
+    return query(collection(db, 'officers'), where('sport', '==', publicSport), orderBy('order'));
   }, [db, publicSport]);
   const { data: officers } = useCollection<LeagueOfficer>(officersQuery);
 
