@@ -444,7 +444,7 @@ export interface LeagueOfficer {
   contactHint: string;
   mappedTopic?: import('@/data/inquiry-topics').InquiryTopic;
   order: number;
-  sport?: Sport;
+  sport?: Sport | 'hub';
 }
 
 // ---------------------------------------------------------------------------
