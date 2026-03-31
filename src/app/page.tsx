@@ -173,7 +173,7 @@ export default function Home() {
     return officers.filter(o =>
       EXECUTIVE_TITLES.includes(o.title) &&
       o.name != null && o.name !== '' &&
-      (!publicSport || !o.sport || o.sport === publicSport)
+      (!publicSport || !o.sport || o.sport === publicSport || (o.sport as string) === 'hub')
     );
   }, [officers, publicSport]);
 
@@ -181,7 +181,7 @@ export default function Home() {
     if (!officers) return [];
     return officers.filter(o =>
       o.name != null && o.name !== '' &&
-      (!publicSport || !o.sport || o.sport === publicSport)
+      (!publicSport || !o.sport || o.sport === publicSport || (o.sport as string) === 'hub')
     );
   }, [officers, publicSport]);
 
