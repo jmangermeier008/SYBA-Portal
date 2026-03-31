@@ -31,6 +31,7 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submittedRole, setSubmittedRole] = useState('');
 
   const selectedTopicConfig = topic ? getTopicConfig(topic) : undefined;
 
@@ -77,8 +78,9 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
           message: message.trim(),
           assignedToRole: topicConfig.assignedToRole,
         }),
-      }).catch(() => {});
+      }).catch((err) => { console.error('[inquiry] Email notification failed:', err); });
 
+      setSubmittedRole(topicConfig.assignedToRole);
       setSubmitted(true);
     } catch (error: any) {
       console.error('[inquiry] Public submit error:', error.message);
@@ -100,11 +102,11 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
           <div className="space-y-1">
             <h2 className="text-xl font-semibold">Message Sent!</h2>
             <p className="text-muted-foreground max-w-sm">
-              Your message has been sent to the {selectedTopicConfig?.assignedToRole ?? 'board'}. A board member will follow up with you soon.
+              Your message has been sent to the {submittedRole || 'board'}. A board member will follow up with you soon.
             </p>
           </div>
           <Button variant="outline" onClick={() => {
-            setName(''); setEmail(''); setTopic(''); setSubject(''); setMessage(''); setSubmitted(false);
+            setName(''); setEmail(''); setTopic(''); setSubject(''); setMessage(''); setSubmittedRole(''); setSubmitted(false);
           }}>
             Send Another Message
           </Button>

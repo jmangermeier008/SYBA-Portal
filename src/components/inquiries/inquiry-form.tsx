@@ -79,7 +79,7 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
           message: message.trim(),
           assignedToRole: topicConfig.assignedToRole,
         }),
-      }).catch(() => {});
+      }).catch((err) => { console.error('[inquiry] Email notification failed:', err); });
 
       setAssignedRole(topicConfig.assignedToRole);
       setSubmitted(true);
