@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, query, orderBy, where } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
 import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
@@ -25,12 +26,11 @@ type OfficerRecord = LeagueOfficer;
 function OfficerRow({ officer, holderName, onSave }: {
   officer: OfficerRecord;
   holderName: string | null;
-  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => Promise<void>;
+  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState(officer.email ?? '');
   const [hint, setHint] = useState(officer.contactHint ?? '');
   const [mappedTopic, setMappedTopic] = useState(officer.mappedTopic ?? 'general');
-  const [sport, setSport] = useState(officer.sport ?? 'baseball');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -38,12 +38,11 @@ function OfficerRow({ officer, holderName, onSave }: {
     setEmail(officer.email ?? '');
     setHint(officer.contactHint ?? '');
     setMappedTopic(officer.mappedTopic ?? 'general');
-    setSport(officer.sport ?? 'baseball');
-  }, [officer.email, officer.contactHint, officer.mappedTopic, officer.sport]);
+  }, [officer.email, officer.contactHint, officer.mappedTopic]);
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(officer.id, holderName, email, hint, mappedTopic, sport);
+    await onSave(officer.id, holderName, email, hint, mappedTopic);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -52,8 +51,7 @@ function OfficerRow({ officer, holderName, onSave }: {
   const dirty =
     email !== (officer.email ?? '') ||
     hint !== (officer.contactHint ?? '') ||
-    mappedTopic !== (officer.mappedTopic ?? 'general') ||
-    sport !== (officer.sport ?? 'baseball');
+    mappedTopic !== (officer.mappedTopic ?? 'general');
 
   return (
     <div className="border rounded-xl p-4 space-y-3">
@@ -66,20 +64,7 @@ function OfficerRow({ officer, holderName, onSave }: {
         </div>
         <span className="text-xs text-muted-foreground">{holderName ?? 'TBA'}</span>
       </div>
-      <div className="grid sm:grid-cols-3 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Sport</Label>
-          <Select value={sport} onValueChange={(v) => setSport(v as 'baseball' | 'football' | 'hub')}>
-            <SelectTrigger className="rounded-xl text-xs h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="baseball">⚾ Baseball</SelectItem>
-              <SelectItem value="football">🏈 Football</SelectItem>
-              <SelectItem value="hub">Hub (both)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="grid sm:grid-cols-2 gap-3">
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Email</Label>
           <Input
@@ -136,6 +121,7 @@ function OfficerRow({ officer, holderName, onSave }: {
 
 export default function AdminSettingsPage() {
   const { isAdmin, isSiteAdmin } = useUser();
+  const { activeSport } = useSport();
   const db = useFirestore();
   const auth = useAuth();
   const { toast } = useToast();
@@ -143,9 +129,9 @@ export default function AdminSettingsPage() {
   const [notifEmail, setNotifEmail] = useState('');
 
   const officersQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'officers'), orderBy('order'));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'officers'), where('sport', '==', activeSport), orderBy('order'));
+  }, [db, activeSport]);
 
   const usersQuery = useMemoFirebase(() => {
     if (!db) return null;
@@ -161,12 +147,12 @@ export default function AdminSettingsPage() {
   }
 
 
-  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => {
-    if (!db) return;
+  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
+    if (!db || !activeSport) return;
     try {
       await setDoc(
         doc(db, 'officers', id),
-        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport: sport || 'baseball' },
+        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport: activeSport },
         { merge: true }
       );
     } catch (err: any) {
@@ -236,7 +222,7 @@ export default function AdminSettingsPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {isLoading ? (
+                  {!activeSport || isLoading ? (
                     <div className="flex justify-center py-10">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
