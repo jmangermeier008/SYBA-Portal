@@ -115,6 +115,14 @@
       ]
     },
     {
+      "collectionGroup": "inquiries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sport", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "concessionSlots",
       "queryScope": "COLLECTION",
       "fields": [

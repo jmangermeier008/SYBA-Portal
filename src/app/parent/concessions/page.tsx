@@ -119,8 +119,9 @@ export default function ParentConcessionsPage() {
   );
 
   const requiredSlots = useMemo(() => {
+    if (!activeSeason) return 0;
     const count = enrollments?.length ?? 0;
-    const perPlayer = activeSeason?.volunteerSlotsRequired ?? 1;
+    const perPlayer = activeSeason.volunteerSlotsRequired ?? 1;
     return count * perPlayer;
   }, [enrollments, activeSeason]);
 
@@ -143,7 +144,7 @@ export default function ParentConcessionsPage() {
           displayName: profile.displayName ?? 'Parent',
           signedUpAt: new Date().toISOString(),
         };
-        transaction.update(slotRef, { signups: [...(current.signups ?? []), newSignup] });
+        transaction.update(slotRef, { signups: [...(current.signups ?? []), newSignup], claimedCount: (current.signups?.length ?? 0) + 1 });
       });
       await addDoc(collection(db, 'notifications'), {
         userId: profile.id,

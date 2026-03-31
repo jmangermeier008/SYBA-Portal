@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -19,8 +19,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
 import { clearUserNotifications } from '@/lib/maintenance-actions';
 import type { LeagueOfficer } from '@/types/scheduling';
+import { EXECUTIVE_TITLES, BASEBALL_COORDINATORS, FOOTBALL_COORDINATORS } from '@/data/officers';
 
 type OfficerRecord = LeagueOfficer;
+
+function getExpectedTitles(sport: string): string[] {
+  const coordinators = sport === 'football'
+    ? FOOTBALL_COORDINATORS.map(c => c.title)
+    : BASEBALL_COORDINATORS.map(c => c.title);
+  return [...EXECUTIVE_TITLES, ...coordinators];
+}
 
 
 function OfficerRow({ officer, holderName, onSave }: {
@@ -130,7 +138,7 @@ export default function AdminSettingsPage() {
 
   const officersQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
-    return query(collection(db, 'officers'), where('sport', '==', activeSport), orderBy('order'));
+    return query(collection(db, 'officers'), where('sport', 'in', [activeSport, 'hub']), orderBy('order'));
   }, [db, activeSport]);
 
   const usersQuery = useMemoFirebase(() => {
@@ -140,6 +148,31 @@ export default function AdminSettingsPage() {
 
   const { data: officers, isLoading } = useCollection<OfficerRecord>(officersQuery);
   const { data: allUsers } = useCollection<{ id: string; displayName: string; officerTitles?: string[] }>(usersQuery);
+
+  const mergedOfficers = useMemo<OfficerRecord[]>(() => {
+    if (!activeSport) return [];
+    const expected = getExpectedTitles(activeSport);
+    return expected.map((title, idx) => {
+      const existing = officers?.find(o => o.title === title);
+      if (existing) return existing;
+      return {
+        id: `${activeSport}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        title,
+        name: null,
+        email: null,
+        contactHint: '',
+        mappedTopic: 'general' as InquiryTopic,
+        order: idx,
+        sport: activeSport,
+      } as OfficerRecord;
+    });
+  }, [activeSport, officers]);
+
+  // At-Large Board Members from Firestore (not in expected list — multi-record, managed separately)
+  const atLargeOfficers = useMemo<OfficerRecord[]>(() => {
+    if (!officers) return [];
+    return officers.filter(o => o.title === 'At-Large Board Member');
+  }, [officers]);
 
   function getHolderName(title: string): string | null {
     const holders = allUsers?.filter(u => u.officerTitles?.includes(title)) ?? [];
@@ -222,15 +255,26 @@ export default function AdminSettingsPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {!activeSport || isLoading ? (
+                  {!activeSport ? (
                     <div className="flex justify-center py-10">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(officers ?? []).map((officer) => (
-                        <OfficerRow key={officer.id} officer={officer as OfficerRecord} holderName={getHolderName(officer.title)} onSave={handleSave} />
+                      {isLoading && (
+                        <p className="text-xs text-muted-foreground pb-1">Loading saved data…</p>
+                      )}
+                      {mergedOfficers.map((officer) => (
+                        <OfficerRow key={officer.id} officer={officer} holderName={getHolderName(officer.title)} onSave={handleSave} />
                       ))}
+                      {atLargeOfficers.length > 0 && (
+                        <>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest pt-2">At-Large Board Members</p>
+                          {atLargeOfficers.map((officer) => (
+                            <OfficerRow key={officer.id} officer={officer} holderName={getHolderName(officer.title)} onSave={handleSave} />
+                          ))}
+                        </>
+                      )}
                     </div>
                   )}
                 </CardContent>

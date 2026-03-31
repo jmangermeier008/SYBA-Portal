@@ -32,6 +32,7 @@ interface TeamGame {
   location: string;
   dateTime: string;
   type: 'Game' | 'Practice';
+  cancelled?: boolean;
 }
 
 interface Player {
@@ -55,7 +56,7 @@ function normalizeTeamGame(g: TeamGame, teamId: string): CalendarEvent {
     date: dateTime.slice(0, 10),
     startTime: dateTime.slice(11, 16),
     title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
-    status: 'scheduled',
+    status: (g.cancelled === true) ? 'cancelled' : 'scheduled',
     fieldName: g.location,
     sourceType: 'team-game',
     sourceId: g.id,
@@ -114,6 +115,7 @@ export default function ParentSchedulesPage() {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
   const [activeTeamId, setActiveTeamId] = useState<string>('');
   const [filters, setFilters] = useState({ games: true, practices: false, concessions: true });
+  const [rsvpLoading, setRsvpLoading] = useState(false);
 
   // ── Fetch players + enrollments ─────────────────────────────────────────────
   const playersQuery = useMemoFirebase(() => {
@@ -245,7 +247,8 @@ export default function ParentSchedulesPage() {
 
   // ── RSVP handler ────────────────────────────────────────────────────────────
   const handleRSVP = async (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
-    if (!user || !db || !selectedPlayerId || selectedPlayerId === 'all') return;
+    if (!user || !db || !selectedPlayerId || selectedPlayerId === 'all' || rsvpLoading) return;
+    setRsvpLoading(true);
     const rsvpId = `${selectedPlayerId}_${gameId}`;
     const rsvpRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId);
     const rsvpData = {
@@ -257,15 +260,19 @@ export default function ParentSchedulesPage() {
       timestamp: new Date().toISOString(),
       teamId,
     };
-    setDoc(rsvpRef, rsvpData, { merge: true })
-      .then(() => toast({ title: 'RSVP Sent', description: `Availability updated to ${status}.` }))
-      .catch(() => {
-        errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: rsvpRef.path,
-          operation: 'write',
-          requestResourceData: rsvpData,
-        }));
-      });
+    try {
+      await setDoc(rsvpRef, rsvpData, { merge: true });
+      toast({ title: 'RSVP Sent', description: `Availability updated to ${status}.` });
+    } catch (err: any) {
+      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+      errorEmitter.emit('permission-error', new FirestorePermissionError({
+        path: rsvpRef.path,
+        operation: 'write',
+        requestResourceData: rsvpData,
+      }));
+    } finally {
+      setRsvpLoading(false);
+    }
   };
 
   // ── Concession sign-up handler ──────────────────────────────────────────────

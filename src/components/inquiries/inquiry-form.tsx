@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useUser, useFirestore } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, addDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Send } from 'lucide-react';
@@ -23,6 +24,7 @@ interface InquiryFormProps {
 export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
   const { profile } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   const [topic, setTopic] = useState<InquiryTopic | ''>('');
@@ -41,6 +43,11 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
     const topicConfig = getTopicConfig(topic);
     if (!topicConfig) return;
 
+    if (!activeSport) {
+      toast({ variant: 'destructive', title: 'No sport selected', description: 'Please select a sport before submitting.' });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
@@ -54,6 +61,7 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
         message: message.trim(),
         status: 'open',
         assignedToRole: topicConfig.assignedToRole,
+        sport: activeSport,
         createdAt: now,
         updatedAt: now,
         resolvedAt: null,
@@ -71,7 +79,7 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
           message: message.trim(),
           assignedToRole: topicConfig.assignedToRole,
         }),
-      }).catch(() => {});
+      }).catch((err) => { console.error('[inquiry] Email notification failed:', err); });
 
       setAssignedRole(topicConfig.assignedToRole);
       setSubmitted(true);

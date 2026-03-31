@@ -7,23 +7,19 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useCollection } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
-import { collection, query, orderBy } from 'firebase/firestore';
+import { collection, query, orderBy, where } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
 import { Inbox, Loader2, Lock, Clock, User } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { InquiryFilters } from '@/components/inquiries/inquiry-filters';
 import { InquiryDetailDialog } from '@/components/inquiries/inquiry-detail-dialog';
-import { getTopicConfig } from '@/data/inquiry-topics';
+import { getTopicConfig, INQUIRY_STATUS_CONFIG } from '@/data/inquiry-topics';
 import type { Inquiry, InquiryTopic, InquiryStatus } from '@/data/inquiry-topics';
-
-const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }> = {
-  open: { label: 'Open', className: 'bg-blue-100 text-blue-800' },
-  in_progress: { label: 'In Progress', className: 'bg-orange-100 text-orange-800' },
-  resolved: { label: 'Resolved', className: 'bg-green-100 text-green-800' },
-};
 
 function AdminInquiriesContent() {
   const { user, isBoardMember, loading: loadingUser } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -34,9 +30,13 @@ function AdminInquiriesContent() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const inquiriesQuery = useMemoFirebase(() => {
-    if (!db || !isBoardMember) return null;
-    return query(collection(db, 'inquiries'), orderBy('createdAt', 'desc'));
-  }, [db, isBoardMember]);
+    if (!db || !isBoardMember || !activeSport) return null;
+    return query(
+      collection(db, 'inquiries'),
+      where('sport', '==', activeSport),
+      orderBy('createdAt', 'desc')
+    );
+  }, [db, isBoardMember, activeSport]);
 
   const { data: inquiries, isLoading } = useCollection<Inquiry>(inquiriesQuery);
 
@@ -60,13 +60,13 @@ function AdminInquiriesContent() {
   // Deep-link: auto-open dialog when ?id= param matches a loaded inquiry
   useEffect(() => {
     const id = searchParams.get('id');
-    if (!id || !inquiries?.length) return;
+    if (!id || isLoading || !inquiries?.length) return;
     const match = inquiries.find(i => i.id === id);
     if (match) {
       setSelectedInquiry(match);
       setDialogOpen(true);
     }
-  }, [searchParams, inquiries]);
+  }, [searchParams, inquiries, isLoading]);
 
   if (loadingUser) {
     return (
@@ -151,7 +151,7 @@ function AdminInquiriesContent() {
           <div className="space-y-3">
             {filtered.map((inquiry) => {
               const topicConfig = getTopicConfig(inquiry.topic);
-              const statusInfo = STATUS_CONFIG[inquiry.status] ?? STATUS_CONFIG.open;
+              const statusInfo = INQUIRY_STATUS_CONFIG[inquiry.status] ?? INQUIRY_STATUS_CONFIG.open;
               return (
                 <Card
                   key={inquiry.id}

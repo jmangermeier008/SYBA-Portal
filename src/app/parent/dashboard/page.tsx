@@ -7,6 +7,7 @@ import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from 
 import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -52,13 +53,15 @@ export default function ParentDashboard({
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [resumingPayment, setResumingPayment] = useState(false);
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
+  const [selectedPlayerId, setSelectedPlayerId] = useState('');
+  const [selectedTeamId, setSelectedTeamId] = useState('');
 
   // Real player count
   const playersQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user?.uid]);
-  const { data: players, isLoading: loadingPlayers } = useCollection<{ id: string }>(playersQuery);
+  const { data: players, isLoading: loadingPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string }>(playersQuery);
 
   // Enrollments to derive team assignment + payment status
   const enrollmentsQuery = useMemoFirebase(() => {
@@ -67,8 +70,21 @@ export default function ParentDashboard({
   }, [db, user?.uid]);
   const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number }>(enrollmentsQuery);
 
-  const firstTeamId = enrollments?.find(e => e.teamId)?.teamId;
-  const firstPlayerId = players?.[0]?.id;
+  // Set initial selected player when players load
+  useEffect(() => {
+    if (players?.length && !selectedPlayerId) {
+      setSelectedPlayerId(players[0].id);
+    }
+  }, [players, selectedPlayerId]);
+
+  // Derive team from selected player's enrollment
+  useEffect(() => {
+    if (!enrollments) return;
+    const enrollment = selectedPlayerId
+      ? enrollments.find(e => e.playerId === selectedPlayerId)
+      : enrollments.find(e => e.teamId);
+    setSelectedTeamId(enrollment?.teamId ?? '');
+  }, [selectedPlayerId, enrollments]);
 
   // Enrollment status logic
   const hasEnrollments = (enrollments?.length ?? 0) > 0;
@@ -110,38 +126,38 @@ export default function ParentDashboard({
   // Next upcoming game for first assigned team
   const now = useMemo(() => new Date().toISOString(), []);
   const nextGameQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId) return null;
+    if (!db || !selectedTeamId) return null;
     return query(
-      collection(db, 'teams', firstTeamId, 'games'),
+      collection(db, 'teams', selectedTeamId, 'games'),
       where('dateTime', '>=', now),
       orderBy('dateTime', 'asc'),
       limit(1)
     );
-  }, [db, firstTeamId]);
+  }, [db, selectedTeamId]);
   const { data: nextGames, isLoading: loadingGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(nextGameQuery);
   const nextGame = nextGames?.[0];
 
   const allTeamGamesQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId) return null;
+    if (!db || !selectedTeamId) return null;
     return query(
-      collection(db, 'teams', firstTeamId, 'games'),
+      collection(db, 'teams', selectedTeamId, 'games'),
       orderBy('dateTime', 'asc')
     );
-  }, [db, firstTeamId]);
+  }, [db, selectedTeamId]);
   const { data: allTeamGames, isLoading: loadingAllTeamGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string; cancelled?: boolean }>(allTeamGamesQuery);
 
   const countdown = useCountdown(nextGame?.dateTime);
 
   // Current RSVP for next game
   const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId || !nextGame?.id) return null;
-    return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
-  }, [db, firstTeamId, nextGame?.id]);
+    if (!db || !selectedTeamId || !nextGame?.id) return null;
+    return collection(db, 'teams', selectedTeamId, 'games', nextGame.id, 'rsvps');
+  }, [db, selectedTeamId, nextGame?.id]);
   const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string; gameId?: string }>(rsvpsQuery);
   // H12: Fix RSVP status — use && to ensure both conditions match, and guard on gameId
-  const currentRsvp = firstPlayerId && nextGame
+  const currentRsvp = selectedPlayerId && nextGame
     ? rsvps?.find(r =>
-        (r.id === `${firstPlayerId}_${nextGame.id}` || r.playerId === firstPlayerId) &&
+        (r.id === `${selectedPlayerId}_${nextGame.id}` || r.playerId === selectedPlayerId) &&
         r.gameId === nextGame.id
       )
     : undefined;
@@ -149,17 +165,17 @@ export default function ParentDashboard({
   const handleDashboardRSVP = async (
     status: 'Attending' | 'Maybe' | 'Not Attending',
     gameId: string = nextGame?.id ?? '',
-    teamId: string = firstTeamId ?? ''
+    teamId: string = selectedTeamId ?? ''
   ) => {
-    if (!user || !db || !teamId || !firstPlayerId || !gameId) return;
+    if (!user || !db || !teamId || !selectedPlayerId || !gameId) return;
     setRsvpLoading(true);
-    const rsvpId = `${firstPlayerId}_${gameId}`;
+    const rsvpId = `${selectedPlayerId}_${gameId}`;
     const rsvpRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId);
     try {
       await setDoc(rsvpRef, {
         id: rsvpId,
         gameId,
-        playerId: firstPlayerId,
+        playerId: selectedPlayerId,
         parentUserId: user.uid,
         status,
         timestamp: new Date().toISOString(),
@@ -174,7 +190,7 @@ export default function ParentDashboard({
   };
 
   const teamCalendarEvents = useMemo((): CalendarEvent[] => {
-    if (!allTeamGames || !firstTeamId) return [];
+    if (!allTeamGames || !selectedTeamId) return [];
     return allTeamGames.map(g => {
       const dateTime = g.dateTime ?? '';
       return {
@@ -183,14 +199,14 @@ export default function ParentDashboard({
         date: dateTime.slice(0, 10),
         startTime: dateTime.slice(11, 16),
         title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
-        status: g.cancelled ? 'cancelled' as const : 'scheduled' as const,
+        status: (g.cancelled === true) ? 'cancelled' as const : 'scheduled' as const,
         fieldName: g.location,
         sourceType: 'team-game' as const,
         sourceId: g.id,
-        teamId: firstTeamId,
+        teamId: selectedTeamId,
       };
     });
-  }, [allTeamGames, firstTeamId]);
+  }, [allTeamGames, selectedTeamId]);
 
   const handleCalendarRsvp = (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
     handleDashboardRSVP(status, gameId, teamId);
@@ -269,7 +285,7 @@ export default function ParentDashboard({
                       {rsvps.filter(r => r.status === 'Attending').length} attending
                     </p>
                   )}
-                  {firstTeamId && firstPlayerId && (
+                  {selectedTeamId && selectedPlayerId && (
                     <div className="flex gap-1.5 mt-2">
                       {rsvpLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -432,11 +448,30 @@ export default function ParentDashboard({
         </div>
 
         {/* Season Schedule */}
-        {firstTeamId && (
+        {selectedTeamId && (
           <Card className="border-none shadow-md mt-6">
-            <CardHeader>
-              <CardTitle className="font-headline">Season Schedule</CardTitle>
-              <CardDescription>Your team's full schedule for the season</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-4 flex-wrap">
+              <div>
+                <CardTitle className="font-headline">Season Schedule</CardTitle>
+                <CardDescription>Your team's full schedule for the season</CardDescription>
+              </div>
+              {(players?.length ?? 0) > 1 && (
+                <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-1.5 border">
+                  <Users className="h-4 w-4 text-primary shrink-0" />
+                  <Select value={selectedPlayerId} onValueChange={setSelectedPlayerId}>
+                    <SelectTrigger className="w-[160px] border-none shadow-none focus:ring-0 bg-transparent h-auto py-0">
+                      <SelectValue placeholder="Select Player" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {players?.map(p => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.firstName && p.lastName ? `${p.firstName} ${p.lastName}` : `Player`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               <LeagueCalendar

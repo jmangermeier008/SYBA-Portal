@@ -35,7 +35,9 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
   // Auto-mark as read when dialog opens
   useEffect(() => {
     if (!open || !inquiry?.isUnread || !inquiry?.id || !db) return;
-    updateDoc(doc(db, 'inquiries', inquiry.id), { isUnread: false });
+    updateDoc(doc(db, 'inquiries', inquiry.id), { isUnread: false }).catch((err) => {
+      console.error('[inquiry] Failed to mark as read:', err);
+    });
   }, [open, inquiry?.id, inquiry?.isUnread, db]);
 
   if (!inquiry) return null;
@@ -104,7 +106,7 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
           replyMessage: replyMessage.trim(),
           inquiryId: inquiry.id,
         }),
-      }).catch(() => {});
+      }).catch((err) => { console.error('[inquiry] Reply email notification failed:', err); });
 
       toast({ title: 'Reply Sent' });
       setReplyMessage('');
@@ -159,7 +161,9 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
           </div>
 
           {/* Replies */}
-          {inquiry.replies?.map((reply) => (
+          {(!inquiry.replies || inquiry.replies.length === 0) ? (
+            <p className="text-sm text-muted-foreground ml-4">No replies yet.</p>
+          ) : inquiry.replies.map((reply) => (
             <div key={reply.id} className="rounded-lg border p-4 space-y-2 ml-4">
               <div className="flex items-center gap-2 text-sm">
                 <User className="h-4 w-4 text-primary" />
