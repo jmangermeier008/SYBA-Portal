@@ -34,7 +34,7 @@ function getExpectedTitles(sport: string): string[] {
 function OfficerRow({ officer, holderName, onSave }: {
   officer: OfficerRecord;
   holderName: string | null;
-  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => Promise<void>;
+  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState(officer.email ?? '');
   const [hint, setHint] = useState(officer.contactHint ?? '');
@@ -50,7 +50,7 @@ function OfficerRow({ officer, holderName, onSave }: {
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(officer.id, holderName, email, hint, mappedTopic);
+    await onSave(officer.id, holderName, email, hint, mappedTopic, officer.sport ?? 'hub');
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -155,15 +155,18 @@ export default function AdminSettingsPage() {
     return expected.map((title, idx) => {
       const existing = officers?.find(o => o.title === title);
       if (existing) return existing;
+      const isExec = EXECUTIVE_TITLES.includes(title);
+      const placeholderSport = isExec ? 'hub' : activeSport;
+      const idPrefix = isExec ? 'hub' : activeSport;
       return {
-        id: `${activeSport}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        id: `${idPrefix}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         title,
         name: null,
         email: null,
         contactHint: '',
         mappedTopic: 'general' as InquiryTopic,
         order: idx,
-        sport: activeSport,
+        sport: placeholderSport,
       } as OfficerRecord;
     });
   }, [activeSport, officers]);
@@ -180,12 +183,12 @@ export default function AdminSettingsPage() {
   }
 
 
-  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
+  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string, sport: string) => {
     if (!db || !activeSport) return;
     try {
       await setDoc(
         doc(db, 'officers', id),
-        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport: activeSport },
+        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport },
         { merge: true }
       );
     } catch (err: any) {

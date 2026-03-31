@@ -118,11 +118,11 @@ export default function Home() {
   // Derived: sport-specific contact email (falls back to hub address when no sport selected)
   const contactEmail = publicSport ? SPORT_CONFIG[publicSport].contactEmail : HUB_contactEmail;
 
-  // Officers (league leadership grid) — all officers, filtered client-side by sport
+  // Officers (league leadership grid) — sport-scoped at Firestore level
   const officersQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'officers'), orderBy('order'));
-  }, [db]);
+    if (!db || !publicSport) return null;
+    return query(collection(db, 'officers'), where('sport', 'in', [publicSport, 'hub']), orderBy('order'));
+  }, [db, publicSport]);
   const { data: officers } = useCollection<LeagueOfficer>(officersQuery);
 
   // Derived: registration banner
@@ -172,18 +172,16 @@ export default function Home() {
     if (!officers) return [];
     return officers.filter(o =>
       EXECUTIVE_TITLES.includes(o.title) &&
-      o.name != null && o.name !== '' &&
-      (!publicSport || !o.sport || o.sport === publicSport || (o.sport as string) === 'hub')
+      o.name != null && o.name !== ''
     );
-  }, [officers, publicSport]);
+  }, [officers]);
 
   const fullBoardOfficers = useMemo(() => {
     if (!officers) return [];
     return officers.filter(o =>
-      o.name != null && o.name !== '' &&
-      (!publicSport || !o.sport || o.sport === publicSport || (o.sport as string) === 'hub')
+      o.name != null && o.name !== ''
     );
-  }, [officers, publicSport]);
+  }, [officers]);
 
   // Derived: pinned announcements first, max 3
   const announcements = useMemo(() => {
