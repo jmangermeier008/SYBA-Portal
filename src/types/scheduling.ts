@@ -44,7 +44,7 @@ export interface Season {
   createdBy: string;
   createdAt: string;
   volunteerSlotsRequired?: number; // min concession slots required per enrolled player
-  sport?: Sport;
+  sport: Sport;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ export interface Field {
   availabilityEnd: string;   // HH:MM
   maintenanceClosures: MaintenanceClosure[];
   createdAt: string;
-  sport?: Sport;
+  sport: Sport;
 }
 
 /** A single date on which the entire sports complex is closed (weather, events, etc.). */
@@ -98,7 +98,7 @@ export interface Team {
   player_ids?: string[]; // Legacy field — kept for backward compatibility
   createdAt: string;
   practiceOptOut?: boolean; // When true, excluded from fairness rotation count
-  sport?: Sport;
+  sport: Sport;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ export interface Game {
   // Umpire assignment + notification tracking:
   umpireName?: string;
   umpireNotified?: boolean;
-  sport?: Sport;
+  sport: Sport;
   locationType?: LocationType;
   scrimmageNote?: string; // Optional follow-on event note, e.g. "Wee Wee Scrimmage follows at 6:30 PM"
   isRecurring?: boolean;   // True when created as part of a recurring series
@@ -186,7 +186,7 @@ export interface ConcessionSlot {
   // Existing signup records live here. New signups continue to use this array
   // via transaction. A future migration may move these to a claims subcollection.
   signups: ConcessionSignup[];
-  sport?: Sport;
+  sport: Sport;
   createdAt: string;
   updatedAt?: string;
 }
@@ -232,7 +232,7 @@ export interface PracticeSlot {
   pendingCoachName?: string;
   pendingRequestedAt?: string;
   pendingReason?: string; // Human-readable reason why approval is needed
-  sport?: Sport;
+  sport: Sport;
   createdBy: string;
   createdAt: string;
   updatedAt?: string;

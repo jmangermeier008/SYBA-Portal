@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useFirestore } from '@/firebase';
+import { useActiveSport } from '@/hooks/use-active-sport';
 import { collection, addDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Send, CheckCircle2 } from 'lucide-react';
@@ -16,6 +17,7 @@ import type { InquiryTopic } from '@/data/inquiry-topics';
 
 export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopic }) {
   const db = useFirestore();
+  const activeSport = useActiveSport();
   const { toast } = useToast();
 
   const [name, setName] = useState('');
@@ -39,6 +41,11 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
     const topicConfig = getTopicConfig(topic);
     if (!topicConfig) return;
 
+    if (!activeSport) {
+      toast({ variant: 'destructive', title: 'No sport selected', description: 'Please select a sport before submitting.' });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
@@ -52,6 +59,7 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
         message: message.trim(),
         status: 'open',
         assignedToRole: topicConfig.assignedToRole,
+        sport: activeSport,
         createdAt: now,
         updatedAt: now,
         resolvedAt: null,

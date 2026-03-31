@@ -7,7 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useCollection } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
-import { collection, query, orderBy } from 'firebase/firestore';
+import { collection, query, orderBy, where } from 'firebase/firestore';
+import { useSport } from '@/firebase/sport-context';
 import { Inbox, Loader2, Lock, Clock, User } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { InquiryFilters } from '@/components/inquiries/inquiry-filters';
@@ -24,6 +25,7 @@ const STATUS_CONFIG: Record<InquiryStatus, { label: string; className: string }>
 function AdminInquiriesContent() {
   const { user, isBoardMember, loading: loadingUser } = useUser();
   const db = useFirestore();
+  const { activeSport } = useSport();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -34,9 +36,13 @@ function AdminInquiriesContent() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const inquiriesQuery = useMemoFirebase(() => {
-    if (!db || !isBoardMember) return null;
-    return query(collection(db, 'inquiries'), orderBy('createdAt', 'desc'));
-  }, [db, isBoardMember]);
+    if (!db || !isBoardMember || !activeSport) return null;
+    return query(
+      collection(db, 'inquiries'),
+      where('sport', '==', activeSport),
+      orderBy('createdAt', 'desc')
+    );
+  }, [db, isBoardMember, activeSport]);
 
   const { data: inquiries, isLoading } = useCollection<Inquiry>(inquiriesQuery);
 

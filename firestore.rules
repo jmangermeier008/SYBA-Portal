@@ -40,6 +40,19 @@ service cloud.firestore {
                : data.role == 'Admin');
     }
 
+    function isBoardMemberForSport(sport) {
+      let data = getUserData();
+      // Site Admin is a cross-sport superuser
+      if (data.get('roles', []).hasAny(['Site Admin'])) {
+        return true;
+      }
+      let sportRoles = data.get('sportRoles', {});
+      let rolesForSport = sportRoles.get(sport, []);
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+             rolesForSport.hasAny(['Board Member', 'Admin']);
+    }
+
     function isCoach() {
       let data = getUserData();
       let roles = data.get('roles', []);
@@ -295,11 +308,12 @@ service cloud.firestore {
       );
       allow create: if
         request.resource.data.status == 'open' &&
+        request.resource.data.keys().hasAll(['sport']) &&
         (isSignedIn()
           ? request.resource.data.senderId == request.auth.uid
           : request.resource.data.senderId == null);
-      allow update: if isBoardMember();
-      allow delete: if isBoardMember();
+      allow update: if isBoardMemberForSport(resource.data.sport);
+      allow delete: if isBoardMemberForSport(resource.data.sport);
     }
 
     match /officers/{officerId} {

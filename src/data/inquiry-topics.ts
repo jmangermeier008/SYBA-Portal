@@ -1,4 +1,5 @@
 import type { OfficerTitle } from './officers';
+import type { Sport } from '@/types/scheduling';
 
 export interface InquiryTopicConfig {
   value: InquiryTopic;
@@ -81,6 +82,7 @@ export interface Inquiry {
   updatedAt: string;
   resolvedAt: string | null;
   replies: InquiryReply[];
+  sport: Sport;
   isUnread?: boolean;
 }
 
