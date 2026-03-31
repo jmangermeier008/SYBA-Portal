@@ -255,12 +255,15 @@ export default function AdminSettingsPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {!activeSport || isLoading ? (
+                  {!activeSport ? (
                     <div className="flex justify-center py-10">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
                   ) : (
                     <div className="space-y-3">
+                      {isLoading && (
+                        <p className="text-xs text-muted-foreground pb-1">Loading saved data…</p>
+                      )}
                       {mergedOfficers.map((officer) => (
                         <OfficerRow key={officer.id} officer={officer} holderName={getHolderName(officer.title)} onSave={handleSave} />
                       ))}
