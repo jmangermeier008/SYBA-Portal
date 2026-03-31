@@ -42,15 +42,12 @@ service cloud.firestore {
 
     function isBoardMemberForSport(sport) {
       let data = getUserData();
-      // Site Admin is a cross-sport superuser
-      if (data.get('roles', []).hasAny(['Site Admin'])) {
-        return true;
-      }
+      let roles = data.get('roles', []);
       let sportRoles = data.get('sportRoles', {});
       let rolesForSport = sportRoles.get(sport, []);
       return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             rolesForSport.hasAny(['Board Member', 'Admin']);
+             (roles.hasAny(['Site Admin']) || rolesForSport.hasAny(['Board Member', 'Admin']));
     }
 
     function isCoach() {
