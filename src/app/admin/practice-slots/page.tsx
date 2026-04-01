@@ -684,7 +684,7 @@ export default function PracticeSlotsAdminPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -701,13 +701,13 @@ export default function PracticeSlotsAdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
 
         {/* Header */}
         <header className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Practice Slots</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Practice Slots</h1>
+            <p className="text-sm text-muted-foreground">
               Create available practice windows by field and division. Coaches claim slots for their teams.
             </p>
           </div>
@@ -769,12 +769,12 @@ export default function PracticeSlotsAdminPage() {
           {/* ── Slot List Tab ─────────────────────────────────────────────────── */}
           <TabsContent value="slots">
             {isLoading ? (
-              <div className="flex justify-center py-20">
+              <div className="flex justify-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
             ) : filteredSlots.length === 0 ? (
               <Card className="border-none shadow-md border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                   <Dumbbell className="h-12 w-12 text-muted-foreground/40 mb-4" />
                   <p className="text-muted-foreground font-medium">
                     {filterStatus === 'all' ? 'No practice slots yet' : `No ${filterStatus} slots`}
@@ -917,7 +917,7 @@ export default function PracticeSlotsAdminPage() {
 
             {pendingSlots.length === 0 ? (
               <Card className="border-none shadow-md border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                   <CheckCircle2 className="h-12 w-12 text-muted-foreground/40 mb-4" />
                   <p className="text-muted-foreground font-medium">No pending requests</p>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -927,7 +927,7 @@ export default function PracticeSlotsAdminPage() {
               </Card>
             ) : filteredPendingSlots.length === 0 ? (
               <Card className="border-none shadow-md border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <CardContent className="flex flex-col items-center justify-center py-8 text-center">
                   <p className="text-muted-foreground font-medium">No requests match the current filters</p>
                 </CardContent>
               </Card>
@@ -1061,8 +1061,8 @@ export default function PracticeSlotsAdminPage() {
           <TabsContent value="distribution">
             {distributionData.totalTeams === 0 ? (
               <Card className="border-none shadow-md">
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                  <p className="text-muted-foreground">No teams found for the active season.</p>
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                  <p className="text-sm text-muted-foreground">No teams found for the active season.</p>
                 </CardContent>
               </Card>
             ) : (

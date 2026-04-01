@@ -184,7 +184,7 @@ export default function AdminCompliancePage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -205,10 +205,10 @@ export default function AdminCompliancePage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 min-w-0 overflow-x-hidden">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Compliance & Verification</h1>
-          <p className="text-muted-foreground">Audit volunteer clearances and redact sensitive player documents.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Compliance & Verification</h1>
+          <p className="text-sm text-muted-foreground">Audit volunteer clearances and redact sensitive player documents.</p>
         </header>
 
         {/* Summary stats */}
@@ -223,7 +223,7 @@ export default function AdminCompliancePage() {
           const pendingVerification = allPlayers?.filter(p => p.birthCertificateUrl && !p.ageVerified).length ?? 0;
           const isReady = fullyCleared === users.length && users.length > 0;
           return (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <Card className="border-none shadow-md">
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
@@ -281,7 +281,7 @@ export default function AdminCompliancePage() {
               </CardHeader>
               <CardContent className="p-0">
                 {loadingUsers ? (
-                  <div className="flex justify-center py-20">
+                  <div className="flex justify-center py-12">
                     <Loader2 className="h-10 w-10 animate-spin text-primary" />
                   </div>
                 ) : (
@@ -305,7 +305,7 @@ export default function AdminCompliancePage() {
                         const isFullyApproved = [ca, cr].every(c => c?.status === 'Approved');
                         return (
                           <TableRow key={user.id}>
-                            <TableCell className="pl-6 py-4">
+                            <TableCell className="pl-6 py-3">
                               <div className="font-semibold">{user.displayName}</div>
                               <div className="text-xs text-muted-foreground">{user.email}</div>
                             </TableCell>
@@ -394,7 +394,7 @@ export default function AdminCompliancePage() {
               </CardHeader>
               <CardContent className="p-0">
                 {loadingPlayers ? (
-                  <div className="flex justify-center py-20">
+                  <div className="flex justify-center py-12">
                     <Loader2 className="h-10 w-10 animate-spin text-primary" />
                   </div>
                 ) : (

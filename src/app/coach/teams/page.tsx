@@ -34,15 +34,15 @@ export default function CoachTeamsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">My Teams</h1>
-          <p className="text-muted-foreground">Manage your assigned rosters and coordinate with families.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">My Teams</h1>
+          <p className="text-sm text-muted-foreground">Manage your assigned rosters and coordinate with families.</p>
         </header>
 
         <div className="grid gap-6">
           {isLoading ? (
-            <div className="flex justify-center py-20">
+            <div className="flex justify-center py-12">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
           ) : !teams || teams.length === 0 ? (
@@ -50,7 +50,7 @@ export default function CoachTeamsPage() {
               <CardContent>
                 <Users className="h-16 w-16 text-muted mx-auto mb-4" />
                 <h3 className="text-xl font-bold font-headline">No Assigned Teams</h3>
-                <p className="text-muted-foreground">You are currently not assigned as a coach to any active rosters.</p>
+                <p className="text-sm text-muted-foreground">You are currently not assigned as a coach to any active rosters.</p>
                 <Button variant="outline" className="mt-6" asChild>
                   <Link href="/coach/dashboard">Return to Dashboard</Link>
                 </Button>

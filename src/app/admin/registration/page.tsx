@@ -173,7 +173,7 @@ export default function RegistrationDashboardPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -188,11 +188,11 @@ export default function RegistrationDashboardPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Registration Dashboard</h1>
-            <p className="text-muted-foreground">Financial and operational snapshot of all registrations.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Registration Dashboard</h1>
+            <p className="text-sm text-muted-foreground">Financial and operational snapshot of all registrations.</p>
           </div>
           <div className="flex items-center gap-3">
             <Select value={selectedSeason} onValueChange={setSelectedSeason}>
@@ -211,15 +211,15 @@ export default function RegistrationDashboardPage() {
         </header>
 
         {loadingEnrollments ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : (
           <>
             {/* Stat Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
               <Card className="border-none shadow-md col-span-2 lg:col-span-1">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Revenue Collected</p>
                     <DollarSign className="h-4 w-4 text-green-500" />
@@ -230,7 +230,7 @@ export default function RegistrationDashboardPage() {
               </Card>
 
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Fee Waivers</p>
                     <BadgeCheck className="h-4 w-4 text-emerald-500" />
@@ -241,7 +241,7 @@ export default function RegistrationDashboardPage() {
               </Card>
 
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Pending Payment</p>
                     <Clock className="h-4 w-4 text-yellow-500" />
@@ -252,7 +252,7 @@ export default function RegistrationDashboardPage() {
               </Card>
 
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Waitlisted</p>
                     <ListOrdered className="h-4 w-4 text-amber-500" />
@@ -263,7 +263,7 @@ export default function RegistrationDashboardPage() {
               </Card>
 
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Total Enrolled</p>
                     <Users className="h-4 w-4 text-primary" />
@@ -294,7 +294,7 @@ export default function RegistrationDashboardPage() {
                       // Try to find division name from seasons data
                       const divLabel = div.divisionId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
                       return (
-                        <div key={div.divisionId} className="p-5 hover:bg-secondary/10 transition-colors">
+                        <div key={div.divisionId} className="p-3 md:p-4 hover:bg-secondary/10 transition-colors">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div className="flex-1">
                               <p className="font-semibold">{divLabel}</p>

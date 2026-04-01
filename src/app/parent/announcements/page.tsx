@@ -51,10 +51,10 @@ export default function ParentAnnouncementsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 max-w-3xl">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">League Announcements</h1>
-          <p className="text-muted-foreground">Stay up to date with the latest news from SYBA.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 max-w-3xl">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">League Announcements</h1>
+          <p className="text-sm text-muted-foreground">Stay up to date with the latest news from SYBA.</p>
         </header>
 
         <div className="relative mb-6">
@@ -68,12 +68,12 @@ export default function ParentAnnouncementsPage() {
         </div>
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : filtered.length === 0 ? (
           <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
               <Megaphone className="h-12 w-12 text-muted-foreground/40 mb-4" />
               <p className="text-muted-foreground font-medium">No announcements found</p>
               <p className="text-sm text-muted-foreground">

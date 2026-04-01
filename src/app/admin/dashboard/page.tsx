@@ -497,7 +497,7 @@ export default function AdminDashboard({
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -533,7 +533,7 @@ export default function AdminDashboard({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-auto">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-auto">
 
         {/* ── Zone 1: Header ── */}
         <header className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

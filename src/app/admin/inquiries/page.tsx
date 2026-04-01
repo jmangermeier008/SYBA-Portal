@@ -106,13 +106,13 @@ function AdminInquiriesContent() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 max-w-4xl">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 max-w-4xl">
         <header className="mb-6">
-          <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
+          <h1 className="text-xl md:text-2xl font-bold font-headline flex items-center gap-2">
             <Inbox className="h-8 w-8" />
             Inquiries
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {openCount > 0 && <span className="font-medium text-blue-600">{openCount} open</span>}
             {openCount > 0 && inProgressCount > 0 && ' · '}
             {inProgressCount > 0 && <span className="font-medium text-orange-600">{inProgressCount} in progress</span>}
@@ -132,12 +132,12 @@ function AdminInquiriesContent() {
         </div>
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : filtered.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
               <Inbox className="h-12 w-12 text-muted-foreground/40 mb-4" />
               <p className="text-muted-foreground font-medium">No inquiries found</p>
               <p className="text-sm text-muted-foreground">

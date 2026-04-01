@@ -112,7 +112,7 @@ export default function AdminAnnouncementsPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -131,11 +131,11 @@ export default function AdminAnnouncementsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 max-w-4xl">
-        <header className="mb-8 flex justify-between items-start">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 max-w-4xl">
+        <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-3xl font-bold font-headline">League Announcements</h1>
-            <p className="text-muted-foreground">Publish league-wide notices visible to all parents and coaches.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">League Announcements</h1>
+            <p className="text-sm text-muted-foreground">Publish league-wide notices visible to all parents and coaches.</p>
           </div>
           <Button onClick={() => setAddOpen(true)} className="rounded-full shadow-lg">
             <Plus className="mr-2 h-4 w-4" /> New Announcement
@@ -143,12 +143,12 @@ export default function AdminAnnouncementsPage() {
         </header>
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : sorted.length === 0 ? (
           <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
               <Megaphone className="h-12 w-12 text-muted-foreground/40 mb-4" />
               <p className="text-muted-foreground font-medium">No announcements yet</p>
               <p className="text-sm text-muted-foreground mb-4">Publish your first league-wide announcement.</p>
@@ -161,7 +161,7 @@ export default function AdminAnnouncementsPage() {
           <div className="space-y-4">
             {sorted.map((ann) => (
               <Card key={ann.id} className={`border-none shadow-md ${ann.pinned ? 'border-l-4 border-l-primary' : ''}`}>
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex justify-between items-start gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">

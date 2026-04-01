@@ -141,7 +141,7 @@ export default function CoachDashboard() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-8">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
         <header className="mb-4">
           <h1 className="text-2xl font-bold font-headline">Coach Dashboard</h1>
           <p className="text-sm text-muted-foreground">Manage your teams and plan your next practice.</p>

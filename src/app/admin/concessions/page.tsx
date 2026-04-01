@@ -354,7 +354,7 @@ export default function ConcessionsAdminPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -369,11 +369,11 @@ export default function ConcessionsAdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex justify-between items-start">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Concessions Management</h1>
-            <p className="text-muted-foreground">Create volunteer slots and track parent sign-ups.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Concessions Management</h1>
+            <p className="text-sm text-muted-foreground">Create volunteer slots and track parent sign-ups.</p>
           </div>
         </header>
 
@@ -435,12 +435,12 @@ export default function ConcessionsAdminPage() {
               </Card>
             ) : (
               isLoading ? (
-                <div className="flex justify-center py-20">
+                <div className="flex justify-center py-12">
                   <Loader2 className="h-10 w-10 animate-spin text-primary" />
                 </div>
               ) : sortedSlots.length === 0 ? (
                 <Card className="border-none shadow-md border-dashed">
-                  <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                     <ShoppingCart className="h-12 w-12 text-muted-foreground/40 mb-4" />
                     <p className="text-muted-foreground font-medium">No concession slots yet</p>
                     <p className="text-sm text-muted-foreground mb-4">Add your first volunteer slot to get started.</p>
@@ -543,7 +543,7 @@ export default function ConcessionsAdminPage() {
 
               {!selectedSeasonId && (
                 <Card className="border-none shadow-md">
-                  <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                     <Users className="h-12 w-12 text-muted-foreground/40 mb-4" />
                     <p className="text-muted-foreground font-medium">Select a season to view compliance</p>
                     <p className="text-sm text-muted-foreground">See which families have met their volunteer commitment.</p>
@@ -552,14 +552,14 @@ export default function ConcessionsAdminPage() {
               )}
 
               {selectedSeasonId && complianceLoading && (
-                <div className="flex justify-center py-20">
+                <div className="flex justify-center py-12">
                   <Loader2 className="h-10 w-10 animate-spin text-primary" />
                 </div>
               )}
 
               {selectedSeasonId && !complianceLoading && families.length === 0 && (
                 <Card className="border-none shadow-md">
-                  <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                  <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                     <AlertCircle className="h-12 w-12 text-muted-foreground/40 mb-4" />
                     <p className="text-muted-foreground font-medium">No enrolled families found</p>
                     <p className="text-sm text-muted-foreground">No registrations have been recorded for this season yet.</p>

@@ -299,13 +299,13 @@ export default function AdminSettingsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline flex items-center gap-2">
             <Settings className="h-8 w-8" />
             Settings
           </h1>
-          <p className="text-muted-foreground">Manage officer directory and system configuration.</p>
+          <p className="text-sm text-muted-foreground">Manage officer directory and system configuration.</p>
         </header>
 
         <div className="max-w-4xl">

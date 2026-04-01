@@ -16,8 +16,8 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
         <CardContent className="py-16 space-y-6">
           <CheckCircle2 className="h-20 w-20 text-green-500 mx-auto" />
           <div className="space-y-2">
-            <h2 className="text-3xl font-bold font-headline">Registration Complete!</h2>
-            <p className="text-muted-foreground">
+            <h2 className="text-xl md:text-2xl font-bold font-headline">Registration Complete!</h2>
+            <p className="text-sm text-muted-foreground">
               Your payment was received and your player has been enrolled.
             </p>
           </div>
@@ -50,7 +50,7 @@ export default function EnrollSuccessPage({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
         <Suspense fallback={<Loader2 className="h-10 w-10 animate-spin text-primary" />}>
           <SuccessContent searchParams={resolvedSearchParams} />
         </Suspense>

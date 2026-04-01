@@ -204,7 +204,7 @@ export default function SeasonsAdminPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -225,11 +225,11 @@ export default function SeasonsAdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex justify-between items-center">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Season Management</h1>
-            <p className="text-muted-foreground">Define seasons, registration periods, and division fees.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Season Management</h1>
+            <p className="text-sm text-muted-foreground">Define seasons, registration periods, and division fees.</p>
           </div>
           
           <Dialog open={open} onOpenChange={setOpen}>
@@ -302,15 +302,15 @@ export default function SeasonsAdminPage() {
 
         <div className="grid gap-6">
           {isLoading ? (
-            <div className="flex justify-center py-20">
+            <div className="flex justify-center py-12">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
           ) : !seasons || seasons.length === 0 ? (
-            <Card className="border-none shadow-md py-12 text-center">
+            <Card className="border-none shadow-md py-8 text-center">
               <CardContent>
                 <Trophy className="h-16 w-16 text-muted mx-auto mb-4" />
                 <h3 className="text-xl font-bold font-headline">No Seasons Defined</h3>
-                <p className="text-muted-foreground">Create your first season to enable player registrations.</p>
+                <p className="text-sm text-muted-foreground">Create your first season to enable player registrations.</p>
               </CardContent>
             </Card>
           ) : (

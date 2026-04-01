@@ -341,7 +341,7 @@ export default function BoardMeetingsPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -356,11 +356,11 @@ export default function BoardMeetingsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex justify-between items-start">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Board Meetings</h1>
-            <p className="text-muted-foreground">Schedule meetings, manage agendas, track attendance, and upload minutes.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Board Meetings</h1>
+            <p className="text-sm text-muted-foreground">Schedule meetings, manage agendas, track attendance, and upload minutes.</p>
           </div>
           <Button onClick={() => setAddOpen(true)} className="rounded-full shadow-lg">
             <Plus className="mr-2 h-4 w-4" /> Schedule Meeting
@@ -368,12 +368,12 @@ export default function BoardMeetingsPage() {
         </header>
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : !meetings || meetings.length === 0 ? (
           <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
               <Calendar className="h-12 w-12 text-muted-foreground/40 mb-4" />
               <p className="text-muted-foreground font-medium">No meetings scheduled</p>
               <p className="text-sm text-muted-foreground mb-4">Add your first board meeting.</p>

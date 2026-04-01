@@ -311,7 +311,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           <CardContent className="py-16 space-y-4">
             <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto" />
             <h2 className="text-2xl font-bold font-headline">Added to Waitlist</h2>
-            <p className="text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               You're on the waitlist for <strong>{selectedSeason?.name}</strong> — <strong>{selectedDivision?.name}</strong>.
               We'll contact you at <strong>{user?.email}</strong> if a spot opens up.
             </p>

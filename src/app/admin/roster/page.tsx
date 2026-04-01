@@ -449,7 +449,7 @@ export default function MasterRosterPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -470,11 +470,11 @@ export default function MasterRosterPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 min-w-0 overflow-x-hidden">
-        <header className="mb-8 flex justify-between items-start">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
+        <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-muted-foreground">Manage league assignments and track registration compliance.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Master Roster Center</h1>
+            <p className="text-sm text-muted-foreground">Manage league assignments and track registration compliance.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
@@ -486,8 +486,8 @@ export default function MasterRosterPage() {
           </div>
         </header>
 
-        <Card className="border-none shadow-md mb-8">
-          <CardContent className="p-6">
+        <Card className="border-none shadow-md mb-4">
+          <CardContent className="p-4">
             <div className="mb-4 relative">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
               <Input
@@ -544,11 +544,11 @@ export default function MasterRosterPage() {
           </CardHeader>
           <CardContent className="p-0">
             {loadingEnrollments ? (
-              <div className="flex justify-center py-20">
+              <div className="flex justify-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
             ) : !filteredEnrollments || filteredEnrollments.length === 0 ? (
-              <div className="text-center py-20 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground">
                 No matching registrations found.
               </div>
             ) : (
@@ -573,7 +573,7 @@ export default function MasterRosterPage() {
                     const canWaive = status !== 'paid' && !e.fee_waived;
                     return (
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
-                        <TableCell className="pl-6 py-4">
+                        <TableCell className="pl-6 py-3">
                           <div className="font-semibold flex items-center gap-1">
                             {p ? `${p.firstName} ${p.lastName}` : 'Loading...'}
                             {p?.birthCertificateUrl && !p?.ageVerified && (
