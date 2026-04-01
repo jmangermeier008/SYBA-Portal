@@ -179,8 +179,12 @@ service cloud.firestore {
       match /games/{gameId} {
         allow get, list: if isSignedIn();
         allow create: if isCoach() || isBoardMember();
-        allow update: if isCoach() || isBoardMember();
-        allow delete: if isCoach() || isBoardMember();
+        allow update: if isBoardMember() ||
+          (isCoach() &&
+           request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['homeScore', 'awayScore', 'status', 'attendance',
+                       'cancelled', 'cancellationReason', 'updatedAt']));
+        allow delete: if isBoardMember();
 
         match /rsvps/{rsvpId} {
           allow get, list: if isSignedIn();
@@ -325,6 +329,17 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read: if true; // public — home page shows complex closure alert
       allow write: if isBoardMember();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Audit Logs — immutable records written on every admin game mutation.
+    // Board members can read and create; no one can update or delete.
+    // ---------------------------------------------------------------------------
+
+    match /auditLogs/{logId} {
+      allow read: if isBoardMember();
+      allow create: if isBoardMember();
+      allow update, delete: if false;
     }
   }
 }
