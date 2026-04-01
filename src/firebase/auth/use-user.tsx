@@ -22,6 +22,8 @@ export interface UserProfile {
   shareContactInfo?: boolean;
   enrolledPlayerIds?: string[];
   preferredSport?: Sport;
+  complianceStatus?: 'pending' | 'approved' | 'action_required';
+  manualComplianceOverride?: boolean;
   createdAt: string;
 }
 
@@ -95,6 +97,13 @@ export function useUser() {
   const isCoach = roles.includes('Coach') || isAdmin;
   const isParent = roles.includes('Parent') || isAdmin;
 
+  // PA Act 153 compliance — true when clearances are approved OR admin has force-approved
+  const isApproved =
+    profile?.complianceStatus === 'approved' || profile?.manualComplianceOverride === true;
+
+  // Board members, admins, and site admins bypass the compliance lockout
+  const hasCoachAccess = isBoardMember || isAdmin || isSiteAdmin || isApproved;
+
   return {
     user,
     profile,
@@ -105,6 +114,8 @@ export function useUser() {
     isBoardMember,
     isCoach,
     isParent,
+    isApproved,
+    hasCoachAccess,
     preferredSport: profile?.preferredSport,
     sportRoles: profile?.sportRoles,
   };

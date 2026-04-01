@@ -9,16 +9,17 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
-import { collection, doc, setDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, query, orderBy, where, writeBatch } from 'firebase/firestore';
 import { useSport } from '@/firebase/sport-context';
-import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench } from 'lucide-react';
+import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
 import { clearUserNotifications } from '@/lib/maintenance-actions';
-import type { LeagueOfficer } from '@/types/scheduling';
+import type { LeagueOfficer, Game } from '@/types/scheduling';
+import { Checkbox } from '@/components/ui/checkbox';
 import { EXECUTIVE_TITLES } from '@/data/officers';
 
 type OfficerRecord = LeagueOfficer;
@@ -127,6 +128,22 @@ export default function AdminSettingsPage() {
   const { toast } = useToast();
 
   const [notifEmail, setNotifEmail] = useState('');
+
+  // Rain-out engine state
+  const [rainoutDate, setRainoutDate] = useState('');
+  const [selectedGameIds, setSelectedGameIds] = useState<Set<string>>(new Set());
+  const [processingRainout, setProcessingRainout] = useState(false);
+
+  // Query scheduled games on the selected rainout date (all sports on that day)
+  const rainoutGamesQuery = useMemoFirebase(() => {
+    if (!db || !rainoutDate) return null;
+    return query(
+      collection(db, 'games'),
+      where('date', '==', rainoutDate),
+      where('status', '==', 'scheduled')
+    );
+  }, [db, rainoutDate]);
+  const { data: rainoutGames, isLoading: loadingRainoutGames } = useCollection<Game>(rainoutGamesQuery);
 
   // Executives only — scoped to the active sport
   const officersQuery = useMemoFirebase(() => {
@@ -244,6 +261,36 @@ export default function AdminSettingsPage() {
       setNotifEmail('');
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Action failed', description: err.message });
+    }
+  };
+
+  const handleProcessRainout = async () => {
+    if (!db || selectedGameIds.size === 0) return;
+    setProcessingRainout(true);
+    try {
+      const batch = writeBatch(db);
+      for (const gameId of selectedGameIds) {
+        const game = rainoutGames?.find(g => g.id === gameId);
+        if (!game) continue;
+        batch.update(doc(db, 'games', gameId), {
+          status: 'unscheduled',
+          originalDate: game.date,
+          originalTime: game.time,
+          originalFieldId: game.fieldId,
+          originalFieldName: game.fieldName,
+        });
+      }
+      await batch.commit();
+      toast({
+        title: 'Rain-out processed',
+        description: `${selectedGameIds.size} game${selectedGameIds.size !== 1 ? 's' : ''} marked as unscheduled. Original date/field preserved.`,
+      });
+      setSelectedGameIds(new Set());
+      setRainoutDate('');
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Failed to process rain-out', description: err.message });
+    } finally {
+      setProcessingRainout(false);
     }
   };
 
@@ -399,6 +446,97 @@ export default function AdminSettingsPage() {
                   onExecute={handleClearNotifications}
                   disabled={!notifEmail.trim()}
                 />
+
+                {/* Rain-out Batch Action */}
+                <Card className="border-none shadow-md">
+                  <CardHeader className="flex flex-row items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                      <CloudRain className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <CardTitle>Rain-out Game Day</CardTitle>
+                      <CardDescription>
+                        Mark scheduled games as unscheduled. Original date, time, and field are preserved for displacement history.
+                      </CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Select game date</Label>
+                      <Input
+                        type="date"
+                        value={rainoutDate}
+                        onChange={(e) => {
+                          setRainoutDate(e.target.value);
+                          setSelectedGameIds(new Set());
+                        }}
+                        className="max-w-xs"
+                      />
+                    </div>
+
+                    {rainoutDate && (
+                      <div className="space-y-2">
+                        {loadingRainoutGames ? (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading games…
+                          </div>
+                        ) : !rainoutGames || rainoutGames.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-2">No scheduled games found on this date.</p>
+                        ) : (
+                          <>
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                              Scheduled games on {rainoutDate}
+                            </p>
+                            <div className="space-y-2">
+                              {rainoutGames.map((game) => {
+                                const label = game.type === 'game'
+                                  ? `${game.homeTeamName ?? '?'} vs ${game.awayTeamName ?? '?'}`
+                                  : `${game.teamName ?? 'Practice'} — Practice`;
+                                return (
+                                  <label
+                                    key={game.id}
+                                    className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/40 transition-colors"
+                                  >
+                                    <Checkbox
+                                      checked={selectedGameIds.has(game.id)}
+                                      onCheckedChange={(checked) => {
+                                        setSelectedGameIds(prev => {
+                                          const next = new Set(prev);
+                                          if (checked) next.add(game.id);
+                                          else next.delete(game.id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">{label}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {game.time} · {game.fieldName}
+                                      </p>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <Button
+                              variant="default"
+                              disabled={selectedGameIds.size === 0 || processingRainout}
+                              onClick={handleProcessRainout}
+                              className="mt-2"
+                            >
+                              {processingRainout ? (
+                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
+                              ) : (
+                                <><CloudRain className="mr-2 h-4 w-4" /> Process Rain-out ({selectedGameIds.size} selected)</>
+                              )}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </TabsContent>
             )}
           </Tabs>
