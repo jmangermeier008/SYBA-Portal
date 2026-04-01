@@ -27,6 +27,7 @@ import {
   type ParsedGame, type ValidationError,
 } from '@/lib/csv-import';
 import type { ConcessionSlot } from '@/types/scheduling';
+import { writeAuditLog } from '@/firebase/firestore/audit-log';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 
 export default function AdminGamesPage() {
   const db = useFirestore();
-  const { loading: loadingUser } = useUser();
+  const { user, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const router = useRouter();
@@ -249,6 +250,19 @@ export default function AdminGamesPage() {
   const { data: pastGames, isLoading: loadingPast } = useCollection<Game>(pastQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
   const { data: fields } = useCollection<Field>(fieldsQuery);
+
+  // ── Field conflict detection ───────────────────────────────────────────────
+  // Derived from already-loaded data — no new subscription needed.
+  const conflictingGame = useMemo<Game | null>(() => {
+    if (!open || !form.fieldId || !form.date || !form.time) return null;
+    return [...(upcomingGames ?? []), ...(pastGames ?? [])].find(g =>
+      g.id !== editingGame?.id &&
+      g.fieldId === form.fieldId &&
+      g.date === form.date &&
+      g.time === form.time &&
+      g.status !== 'cancelled'
+    ) ?? null;
+  }, [open, form.fieldId, form.date, form.time, upcomingGames, pastGames, editingGame]);
 
   const fieldMap = Object.fromEntries((fields ?? []).map((f) => [f.id, f.name]));
   const teamMap = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name]));
@@ -431,6 +445,18 @@ export default function AdminGamesPage() {
 
         // No cascade needed — just update the game
         await updateDoc(doc(db, 'games', editingGame.id), payload);
+        if (user) {
+          writeAuditLog(db, {
+            action: 'game.updated',
+            adminUid: user.uid,
+            targetCollection: 'games',
+            targetDocId: editingGame.id,
+            before: { date: editingGame.date, time: editingGame.time, fieldId: editingGame.fieldId, status: editingGame.status },
+            after: { date: form.date, time: form.time, fieldId: form.fieldId },
+            meta: { gameLabel: gameLabel(editingGame) },
+            sport: activeSport ?? undefined,
+          });
+        }
         toast({ title: 'Updated', description: 'Game details saved.' });
         closeDialog();
         return;
@@ -439,6 +465,15 @@ export default function AdminGamesPage() {
       // ── CREATE MODE ────────────────────────────────────────────────────────
       const gameId = crypto.randomUUID();
       const createPayload = { ...buildGamePayload(), status: 'scheduled', createdAt: Timestamp.now() };
+
+      const auditCreateOpts = {
+        action: 'game.created' as const,
+        adminUid: user?.uid ?? '',
+        targetCollection: 'games',
+        targetDocId: gameId,
+        after: { date: form.date, time: form.time, fieldId: form.fieldId, type: form.type },
+        sport: activeSport ?? undefined,
+      };
 
       if (shiftForm.enabled && form.type === 'game') {
         const batch = writeBatch(db);
@@ -451,9 +486,11 @@ export default function AdminGamesPage() {
           status: 'active', signups: [], createdAt: Timestamp.now(),
         });
         await batch.commit();
+        if (user) writeAuditLog(db, auditCreateOpts);
         toast({ title: 'Saved', description: 'Game and concession shift added.' });
       } else {
         await setDoc(doc(db, 'games', gameId), createPayload);
+        if (user) writeAuditLog(db, auditCreateOpts);
         toast({ title: 'Saved', description: `${form.type === 'game' ? 'Game' : 'Practice'} added.` });
       }
 
@@ -568,6 +605,17 @@ export default function AdminGamesPage() {
 
       await batch.commit();
 
+      if (user) {
+        writeAuditLog(db, {
+          action: 'game.cancelled',
+          adminUid: user.uid,
+          targetCollection: 'games',
+          targetDocId: game.id,
+          meta: { gameLabel: label, linkedShiftCount: shiftsSnap.size },
+          sport: activeSport ?? undefined,
+        });
+      }
+
       if (affectedParentIds.size > 0) {
         fetch('/api/email/schedule-change', {
           method: 'POST',
@@ -600,6 +648,16 @@ export default function AdminGamesPage() {
       const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       shiftsSnap.forEach(shiftDoc => batch.delete(shiftDoc.ref));
       await batch.commit();
+      if (user) {
+        writeAuditLog(db, {
+          action: 'game.deleted',
+          adminUid: user.uid,
+          targetCollection: 'games',
+          targetDocId: game.id,
+          meta: { gameLabel: gameLabel(game) },
+          sport: activeSport ?? undefined,
+        });
+      }
       toast({ title: 'Deleted', description: shiftsSnap.size > 0 ? `${shiftsSnap.size} linked shift${shiftsSnap.size !== 1 ? 's' : ''} also removed.` : undefined });
       setDeleteDialog({ open: false, game: null, linkedShiftCount: 0, isDeleting: false });
     } catch (err: any) {
@@ -654,6 +712,17 @@ export default function AdminGamesPage() {
         status: 'completed',
         updatedAt: Timestamp.now(),
       });
+      if (user) {
+        writeAuditLog(db, {
+          action: 'game.score_recorded',
+          adminUid: user.uid,
+          targetCollection: 'games',
+          targetDocId: game.id,
+          after: { homeScore, awayScore, status: 'completed' },
+          meta: { gameLabel: gameLabel(game) },
+          sport: activeSport ?? undefined,
+        });
+      }
       toast({ title: 'Score Saved', description: 'Game marked complete with final score.' });
       setScoreDialog({ open: false, game: null, isSaving: false });
     } catch (err: any) {
@@ -874,6 +943,23 @@ export default function AdminGamesPage() {
                       <div className="space-y-1.5">
                         <Label>Time</Label>
                         <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                      </div>
+                    </div>
+                  )}
+
+                  {conflictingGame && !form.isRecurring && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-start gap-2 text-sm text-amber-800">
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                      <div>
+                        <p className="font-medium">Field may be occupied</p>
+                        <p className="text-amber-700 mt-0.5">
+                          {conflictingGame.homeTeamName && conflictingGame.awayTeamName
+                            ? `${conflictingGame.homeTeamName} vs. ${conflictingGame.awayTeamName}`
+                            : conflictingGame.teamName
+                            ? `${conflictingGame.teamName} Practice`
+                            : 'Another event'}
+                          {' '}is already scheduled at this field, date, and time.
+                        </p>
                       </div>
                     </div>
                   )}

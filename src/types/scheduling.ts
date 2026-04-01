@@ -468,3 +468,28 @@ export interface Announcement {
   publishedBy?: string;
   sport?: Sport;
 }
+
+// ---------------------------------------------------------------------------
+// Audit Log  (collection: auditLogs)
+// ---------------------------------------------------------------------------
+
+export type AuditAction =
+  | 'game.created'
+  | 'game.updated'
+  | 'game.cancelled'
+  | 'game.deleted'
+  | 'game.score_recorded';
+
+/** An immutable audit record written on every admin-initiated game mutation. */
+export interface AuditLog {
+  id: string;
+  action: AuditAction;
+  adminUid: string;
+  targetCollection: string;
+  targetDocId: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  meta?: Record<string, unknown>;
+  createdAt: string;
+  sport?: Sport;
+}

@@ -12,6 +12,7 @@ import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebas
 import { doc, updateDoc, collection, query, orderBy, where, getDocs, arrayUnion } from 'firebase/firestore';
 import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, UserPlus, CheckCircle2, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { stripPhone } from '@/lib/utils';
 
 interface OfficerRecord {
   id: string;
@@ -104,7 +105,7 @@ export default function ParentSettingsPage() {
     try {
       await updateDoc(userRef, {
         displayName: formData.displayName,
-        phoneNumber: formData.phoneNumber,
+        phoneNumber: stripPhone(formData.phoneNumber),
         updatedAt: new Date().toISOString(),
       });
       toast({ title: "Profile Saved", description: "Your name and phone number have been updated." });
