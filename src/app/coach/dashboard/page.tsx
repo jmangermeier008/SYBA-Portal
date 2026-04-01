@@ -7,7 +7,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
-import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone } from 'lucide-react';
+import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -141,51 +141,72 @@ export default function CoachDashboard() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex flex-wrap justify-between items-start gap-4">
-          <div>
-            <h1 className="text-3xl font-bold font-headline">Coach Dashboard</h1>
-            <p className="text-muted-foreground">Manage your teams and plan your next practice.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Team selector — only shown when coach has multiple teams */}
-            {teams && teams.length > 1 && (
-              <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
-                {teams.map((team, i) => (
-                  <button
-                    key={team.id}
-                    onClick={() => setSelectedTeamIndex(i)}
-                    className={cn(
-                      'px-3 py-2 min-h-[44px] rounded-full transition-colors text-xs font-semibold',
-                      clampedTeamIndex === i ? 'bg-white shadow text-foreground' : 'text-muted-foreground'
-                    )}
-                  >
-                    {team.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            <Button variant="outline" asChild className="rounded-full">
-              <Link href="/coach/drills">
-                <Dumbbell className="mr-2 h-4 w-4" /> Drill Library
-              </Link>
-            </Button>
-          </div>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4">
+          <h1 className="text-2xl font-bold font-headline">Coach Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Manage your teams and plan your next practice.</p>
         </header>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
+        {/* Team selector — horizontal scroll, sits above action grid */}
+        {teams && teams.length > 1 && (
+          <div className="mb-4 overflow-x-auto">
+            <div className="flex items-center gap-2 w-max">
+              {teams.map((team, i) => (
+                <button
+                  key={team.id}
+                  onClick={() => setSelectedTeamIndex(i)}
+                  className={cn(
+                    'px-4 py-2 rounded-full border text-xs font-semibold whitespace-nowrap transition-colors',
+                    clampedTeamIndex === i
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-muted text-muted-foreground border-transparent'
+                  )}
+                >
+                  {team.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 2×2 Action Grid — always above the fold on mobile */}
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          {[
+            { href: '/coach/teams', icon: Users, label: 'Roster', sub: 'Players & contacts' },
+            { href: '/coach/drills', icon: Dumbbell, label: 'Drills', sub: `${activeSport ?? 'Baseball'} drills` },
+            { href: '/coach/schedules', icon: ClipboardList, label: 'Log Score', sub: 'Game results' },
+            { href: '/coach/contact', icon: Phone, label: 'Contact', sub: 'League office' },
+          ].map(({ href, icon: Icon, label, sub }) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex items-center gap-3 rounded-xl border bg-card p-3 shadow-sm active:scale-95 transition-transform"
+            >
+              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <Icon className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold leading-tight">{label}</p>
+                <p className="text-[10px] text-muted-foreground leading-tight">{sub}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        {/* Stats strip — 2 cols on mobile, 4 on desktop */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
           <Card className="border-none shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">My Teams</CardTitle>
-              <Users className="h-4 w-4 text-primary" />
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
+              <CardTitle className="text-xs font-medium text-muted-foreground">My Teams</CardTitle>
+              <Users className="h-3.5 w-3.5 text-primary" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-3">
               {loadingTeams ? (
-                <><Skeleton className="h-8 w-8 mb-1" /><Skeleton className="h-3 w-32" /></>
+                <><Skeleton className="h-7 w-8 mb-1" /><Skeleton className="h-3 w-24" /></>
               ) : (
                 <>
-                  <div className="text-2xl font-bold">{teams?.length ?? 0}</div>
-                  <p className="text-xs text-muted-foreground">
+                  <div className="text-xl font-bold">{teams?.length ?? 0}</div>
+                  <p className="text-[10px] text-muted-foreground truncate">
                     {teams?.map(t => t.name).join(', ') || 'No teams assigned'}
                   </p>
                 </>
@@ -193,72 +214,74 @@ export default function CoachDashboard() {
             </CardContent>
           </Card>
           <Card className="border-none shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Players</CardTitle>
-              <Star className="h-4 w-4 text-accent-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Players</CardTitle>
+              <Star className="h-3.5 w-3.5 text-accent-foreground" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{playerCount}</div>
-              <p className="text-xs text-muted-foreground">Roster Size</p>
+            <CardContent className="px-4 pb-3">
+              <div className="text-xl font-bold">{playerCount}</div>
+              <p className="text-[10px] text-muted-foreground">Roster size</p>
             </CardContent>
           </Card>
           <Card className="border-none shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Next Event</CardTitle>
-              <Calendar className="h-4 w-4 text-primary" />
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Next Event</CardTitle>
+              <Calendar className="h-3.5 w-3.5 text-primary" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-3">
               {nextGame ? (
                 <>
-                  <div className="text-2xl font-bold">{nextGame.type}</div>
-                  <p className="text-xs text-muted-foreground">
+                  <div className="text-xl font-bold">{nextGame.type}</div>
+                  <p className="text-[10px] text-muted-foreground">
                     {format(new Date(nextGame.dateTime), 'EEE, MMM d @ h:mm a')}
                   </p>
                 </>
               ) : (
                 <>
-                  <div className="text-2xl font-bold">—</div>
-                  <p className="text-xs text-muted-foreground">No upcoming events</p>
+                  <div className="text-xl font-bold">—</div>
+                  <p className="text-[10px] text-muted-foreground">No upcoming events</p>
                 </>
               )}
             </CardContent>
           </Card>
           <Card className="border-none shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Attendance Rate</CardTitle>
-              <UserCheck className="h-4 w-4 text-accent-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Attendance</CardTitle>
+              <UserCheck className="h-3.5 w-3.5 text-accent-foreground" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-3">
               {attendanceRate !== null ? (
                 <>
-                  <div className="text-2xl font-bold">{attendanceRate}%</div>
-                  <p className="text-xs text-muted-foreground">{attendingCount}/{totalRsvpCount} confirmed</p>
+                  <div className="text-xl font-bold">{attendanceRate}%</div>
+                  <p className="text-[10px] text-muted-foreground">{attendingCount}/{totalRsvpCount} confirmed</p>
                 </>
               ) : (
                 <>
-                  <div className="text-2xl font-bold">—</div>
-                  <p className="text-xs text-muted-foreground">No RSVPs yet</p>
+                  <div className="text-xl font-bold">—</div>
+                  <p className="text-[10px] text-muted-foreground">No RSVPs yet</p>
                 </>
               )}
             </CardContent>
           </Card>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-3">
           <Card className="md:col-span-2 border-none shadow-md">
-            <CardHeader className="flex flex-row items-start justify-between">
+            <CardHeader className="flex flex-row items-start justify-between pb-3">
               <div>
-                <CardTitle className="font-headline">Team Schedule</CardTitle>
-                <CardDescription>Upcoming games and practices{teams?.[clampedTeamIndex] ? ` for ${teams[clampedTeamIndex].name}` : ''}</CardDescription>
+                <CardTitle className="font-headline text-base">Team Schedule</CardTitle>
+                <CardDescription className="text-xs">
+                  Upcoming games and practices{teams?.[clampedTeamIndex] ? ` for ${teams[clampedTeamIndex].name}` : ''}
+                </CardDescription>
               </div>
               <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm shrink-0">
                 <button
                   onClick={() => setScheduleView('list')}
-                  className={cn('px-3 py-2 min-h-[44px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'list' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
+                  className={cn('px-3 py-1.5 min-h-[36px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'list' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
                 >List</button>
                 <button
                   onClick={() => setScheduleView('calendar')}
-                  className={cn('px-3 py-2 min-h-[44px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'calendar' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
+                  className={cn('px-3 py-1.5 min-h-[36px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'calendar' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
                 >Calendar</button>
               </div>
             </CardHeader>
@@ -272,42 +295,40 @@ export default function CoachDashboard() {
                   visibleFilters={['games', 'practices']}
                 />
               ) : loadingGames ? (
-                <div className="flex justify-center py-10">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-7 w-7 animate-spin text-primary" />
                 </div>
               ) : !games || games.length === 0 ? (
-                <div className="text-center py-10 text-muted-foreground">
-                  <Calendar className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                  <p>No scheduled events yet.</p>
-                  <Button variant="link" asChild className="mt-2">
+                <div className="text-center py-8 text-muted-foreground">
+                  <Calendar className="h-10 w-10 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm">No scheduled events yet.</p>
+                  <Button variant="link" asChild className="mt-1">
                     <Link href="/coach/schedules">Add an event</Link>
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {games.map((game) => (
-                    <div key={game.id} className="flex items-center justify-between p-4 rounded-lg bg-secondary/20">
-                      <div className="flex items-center gap-4">
+                    <div key={game.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-secondary/20">
+                      <div className="flex items-center gap-3">
                         <div className={cn(
-                          "w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white shadow-sm",
+                          "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-sm shrink-0",
                           game.type === 'Game' ? "bg-primary" : "bg-accent"
                         )}>
                           {game.type[0]}
                         </div>
                         <div>
-                          <p className="font-semibold">
+                          <p className="text-sm font-semibold leading-tight">
                             {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
                           </p>
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(game.dateTime), 'EEE, MMM d')} • {format(new Date(game.dateTime), 'h:mm a')}
+                          <p className="text-[10px] text-muted-foreground">
+                            {format(new Date(game.dateTime), 'EEE, MMM d')} · {format(new Date(game.dateTime), 'h:mm a')}
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-                          <Link href="/coach/schedules">Manage</Link>
-                        </Button>
-                      </div>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs px-2" asChild>
+                        <Link href="/coach/schedules">Manage</Link>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -315,80 +336,54 @@ export default function CoachDashboard() {
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-6">
-            <Card className="border-none shadow-md">
-              <CardHeader>
-                <CardTitle className="font-headline">League Announcements</CardTitle>
-                <CardDescription>Latest updates from the league</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loadingAnnouncements ? (
-                  <div className="space-y-3">
-                    {[0, 1].map(i => (
-                      <div key={i} className="flex items-start gap-4 p-3">
-                        <Skeleton className="w-10 h-10 rounded-full shrink-0" />
-                        <div className="flex-1 space-y-1.5">
-                          <Skeleton className="h-4 w-3/4" />
-                          <Skeleton className="h-3 w-full" />
-                        </div>
+          <Card className="border-none shadow-md">
+            <CardHeader className="pb-3">
+              <CardTitle className="font-headline text-base">Announcements</CardTitle>
+              <CardDescription className="text-xs">Latest updates from the league</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingAnnouncements ? (
+                <div className="space-y-3">
+                  {[0, 1].map(i => (
+                    <div key={i} className="flex items-start gap-3 p-2">
+                      <Skeleton className="w-8 h-8 rounded-full shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3.5 w-3/4" />
+                        <Skeleton className="h-3 w-full" />
                       </div>
-                    ))}
-                  </div>
-                ) : announcements && announcements.length > 0 ? (
-                  <div className="space-y-4">
-                    {announcements.map((a) => (
-                      <div key={a.id} className="flex items-start gap-4 p-3 rounded-lg bg-secondary/30">
-                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary shrink-0">
-                          <Megaphone className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold">{a.title}</p>
-                          <p className="text-xs text-muted-foreground line-clamp-2">{a.body}</p>
-                          {a.publishedAt && (
-                            <p className="text-[10px] text-muted-foreground mt-1">
-                              {format(new Date(a.publishedAt), 'MMM d')}
-                            </p>
-                          )}
-                        </div>
+                    </div>
+                  ))}
+                </div>
+              ) : announcements && announcements.length > 0 ? (
+                <div className="space-y-3">
+                  {announcements.map((a) => (
+                    <div key={a.id} className="flex items-start gap-3 p-2 rounded-lg bg-secondary/30">
+                      <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary shrink-0">
+                        <Megaphone className="h-4 w-4" />
                       </div>
-                    ))}
-                    <Button variant="ghost" size="sm" asChild className="w-full mt-2">
-                      <Link href="/coach/announcements">View all announcements</Link>
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Megaphone className="h-10 w-10 text-muted mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground">No announcements yet.</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-md">
-              <CardHeader>
-                <CardTitle className="font-headline">Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
-                  <Link href="/coach/drills">
-                    <div className="text-left">
-                      <p className="font-semibold flex items-center gap-2"><Dumbbell className="h-4 w-4" /> Practice Drills</p>
-                      <p className="text-xs text-muted-foreground">Browse age-grouped {activeSport ?? 'baseball'} drills</p>
+                      <div>
+                        <p className="text-xs font-semibold">{a.title}</p>
+                        <p className="text-[10px] text-muted-foreground line-clamp-2">{a.body}</p>
+                        {a.publishedAt && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {format(new Date(a.publishedAt), 'MMM d')}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </Link>
-                </Button>
-                <Button className="w-full justify-start rounded-xl py-6 h-auto" variant="outline" asChild>
-                  <Link href="/coach/teams">
-                    <div className="text-left">
-                      <p className="font-semibold flex items-center gap-2"><Users className="h-4 w-4" /> Roster Management</p>
-                      <p className="text-xs text-muted-foreground">View player details and contacts</p>
-                    </div>
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
+                  ))}
+                  <Button variant="ghost" size="sm" asChild className="w-full text-xs">
+                    <Link href="/coach/announcements">View all</Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <Megaphone className="h-8 w-8 text-muted mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">No announcements yet.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </main>
     </div>

@@ -157,7 +157,7 @@ export default function StandingsPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardContent className="pt-6">
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -180,10 +180,10 @@ export default function StandingsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Standings</h1>
-          <p className="text-muted-foreground">Win/loss records computed from completed game scores.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Standings</h1>
+          <p className="text-sm text-muted-foreground">Win/loss records computed from completed game scores.</p>
         </header>
 
         <div className="flex flex-wrap gap-3 mb-6">
@@ -218,11 +218,11 @@ export default function StandingsPage() {
             <CardContent>
               <Trophy className="h-16 w-16 text-muted mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline">Select Season & Division</h3>
-              <p className="text-muted-foreground">Choose a season and division to view standings.</p>
+              <p className="text-sm text-muted-foreground">Choose a season and division to view standings.</p>
             </CardContent>
           </Card>
         ) : loadingGames ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : (

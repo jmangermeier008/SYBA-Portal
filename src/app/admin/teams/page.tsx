@@ -203,7 +203,7 @@ export default function TeamsAdminPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -224,11 +224,11 @@ export default function TeamsAdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex justify-between items-center">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold font-headline">League Teams</h1>
-            <p className="text-muted-foreground">Manage all teams and view their rosters across the association.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">League Teams</h1>
+            <p className="text-sm text-muted-foreground">Manage all teams and view their rosters across the association.</p>
           </div>
 
           <Dialog open={open} onOpenChange={setOpen}>
@@ -357,7 +357,7 @@ export default function TeamsAdminPage() {
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {loadingTeams ? (
-            <div className="col-span-full flex justify-center py-20">
+            <div className="col-span-full flex justify-center py-12">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
           ) : filteredTeams.length === 0 ? (

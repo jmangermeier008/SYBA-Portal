@@ -228,7 +228,7 @@ export default function RolesPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -249,11 +249,11 @@ export default function RolesPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold font-headline">User Role Management</h1>
-            <p className="text-muted-foreground">Assign roles, officer titles, and manage portal access.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">User Role Management</h1>
+            <p className="text-sm text-muted-foreground">Assign roles, officer titles, and manage portal access.</p>
           </div>
           <Button className="rounded-full px-6" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add User
@@ -299,13 +299,13 @@ export default function RolesPage() {
           </CardHeader>
           <CardContent className="p-0">
             {isLoading ? (
-              <div className="flex justify-center items-center py-20">
+              <div className="flex justify-center items-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
             ) : !users || users.length === 0 ? (
-              <div className="text-center py-20 text-muted-foreground">No users found.</div>
+              <div className="text-center py-12 text-muted-foreground">No users found.</div>
             ) : filteredUsers.length === 0 ? (
-              <div className="text-center py-20 text-muted-foreground">No users match your filters.</div>
+              <div className="text-center py-12 text-muted-foreground">No users match your filters.</div>
             ) : (
               <div className="overflow-x-auto w-full">
                 <Table>
@@ -326,7 +326,7 @@ export default function RolesPage() {
                       const isBoardMember = userRoles.includes('Board Member');
                       return (
                         <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
-                          <TableCell className="pl-6 py-4">
+                          <TableCell className="pl-6 py-3">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
                                 {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="h-5 w-5" />}

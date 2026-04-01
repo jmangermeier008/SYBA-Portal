@@ -216,7 +216,7 @@ export default function SponsorshipsPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -231,11 +231,11 @@ export default function SponsorshipsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 min-w-0 overflow-x-hidden">
-        <header className="mb-8 flex justify-between items-start">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
+        <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Sponsorship Tracker</h1>
-            <p className="text-muted-foreground">Track sponsor commitments and revenue across the league.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Sponsorship Tracker</h1>
+            <p className="text-sm text-muted-foreground">Track sponsor commitments and revenue across the league.</p>
           </div>
           <Button onClick={openAddDialog} className="rounded-full shadow-lg">
             <Plus className="mr-2 h-4 w-4" /> Add Sponsor
@@ -243,15 +243,15 @@ export default function SponsorshipsPage() {
         </header>
 
         {isLoading ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : (
           <>
             {/* Stat Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Total Pledged</p>
                     <DollarSign className="h-4 w-4 text-primary" />
@@ -260,7 +260,7 @@ export default function SponsorshipsPage() {
                 </CardContent>
               </Card>
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Received</p>
                     <TrendingUp className="h-4 w-4 text-green-500" />
@@ -269,7 +269,7 @@ export default function SponsorshipsPage() {
                 </CardContent>
               </Card>
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Outstanding</p>
                     <AlertCircle className="h-4 w-4 text-amber-500" />
@@ -278,7 +278,7 @@ export default function SponsorshipsPage() {
                 </CardContent>
               </Card>
               <Card className="border-none shadow-md">
-                <CardContent className="p-5">
+                <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold uppercase text-muted-foreground">Active Sponsors</p>
                     <Star className="h-4 w-4 text-yellow-500" />
@@ -289,7 +289,7 @@ export default function SponsorshipsPage() {
             </div>
 
             {/* Unified Revenue Chart */}
-            <Card className="border-none shadow-md mb-8">
+            <Card className="border-none shadow-md mb-4">
               <CardHeader>
                 <CardTitle className="text-lg font-headline">Unified Revenue Overview</CardTitle>
                 <CardDescription>Registration payments + sponsorships received to date.</CardDescription>
@@ -347,7 +347,7 @@ export default function SponsorshipsPage() {
                         const outstanding = (sp.pledgedAmount ?? 0) - (sp.receivedAmount ?? 0);
                         return (
                           <TableRow key={sp.id} className="hover:bg-secondary/20 transition-colors">
-                            <TableCell className="pl-6 py-4">
+                            <TableCell className="pl-6 py-3">
                               <div className="font-semibold">{sp.name}</div>
                               {sp.contactName && (
                                 <div className="text-xs text-muted-foreground">{sp.contactName}</div>

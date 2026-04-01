@@ -16,7 +16,9 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Switch } from '@/components/ui/switch';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -64,6 +66,9 @@ interface ParentProfile {
   displayName: string | null;
   email: string | null;
   phoneNumber?: string | null;
+  roles?: string[];
+  complianceStatus?: 'pending' | 'approved' | 'action_required';
+  manualComplianceOverride?: boolean;
 }
 
 function getPaymentStatus(e: Enrollment) {
@@ -386,6 +391,22 @@ export default function MasterRosterPage() {
     }
   };
 
+  const handleToggleForceApprove = async (userId: string, currentOverride: boolean) => {
+    try {
+      await updateDoc(doc(db, 'userProfiles', userId), {
+        manualComplianceOverride: !currentOverride,
+      });
+      toast({
+        title: !currentOverride ? 'Compliance override enabled' : 'Compliance override removed',
+        description: !currentOverride
+          ? 'Coach can now access the portal. Clearance review still required.'
+          : 'Override removed. Coach must complete clearances to regain access.',
+      });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Update failed', description: err.message });
+    }
+  };
+
   const exportRosterCSV = () => {
     if (!filteredEnrollments || filteredEnrollments.length === 0) return;
 
@@ -428,7 +449,7 @@ export default function MasterRosterPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -449,11 +470,11 @@ export default function MasterRosterPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 min-w-0 overflow-x-hidden">
-        <header className="mb-8 flex justify-between items-start">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
+        <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-muted-foreground">Manage league assignments and track registration compliance.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Master Roster Center</h1>
+            <p className="text-sm text-muted-foreground">Manage league assignments and track registration compliance.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
@@ -465,8 +486,8 @@ export default function MasterRosterPage() {
           </div>
         </header>
 
-        <Card className="border-none shadow-md mb-8">
-          <CardContent className="p-6">
+        <Card className="border-none shadow-md mb-4">
+          <CardContent className="p-4">
             <div className="mb-4 relative">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
               <Input
@@ -523,11 +544,11 @@ export default function MasterRosterPage() {
           </CardHeader>
           <CardContent className="p-0">
             {loadingEnrollments ? (
-              <div className="flex justify-center py-20">
+              <div className="flex justify-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
             ) : !filteredEnrollments || filteredEnrollments.length === 0 ? (
-              <div className="text-center py-20 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground">
                 No matching registrations found.
               </div>
             ) : (
@@ -540,6 +561,7 @@ export default function MasterRosterPage() {
                     <TableHead className="hidden md:table-cell">Parent</TableHead>
                     <TableHead>Paid</TableHead>
                     <TableHead className="hidden sm:table-cell">Clearance</TableHead>
+                    <TableHead className="hidden lg:table-cell">Compliance</TableHead>
                     <TableHead>Assignment</TableHead>
                     <TableHead className="w-12" />
                   </TableRow>
@@ -551,7 +573,7 @@ export default function MasterRosterPage() {
                     const canWaive = status !== 'paid' && !e.fee_waived;
                     return (
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
-                        <TableCell className="pl-6 py-4">
+                        <TableCell className="pl-6 py-3">
                           <div className="font-semibold flex items-center gap-1">
                             {p ? `${p.firstName} ${p.lastName}` : 'Loading...'}
                             {p?.birthCertificateUrl && !p?.ageVerified && (
@@ -599,6 +621,48 @@ export default function MasterRosterPage() {
                           ) : (
                             <AlertCircle className="h-5 w-5 text-yellow-500" />
                           )}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          {(() => {
+                            const parent = profileMap.get(e.parentUserId);
+                            if (!parent?.roles?.includes('Coach')) return null;
+                            const isOverride = parent.manualComplianceOverride === true;
+                            const status = parent.complianceStatus;
+                            const isApproved = status === 'approved' || isOverride;
+                            return (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button className="flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 border transition-colors hover:bg-muted/50">
+                                    {isApproved ? (
+                                      <><ShieldCheck className="h-3.5 w-3.5 text-green-600" /><span className="text-green-700">{isOverride ? 'Override' : 'Approved'}</span></>
+                                    ) : (
+                                      <><ShieldAlert className="h-3.5 w-3.5 text-yellow-600" /><span className="text-yellow-700">Pending</span></>
+                                    )}
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-64 p-4" align="start">
+                                  <p className="text-sm font-semibold mb-1">PA Act 153 Compliance</p>
+                                  <p className="text-xs text-muted-foreground mb-3">
+                                    {isOverride
+                                      ? 'Admin override is active. Coach bypasses clearance check.'
+                                      : status === 'approved'
+                                      ? 'All clearances reviewed and approved.'
+                                      : 'Clearances not yet approved. Enable override to grant access.'}
+                                  </p>
+                                  <div className="flex items-center justify-between">
+                                    <label className="text-xs font-medium" htmlFor={`force-approve-${e.parentUserId}`}>
+                                      Force Approve
+                                    </label>
+                                    <Switch
+                                      id={`force-approve-${e.parentUserId}`}
+                                      checked={isOverride}
+                                      onCheckedChange={() => handleToggleForceApprove(e.parentUserId, isOverride)}
+                                    />
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           <Select

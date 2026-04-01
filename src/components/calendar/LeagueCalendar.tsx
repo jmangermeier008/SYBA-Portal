@@ -429,7 +429,7 @@ function EventPill({
           className={cn(
             'w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate transition-opacity hover:opacity-80 leading-snug',
             pillCls,
-            event.status === 'cancelled' && 'opacity-40 line-through'
+            (event.status === 'cancelled' || event.status === 'unscheduled') && 'opacity-40 line-through'
           )}
           style={pillStyle}
         >
@@ -478,7 +478,7 @@ function EventDot({
             className={cn(
               'w-2.5 h-2.5 rounded-full block',
               !divisionColors && dotColors[event.eventType],
-              event.status === 'cancelled' && 'opacity-40'
+              (event.status === 'cancelled' || event.status === 'unscheduled') && 'opacity-40'
             )}
             style={divisionColors ? { backgroundColor: dotColor } : undefined}
           />

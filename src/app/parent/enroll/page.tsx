@@ -19,12 +19,12 @@ export default function EnrollPage({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Season Enrollment</h1>
-          <p className="text-muted-foreground">Register your players for the upcoming season at Sharpsville.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Season Enrollment</h1>
+          <p className="text-sm text-muted-foreground">Register your players for the upcoming season at Sharpsville.</p>
         </header>
-        <Suspense fallback={<div className="flex justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}>
+        <Suspense fallback={<div className="flex justify-center py-12"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}>
           <EnrollmentStepper initialPlayerId={initialPlayerId} />
         </Suspense>
       </main>

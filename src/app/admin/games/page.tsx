@@ -715,7 +715,7 @@ export default function AdminGamesPage() {
   if (!isAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background"><Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardContent className="py-12"><Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
               <p className="font-bold text-lg">Access Denied</p></CardContent>
@@ -741,13 +741,13 @@ export default function AdminGamesPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 min-w-0 overflow-x-auto">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-auto">
 
         {/* Header */}
-        <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Game Schedule</h1>
-            <p className="text-muted-foreground">Add and manage games and practices for all teams.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Game Schedule</h1>
+            <p className="text-sm text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {/* List / Calendar toggle */}

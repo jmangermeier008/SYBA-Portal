@@ -296,7 +296,7 @@ export default function CoachPracticeSlotsPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardContent className="py-12">
               <ShieldAlert className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -313,7 +313,7 @@ export default function CoachPracticeSlotsPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardContent className="py-12">
               <ShieldAlert className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -336,22 +336,22 @@ export default function CoachPracticeSlotsPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
         <div className="max-w-4xl">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Practice Slots</h1>
-          <p className="text-muted-foreground">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Practice Slots</h1>
+          <p className="text-sm text-muted-foreground">
             Browse open practice windows for <strong>{activeTeam.name}</strong> and claim one for your team.
           </p>
         </header>
 
         {loadingSlots ? (
-          <div className="flex justify-center py-20">
+          <div className="flex justify-center py-12">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
           </div>
         ) : !hasAnything ? (
           <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
               <Dumbbell className="h-12 w-12 text-muted-foreground/40 mb-4" />
               <p className="text-muted-foreground font-medium">No upcoming practice slots</p>
               <p className="text-sm text-muted-foreground mt-1">

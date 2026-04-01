@@ -159,7 +159,7 @@ export default function GameDetailPage({
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardContent className="pt-6">
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -179,7 +179,7 @@ export default function GameDetailPage({
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardContent className="pt-6">
               <CalendarDays className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -211,7 +211,7 @@ export default function GameDetailPage({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-6 pt-16 md:pt-6">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
 
         {/* Back / manage bar */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
@@ -232,7 +232,7 @@ export default function GameDetailPage({
 
         {/* Event header card */}
         <Card className="border-none shadow-md mb-4">
-          <CardContent className="p-5">
+          <CardContent className="p-3">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className={cn('text-xs font-semibold', game.type === 'game' ? 'border-blue-200 text-blue-700' : 'border-green-200 text-green-700')}>

@@ -42,8 +42,8 @@ export default async function ContactPage({
 
       <main className="flex-1 py-12 md:py-16">
         <div className="container px-4 md:px-6 mx-auto max-w-2xl">
-          <header className="mb-8">
-            <h1 className="text-3xl font-bold font-headline flex items-center gap-2">
+          <header className="mb-4 md:mb-6">
+            <h1 className="text-xl md:text-2xl font-bold font-headline flex items-center gap-2">
               <MessageSquare className="h-8 w-8 text-primary" />
               Contact Us
             </h1>

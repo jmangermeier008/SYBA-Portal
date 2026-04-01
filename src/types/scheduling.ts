@@ -105,7 +105,7 @@ export interface Team {
 // Games
 // ---------------------------------------------------------------------------
 
-export type GameStatus = 'scheduled' | 'cancelled' | 'completed' | 'postponed';
+export type GameStatus = 'scheduled' | 'cancelled' | 'completed' | 'postponed' | 'unscheduled';
 export type GameType = 'game' | 'practice';
 
 /**
@@ -147,6 +147,11 @@ export interface Game {
   createdBy?: string;
   createdAt: string;
   updatedAt?: string;
+  // Rain-out displacement history — populated when status is set to 'unscheduled':
+  originalDate?: string;       // YYYY-MM-DD
+  originalTime?: string;       // HH:MM
+  originalFieldId?: string;
+  originalFieldName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +306,8 @@ export interface UserProfile {
   teamIds?: string[];
   notificationPrefs?: NotificationPrefs;
   preferredSport?: Sport;
+  complianceStatus?: 'pending' | 'approved' | 'action_required';
+  manualComplianceOverride?: boolean; // Admin emergency bypass — skips clearance check
   createdAt: string;
 }
 

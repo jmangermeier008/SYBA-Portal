@@ -102,11 +102,11 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <div className="text-center space-y-4">
             <Users className="h-12 w-12 text-muted-foreground mx-auto" />
             <h2 className="text-xl font-bold font-headline">Team Not Found</h2>
-            <p className="text-muted-foreground">This team link may be invalid or the team has been removed.</p>
+            <p className="text-sm text-muted-foreground">This team link may be invalid or the team has been removed.</p>
             <Button variant="outline" asChild>
               <Link href="/parent/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Teams</Link>
             </Button>
@@ -121,11 +121,11 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <div className="text-center space-y-4">
             <AlertTriangle className="h-12 w-12 text-destructive mx-auto" />
             <h2 className="text-xl font-bold font-headline">Access Denied</h2>
-            <p className="text-muted-foreground">You do not have a player enrolled on this team.</p>
+            <p className="text-sm text-muted-foreground">You do not have a player enrolled on this team.</p>
             <Button variant="outline" asChild>
               <Link href="/parent/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Teams</Link>
             </Button>
@@ -138,15 +138,15 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
           <Button variant="ghost" asChild className="mb-4">
             <Link href="/parent/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to Teams</Link>
           </Button>
           <div className="flex justify-between items-end">
             <div>
-              <h1 className="text-3xl font-bold font-headline">{team?.name || 'Team Directory'}</h1>
-              <p className="text-muted-foreground">Coordinate with your teammates. Privacy settings respected.</p>
+              <h1 className="text-xl md:text-2xl font-bold font-headline">{team?.name || 'Team Directory'}</h1>
+              <p className="text-sm text-muted-foreground">Coordinate with your teammates. Privacy settings respected.</p>
             </div>
             <Badge variant="outline" className="h-8 px-4 rounded-full bg-primary/5 text-primary border-primary/20">
               <Users className="mr-2 h-3 w-3" /> {enrollments?.length || 0} Families

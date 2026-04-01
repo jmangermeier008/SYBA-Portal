@@ -113,18 +113,18 @@ export default function CoachSchedulesPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Team Schedule</h1>
-          <p className="text-muted-foreground">View your team's practices and games. To add a practice, use the Practice Slots page.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Team Schedule</h1>
+          <p className="text-sm text-muted-foreground">View your team's practices and games. To add a practice, use the Practice Slots page.</p>
         </header>
 
         {!activeTeam && !loadingTeams ? (
-          <Card className="border-none shadow-md py-20 text-center">
+          <Card className="border-none shadow-md py-12 text-center">
             <CardContent>
               <ShieldAlert className="h-16 w-16 text-muted mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline">No Active Team</h3>
-              <p className="text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 You must be assigned to a team roster to manage schedules.
               </p>
             </CardContent>

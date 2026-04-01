@@ -138,7 +138,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <div className="text-center space-y-4">
             <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
             <p className="text-muted-foreground font-medium">Loading team roster...</p>
@@ -151,9 +151,9 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
         <div className="max-w-7xl">
-        <header className="mb-8">
+        <header className="mb-4 md:mb-6">
           <Button variant="ghost" asChild className="mb-4 -ml-2">
             <Link href="/coach/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to My Teams</Link>
           </Button>
@@ -162,11 +162,11 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
         </header>
 
         {!enrollments || enrollments.length === 0 ? (
-          <Card className="border-none shadow-md py-20 text-center">
+          <Card className="border-none shadow-md py-12 text-center">
             <CardContent>
               <Users className="h-16 w-16 text-muted mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline">No Players Found</h3>
-              <p className="text-muted-foreground">This team roster is currently empty or players are awaiting assignment.</p>
+              <p className="text-sm text-muted-foreground">This team roster is currently empty or players are awaiting assignment.</p>
               <Button className="mt-6" asChild variant="outline">
                 <Link href="/coach/teams">Check Other Teams</Link>
               </Button>

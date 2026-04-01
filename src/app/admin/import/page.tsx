@@ -86,7 +86,7 @@ export default function DataManagementPage() {
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-muted-foreground">Please sign in to continue.</p>
+        <p className="text-sm text-muted-foreground">Please sign in to continue.</p>
       </div>
     );
   }
@@ -95,7 +95,7 @@ export default function DataManagementPage() {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8 flex items-center justify-center">
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 flex items-center justify-center">
           <Card className="max-w-md text-center border-none shadow-xl">
             <CardHeader>
               <CardTitle className="font-headline text-2xl">Access Denied</CardTitle>
@@ -231,13 +231,13 @@ export default function DataManagementPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold font-headline">Data Management</h1>
-          <p className="text-muted-foreground">Monitor data health and manage league records.</p>
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Data Management</h1>
+          <p className="text-sm text-muted-foreground">Monitor data health and manage league records.</p>
         </header>
 
-        <div className="grid gap-8 max-w-3xl">
+        <div className="grid gap-4 max-w-3xl">
 
           {/* ── Data Status ── */}
           <Card className="border-none shadow-xl">
