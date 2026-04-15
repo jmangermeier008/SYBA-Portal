@@ -1,7 +1,19 @@
 'use server';
 
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 
+async function batchDelete(docs: QueryDocumentSnapshot[], batchSize = 500): Promise<number> {
+  const db = getAdminFirestore();
+  let deleted = 0;
+  for (let i = 0; i < docs.length; i += batchSize) {
+    const batch = db.batch();
+    docs.slice(i, i + batchSize).forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    deleted += Math.min(batchSize, docs.length - i);
+  }
+  return deleted;
+}
 
 async function verifyAdminCaller(idToken: string): Promise<string> {
   const decoded = await getAdminAuth().verifyIdToken(idToken);
@@ -102,67 +114,37 @@ export async function nukeTestSeason(
   await verifyAdminCaller(idToken);
 
   const db = getAdminFirestore();
-  const batchSize = 500;
-  let enrollmentsDeleted = 0;
-  let playersDeleted = 0;
-  let gamesDeleted = 0;
-  let practiceSlotsDeleted = 0;
-  const playerIds: string[] = [];
 
-  // Pass 1 — Enrollments
-  const enrollmentSnap = await db.collectionGroup('enrollments')
-    .where('seasonId', '==', seasonId)
-    .where('isTest', '==', true)
-    .get();
+  // Fetch enrollments first — player IDs are needed before player deletion can start.
+  // Games and slots are independent and fetched in parallel.
+  const [enrollmentSnap, gamesSnap, slotsSnap] = await Promise.all([
+    db.collectionGroup('enrollments').where('seasonId', '==', seasonId).where('isTest', '==', true).get(),
+    db.collection('games').where('seasonId', '==', seasonId).where('isTest', '==', true).get(),
+    db.collection('practiceSlots').where('seasonId', '==', seasonId).where('isTest', '==', true).get(),
+  ]);
 
-  for (const doc of enrollmentSnap.docs) {
-    const data = doc.data();
-    if (data.playerId) playerIds.push(data.playerId);
-  }
-
-  for (let i = 0; i < enrollmentSnap.docs.length; i += batchSize) {
-    const batch = db.batch();
-    enrollmentSnap.docs.slice(i, i + batchSize).forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    enrollmentsDeleted += Math.min(batchSize, enrollmentSnap.docs.length - i);
-  }
-
-  // Pass 2 — Players under the test seed parent
+  const playerIds = enrollmentSnap.docs.map((d) => d.data().playerId).filter(Boolean) as string[];
   const uniquePlayerIds = [...new Set(playerIds)];
-  for (let i = 0; i < uniquePlayerIds.length; i += batchSize) {
+
+  const batchSize = 500;
+  const playerRefs = uniquePlayerIds.map((pid) =>
+    db.collection('userProfiles').doc(TEST_PARENT_UID).collection('players').doc(pid)
+  );
+
+  // Delete enrollments and build fake snapshot array for player refs so batchDelete can handle them
+  const [enrollmentsDeleted, gamesDeleted, practiceSlotsDeleted] = await Promise.all([
+    batchDelete(enrollmentSnap.docs),
+    batchDelete(gamesSnap.docs),
+    batchDelete(slotsSnap.docs),
+  ]);
+
+  // Player deletion runs after enrollments (depends on playerIds from enrollment scan)
+  let playersDeleted = 0;
+  for (let i = 0; i < playerRefs.length; i += batchSize) {
     const batch = db.batch();
-    uniquePlayerIds.slice(i, i + batchSize).forEach((pid) => {
-      const ref = db.collection('userProfiles').doc(TEST_PARENT_UID).collection('players').doc(pid);
-      batch.delete(ref);
-    });
+    playerRefs.slice(i, i + batchSize).forEach((ref) => batch.delete(ref));
     await batch.commit();
-    playersDeleted += Math.min(batchSize, uniquePlayerIds.length - i);
-  }
-
-  // Pass 3 — Games
-  const gamesSnap = await db.collection('games')
-    .where('seasonId', '==', seasonId)
-    .where('isTest', '==', true)
-    .get();
-
-  for (let i = 0; i < gamesSnap.docs.length; i += batchSize) {
-    const batch = db.batch();
-    gamesSnap.docs.slice(i, i + batchSize).forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    gamesDeleted += Math.min(batchSize, gamesSnap.docs.length - i);
-  }
-
-  // Pass 4 — Practice Slots
-  const slotsSnap = await db.collection('practiceSlots')
-    .where('seasonId', '==', seasonId)
-    .where('isTest', '==', true)
-    .get();
-
-  for (let i = 0; i < slotsSnap.docs.length; i += batchSize) {
-    const batch = db.batch();
-    slotsSnap.docs.slice(i, i + batchSize).forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    practiceSlotsDeleted += Math.min(batchSize, slotsSnap.docs.length - i);
+    playersDeleted += Math.min(batchSize, playerRefs.length - i);
   }
 
   return { enrollmentsDeleted, playersDeleted, gamesDeleted, practiceSlotsDeleted };
@@ -187,15 +169,6 @@ export async function clearUserNotifications(
 
   if (snapshot.empty) return { deleted: 0 };
 
-  const batchSize = 500;
-  let deleted = 0;
-  for (let i = 0; i < snapshot.docs.length; i += batchSize) {
-    const batch = db.batch();
-    snapshot.docs.slice(i, i + batchSize).forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    deleted += Math.min(batchSize, snapshot.docs.length - i);
-  }
-
-  return { deleted };
+  return { deleted: await batchDelete(snapshot.docs) };
 }
 

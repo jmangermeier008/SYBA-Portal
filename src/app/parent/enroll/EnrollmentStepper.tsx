@@ -36,6 +36,7 @@ interface StepperState {
 }
 
 const SHIRT_SIZES = ['Youth XS', 'Youth S', 'Youth M', 'Youth L', 'Youth XL', 'Adult S', 'Adult M', 'Adult L'];
+const EQUIPMENT_SIZES = ['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'];
 
 export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string }) {
   const { user } = useUser();
@@ -93,9 +94,21 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: divisions } = useCollection<Division>(divisionsQuery);
 
-  // Dynamic step count: football adds an Equipment Sizing step between Player Details and Review
   const totalSteps = activeSport === 'football' ? 4 : 3;
-  const reviewStep = totalSteps;
+
+  const getStepLabel = (s: number) => {
+    if (s === 1) return 'Season & Division';
+    if (s === 2) return 'Player Details';
+    if (activeSport === 'football' && s === 3) return 'Equipment Sizing';
+    return 'Review & Pay';
+  };
+
+  const getStepDescription = (s: number) => {
+    if (s === 1) return 'Choose the season and division for your player.';
+    if (s === 2) return 'Confirm player info and emergency contacts.';
+    if (activeSport === 'football' && s === 3) return 'Help us prepare your equipment kit. Sizes will be verified at distribution.';
+    return 'Review your registration before proceeding.';
+  };
 
   const selectedPlayer = players?.find(p => p.id === state.playerId);
   const selectedSeason = seasons?.find(s => s.id === state.seasonId);
@@ -379,13 +392,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               {state.step > s ? '✓' : s}
             </div>
             <span className={`text-sm hidden sm:inline ${state.step === s ? 'font-semibold' : 'text-muted-foreground'}`}>
-              {s === 1
-                ? 'Season & Division'
-                : s === 2
-                ? 'Player Details'
-                : activeSport === 'football' && s === 3
-                ? 'Equipment Sizing'
-                : 'Review & Pay'}
+              {getStepLabel(s)}
             </span>
             {s < totalSteps && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
           </div>
@@ -395,22 +402,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       <Card className="border-none shadow-xl">
         <CardHeader className="bg-primary text-primary-foreground">
           <CardTitle className="text-2xl font-headline">
-            {state.step === 1
-              ? 'Season & Division'
-              : state.step === 2
-              ? 'Player Details'
-              : activeSport === 'football' && state.step === 3
-              ? 'Equipment Sizing'
-              : 'Review & Pay'}
+            {getStepLabel(state.step)}
           </CardTitle>
           <CardDescription className="text-primary-foreground/80">
-            {state.step === 1
-              ? 'Choose the season and division for your player.'
-              : state.step === 2
-              ? 'Confirm player info and emergency contacts.'
-              : activeSport === 'football' && state.step === 3
-              ? 'Help us prepare your equipment kit. Sizes will be verified at distribution.'
-              : 'Review your registration before proceeding.'}
+            {getStepDescription(state.step)}
           </CardDescription>
         </CardHeader>
 
@@ -656,7 +651,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.helmetSize} onValueChange={(val) => setState(prev => ({ ...prev, helmetSize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'].map(s => (
+                      {EQUIPMENT_SIZES.map(s => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
                     </SelectContent>
@@ -667,7 +662,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.shoulderPadSize} onValueChange={(val) => setState(prev => ({ ...prev, shoulderPadSize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'].map(s => (
+                      {EQUIPMENT_SIZES.map(s => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
                     </SelectContent>
@@ -678,7 +673,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.pantSize} onValueChange={(val) => setState(prev => ({ ...prev, pantSize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'].map(s => (
+                      {EQUIPMENT_SIZES.map(s => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
                       ))}
                     </SelectContent>
@@ -699,8 +694,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             </>
           )}
 
-          {/* ── STEP 3 (baseball) / STEP 4 (football) — Review & Pay ── */}
-          {state.step === reviewStep && (
+          {state.step === totalSteps && (
             <>
               <div className="space-y-3">
                 <div className="p-4 rounded-xl bg-secondary/20 space-y-2 text-sm">
