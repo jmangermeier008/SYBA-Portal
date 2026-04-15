@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, ReactNo
 import { Loader2 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser } from './auth/use-user';
+import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import type { Sport } from '@/types/scheduling';
 
 interface SportContextState {
@@ -16,6 +17,9 @@ interface SportContextState {
   isBoardMember: boolean;
   isCoach: boolean;
   isParent: boolean;
+  // Branding — derived from SPORT_CONFIG; safe to destructure in any component
+  logoUrl: string;      // resolves to SPORT_CONFIG[activeSport].logoUrl, falls back to HUB_LOGO_URL
+  leagueName: string;   // full org name, e.g. "Sharpsville Youth Baseball Association"
 }
 
 const SportContext = createContext<SportContextState>({
@@ -25,6 +29,8 @@ const SportContext = createContext<SportContextState>({
   isBoardMember: false,
   isCoach: false,
   isParent: false,
+  logoUrl: HUB_LOGO_URL,
+  leagueName: 'Athletics Hub',
 });
 
 export function useSport(): SportContextState {
@@ -104,10 +110,14 @@ export function SportProvider({ children }: { children: ReactNode }) {
   // Parents are not sport-specific — fall back to legacy roles for parent check
   const isParent = sportRoleList.includes('Parent') || roles.includes('Parent');
 
+  // Branding — derived from SPORT_CONFIG for the active sport
+  const logoUrl = activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL;
+  const leagueName = activeSport ? SPORT_CONFIG[activeSport].leagueName : 'Athletics Hub';
+
   const contextValue = useMemo(
-    () => ({ activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent }),
+    () => ({ activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl, leagueName }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent]
+    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl, leagueName]
   );
 
   // Always render the provider so useSport() never throws regardless of tree position.

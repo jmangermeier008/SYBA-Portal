@@ -15,6 +15,7 @@ export interface SportConfig {
   icon: string;
   logoUrl: string;
   acronym: string;
+  leagueName: string;   // full organization name, e.g. "Sharpsville Youth Baseball Association"
   contactEmail: string; // public contact / reply-to address for this sport
   // Officials / Umpires
   umpireLabel: string;
@@ -36,6 +37,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     icon: '⚾',
     logoUrl: '/baseball.png',
     acronym: 'SYBA',
+    leagueName: 'Sharpsville Youth Baseball Association',
     contactEmail: 'info@syba.blue',
     umpireLabel: 'Umpire',
     umpiresLabel: 'Umpires',
@@ -56,6 +58,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     icon: '🏈',
     logoUrl: '/football.png',
     acronym: 'SYFA',
+    leagueName: 'Sharpsville Youth Football Association',
     contactEmail: 'football@sharpsvillesports.com',
     umpireLabel: 'Official',
     umpiresLabel: 'Officials',

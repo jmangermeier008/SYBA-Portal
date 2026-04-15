@@ -83,7 +83,7 @@ const adminRegistrationItems = [
 
 const adminRosterItems = [
   { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
-  { label: 'Equipment', icon: ShieldCheck, href: '/admin/equipment', comingSoon: true },
+  { label: 'Equipment', icon: ShieldCheck, href: '/admin/equipment' },
 ];
 
 const adminOperationsItems = [
@@ -283,7 +283,7 @@ function NavSection({
 export function Sidebar() {
   const pathname = usePathname();
   const { profile, roles } = useUser();
-  const { activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent } = useSport();
+  const { activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl } = useSport();
   const auth = useAuth();
   const db = useFirestore();
   const router = useRouter();
@@ -460,7 +460,7 @@ export function Sidebar() {
       <div className={cn("p-4 flex items-center", collapsed && !isMobile ? "justify-center" : "justify-between px-6")}>
         <Link href="/" className="flex flex-col items-center gap-1" onClick={closeMenu}>
           <Image
-            src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
+            src={logoUrl}
             alt={activeSport ? SPORT_CONFIG[activeSport].acronym : 'Hub'}
             width={36}
             height={36}
@@ -737,7 +737,7 @@ export function Sidebar() {
           </button>
           <Link href="/" className="flex flex-col items-center gap-0.5">
             <Image
-              src={activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL}
+              src={logoUrl}
               alt={activeSport ? SPORT_CONFIG[activeSport].acronym : 'Hub'}
               width={30}
               height={30}

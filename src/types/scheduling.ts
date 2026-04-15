@@ -163,6 +163,7 @@ export interface ConcessionSignup {
   parentUserId: string;
   displayName: string;
   signedUpAt: string;
+  attendance?: 'pending' | 'worked' | 'no-show'; // admin-recorded after the shift
 }
 
 /** A volunteer concession shift. claimedCount mirrors signups.length — keep in sync via transaction. */
@@ -407,12 +408,16 @@ export interface Enrollment {
   footballEquipment?: {
     verifiedWeight?: number;   // Official weigh-in result (lbs)
     helmetSize?: string;       // e.g. "S", "M", "L", "XL"
+    helmetStatus?: 'not_issued' | 'issued' | 'returned'; // admin-tracked per-item status
     shoulderPadSize?: string;  // e.g. "Youth S", "Youth M", "Adult S"
+    padStatus?: 'not_issued' | 'issued' | 'returned';    // admin-tracked per-item status
     pantSize?: string;         // e.g. "Youth S", "Youth M", "Adult S"
     jerseySize?: string;       // Football jersey size (may differ from shirt size)
     jerseyNumber?: string;     // Assigned jersey number
     issuedAt?: string;         // ISO datetime when equipment kit was distributed
   };
+  // Admin-assigned jersey number (both sports) — distinct from parent-entered uniformNumberPreference
+  assignedJerseyNumber?: string;
   isTest?: boolean; // Marks this enrollment as synthetic seed data; excluded from live roster/payment views
   weightHistory?: { weight: number; date: string; recordedBy: string }[]; // Coach-recorded weigh-ins
 }

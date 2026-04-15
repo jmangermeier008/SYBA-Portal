@@ -4,7 +4,20 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, doc, addDoc, deleteDoc, getDocs, getDoc, query, where, collectionGroup } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  addDoc,
+  deleteDoc,
+  getDocs,
+  getDoc,
+  query,
+  where,
+  collectionGroup,
+  updateDoc,
+  arrayRemove,
+  arrayUnion,
+} from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,16 +41,22 @@ import {
   AlertCircle,
   LayoutList,
   CalendarIcon,
+  UserPlus,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
 import { DayPicker } from 'react-day-picker';
 import { cn } from '@/lib/utils';
 
+// ── Local types ────────────────────────────────────────────────────────────────
+
+type AttendanceStatus = 'pending' | 'worked' | 'no-show';
+
 interface ConcessionSignup {
   parentUserId: string;
   displayName: string;
   signedUpAt: string;
+  attendance?: AttendanceStatus;
 }
 
 interface ConcessionSlot {
@@ -64,9 +83,12 @@ interface FamilyCompliance {
   parentUserId: string;
   displayName: string;
   email: string;
-  slotsCount: number;
+  workedCount: number;
+  pendingCount: number;
   required: number;
 }
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 const emptySlot = {
   gameDate: '',
@@ -85,11 +107,35 @@ function formatTime(t: string) {
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+function isPastSlot(gameDate: string): boolean {
+  return gameDate < format(new Date(), 'yyyy-MM-dd');
+}
+
 function complianceStatus(family: FamilyCompliance) {
-  if (family.slotsCount >= family.required) return 'met';
-  if (family.slotsCount > 0) return 'partial';
+  if (family.workedCount >= family.required) return 'met';
+  if (family.workedCount > 0 || family.pendingCount > 0) return 'partial';
   return 'none';
 }
+
+const ATTENDANCE_CONFIG: Record<
+  AttendanceStatus,
+  { label: string; className: string }
+> = {
+  pending: {
+    label: 'Pending',
+    className: 'bg-muted text-muted-foreground hover:bg-muted/80',
+  },
+  worked: {
+    label: 'Worked',
+    className: 'bg-green-100 text-green-700 hover:bg-green-200',
+  },
+  'no-show': {
+    label: 'No-Show',
+    className: 'bg-red-100 text-red-700 hover:bg-red-200',
+  },
+};
+
+// ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ConcessionsAdminPage() {
   const db = useFirestore();
@@ -97,22 +143,34 @@ export default function ConcessionsAdminPage() {
   const { activeSport } = useSport();
   const { toast } = useToast();
 
-  // Manage Slots state
+  // ── Manage Slots state ────────────────────────────────────────────────────
   const [addDialog, setAddDialog] = useState(false);
   const [formData, setFormData] = useState(emptySlot);
   const [saving, setSaving] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
   const [deleting, setDeleting] = useState(false);
+  const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
+  const [calMonth, setCalMonth] = useState<Date>(new Date());
 
-  // Family Compliance state
+  // Attendance toggle saving
+  const [attendanceSaving, setAttendanceSaving] = useState<Set<string>>(new Set());
+
+  // Manual assign dialog
+  const [assignDialog, setAssignDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
+  const [assignParentId, setAssignParentId] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
+  // parent lookup: parentUserId → displayName
+  const [parentMap, setParentMap] = useState<Map<string, string>>(new Map());
+  const [parentMapLoading, setParentMapLoading] = useState(false);
+
+  // ── Family Compliance state ───────────────────────────────────────────────
   const [selectedSeasonId, setSelectedSeasonId] = useState<string>('');
   const [complianceLoading, setComplianceLoading] = useState(false);
   const [families, setFamilies] = useState<FamilyCompliance[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
-  const [calMonth, setCalMonth] = useState<Date>(new Date());
 
+  // ── Firestore queries (all before any early return) ───────────────────────
   const slotsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
     return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
@@ -139,12 +197,11 @@ export default function ConcessionsAdminPage() {
     ? [...slots].sort((a, b) => a.gameDate.localeCompare(b.gameDate))
     : [];
 
-  // Set of all game dates
+  // ── Calendar coverage memos ───────────────────────────────────────────────
   const gameDateSet = useMemo(() => {
     return new Set((allGames ?? []).map(g => g.date).filter(Boolean));
   }, [allGames]);
 
-  // Per-date slot coverage: { totalCap, filled }
   const coverageByDate = useMemo(() => {
     const map = new Map<string, { totalCap: number; filled: number }>();
     for (const slot of sortedSlots) {
@@ -157,7 +214,6 @@ export default function ConcessionsAdminPage() {
     return map;
   }, [sortedSlots]);
 
-  // Derive colored date sets for react-day-picker modifiers
   const redDates = useMemo(() =>
     [...gameDateSet].filter(d => !coverageByDate.has(d)).map(d => parseISO(d)),
   [gameDateSet, coverageByDate]);
@@ -176,6 +232,7 @@ export default function ConcessionsAdminPage() {
     }).map(d => parseISO(d));
   }, [gameDateSet, coverageByDate]);
 
+  // ── Slot CRUD ─────────────────────────────────────────────────────────────
   const handleAddSlot = async () => {
     if (!formData.gameDate || !db) return;
     setSaving(true);
@@ -188,6 +245,7 @@ export default function ConcessionsAdminPage() {
         cancelCutoffHours: Number(formData.cancelCutoffHours),
         description: formData.description.trim(),
         signups: [],
+        sport: activeSport,
         createdAt: new Date().toISOString(),
       });
       toast({ title: 'Slot Created', description: `Concession slot for ${formData.gameDate} added.` });
@@ -214,86 +272,183 @@ export default function ConcessionsAdminPage() {
     }
   };
 
+  // ── Attendance toggle ─────────────────────────────────────────────────────
+  async function handleAttendanceChange(
+    slot: ConcessionSlot,
+    signup: ConcessionSignup,
+    newStatus: AttendanceStatus
+  ) {
+    if (!db) return;
+    const key = `${slot.id}_${signup.parentUserId}`;
+    setAttendanceSaving(prev => new Set(prev).add(key));
+    try {
+      const slotRef = doc(db, 'concessionSlots', slot.id);
+      const updatedSignup: ConcessionSignup = { ...signup, attendance: newStatus };
+      await updateDoc(slotRef, {
+        signups: arrayRemove(signup),
+      });
+      await updateDoc(slotRef, {
+        signups: arrayUnion(updatedSignup),
+      });
+      toast({ title: 'Attendance updated' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setAttendanceSaving(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
+
+  // ── Manual Assign ─────────────────────────────────────────────────────────
+  // Load all parents for the selected season when the assign dialog opens
+  async function loadParentsForSeason(seasonId: string) {
+    if (!db || parentMap.size > 0) return;
+    setParentMapLoading(true);
+    try {
+      const enrollSnap = await getDocs(
+        query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
+      );
+      const parentIds = new Set<string>();
+      enrollSnap.docs.forEach(d => {
+        const pid = d.data().parentUserId as string;
+        if (pid) parentIds.add(pid);
+      });
+      const map = new Map<string, string>();
+      await Promise.all(
+        Array.from(parentIds).map(async pid => {
+          const profileDoc = await getDoc(doc(db, 'userProfiles', pid));
+          if (profileDoc.exists()) {
+            const data = profileDoc.data();
+            map.set(pid, data.displayName || data.email || pid);
+          } else {
+            map.set(pid, pid);
+          }
+        })
+      );
+      setParentMap(map);
+    } catch (err: any) {
+      toast({ title: 'Error loading parents', description: err.message, variant: 'destructive' });
+    } finally {
+      setParentMapLoading(false);
+    }
+  }
+
+  function openAssignDialog(slot: ConcessionSlot) {
+    setAssignDialog({ open: true, slot });
+    setAssignParentId('');
+    // Use the selected compliance season or fall back to any season
+    const seasonId = selectedSeasonId || (seasons?.[0]?.id ?? '');
+    if (seasonId) loadParentsForSeason(seasonId);
+  }
+
+  async function handleManualAssign() {
+    if (!db || !assignDialog.slot || !assignParentId) return;
+    setAssignSaving(true);
+    try {
+      const slot = assignDialog.slot;
+      // Guard: already in slot
+      if (slot.signups.some(s => s.parentUserId === assignParentId)) {
+        toast({ title: 'Already assigned', description: 'This parent is already on this slot.', variant: 'destructive' });
+        return;
+      }
+      const displayName = parentMap.get(assignParentId) ?? assignParentId;
+      const newSignup: ConcessionSignup = {
+        parentUserId: assignParentId,
+        displayName,
+        signedUpAt: new Date().toISOString(),
+        attendance: 'worked',
+      };
+      await updateDoc(doc(db, 'concessionSlots', slot.id), {
+        signups: arrayUnion(newSignup),
+      });
+      toast({ title: 'Volunteer assigned', description: `${displayName} marked as Worked.` });
+      setAssignDialog({ open: false, slot: null });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setAssignSaving(false);
+    }
+  }
+
+  // ── Family Compliance ─────────────────────────────────────────────────────
   const loadComplianceReport = useCallback(async (seasonId: string) => {
     if (!db || !seasonId) return;
     setComplianceLoading(true);
     setFamilies([]);
     try {
-      // Get the season details
       const seasonDoc = await getDoc(doc(db, 'seasons', seasonId));
       if (!seasonDoc.exists()) return;
       const season = { id: seasonDoc.id, ...seasonDoc.data() } as Season;
       setSelectedSeason(season);
 
-      // Get all enrollments for this season
+      // Unique parent IDs from enrollments
       const enrollmentsSnap = await getDocs(
         query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
       );
-
-      // Collect unique parentUserIds
       const parentIds = new Set<string>();
       enrollmentsSnap.docs.forEach(d => {
-        const parentUserId = d.data().parentUserId as string;
-        if (parentUserId) parentIds.add(parentUserId);
+        const pid = d.data().parentUserId as string;
+        if (pid) parentIds.add(pid);
       });
 
-      if (parentIds.size === 0) {
-        setFamilies([]);
-        return;
-      }
+      if (parentIds.size === 0) { setFamilies([]); return; }
 
-      // Fetch user profiles for each parent via individual getDoc calls
       const parentIdArray = Array.from(parentIds);
       const profileMap = new Map<string, { displayName: string; email: string }>();
-
       await Promise.all(
-        parentIdArray.map(async (parentId) => {
-          const profileDoc = await getDoc(doc(db, 'userProfiles', parentId));
+        parentIdArray.map(async pid => {
+          const profileDoc = await getDoc(doc(db, 'userProfiles', pid));
           if (profileDoc.exists()) {
             const data = profileDoc.data();
-            profileMap.set(parentId, {
-              displayName: data.displayName || data.email || parentId,
-              email: data.email || '',
-            });
+            profileMap.set(pid, { displayName: data.displayName || data.email || pid, email: data.email || '' });
           } else {
-            profileMap.set(parentId, { displayName: parentId, email: '' });
+            profileMap.set(pid, { displayName: pid, email: '' });
           }
         })
       );
 
-      // Get concession slots within the season's registration date range
-      // Filter client-side using registrationOpen / registrationClose
+      // Build worked/pending counts from concession slot signups
       const allSlotsSnap = await getDocs(collection(db, 'concessionSlots'));
-      const signupCountMap = new Map<string, number>();
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const workedCountMap = new Map<string, number>();
+      const pendingCountMap = new Map<string, number>();
 
       allSlotsSnap.docs.forEach(d => {
         const slotData = d.data() as ConcessionSlot;
         const gameDate = slotData.gameDate;
-        // Include slots within the season's date range (or all slots if no range set)
         const inRange =
           (!season.registrationOpen || gameDate >= season.registrationOpen) &&
           (!season.registrationClose || gameDate <= season.registrationClose);
         if (inRange && slotData.signups) {
           slotData.signups.forEach(signup => {
-            signupCountMap.set(
-              signup.parentUserId,
-              (signupCountMap.get(signup.parentUserId) ?? 0) + 1
-            );
+            const pid = signup.parentUserId;
+            const att = signup.attendance;
+            if (att === 'worked') {
+              workedCountMap.set(pid, (workedCountMap.get(pid) ?? 0) + 1);
+            } else if (!att || att === 'pending') {
+              // Count future sign-ups as pending; past unconfirmed slots don't count
+              if (gameDate >= today) {
+                pendingCountMap.set(pid, (pendingCountMap.get(pid) ?? 0) + 1);
+              }
+            }
+            // 'no-show' contributes to neither
           });
         }
       });
 
       const required = season.volunteerSlotsRequired ?? 1;
-
-      const result: FamilyCompliance[] = parentIdArray.map(parentId => ({
-        parentUserId: parentId,
-        displayName: profileMap.get(parentId)?.displayName ?? parentId,
-        email: profileMap.get(parentId)?.email ?? '',
-        slotsCount: signupCountMap.get(parentId) ?? 0,
+      const result: FamilyCompliance[] = parentIdArray.map(pid => ({
+        parentUserId: pid,
+        displayName: profileMap.get(pid)?.displayName ?? pid,
+        email: profileMap.get(pid)?.email ?? '',
+        workedCount: workedCountMap.get(pid) ?? 0,
+        pendingCount: pendingCountMap.get(pid) ?? 0,
         required,
       }));
 
-      // Sort: not signed up first, then partial, then met
       result.sort((a, b) => {
         const order = { none: 0, partial: 1, met: 2 };
         return order[complianceStatus(a)] - order[complianceStatus(b)];
@@ -308,9 +463,7 @@ export default function ConcessionsAdminPage() {
   }, [db, toast]);
 
   useEffect(() => {
-    if (selectedSeasonId) {
-      loadComplianceReport(selectedSeasonId);
-    }
+    if (selectedSeasonId) loadComplianceReport(selectedSeasonId);
   }, [selectedSeasonId, loadComplianceReport]);
 
   const filteredFamilies = families.filter(f =>
@@ -325,11 +478,11 @@ export default function ConcessionsAdminPage() {
   const handleExportCSV = () => {
     const seasonName = selectedSeason?.name ?? 'season';
     const rows = [
-      ['Family Name', 'Email', 'Slots Signed Up', 'Required', 'Status'],
+      ['Family Name', 'Email', 'Worked Shifts', 'Pending Shifts', 'Required', 'Status'],
       ...families.map(f => {
         const status = complianceStatus(f);
         const label = status === 'met' ? 'Met' : status === 'partial' ? 'Partial' : 'Not Signed Up';
-        return [f.displayName, f.email, String(f.slotsCount), String(f.required), label];
+        return [f.displayName, f.email, String(f.workedCount), String(f.pendingCount), String(f.required), label];
       }),
     ];
     const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -342,6 +495,7 @@ export default function ConcessionsAdminPage() {
     URL.revokeObjectURL(url);
   };
 
+  // ── Guards ────────────────────────────────────────────────────────────────
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -455,6 +609,8 @@ export default function ConcessionsAdminPage() {
                     const signupCount = slot.signups?.length ?? 0;
                     const spotsLeft = slot.capacity - signupCount;
                     const isFull = spotsLeft <= 0;
+                    const isPast = isPastSlot(slot.gameDate);
+
                     return (
                       <Card key={slot.id} className="border-none shadow-md">
                         <CardHeader className="pb-3">
@@ -500,13 +656,59 @@ export default function ConcessionsAdminPage() {
                             Cancel cutoff: {slot.cancelCutoffHours}h before start
                           </p>
 
+                          {/* Volunteers list with attendance toggles (past slots only) */}
                           {slot.signups?.length > 0 && (
-                            <div className="space-y-1 pt-1 border-t">
+                            <div className="space-y-2 pt-1 border-t">
                               <p className="text-xs font-bold uppercase text-muted-foreground">Volunteers</p>
-                              {slot.signups.map((s, i) => (
-                                <p key={i} className="text-xs text-foreground">{s.displayName}</p>
-                              ))}
+                              {slot.signups.map((s, i) => {
+                                const key = `${slot.id}_${s.parentUserId}`;
+                                const isSaving = attendanceSaving.has(key);
+                                const current = s.attendance ?? (isPast ? 'pending' : 'pending');
+                                return (
+                                  <div key={i} className="flex items-center justify-between gap-2">
+                                    <span className="text-xs text-foreground truncate">{s.displayName}</span>
+                                    {isPast ? (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        {isSaving ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                        ) : (
+                                          (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
+                                            <button
+                                              key={status}
+                                              onClick={() => handleAttendanceChange(slot, s, status)}
+                                              className={cn(
+                                                'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
+                                                current === status
+                                                  ? ATTENDANCE_CONFIG[status].className
+                                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                                              )}
+                                            >
+                                              {ATTENDANCE_CONFIG[status].label}
+                                            </button>
+                                          ))
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-[10px] shrink-0">
+                                        Signed Up
+                                      </Badge>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
+                          )}
+
+                          {/* Manual Assign — only for past slots */}
+                          {isPast && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full rounded-full text-xs gap-1.5 mt-1"
+                              onClick={() => openAssignDialog(slot)}
+                            >
+                              <UserPlus className="h-3.5 w-3.5" /> Manual Assign
+                            </Button>
                           )}
                         </CardContent>
                       </Card>
@@ -593,7 +795,8 @@ export default function ConcessionsAdminPage() {
 
                   {selectedSeason && (
                     <p className="text-sm text-muted-foreground">
-                      Requirement: <strong>{selectedSeason.volunteerSlotsRequired ?? 1} slot{(selectedSeason.volunteerSlotsRequired ?? 1) !== 1 ? 's' : ''}</strong> per family for the {selectedSeason.name} season.
+                      Requirement: <strong>{selectedSeason.volunteerSlotsRequired ?? 1} shift{(selectedSeason.volunteerSlotsRequired ?? 1) !== 1 ? 's' : ''} worked</strong> per family for the {selectedSeason.name} season.
+                      <span className="ml-2 text-xs italic">Pending (future) shifts do not count until marked Worked.</span>
                     </p>
                   )}
 
@@ -613,7 +816,8 @@ export default function ConcessionsAdminPage() {
                           <tr className="border-b bg-muted/30">
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Family</th>
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Email</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Slots</th>
+                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Worked</th>
+                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Pending</th>
                             <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Status</th>
                           </tr>
                         </thead>
@@ -624,8 +828,13 @@ export default function ConcessionsAdminPage() {
                               <tr key={family.parentUserId} className="border-b last:border-0 hover:bg-muted/20">
                                 <td className="px-4 py-3 font-medium">{family.displayName}</td>
                                 <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{family.email}</td>
-                                <td className="px-4 py-3 text-center">
-                                  {family.slotsCount} / {family.required}
+                                <td className="px-4 py-3 text-center font-medium">
+                                  {family.workedCount} / {family.required}
+                                </td>
+                                <td className="px-4 py-3 text-center text-muted-foreground hidden sm:table-cell">
+                                  {family.pendingCount > 0
+                                    ? <span className="text-yellow-600 font-medium">+{family.pendingCount} upcoming</span>
+                                    : '—'}
                                 </td>
                                 <td className="px-4 py-3 text-center">
                                   {status === 'met' && (
@@ -723,6 +932,54 @@ export default function ConcessionsAdminPage() {
             <Button variant="outline" onClick={() => setDeleteDialog({ open: false, slot: null })} disabled={deleting}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteSlot} disabled={deleting}>
               {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Assign Dialog */}
+      <Dialog open={assignDialog.open} onOpenChange={(open) => !assignSaving && setAssignDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manual Assign Volunteer</DialogTitle>
+            <DialogDescription>
+              Select a parent to mark as <strong>Worked</strong> for{' '}
+              {assignDialog.slot?.gameDate
+                ? format(parseISO(assignDialog.slot.gameDate), 'EEE, MMM d, yyyy')
+                : 'this slot'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {parentMapLoading ? (
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label>Select Parent</Label>
+                <Select value={assignParentId} onValueChange={setAssignParentId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a parent…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from(parentMap.entries())
+                      .filter(([pid]) => !assignDialog.slot?.signups.some(s => s.parentUserId === pid))
+                      .sort((a, b) => a[1].localeCompare(b[1]))
+                      .map(([pid, name]) => (
+                        <SelectItem key={pid} value={pid}>{name}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignDialog({ open: false, slot: null })} disabled={assignSaving}>
+              Cancel
+            </Button>
+            <Button onClick={handleManualAssign} disabled={assignSaving || !assignParentId || parentMapLoading}>
+              {assignSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Mark as Worked
             </Button>
           </DialogFooter>
         </DialogContent>
