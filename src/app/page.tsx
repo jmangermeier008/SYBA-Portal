@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Loader2, AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
+import { AlertTriangle, Megaphone, Calendar, Pin, Users } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
 import type { Announcement, ComplexClosuresDocument, Game, LeagueOfficer, Sport } from '@/types/scheduling';
 import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
@@ -203,11 +203,6 @@ export default function Home() {
     }
   }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach]);
 
-  if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-white px-4">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-    </div>
-  );
   if (user && profile) return null; // redirect in flight — suppress flash
 
   return (
