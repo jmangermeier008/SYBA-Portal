@@ -134,28 +134,29 @@ export default function SeasonsAdminPage() {
   };
 
   const handleDeleteSeason = async (id: string) => {
-    if (!confirm("Are you sure? This will delete the season and all its divisions.")) return;
+    if (!confirm("Are you sure? This will permanently delete the season along with all its divisions, teams, and enrollments.")) return;
     try {
-      // H4: Check for enrollments referencing this season before deleting
+      // 1. Delete all enrollments for this season
       const enrollmentsSnap = await getDocs(query(collectionGroup(db, 'enrollments'), where('seasonId', '==', id)));
-      if (!enrollmentsSnap.empty) {
-        toast({
-          variant: "destructive",
-          title: "Cannot Delete Season",
-          description: `This season has ${enrollmentsSnap.size} active enrollment${enrollmentsSnap.size !== 1 ? 's' : ''}. Remove all enrollments before deleting.`,
-        });
-        return;
-      }
+      await Promise.all(enrollmentsSnap.docs.map(d => deleteDoc(d.ref)));
 
-      // Cascade-delete all division subcollection documents first
-      const divisionsSnapshot = await getDocs(collection(db, 'seasons', id, 'divisions'));
+      // 2. Delete all teams for this season, including each team's games subcollection
+      const teamsSnap = await getDocs(query(collection(db, 'teams'), where('seasonId', '==', id)));
       await Promise.all(
-        divisionsSnapshot.docs.map(divDoc => deleteDoc(divDoc.ref))
+        teamsSnap.docs.map(async teamDoc => {
+          const teamGamesSnap = await getDocs(collection(db, 'teams', teamDoc.id, 'games'));
+          await Promise.all(teamGamesSnap.docs.map(g => deleteDoc(g.ref)));
+          await deleteDoc(teamDoc.ref);
+        })
       );
 
-      // Now delete the season document itself
+      // 3. Delete all division subcollection documents
+      const divisionsSnapshot = await getDocs(collection(db, 'seasons', id, 'divisions'));
+      await Promise.all(divisionsSnapshot.docs.map(divDoc => deleteDoc(divDoc.ref)));
+
+      // 4. Delete the season document itself
       await deleteDoc(doc(db, 'seasons', id));
-      toast({ title: "Season Deleted", description: "Season and all divisions have been removed." });
+      toast({ title: "Season Deleted", description: "Season, divisions, teams, and enrollments have been removed." });
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
