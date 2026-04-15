@@ -54,6 +54,8 @@ export default function DivisionsAdminPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editAgeGroup, setEditAgeGroup] = useState('');
+  const [editFee, setEditFee] = useState('');
+  const [editCapacity, setEditCapacity] = useState('');
   const [formData, setFormData] = useState({ name: '', ageGroup: '', fee: '', capacity: '' });
 
   // ── Queries (all hooks before any early return) ──────────────────────────────
@@ -129,6 +131,8 @@ export default function DivisionsAdminPage() {
       await updateDoc(doc(db, 'seasons', selectedSeasonId, 'divisions', divId), {
         name: editName.trim(),
         ageGroup: editAgeGroup.trim(),
+        fee: editFee !== '' ? Math.round(Number(editFee) * 100) : 0,
+        capacity: editCapacity !== '' ? Number(editCapacity) : 20,
       });
       toast({ title: 'Division Updated' });
       setEditingId(null);
@@ -325,6 +329,30 @@ export default function DivisionsAdminPage() {
                             placeholder="Age group (optional)"
                             className="h-7 text-xs"
                           />
+                          <div className="grid grid-cols-2 gap-2 mt-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Fee ($)</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={editFee}
+                                onChange={e => setEditFee(e.target.value)}
+                                className="h-7 text-xs"
+                                placeholder="0"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Capacity</Label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={editCapacity}
+                                onChange={e => setEditCapacity(e.target.value)}
+                                className="h-7 text-xs"
+                                placeholder="20"
+                              />
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div>
@@ -349,7 +377,7 @@ export default function DivisionsAdminPage() {
                               size="icon"
                               variant="ghost"
                               className="h-7 w-7 text-muted-foreground"
-                              onClick={() => setEditingId(null)}
+                              onClick={() => { setEditingId(null); setEditFee(''); setEditCapacity(''); }}
                             >
                               <X className="h-3.5 w-3.5" />
                             </Button>
@@ -364,6 +392,8 @@ export default function DivisionsAdminPage() {
                                 setEditingId(div.id);
                                 setEditName(div.name);
                                 setEditAgeGroup(div.ageGroup ?? '');
+                                setEditFee(div.fee != null ? String(div.fee / 100) : '');
+                                setEditCapacity(div.capacity != null ? String(div.capacity) : '');
                               }}
                             >
                               <Pencil className="h-3.5 w-3.5" />
