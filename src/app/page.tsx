@@ -283,7 +283,7 @@ export default function Home() {
               <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
             </Button>
             <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
-              <Link href="/signup">Register Player</Link>
+              <Link href={`/parent/enroll?sport=${publicSport}`}>Register Player</Link>
             </Button>
           </div>
 

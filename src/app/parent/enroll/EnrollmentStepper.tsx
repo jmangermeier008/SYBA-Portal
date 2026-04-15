@@ -5,7 +5,7 @@ import { collection, doc, setDoc, updateDoc, query, where, orderBy, getDocs, col
 import { useUser, useFirestore, useMemoFirebase, useCollection, useAuth } from '@/firebase';
 import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
 import { useSport } from '@/firebase/sport-context';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -86,7 +86,18 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const { activeSport } = useSport();
   const db = useFirestore();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+
+  // ── Seed sport from URL param ─────────────────────────────────────────────
+  // When arriving from the home page with ?sport=baseball, write it to
+  // localStorage before anonymous sign-in resolves so SportProvider picks it up.
+  useEffect(() => {
+    const sportParam = searchParams.get('sport');
+    if (sportParam === 'baseball' || sportParam === 'football') {
+      localStorage.setItem('syba_active_sport', sportParam);
+    }
+  }, [searchParams]);
 
   // ── Anonymous auth ────────────────────────────────────────────────────────
   // If no user is signed in after auth loads, silently sign in anonymously so

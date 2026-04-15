@@ -65,9 +65,14 @@ export function SportProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user?.uid) {
       if (!loading) {
-        // Auth has fully resolved with no user — genuine logout, clear stored sport
-        localStorage.removeItem('syba_active_sport');
-        setActiveSportState(null);
+        // Auth has fully resolved with no user — genuine logout, clear stored sport.
+        // Exception: on the enrollment path, anonymous sign-in is still pending.
+        // Clearing localStorage here would wipe the sport the user just selected on
+        // the home page before the anonymous user is established.
+        if (!pathname.startsWith('/parent/enroll')) {
+          localStorage.removeItem('syba_active_sport');
+          setActiveSportState(null);
+        }
         setSportLoaded(true);
       }
       // Still resolving — don't touch localStorage yet; wait for the next effect run
@@ -132,10 +137,10 @@ export function SportProvider({ children }: { children: ReactNode }) {
       ) : !user ? (
         // Not logged in — pass through; auth pages and home page handle their own flow
         children
-      ) : !activeSport && pathname !== '/' ? (
+      ) : !activeSport && pathname !== '/' && !pathname.startsWith('/parent/enroll') ? (
         // Logged in, no sport, not on home page — redirect to home page to select sport.
-        // Guard excludes '/' to prevent an infinite redirect loop when the user is already
-        // on the home page waiting to pick a sport.
+        // Guard excludes '/' (infinite-loop prevention) and '/parent/enroll' (guest
+        // registration: anonymous sign-in is in flight and sport is still being resolved).
         <RedirectToHome />
       ) : (
         children
