@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { updateDoc, doc, collection, setDoc, deleteDoc } from 'firebase/firestore';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
@@ -87,7 +87,12 @@ export default function RolesPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [sportFilter, setSportFilter] = useState<string>(activeSport ?? 'all');
+  const [sportFilter, setSportFilter] = useState<string>('all');
+  // activeSport is null on first render (set via useEffect in SportProvider),
+  // so we sync sportFilter once it resolves rather than relying on the useState initializer.
+  useEffect(() => {
+    if (activeSport) setSportFilter(activeSport);
+  }, [activeSport]);
 
   const filteredUsers = useMemo(() => {
     if (!users) return [];
