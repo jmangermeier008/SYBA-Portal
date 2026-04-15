@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch, deleteDoc, query, where, increment } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -53,6 +53,13 @@ interface Enrollment {
   parentWeightEstimate?: number;
   footballEquipment?: FootballEquipment;
   sport?: string;
+  profileStatus?: 'incomplete' | 'complete';
+}
+
+interface Division {
+  id: string;
+  name: string;
+  fee: number;
 }
 
 interface Player {
@@ -97,6 +104,7 @@ export default function MasterRosterPage() {
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showNeedsAttention, setShowNeedsAttention] = useState(false);
 
   // Import roster state
   const [importOpen, setImportOpen] = useState(false);
@@ -170,11 +178,18 @@ export default function MasterRosterPage() {
     return collection(db, 'userProfiles');
   }, [db, isAdmin, isBoardMember]);
 
+  // Divisions for the currently-selected season — used by the admin division override select
+  const divisionsForSeasonQuery = useMemoFirebase(() => {
+    if (!db || !selectedSeason || selectedSeason === 'all-seasons' || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'seasons', selectedSeason, 'divisions');
+  }, [db, selectedSeason, isAdmin, isBoardMember]);
+
   const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: players } = useCollection<Player>(playersQuery);
   const { data: parentProfiles } = useCollection<ParentProfile>(parentProfilesQuery);
+  const { data: divisionsForSeason } = useCollection<Division>(divisionsForSeasonQuery);
 
   const profileMap = useMemo(() => {
     const m = new Map<string, ParentProfile>();
@@ -182,9 +197,12 @@ export default function MasterRosterPage() {
     return m;
   }, [parentProfiles]);
 
+  const needsAttentionCount = enrollments?.filter(e => e.profileStatus === 'incomplete').length ?? 0;
+
   const filteredEnrollments = enrollments?.filter(e => {
     if (selectedSeason && selectedSeason !== 'all-seasons' && e.seasonId !== selectedSeason) return false;
     if (selectedDivision && selectedDivision !== 'all-divisions' && e.divisionId !== selectedDivision) return false;
+    if (showNeedsAttention && e.profileStatus !== 'incomplete') return false;
     if (searchQuery.trim()) {
       const p = players?.find(p => p.id === e.playerId);
       const name = p ? `${p.firstName} ${p.lastName}`.toLowerCase() : '';
@@ -245,6 +263,47 @@ export default function MasterRosterPage() {
     }
 
     toast({ title: "Assignment Initiated", description: "Updating roster status in the background." });
+  };
+
+  const handleDivisionOverride = async (enrollment: Enrollment, newDivisionId: string) => {
+    if (!db || !enrollment || newDivisionId === enrollment.divisionId) return;
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Update enrollment's divisionId
+      batch.update(
+        doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id),
+        { divisionId: newDivisionId },
+      );
+
+      // 2. Decrement old division's registeredCount
+      if (enrollment.seasonId && enrollment.divisionId) {
+        batch.update(
+          doc(db, 'seasons', enrollment.seasonId, 'divisions', enrollment.divisionId),
+          { registeredCount: increment(-1) },
+        );
+      }
+
+      // 3. Increment new division's registeredCount
+      if (enrollment.seasonId) {
+        batch.update(
+          doc(db, 'seasons', enrollment.seasonId, 'divisions', newDivisionId),
+          { registeredCount: increment(1) },
+        );
+      }
+
+      await batch.commit();
+      toast({ title: 'Division Updated', description: 'Division reassigned and counts updated.' });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: `userProfiles/${enrollment.parentUserId}/enrollments/${enrollment.id}`,
+          operation: 'update',
+        }));
+      } else {
+        toast({ variant: 'destructive', title: 'Update Failed', description: error.message });
+      }
+    }
   };
 
   const handleConfirmWaiver = async () => {
@@ -607,6 +666,26 @@ export default function MasterRosterPage() {
                 </div>
               </div>
             </div>
+
+            {/* Needs Attention toggle */}
+            {needsAttentionCount > 0 && (
+              <div className="mt-4 flex items-center gap-3">
+                <Button
+                  variant={showNeedsAttention ? 'default' : 'outline'}
+                  size="sm"
+                  className="rounded-full gap-2"
+                  onClick={() => setShowNeedsAttention(v => !v)}
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  Needs Attention ({needsAttentionCount})
+                </Button>
+                {showNeedsAttention && (
+                  <span className="text-xs text-muted-foreground">
+                    Showing registrations with incomplete account setup
+                  </span>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -659,8 +738,29 @@ export default function MasterRosterPage() {
                                 <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
                               </span>
                             )}
+                            {e.profileStatus === 'incomplete' && (
+                              <span title="Account not yet claimed — guest registration">
+                                <AlertCircle className="h-4 w-4 text-orange-400 shrink-0" />
+                              </span>
+                            )}
                           </div>
-                          <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
+                          {isAdmin && divisionsForSeason && divisionsForSeason.length > 0 && e.seasonId === selectedSeason ? (
+                            <Select
+                              value={e.divisionId}
+                              onValueChange={(newDivId) => handleDivisionOverride(e, newDivId)}
+                            >
+                              <SelectTrigger className="h-6 text-[10px] rounded px-1.5 mt-0.5 w-auto max-w-[140px] border-dashed bg-transparent">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {divisionsForSeason.map(d => (
+                                  <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
+                          )}
                         </TableCell>
                         <TableCell className="hidden md:table-cell py-4">
                           {(() => {

@@ -1,14 +1,207 @@
 "use client";
 
-import { Suspense, use } from 'react';
+import { Suspense, use, useState } from 'react';
+import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
+import { doc, updateDoc } from 'firebase/firestore';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Loader2, Mail } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { CheckCircle2, Loader2, Mail, KeyRound, UserCheck } from 'lucide-react';
 import Link from 'next/link';
+import { useUser, useAuth, useFirestore } from '@/firebase';
+import { useToast } from '@/hooks/use-toast';
+
+// ---------------------------------------------------------------------------
+// Claim Account Form — shown to anonymous users who just paid
+// ---------------------------------------------------------------------------
+
+function ClaimAccountForm() {
+  const auth = useAuth();
+  const db = useFirestore();
+  const { user } = useUser();
+  const { toast } = useToast();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [claiming, setClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+
+  const handleClaim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !auth.currentUser) return;
+    if (password !== confirm) {
+      toast({ variant: 'destructive', title: 'Passwords do not match', description: 'Please re-enter your passwords.' });
+      return;
+    }
+    if (password.length < 8) {
+      toast({ variant: 'destructive', title: 'Password too short', description: 'Use at least 8 characters.' });
+      return;
+    }
+
+    setClaiming(true);
+    try {
+      // Link the anonymous account to a permanent email/password credential
+      const credential = EmailAuthProvider.credential(email, password);
+      await linkWithCredential(auth.currentUser, credential);
+
+      // Update the Firestore profile with the email and flip profileStatus
+      if (db) {
+        await updateDoc(doc(db, 'userProfiles', user.uid), {
+          email,
+          displayName: email,
+          roles: ['Parent'],
+          profileStatus: 'complete',
+        });
+      }
+
+      setClaimed(true);
+      toast({ title: 'Account created!', description: 'Your registration is now linked to your new account.' });
+    } catch (error: any) {
+      const msg =
+        error.code === 'auth/email-already-in-use'
+          ? 'That email is already in use. Try signing in instead.'
+          : error.code === 'auth/invalid-email'
+          ? 'Please enter a valid email address.'
+          : error.message;
+      toast({ variant: 'destructive', title: 'Could not create account', description: msg });
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  if (claimed) {
+    return (
+      <div className="space-y-4 text-center">
+        <UserCheck className="h-16 w-16 text-green-500 mx-auto" />
+        <div>
+          <h3 className="font-bold text-lg font-headline">Account Created!</h3>
+          <p className="text-sm text-muted-foreground">
+            Your registration is saved to <strong>{email}</strong>. You can log in at any time to view your dashboard.
+          </p>
+        </div>
+        <Button asChild className="rounded-full px-8">
+          <Link href="/parent/dashboard">Go to Dashboard</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleClaim} className="space-y-4">
+      <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+        <KeyRound className="h-4 w-4 mt-0.5 shrink-0" />
+        <p>
+          Create a password to save your registration and access your account anytime.
+          This is optional — your enrollment is already confirmed.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="claimEmail">Email Address</Label>
+        <Input
+          id="claimEmail"
+          type="email"
+          className="rounded-xl"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoComplete="email"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="claimPassword">Password</Label>
+        <Input
+          id="claimPassword"
+          type="password"
+          className="rounded-xl"
+          placeholder="8+ characters"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          autoComplete="new-password"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="claimConfirm">Confirm Password</Label>
+        <Input
+          id="claimConfirm"
+          type="password"
+          className="rounded-xl"
+          placeholder="Repeat password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          required
+          autoComplete="new-password"
+        />
+      </div>
+
+      <div className="flex gap-3 pt-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="flex-1 rounded-xl"
+          asChild
+        >
+          <Link href="/parent/dashboard">Skip for now</Link>
+        </Button>
+        <Button
+          type="submit"
+          className="flex-1 rounded-xl"
+          disabled={claiming}
+        >
+          {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Create Account'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Success Content — switches between standard view and anonymous claim view
+// ---------------------------------------------------------------------------
 
 function SuccessContent({ searchParams }: { searchParams: { [key: string]: string | string[] | undefined } }) {
+  const { user, loading } = useUser();
+
   const enrollmentId = typeof searchParams.enrollment_id === 'string' ? searchParams.enrollment_id : '';
+  const enrollmentIds = typeof searchParams.enrollment_ids === 'string' ? searchParams.enrollment_ids : '';
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // Anonymous user — prompt them to claim their account
+  if (user?.isAnonymous) {
+    return (
+      <div className="max-w-lg mx-auto">
+        <Card className="border-none shadow-xl">
+          <CardHeader className="text-center">
+            <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-2" />
+            <CardTitle className="font-headline text-2xl">Registration Complete!</CardTitle>
+            <CardDescription>
+              Your payment was received. Set up an account to manage your registration and get updates.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pb-8">
+            <ClaimAccountForm />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Authenticated user — standard success screen
+  const displayId = enrollmentIds || enrollmentId;
 
   return (
     <div className="max-w-lg mx-auto text-center">
@@ -25,8 +218,8 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
             <Mail className="h-5 w-5 shrink-0 text-primary" />
             <span>A confirmation email is on its way to your inbox.</span>
           </div>
-          {enrollmentId && (
-            <p className="text-xs text-muted-foreground">Enrollment ID: {enrollmentId}</p>
+          {displayId && (
+            <p className="text-xs text-muted-foreground">Enrollment ID: {displayId}</p>
           )}
           <Button asChild className="rounded-full px-8 text-base">
             <Link href="/parent/dashboard">Back to Dashboard</Link>
@@ -36,6 +229,10 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function EnrollSuccessPage({
   params,

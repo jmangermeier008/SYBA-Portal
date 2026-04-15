@@ -24,58 +24,84 @@ export async function POST(req: Request) {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
-    const enrollmentId = session.metadata?.enrollmentId;
     const userId = session.metadata?.userId;
 
-    if (!enrollmentId || !userId) {
-      console.error('[stripe/webhook] Missing enrollmentId or userId in session metadata', session.id);
+    if (!userId) {
+      console.error('[stripe/webhook] Missing userId in session metadata', session.id);
+      return NextResponse.json({ received: true });
+    }
+
+    // Resolve enrollment IDs — prefer the new comma-separated field, fall back to legacy single ID.
+    const rawIds = session.metadata?.enrollmentIds ?? session.metadata?.enrollmentId ?? '';
+    const enrollmentIds = rawIds
+      .split(',')
+      .map((id: string) => id.trim())
+      .filter(Boolean);
+
+    if (enrollmentIds.length === 0) {
+      console.error('[stripe/webhook] No enrollment IDs found in session metadata', session.id);
       return NextResponse.json({ received: true });
     }
 
     try {
       const db = getAdminFirestore();
-      const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
+      const playerNames: string[] = [];
 
-      const enrollmentSnap = await enrollmentRef.get();
-      if (!enrollmentSnap.exists) {
-        console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId}`);
-        // Return 200 so Stripe doesn't retry — enrollment may have been deleted
-        return NextResponse.json({ received: true });
+      for (const enrollmentId of enrollmentIds) {
+        const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
+        const enrollmentSnap = await enrollmentRef.get();
+
+        if (!enrollmentSnap.exists) {
+          console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId}`);
+          continue; // Skip missing enrollments rather than failing the whole webhook
+        }
+
+        await enrollmentRef.update({
+          payment_status: 'paid',
+          paymentStatus: 'paid',
+          stripe_payment_id: session.payment_intent ?? '',
+          updatedAt: new Date().toISOString(),
+        });
+
+        console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
+
+        // Increment registeredCount on the division
+        const enrollment = enrollmentSnap.data() as any;
+        if (enrollment.seasonId && enrollment.divisionId) {
+          const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
+          divRef.update({ registeredCount: FieldValue.increment(1) })
+            .catch((err: any) => console.error('[stripe/webhook] registeredCount increment error:', err.message));
+        }
+
+        // Collect player names for the confirmation email
+        try {
+          const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
+          if (playerSnap.exists) {
+            const p = playerSnap.data() as any;
+            playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+          }
+        } catch {
+          // Non-fatal
+        }
       }
 
-      await enrollmentRef.update({
-        payment_status: 'paid',
-        paymentStatus: 'paid',
-        stripe_payment_id: session.payment_intent ?? '',
-        updatedAt: new Date().toISOString(),
-      });
-
-      console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
-
-      // Increment registeredCount on the division now that payment is confirmed
-      const enrollment = enrollmentSnap.data() as any;
-      if (enrollment.seasonId && enrollment.divisionId) {
-        const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
-        divRef.update({ registeredCount: FieldValue.increment(1) })
-          .catch((err: any) => console.error('[stripe/webhook] registeredCount increment error:', err.message));
-      }
-
-      // Fetch data for confirmation email
+      // Send a single confirmation email listing all registered players
       try {
-        const [playerSnap, userSnap, seasonSnap] = await Promise.all([
-          db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get(),
+        const [userSnap, firstEnrollmentSnap] = await Promise.all([
           db.doc(`userProfiles/${userId}`).get(),
-          db.doc(`seasons/${enrollment.seasonId}`).get(),
+          db.doc(`userProfiles/${userId}/enrollments/${enrollmentIds[0]}`).get(),
         ]);
-        const divisionSnap = await db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`).get();
 
-        const player = playerSnap.data() as any;
+        const firstEnrollment = firstEnrollmentSnap.data() as any;
         const user = userSnap.data() as any;
-        const season = seasonSnap.data() as any;
-        const division = divisionSnap.data() as any;
+
+        const [seasonSnap, divisionSnap] = await Promise.all([
+          db.doc(`seasons/${firstEnrollment?.seasonId}`).get(),
+          db.doc(`seasons/${firstEnrollment?.seasonId}/divisions/${firstEnrollment?.divisionId}`).get(),
+        ]);
 
         const toEmail = session.customer_details?.email ?? user?.email ?? '';
-        const playerName = player ? `${player.firstName} ${player.lastName}` : '';
+        const playerName = playerNames.join(', ') || 'Your player';
 
         fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/email/confirmation`, {
           method: 'POST',
@@ -83,10 +109,10 @@ export async function POST(req: Request) {
           body: JSON.stringify({
             toEmail,
             playerName,
-            seasonName: season?.name ?? '',
-            divisionName: division?.name ?? '',
+            seasonName: seasonSnap.data()?.name ?? '',
+            divisionName: divisionSnap.data()?.name ?? '',
             isWaitlisted: false,
-            feeWaived: enrollment.fee_waived ?? false,
+            feeWaived: firstEnrollment?.fee_waived ?? false,
           }),
         }).catch(err => console.error('[stripe/webhook] Email send error:', err));
       } catch (emailFetchErr: any) {

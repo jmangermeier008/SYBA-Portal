@@ -26,6 +26,7 @@ interface Season {
   isActive?: boolean;
   status?: string;
   volunteerSlotsRequired?: number;
+  ageCutoffDate?: string;
   sport?: string;
 }
 
@@ -41,6 +42,7 @@ export default function SeasonsAdminPage() {
     registrationOpen: '',
     registrationClose: '',
     volunteerSlotsRequired: 1,
+    ageCutoffDate: '',
   });
   const [isUpdating, setIsUpdating] = useState(false);
   const [formData, setFormData] = useState({
@@ -48,6 +50,7 @@ export default function SeasonsAdminPage() {
     registrationOpen: '',
     registrationClose: '',
     volunteerSlotsRequired: 1,
+    ageCutoffDate: '',
   });
 
   const seasonsQuery = useMemoFirebase(() => {
@@ -112,7 +115,7 @@ export default function SeasonsAdminPage() {
 
       toast({ title: "Season Created", description: `${formData.name} is now active.` });
       setOpen(false);
-      setFormData({ name: '', registrationOpen: '', registrationClose: '', volunteerSlotsRequired: 1 });
+      setFormData({ name: '', registrationOpen: '', registrationClose: '', volunteerSlotsRequired: 1, ageCutoffDate: '' });
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -193,6 +196,7 @@ export default function SeasonsAdminPage() {
         registrationOpen: editFormData.registrationOpen,
         registrationClose: editFormData.registrationClose,
         volunteerSlotsRequired: Number(editFormData.volunteerSlotsRequired),
+        ...(editFormData.ageCutoffDate ? { ageCutoffDate: editFormData.ageCutoffDate } : {}),
       });
       toast({ title: "Season Updated", description: `${editingSeason.name} registration dates saved.` });
       setEditingSeason(null);
@@ -306,6 +310,16 @@ export default function SeasonsAdminPage() {
                       onChange={(e) => setFormData({...formData, volunteerSlotsRequired: Number(e.target.value)})}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ageCutoffDate">Age Cutoff Date</Label>
+                    <Input
+                      id="ageCutoffDate"
+                      type="date"
+                      value={formData.ageCutoffDate}
+                      onChange={(e) => setFormData({...formData, ageCutoffDate: e.target.value})}
+                    />
+                    <p className="text-xs text-muted-foreground">League age is calculated as of this date. Leave blank to use May 1 (baseball default).</p>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -375,6 +389,7 @@ export default function SeasonsAdminPage() {
                             registrationOpen: season.registrationOpen,
                             registrationClose: season.registrationClose,
                             volunteerSlotsRequired: season.volunteerSlotsRequired ?? 1,
+                            ageCutoffDate: season.ageCutoffDate ?? '',
                           });
                           setEditingSeason(season);
                         }}
@@ -391,6 +406,11 @@ export default function SeasonsAdminPage() {
                   <div className="flex items-center gap-1 font-medium">
                     <Calendar className="h-4 w-4" /> Season ID: {season.id}
                   </div>
+                  {season.ageCutoffDate && (
+                    <div className="text-xs text-muted-foreground">
+                      Age Cutoff: {season.ageCutoffDate}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))
@@ -439,6 +459,16 @@ export default function SeasonsAdminPage() {
                   value={editFormData.volunteerSlotsRequired}
                   onChange={(e) => setEditFormData({ ...editFormData, volunteerSlotsRequired: Number(e.target.value) })}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editAgeCutoffDate">Age Cutoff Date</Label>
+                <Input
+                  id="editAgeCutoffDate"
+                  type="date"
+                  value={editFormData.ageCutoffDate}
+                  onChange={(e) => setEditFormData({ ...editFormData, ageCutoffDate: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">League age is calculated as of this date. Leave blank to use May 1 (baseball default).</p>
               </div>
             </div>
             <DialogFooter>

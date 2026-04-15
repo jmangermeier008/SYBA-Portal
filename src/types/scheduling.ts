@@ -44,6 +44,7 @@ export interface Season {
   createdBy: string;
   createdAt: string;
   volunteerSlotsRequired?: number; // min concession slots required per enrolled player
+  ageCutoffDate?: string; // YYYY-MM-DD — baseball age is calculated as of this date (e.g. "2026-04-30")
   sport: Sport;
   isTest?: boolean; // When true, this season is synthetic test data — excluded from live UI queries
 }
@@ -354,6 +355,8 @@ export interface Division {
   waitlistEnabled?: boolean;
   registeredCount?: number; // Denormalized count — updated on each enrollment write
   sport?: Sport;
+  minAge?: number;          // Minimum league age (inclusive) for this division
+  maxAge?: number;          // Maximum league age (inclusive) for this division
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +423,9 @@ export interface Enrollment {
   assignedJerseyNumber?: string;
   isTest?: boolean; // Marks this enrollment as synthetic seed data; excluded from live roster/payment views
   weightHistory?: { weight: number; date: string; recordedBy: string }[]; // Coach-recorded weigh-ins
+  // Guest / anonymous registration status — set to 'incomplete' for anonymous-auth enrollments
+  // until the parent claims their account; flipped to 'complete' on account link
+  profileStatus?: 'incomplete' | 'complete';
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, setDoc, updateDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
-import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useFirestore, useMemoFirebase, useCollection, useAuth } from '@/firebase';
+import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -10,16 +11,28 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, CreditCard, ShieldCheck, ChevronRight, ChevronLeft, Clock, ListOrdered, CheckCircle2 } from 'lucide-react';
+import { Loader2, CreditCard, ShieldCheck, ChevronRight, ChevronLeft, Clock, ListOrdered, CheckCircle2, UserPlus, ShoppingCart, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import type { Player, Season, Division, EmergencyContact } from '@/types/scheduling';
+import { getLeagueAge, getSuggestedDivisions } from '@/lib/registration-logic';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface StepperState {
   step: 1 | 2 | 3 | 4;
+  // Existing player selection (logged-in users)
   playerId: string;
+  // New player entry (guests / anonymous)
+  isNewPlayer: boolean;
+  newPlayerFirst: string;
+  newPlayerLast: string;
+  newPlayerDOB: string;
+  // Enrollment
   seasonId: string;
   divisionId: string;
   isWaitlisted: boolean;
@@ -35,19 +48,63 @@ interface StepperState {
   equipmentJerseySize: string;
 }
 
+/** A completed cart entry — built from StepperState before being added to the cart array. */
+interface CartItem {
+  isNewPlayer: boolean;
+  playerId?: string;
+  newPlayerFirst?: string;
+  newPlayerLast?: string;
+  newPlayerDOB?: string;
+  playerDisplayName: string;
+  seasonId: string;
+  seasonName: string;
+  divisionId: string;
+  divisionName: string;
+  divisionFee: number;
+  isWaitlisted: boolean;
+  shirtSize: string;
+  uniformNumberPreference: string;
+  emergencyContacts: EmergencyContact[];
+  medicalNotes: string;
+  parentWeightEstimate?: string;
+  helmetSize?: string;
+  shoulderPadSize?: string;
+  pantSize?: string;
+  equipmentJerseySize?: string;
+}
+
 const SHIRT_SIZES = ['Youth XS', 'Youth S', 'Youth M', 'Youth L', 'Youth XL', 'Adult S', 'Adult M', 'Adult L'];
 const EQUIPMENT_SIZES = ['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'];
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string }) {
-  const { user } = useUser();
+  const { user, loading: loadingUser } = useUser();
+  const auth = useAuth();
   const { activeSport } = useSport();
   const db = useFirestore();
   const router = useRouter();
   const { toast } = useToast();
 
+  // ── Anonymous auth ────────────────────────────────────────────────────────
+  // If no user is signed in after auth loads, silently sign in anonymously so
+  // guests can write their player and enrollment docs before account creation.
+  useEffect(() => {
+    if (!loadingUser && !user) {
+      initiateAnonymousSignIn(auth);
+    }
+  }, [loadingUser, user, auth]);
+
+  // ── Form state ────────────────────────────────────────────────────────────
   const [state, setState] = useState<StepperState>({
     step: 1,
     playerId: initialPlayerId,
+    isNewPlayer: false,
+    newPlayerFirst: '',
+    newPlayerLast: '',
+    newPlayerDOB: '',
     seasonId: '',
     divisionId: '',
     isWaitlisted: false,
@@ -62,16 +119,22 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     equipmentJerseySize: '',
   });
 
+  // ── Cart state ────────────────────────────────────────────────────────────
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cartView, setCartView] = useState(false); // true = showing cart review
+
+  // ── UI state ──────────────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [isDuplicate, setIsDuplicate] = useState(false);
-  // Non-null when a pending_payment enrollment with no stripe_payment_id exists — ghost enrollment.
-  // Surfaces a "Resume Payment" prompt instead of blocking with a duplicate error.
   const [resumableEnrollmentId, setResumableEnrollmentId] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // ── Firestore queries ─────────────────────────────────────────────────────
+  // All hooks MUST come before any conditional returns (Rules of Hooks).
+
   const playersQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
+    if (!db || !user || user.isAnonymous) return null;
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user]);
 
@@ -92,10 +155,76 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
   const { data: players } = useCollection<Player>(playersQuery);
   const { data: seasons } = useCollection<Season>(seasonsQuery);
-  const { data: divisions } = useCollection<Division>(divisionsQuery);
+  const { data: rawDivisions } = useCollection<Division>(divisionsQuery);
+
+  // ── Derived values ────────────────────────────────────────────────────────
+  // Compute the player DOB (existing or newly-entered) so we can calculate league age.
+  const playerDOB = useMemo(() => {
+    if (state.isNewPlayer) return state.newPlayerDOB;
+    return players?.find(p => p.id === state.playerId)?.dateOfBirth ?? '';
+  }, [state.isNewPlayer, state.newPlayerDOB, state.playerId, players]);
+
+  const selectedSeason = useMemo(
+    () => seasons?.find(s => s.id === state.seasonId),
+    [seasons, state.seasonId],
+  );
+
+  // League age — recalculated whenever DOB or season changes
+  const leagueAge = useMemo(
+    () => (playerDOB && selectedSeason)
+      ? getLeagueAge(playerDOB, selectedSeason.ageCutoffDate)
+      : null,
+    [playerDOB, selectedSeason],
+  );
+
+  // Filter divisions by league age (suggestive — parent can still pick any division)
+  const divisions = useMemo(() => {
+    if (!rawDivisions) return undefined;
+    return getSuggestedDivisions(leagueAge ?? 'N/A', rawDivisions);
+  }, [rawDivisions, leagueAge]);
+
+  const selectedPlayer = useMemo(
+    () => players?.find(p => p.id === state.playerId),
+    [players, state.playerId],
+  );
+
+  const selectedDivision = useMemo(
+    () => rawDivisions?.find(d => d.id === state.divisionId),
+    [rawDivisions, state.divisionId],
+  );
 
   const totalSteps = activeSport === 'football' ? 4 : 3;
 
+  // ── Auto-switch to new-player mode for anonymous users ────────────────────
+  useEffect(() => {
+    if (user?.isAnonymous) {
+      setState(prev => ({ ...prev, isNewPlayer: true }));
+    }
+  }, [user]);
+
+  // ── Pre-fill emergency contacts when player or step changes ──────────────
+  useEffect(() => {
+    if (selectedPlayer && state.step === 2) {
+      setState(prev => ({
+        ...prev,
+        medicalNotes: selectedPlayer.medicalNotes || '',
+        emergencyContacts: selectedPlayer.emergencyContacts?.length
+          ? selectedPlayer.emergencyContacts
+          : [{ name: '', phone: '', relationship: '' }],
+      }));
+    }
+  }, [selectedPlayer, state.step]);
+
+  // ── Waitlist status when division changes ─────────────────────────────────
+  useEffect(() => {
+    if (selectedDivision) {
+      const isFull = selectedDivision.capacity != null &&
+        (selectedDivision.registeredCount ?? 0) >= selectedDivision.capacity;
+      setState(prev => ({ ...prev, isWaitlisted: isFull && !!selectedDivision.waitlistEnabled }));
+    }
+  }, [selectedDivision]);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const getStepLabel = (s: number) => {
     if (s === 1) return 'Season & Division';
     if (s === 2) return 'Player Details';
@@ -110,39 +239,23 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     return 'Review your registration before proceeding.';
   };
 
-  const selectedPlayer = players?.find(p => p.id === state.playerId);
-  const selectedSeason = seasons?.find(s => s.id === state.seasonId);
-  const selectedDivision = divisions?.find(d => d.id === state.divisionId);
-
-  // Pre-fill player details when player or step changes
-  useEffect(() => {
-    if (selectedPlayer && state.step === 2) {
-      setState(prev => ({
-        ...prev,
-        medicalNotes: selectedPlayer.medicalNotes || '',
-        emergencyContacts: selectedPlayer.emergencyContacts?.length
-          ? selectedPlayer.emergencyContacts
-          : [{ name: '', phone: '', relationship: '' }],
-      }));
-    }
-  }, [selectedPlayer, state.step]);
-
-  // Determine waitlist status when division changes
-  useEffect(() => {
-    if (selectedDivision) {
-      const isFull = selectedDivision.capacity != null &&
-        (selectedDivision.registeredCount ?? 0) >= selectedDivision.capacity;
-      setState(prev => ({ ...prev, isWaitlisted: isFull && !!selectedDivision.waitlistEnabled }));
-    }
-  }, [selectedDivision]);
-
   const isDivisionClosed = () => {
     if (!selectedDivision || !selectedDivision.capacity) return false;
     const isFull = (selectedDivision.registeredCount ?? 0) >= selectedDivision.capacity;
     return isFull && !selectedDivision.waitlistEnabled;
   };
 
+  const playerDisplayName = () => {
+    if (state.isNewPlayer) {
+      return `${state.newPlayerFirst} ${state.newPlayerLast}`.trim() || 'New Player';
+    }
+    return selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Player';
+  };
+
+  // ── Duplicate check ───────────────────────────────────────────────────────
   const checkDuplicate = async (): Promise<'none' | 'paid' | 'resumable'> => {
+    // Skip duplicate check for new players (they don't have a playerId yet)
+    if (state.isNewPlayer) return 'none';
     if (!db || !state.playerId || !state.seasonId) return 'none';
     setCheckingDuplicate(true);
     try {
@@ -153,12 +266,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       );
       const snap = await getDocs(q);
       if (snap.empty) return 'none';
-      // Distinguish ghost enrollments (abandoned Stripe checkout) from confirmed ones.
       for (const docSnap of snap.docs) {
         const d = docSnap.data();
         const status = d.paymentStatus ?? d.payment_status ?? '';
         if (status === 'pending_payment' && !d.stripe_payment_id) {
-          // Ghost enrollment — user abandoned Stripe. Offer resume instead of blocking.
           setResumableEnrollmentId(d.id ?? docSnap.id);
           return 'resumable';
         }
@@ -172,17 +283,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     }
   };
 
+  // ── Navigation ────────────────────────────────────────────────────────────
   const handleNext = async () => {
     if (state.step === 1) {
       const result = await checkDuplicate();
-      if (result === 'paid') {
-        setIsDuplicate(true);
-        return;
-      }
-      if (result === 'resumable') {
-        // Show the resume banner — stay on step 1 so the user sees it.
-        return;
-      }
+      if (result === 'paid') { setIsDuplicate(true); return; }
+      if (result === 'resumable') return;
       setIsDuplicate(false);
       setResumableEnrollmentId(null);
       setState(prev => ({ ...prev, step: 2 }));
@@ -203,124 +309,237 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     setState(prev => ({ ...prev, emergencyContacts: updated }));
   };
 
-  const handleSubmit = async () => {
-    if (!user || !db || !selectedDivision) return;
+  // ── Add current form state to cart ────────────────────────────────────────
+  const buildCartItem = (): CartItem => ({
+    isNewPlayer: state.isNewPlayer,
+    playerId: state.isNewPlayer ? undefined : state.playerId,
+    newPlayerFirst: state.isNewPlayer ? state.newPlayerFirst : undefined,
+    newPlayerLast: state.isNewPlayer ? state.newPlayerLast : undefined,
+    newPlayerDOB: state.isNewPlayer ? state.newPlayerDOB : undefined,
+    playerDisplayName: playerDisplayName(),
+    seasonId: state.seasonId,
+    seasonName: selectedSeason?.name ?? '',
+    divisionId: state.divisionId,
+    divisionName: selectedDivision?.name ?? '',
+    divisionFee: selectedDivision?.fee ?? 0,
+    isWaitlisted: state.isWaitlisted,
+    shirtSize: state.shirtSize,
+    uniformNumberPreference: state.uniformNumberPreference,
+    emergencyContacts: state.emergencyContacts.filter(c => c.name),
+    medicalNotes: state.medicalNotes,
+    parentWeightEstimate: state.parentWeightEstimate || undefined,
+    helmetSize: state.helmetSize || undefined,
+    shoulderPadSize: state.shoulderPadSize || undefined,
+    pantSize: state.pantSize || undefined,
+    equipmentJerseySize: state.equipmentJerseySize || undefined,
+  });
+
+  const handleAddAnotherPlayer = () => {
+    setCart(prev => [...prev, buildCartItem()]);
+    // Reset form for the next player
+    setState({
+      step: 1,
+      playerId: '',
+      isNewPlayer: user?.isAnonymous ?? false,
+      newPlayerFirst: '',
+      newPlayerLast: '',
+      newPlayerDOB: '',
+      seasonId: '',
+      divisionId: '',
+      isWaitlisted: false,
+      shirtSize: '',
+      uniformNumberPreference: '',
+      emergencyContacts: [{ name: '', phone: '', relationship: '' }],
+      medicalNotes: '',
+      parentWeightEstimate: '',
+      helmetSize: '',
+      shoulderPadSize: '',
+      pantSize: '',
+      equipmentJerseySize: '',
+    });
+    setIsDuplicate(false);
+    setResumableEnrollmentId(null);
+  };
+
+  const handleReviewCart = () => {
+    setCart(prev => [...prev, buildCartItem()]);
+    setCartView(true);
+  };
+
+  const handleRemoveFromCart = (index: number) => {
+    setCart(prev => prev.filter((_, i) => i !== index));
+    if (cart.length === 1) setCartView(false);
+  };
+
+  // ── Submit — write all Firestore docs and launch Stripe ───────────────────
+  const handleSubmit = async (itemsToSubmit?: CartItem[]) => {
+    if (!user || !db) return;
+
+    // If called from cart view, use the cart; otherwise build a single-item array.
+    const items = itemsToSubmit ?? [buildCartItem()];
+    if (items.length === 0) return;
+
     setSubmitting(true);
 
-    const enrollmentId = crypto.randomUUID();
-    const enrollmentRef = doc(db, 'userProfiles', user.uid, 'enrollments', enrollmentId);
-    const paymentStatus = state.isWaitlisted ? 'waitlisted' : 'pending_payment';
-
-    const enrollmentData = {
-      id: enrollmentId,
-      playerId: state.playerId,
-      seasonId: state.seasonId,
-      divisionId: state.divisionId,
-      parentUserId: user.uid,
-      shirtSize: state.shirtSize,
-      jerseySize: state.shirtSize, // backwards compat
-      uniformNumberPreference: state.uniformNumberPreference,
-      emergencyContacts: state.emergencyContacts.filter(c => c.name),
-      medicalNotes: state.medicalNotes,
-      payment_status: paymentStatus,
-      paymentStatus: paymentStatus, // backwards compat for roster page
-      stripe_payment_id: '',
-      fee_waived: false,
-      waiver_reason: '',
-      registrationFeeAmount: selectedDivision.fee,
-      registered_at: new Date().toISOString(),
-      enrollmentDate: new Date().toISOString(),
-      ...(state.isWaitlisted ? { waitlisted_at: new Date().toISOString() } : {}),
-      sport: activeSport ?? undefined,
-      ...(activeSport === 'football' && state.parentWeightEstimate
-        ? { parentWeightEstimate: Number(state.parentWeightEstimate) }
-        : {}),
-      ...(activeSport === 'football' && state.helmetSize
-        ? {
-            footballEquipment: {
-              helmetSize: state.helmetSize,
-              shoulderPadSize: state.shoulderPadSize,
-              pantSize: state.pantSize,
-              jerseySize: state.equipmentJerseySize,
-            },
-          }
-        : {}),
-      weightHistory: [],
-    };
-
     try {
-      await setDoc(enrollmentRef, enrollmentData);
+      const idToken = await user.getIdToken();
+      const isAnonymous = user.isAnonymous;
+      const now = new Date().toISOString();
+      const enrollmentIds: string[] = [];
+      const waitlistedItems: CartItem[] = [];
+      const payableItems: CartItem[] = [];
 
-      if (state.isWaitlisted) {
-        // Send waitlist confirmation email
-        try {
-          const emailRes = await fetch('/api/email/confirmation', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              toEmail: user.email,
-              playerName: selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Your player',
-              seasonName: selectedSeason?.name ?? '',
-              divisionName: selectedDivision.name,
-              isWaitlisted: true,
-              feeWaived: false,
-            }),
+      for (const item of items) {
+        if (item.isWaitlisted) {
+          waitlistedItems.push(item);
+        } else {
+          payableItems.push(item);
+        }
+      }
+
+      // ── Write all Firestore documents ──────────────────────────────────
+      for (const item of items) {
+        // 1. Create player document if this is a new player
+        let playerId = item.playerId ?? '';
+        if (item.isNewPlayer) {
+          playerId = crypto.randomUUID();
+          await setDoc(doc(db, 'userProfiles', user.uid, 'players', playerId), {
+            id: playerId,
+            firstName: item.newPlayerFirst ?? '',
+            lastName: item.newPlayerLast ?? '',
+            dateOfBirth: item.newPlayerDOB ?? '',
+            parentIds: [user.uid],
+            primaryParentId: user.uid,
           });
-          if (!emailRes.ok) {
-            toast({ variant: 'destructive', title: 'Added to Waitlist', description: "You've been waitlisted, but the confirmation email failed to send." });
-          }
-        } catch (err) {
-          console.error('[enroll] Email send error:', err);
         }
 
+        // 2. Create enrollment document
+        const enrollmentId = crypto.randomUUID();
+        enrollmentIds.push(enrollmentId);
+        const paymentStatus = item.isWaitlisted ? 'waitlisted' : 'pending_payment';
+
+        const enrollmentData: Record<string, unknown> = {
+          id: enrollmentId,
+          playerId,
+          seasonId: item.seasonId,
+          divisionId: item.divisionId,
+          parentUserId: user.uid,
+          shirtSize: item.shirtSize,
+          jerseySize: item.shirtSize,
+          uniformNumberPreference: item.uniformNumberPreference,
+          emergencyContacts: item.emergencyContacts,
+          medicalNotes: item.medicalNotes,
+          payment_status: paymentStatus,
+          paymentStatus,
+          stripe_payment_id: '',
+          fee_waived: false,
+          waiver_reason: '',
+          registrationFeeAmount: item.divisionFee,
+          registered_at: now,
+          enrollmentDate: now,
+          sport: activeSport ?? undefined,
+          profileStatus: isAnonymous ? 'incomplete' : 'complete',
+          weightHistory: [],
+          ...(item.isWaitlisted ? { waitlisted_at: now } : {}),
+          ...(activeSport === 'football' && item.parentWeightEstimate
+            ? { parentWeightEstimate: Number(item.parentWeightEstimate) }
+            : {}),
+          ...(activeSport === 'football' && item.helmetSize
+            ? {
+                footballEquipment: {
+                  helmetSize: item.helmetSize,
+                  shoulderPadSize: item.shoulderPadSize,
+                  pantSize: item.pantSize,
+                  jerseySize: item.equipmentJerseySize,
+                },
+              }
+            : {}),
+        };
+
+        await setDoc(
+          doc(db, 'userProfiles', user.uid, 'enrollments', enrollmentId),
+          enrollmentData,
+        );
+      }
+
+      // ── Handle waitlisted players ──────────────────────────────────────
+      if (waitlistedItems.length > 0) {
+        for (const item of waitlistedItems) {
+          try {
+            await fetch('/api/email/confirmation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                toEmail: user.email,
+                playerName: item.playerDisplayName,
+                seasonName: item.seasonName,
+                divisionName: item.divisionName,
+                isWaitlisted: true,
+                feeWaived: false,
+              }),
+            });
+          } catch (err) {
+            console.error('[enroll] Waitlist email error:', err);
+          }
+        }
+      }
+
+      // ── If all players are waitlisted, we're done ──────────────────────
+      if (payableItems.length === 0) {
         setSuccess(true);
         setSubmitting(false);
         return;
       }
 
-      // Start Stripe checkout (send ID token for server-side auth verification)
-      const idToken = await user.getIdToken();
+      // ── Launch Stripe for payable items ────────────────────────────────
+      const payableEnrollmentIds = enrollmentIds.filter((_, i) => !items[i].isWaitlisted);
+
       const resp = await fetch('/api/stripe/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
         body: JSON.stringify({
-          enrollmentId,
+          enrollmentIds: payableEnrollmentIds,
           userId: user.uid,
-          fee: selectedDivision.fee,
-          divisionName: selectedDivision.name,
-          playerName: selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Player',
         }),
       });
 
       const data = await resp.json();
 
       if (data.url) {
-        // Persist the Stripe session ID so orphaned enrollments can be reconciled
-        // if the user abandons checkout. This enables the "resume payment" flow on return.
         if (data.sessionId) {
-          await updateDoc(enrollmentRef, { stripeSessionId: data.sessionId });
+          // Persist Stripe session ID for orphan reconciliation
+          await Promise.all(
+            payableEnrollmentIds.map(eid =>
+              updateDoc(doc(db, 'userProfiles', user.uid, 'enrollments', eid), {
+                stripeSessionId: data.sessionId,
+              })
+            )
+          );
         }
-        toast({ title: "Redirecting to Payment", description: "Secure checkout via Stripe." });
+        toast({ title: 'Redirecting to Payment', description: 'Secure checkout via Stripe.' });
         router.push(data.url);
       } else {
-        toast({ variant: "destructive", title: "Checkout Error", description: data.error || "Could not initiate payment." });
+        toast({ variant: 'destructive', title: 'Checkout Error', description: data.error || 'Could not initiate payment.' });
         setSubmitting(false);
       }
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
-          path: enrollmentRef.path,
+          path: `userProfiles/${user.uid}/enrollments`,
           operation: 'create',
-          requestResourceData: enrollmentData,
         }));
       } else {
         console.error('[enroll] Submit error:', error);
-        toast({ variant: "destructive", title: "Error", description: error.message });
+        toast({ variant: 'destructive', title: 'Error', description: error.message });
       }
       setSubmitting(false);
     }
   };
 
+  // ── Resume ghost enrollment ───────────────────────────────────────────────
   const handleResumePayment = async () => {
     if (!user || !db || !selectedDivision || !resumableEnrollmentId) return;
     setSubmitting(true);
@@ -330,31 +549,40 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify({
-          enrollmentId: resumableEnrollmentId,
+          enrollmentIds: [resumableEnrollmentId],
           userId: user.uid,
-          fee: selectedDivision.fee,
-          divisionName: selectedDivision.name,
-          playerName: selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Player',
         }),
       });
       const data = await resp.json();
       if (data.url) {
         if (data.sessionId) {
-          const enrollmentRef = doc(db, 'userProfiles', user.uid, 'enrollments', resumableEnrollmentId);
-          await updateDoc(enrollmentRef, { stripeSessionId: data.sessionId });
+          await updateDoc(
+            doc(db, 'userProfiles', user.uid, 'enrollments', resumableEnrollmentId),
+            { stripeSessionId: data.sessionId },
+          );
         }
-        toast({ title: "Redirecting to Payment", description: "Secure checkout via Stripe." });
+        toast({ title: 'Redirecting to Payment', description: 'Secure checkout via Stripe.' });
         router.push(data.url);
       } else {
-        toast({ variant: "destructive", title: "Checkout Error", description: data.error || "Could not initiate payment." });
+        toast({ variant: 'destructive', title: 'Checkout Error', description: data.error || 'Could not initiate payment.' });
         setSubmitting(false);
       }
     } catch (error: any) {
       console.error('[enroll] Resume payment error:', error);
-      toast({ variant: "destructive", title: "Error", description: error.message });
+      toast({ variant: 'destructive', title: 'Error', description: error.message });
       setSubmitting(false);
     }
   };
+
+  // ── Loading / waitlist success screens ───────────────────────────────────
+  if (loadingUser || (!user && !loadingUser)) {
+    // Show spinner while auth resolves or anonymous sign-in is pending
+    return (
+      <div className="max-w-2xl mx-auto flex justify-center py-20">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (success) {
     return (
@@ -364,8 +592,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto" />
             <h2 className="text-2xl font-bold font-headline">Added to Waitlist</h2>
             <p className="text-sm text-muted-foreground">
-              You're on the waitlist for <strong>{selectedSeason?.name}</strong> — <strong>{selectedDivision?.name}</strong>.
-              We'll contact you at <strong>{user?.email}</strong> if a spot opens up.
+              You've been placed on the waitlist. We'll be in touch if a spot opens up.
             </p>
             <Button onClick={() => router.push('/parent/dashboard')} className="rounded-full px-8 mt-4">
               Back to Dashboard
@@ -376,8 +603,109 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     );
   }
 
+  // ── Cart Review Screen ────────────────────────────────────────────────────
+  if (cartView) {
+    const cartTotal = cart.filter(i => !i.isWaitlisted).reduce((sum, i) => sum + i.divisionFee, 0);
+
+    return (
+      <div className="max-w-2xl mx-auto space-y-4">
+        <div className="flex items-center gap-3 mb-2">
+          <ShoppingCart className="h-6 w-6 text-primary" />
+          <h2 className="text-xl font-bold font-headline">Cart Summary</h2>
+        </div>
+
+        {cart.map((item, i) => (
+          <Card key={i} className="border-none shadow-md">
+            <CardContent className="pt-4 pb-3 space-y-1 text-sm">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="font-semibold">{item.playerDisplayName}</p>
+                  <p className="text-muted-foreground">{item.seasonName} · {item.divisionName}</p>
+                </div>
+                <div className="text-right">
+                  {item.isWaitlisted ? (
+                    <Badge variant="secondary">Waitlist</Badge>
+                  ) : (
+                    <span className="font-semibold text-primary">${(item.divisionFee / 100).toFixed(2)}</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive hover:bg-destructive/10 ml-1 h-7 w-7"
+                    onClick={() => handleRemoveFromCart(i)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+
+        {cartTotal > 0 && (
+          <div className="flex justify-between items-center px-1 pt-2 font-semibold">
+            <span>Total Due Today</span>
+            <span className="text-primary text-lg">${(cartTotal / 100).toFixed(2)}</span>
+          </div>
+        )}
+
+        <div className="flex items-start gap-3 p-4 bg-muted/30 rounded-xl">
+          <ShieldCheck className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            By completing registration you agree to the SYBA Code of Conduct. Registration is not complete until payment is received (if applicable).
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            className="rounded-xl flex-1"
+            onClick={() => setCartView(false)}
+            disabled={submitting}
+          >
+            <ChevronLeft className="mr-1 h-4 w-4" /> Back
+          </Button>
+          <Button
+            className="rounded-xl flex-1 h-12 text-base font-semibold"
+            onClick={() => handleSubmit(cart)}
+            disabled={submitting || cart.length === 0}
+          >
+            {submitting ? (
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            ) : cartTotal > 0 ? (
+              <><CreditCard className="mr-2 h-5 w-5" /> Pay ${(cartTotal / 100).toFixed(2)}</>
+            ) : (
+              <><ListOrdered className="mr-2 h-5 w-5" /> Join Waitlist</>
+            )}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Multi-player in-progress banner ──────────────────────────────────────
+  const cartBanner = cart.length > 0 && (
+    <div className="flex items-center gap-2 p-3 rounded-xl bg-primary/10 border border-primary/20 text-primary text-sm mb-4">
+      <ShoppingCart className="h-4 w-4 shrink-0" />
+      <span>
+        {cart.length} player{cart.length > 1 ? 's' : ''} in cart — add another or proceed to checkout.
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="ml-auto rounded-full h-7 text-xs"
+        onClick={() => setCartView(true)}
+      >
+        Review Cart
+      </Button>
+    </div>
+  );
+
+  // ── Step form ─────────────────────────────────────────────────────────────
   return (
     <div className="max-w-2xl mx-auto">
+      {cartBanner}
+
       {/* Step Indicator */}
       <div className="flex items-center mb-8 gap-2">
         {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => (
@@ -410,27 +738,82 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         </CardHeader>
 
         <CardContent className="space-y-6 pt-6 pb-24">
+
           {/* ── STEP 1 ── */}
           {state.step === 1 && (
             <>
-              <div className="space-y-2">
-                <Label>Select Player</Label>
-                <Select
-                  value={state.playerId}
-                  onValueChange={(val) => setState(prev => ({ ...prev, playerId: val }))}
-                >
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Choose a child" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {players && players.length > 0 ? players.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>
-                    )) : (
-                      <div className="px-3 py-2 text-sm text-muted-foreground italic">No players added yet. Add a player from your dashboard first.</div>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Player selection (existing) vs new player entry */}
+              {!user?.isAnonymous && players && players.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Select Player</Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs rounded-full h-7"
+                      onClick={() => setState(prev => ({ ...prev, isNewPlayer: !prev.isNewPlayer, playerId: '' }))}
+                    >
+                      {state.isNewPlayer ? 'Select existing player' : <><UserPlus className="mr-1 h-3 w-3" />Add new child</>}
+                    </Button>
+                  </div>
+
+                  {!state.isNewPlayer && (
+                    <Select
+                      value={state.playerId}
+                      onValueChange={(val) => setState(prev => ({ ...prev, playerId: val }))}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue placeholder="Choose a child" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {players.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.firstName} {p.lastName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
+
+              {/* New player fields */}
+              {(state.isNewPlayer || !players || players.length === 0) && (
+                <div className="space-y-3">
+                  <Label>Player Information</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">First Name</Label>
+                      <Input
+                        className="rounded-xl"
+                        placeholder="First name"
+                        value={state.newPlayerFirst}
+                        onChange={(e) => setState(prev => ({ ...prev, newPlayerFirst: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Last Name</Label>
+                      <Input
+                        className="rounded-xl"
+                        placeholder="Last name"
+                        value={state.newPlayerLast}
+                        onChange={(e) => setState(prev => ({ ...prev, newPlayerLast: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Date of Birth</Label>
+                    <Input
+                      className="rounded-xl"
+                      type="date"
+                      value={state.newPlayerDOB}
+                      onChange={(e) => setState(prev => ({ ...prev, newPlayerDOB: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Select Season</Label>
@@ -450,6 +833,16 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* League age hint */}
+              {leagueAge !== null && leagueAge !== 'N/A' && state.seasonId && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                  League age for {selectedSeason?.ageCutoffDate ?? 'this season'}: <strong>{leagueAge}</strong>
+                  {divisions && rawDivisions && divisions.length < rawDivisions.length && (
+                    <span className="text-xs ml-1">(divisions filtered to best match)</span>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Division</Label>
@@ -651,9 +1044,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.helmetSize} onValueChange={(val) => setState(prev => ({ ...prev, helmetSize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {EQUIPMENT_SIZES.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
+                      {EQUIPMENT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -662,9 +1053,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.shoulderPadSize} onValueChange={(val) => setState(prev => ({ ...prev, shoulderPadSize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {EQUIPMENT_SIZES.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
+                      {EQUIPMENT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -673,9 +1062,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.pantSize} onValueChange={(val) => setState(prev => ({ ...prev, pantSize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {EQUIPMENT_SIZES.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
+                      {EQUIPMENT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -684,9 +1071,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Select value={state.equipmentJerseySize} onValueChange={(val) => setState(prev => ({ ...prev, equipmentJerseySize: val }))}>
                     <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
-                      {SHIRT_SIZES.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
+                      {SHIRT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -694,15 +1079,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             </>
           )}
 
+          {/* ── REVIEW STEP ── */}
           {state.step === totalSteps && (
             <>
               <div className="space-y-3">
                 <div className="p-4 rounded-xl bg-secondary/20 space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Player</span>
-                    <span className="font-medium">
-                      {selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : '—'}
-                    </span>
+                    <span className="font-medium">{playerDisplayName()}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Season</span>
@@ -800,7 +1184,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               onClick={handleNext}
               disabled={
                 checkingDuplicate ||
-                (state.step === 1 && (!state.playerId || !state.seasonId || !state.divisionId || isDivisionClosed())) ||
+                (state.step === 1 && (
+                  (!state.isNewPlayer && !state.playerId) ||
+                  (state.isNewPlayer && (!state.newPlayerFirst || !state.newPlayerLast || !state.newPlayerDOB)) ||
+                  !state.seasonId || !state.divisionId || isDivisionClosed()
+                )) ||
                 (state.step === 2 && !state.shirtSize) ||
                 (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
                 (state.step === 3 && activeSport === 'football' && (!state.helmetSize || !state.shoulderPadSize || !state.pantSize || !state.equipmentJerseySize))
@@ -813,20 +1201,34 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               )}
             </Button>
           ) : (
-            <Button
-              type="button"
-              className="h-12 px-8 rounded-xl text-lg font-semibold"
-              onClick={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              ) : state.isWaitlisted ? (
-                <><ListOrdered className="mr-2 h-5 w-5" /> Join Waitlist — No Payment Required</>
-              ) : (
-                <><CreditCard className="mr-2 h-5 w-5" /> Proceed to Payment</>
-              )}
-            </Button>
+            /* On the review step: show Add Another + Pay (or just Pay if cart is empty) */
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl min-h-[44px] px-4 text-sm"
+                onClick={handleAddAnotherPlayer}
+                disabled={submitting}
+              >
+                <UserPlus className="mr-1 h-4 w-4" /> Add Player
+              </Button>
+              <Button
+                type="button"
+                className="h-12 px-6 rounded-xl text-base font-semibold"
+                onClick={cart.length > 0 ? handleReviewCart : () => handleSubmit()}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                ) : cart.length > 0 ? (
+                  <><ShoppingCart className="mr-2 h-5 w-5" /> Review Cart ({cart.length + 1})</>
+                ) : state.isWaitlisted ? (
+                  <><ListOrdered className="mr-2 h-5 w-5" /> Join Waitlist</>
+                ) : (
+                  <><CreditCard className="mr-2 h-5 w-5" /> Proceed to Payment</>
+                )}
+              </Button>
+            </div>
           )}
         </CardFooter>
       </Card>
