@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { collection, doc, setDoc, updateDoc, query, where, getDocs, collectionGroup } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,12 +27,14 @@ interface StepperState {
   uniformNumberPreference: string;
   emergencyContacts: EmergencyContact[];
   medicalNotes: string;
+  parentWeightEstimate: string; // string in state for input control, parsed to number on save
 }
 
 const SHIRT_SIZES = ['Youth XS', 'Youth S', 'Youth M', 'Youth L', 'Youth XL', 'Adult S', 'Adult M', 'Adult L'];
 
 export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string }) {
   const { user } = useUser();
+  const { activeSport } = useSport();
   const db = useFirestore();
   const router = useRouter();
   const { toast } = useToast();
@@ -46,6 +49,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     uniformNumberPreference: '',
     emergencyContacts: [{ name: '', phone: '', relationship: '' }],
     medicalNotes: '',
+    parentWeightEstimate: '',
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -62,9 +66,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   }, [db, user]);
 
   const seasonsQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return collection(db, 'seasons');
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(
+      collection(db, 'seasons'),
+      where('sport', '==', activeSport),
+      where('status', '==', 'active'),
+      orderBy('name', 'asc'),
+    );
+  }, [db, activeSport]);
 
   const divisionsQuery = useMemoFirebase(() => {
     if (!db || !state.seasonId) return null;
@@ -194,6 +203,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       registered_at: new Date().toISOString(),
       enrollmentDate: new Date().toISOString(),
       ...(state.isWaitlisted ? { waitlisted_at: new Date().toISOString() } : {}),
+      sport: activeSport ?? undefined,
+      ...(activeSport === 'football' && state.parentWeightEstimate
+        ? { parentWeightEstimate: Number(state.parentWeightEstimate) }
+        : {}),
     };
 
     try {
@@ -517,6 +530,30 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 </div>
               </div>
 
+              {activeSport === 'football' && (
+                <div className="space-y-2">
+                  <Label htmlFor="weightEstimate">
+                    Weight Estimate <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="weightEstimate"
+                      className="rounded-xl"
+                      type="number"
+                      min={40}
+                      max={350}
+                      placeholder="e.g. 95"
+                      value={state.parentWeightEstimate}
+                      onChange={(e) => setState(prev => ({ ...prev, parentWeightEstimate: e.target.value }))}
+                    />
+                    <span className="text-sm text-muted-foreground whitespace-nowrap">lbs</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Parent estimate — will be verified by league staff at equipment distribution.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label>Medical Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
                 <Input
@@ -596,6 +633,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       <span className="font-medium">#{state.uniformNumberPreference}</span>
                     </div>
                   )}
+                  {activeSport === 'football' && state.parentWeightEstimate && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Weight Estimate</span>
+                      <span className="font-medium">{state.parentWeightEstimate} lbs</span>
+                    </div>
+                  )}
                 </div>
 
                 {state.isWaitlisted ? (
@@ -649,7 +692,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               disabled={
                 checkingDuplicate ||
                 (state.step === 1 && (!state.playerId || !state.seasonId || !state.divisionId || isDivisionClosed())) ||
-                (state.step === 2 && !state.shirtSize)
+                (state.step === 2 && !state.shirtSize) ||
+                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate)
               }
             >
               {checkingDuplicate ? (
