@@ -18,7 +18,7 @@ import { FirestorePermissionError } from '@/firebase/errors';
 import type { Player, Season, Division, EmergencyContact } from '@/types/scheduling';
 
 interface StepperState {
-  step: 1 | 2 | 3;
+  step: 1 | 2 | 3 | 4;
   playerId: string;
   seasonId: string;
   divisionId: string;
@@ -28,6 +28,11 @@ interface StepperState {
   emergencyContacts: EmergencyContact[];
   medicalNotes: string;
   parentWeightEstimate: string; // string in state for input control, parsed to number on save
+  // Football equipment sizing (step 3 for football only)
+  helmetSize: string;
+  shoulderPadSize: string;
+  pantSize: string;
+  equipmentJerseySize: string;
 }
 
 const SHIRT_SIZES = ['Youth XS', 'Youth S', 'Youth M', 'Youth L', 'Youth XL', 'Adult S', 'Adult M', 'Adult L'];
@@ -50,6 +55,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     emergencyContacts: [{ name: '', phone: '', relationship: '' }],
     medicalNotes: '',
     parentWeightEstimate: '',
+    helmetSize: '',
+    shoulderPadSize: '',
+    pantSize: '',
+    equipmentJerseySize: '',
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -83,6 +92,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const { data: players } = useCollection<Player>(playersQuery);
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: divisions } = useCollection<Division>(divisionsQuery);
+
+  // Dynamic step count: football adds an Equipment Sizing step between Player Details and Review
+  const totalSteps = activeSport === 'football' ? 4 : 3;
+  const reviewStep = totalSteps;
 
   const selectedPlayer = players?.find(p => p.id === state.playerId);
   const selectedSeason = seasons?.find(s => s.id === state.seasonId);
@@ -162,11 +175,13 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       setState(prev => ({ ...prev, step: 2 }));
     } else if (state.step === 2) {
       setState(prev => ({ ...prev, step: 3 }));
+    } else if (state.step === 3 && activeSport === 'football') {
+      setState(prev => ({ ...prev, step: 4 }));
     }
   };
 
   const handleBack = () => {
-    setState(prev => ({ ...prev, step: (prev.step - 1) as 1 | 2 | 3 }));
+    setState(prev => ({ ...prev, step: (prev.step - 1) as 1 | 2 | 3 | 4 }));
   };
 
   const updateEmergencyContact = (index: number, field: keyof EmergencyContact, value: string) => {
@@ -207,6 +222,17 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       ...(activeSport === 'football' && state.parentWeightEstimate
         ? { parentWeightEstimate: Number(state.parentWeightEstimate) }
         : {}),
+      ...(activeSport === 'football' && state.helmetSize
+        ? {
+            footballEquipment: {
+              helmetSize: state.helmetSize,
+              shoulderPadSize: state.shoulderPadSize,
+              pantSize: state.pantSize,
+              jerseySize: state.equipmentJerseySize,
+            },
+          }
+        : {}),
+      weightHistory: [],
     };
 
     try {
@@ -341,7 +367,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     <div className="max-w-2xl mx-auto">
       {/* Step Indicator */}
       <div className="flex items-center mb-8 gap-2">
-        {[1, 2, 3].map((s) => (
+        {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => (
           <div key={s} className="flex items-center gap-2">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
               state.step === s
@@ -353,9 +379,15 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               {state.step > s ? '✓' : s}
             </div>
             <span className={`text-sm hidden sm:inline ${state.step === s ? 'font-semibold' : 'text-muted-foreground'}`}>
-              {s === 1 ? 'Season & Division' : s === 2 ? 'Player Details' : 'Review & Pay'}
+              {s === 1
+                ? 'Season & Division'
+                : s === 2
+                ? 'Player Details'
+                : activeSport === 'football' && s === 3
+                ? 'Equipment Sizing'
+                : 'Review & Pay'}
             </span>
-            {s < 3 && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+            {s < totalSteps && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
           </div>
         ))}
       </div>
@@ -363,13 +395,21 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       <Card className="border-none shadow-xl">
         <CardHeader className="bg-primary text-primary-foreground">
           <CardTitle className="text-2xl font-headline">
-            {state.step === 1 ? 'Season & Division' : state.step === 2 ? 'Player Details' : 'Review & Pay'}
+            {state.step === 1
+              ? 'Season & Division'
+              : state.step === 2
+              ? 'Player Details'
+              : activeSport === 'football' && state.step === 3
+              ? 'Equipment Sizing'
+              : 'Review & Pay'}
           </CardTitle>
           <CardDescription className="text-primary-foreground/80">
             {state.step === 1
               ? 'Choose the season and division for your player.'
               : state.step === 2
               ? 'Confirm player info and emergency contacts.'
+              : activeSport === 'football' && state.step === 3
+              ? 'Help us prepare your equipment kit. Sizes will be verified at distribution.'
               : 'Review your registration before proceeding.'}
           </CardDescription>
         </CardHeader>
@@ -604,8 +644,63 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             </>
           )}
 
-          {/* ── STEP 3 ── */}
-          {state.step === 3 && (
+          {/* ── STEP 3 — Football Equipment Sizing (football only) ── */}
+          {activeSport === 'football' && state.step === 3 && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                All sizes are parent estimates — league staff will verify and adjust at equipment distribution.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Helmet Size <span className="text-destructive">*</span></Label>
+                  <Select value={state.helmetSize} onValueChange={(val) => setState(prev => ({ ...prev, helmetSize: val }))}>
+                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>
+                      {['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'].map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Shoulder Pad Size <span className="text-destructive">*</span></Label>
+                  <Select value={state.shoulderPadSize} onValueChange={(val) => setState(prev => ({ ...prev, shoulderPadSize: val }))}>
+                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>
+                      {['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'].map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Pant Size <span className="text-destructive">*</span></Label>
+                  <Select value={state.pantSize} onValueChange={(val) => setState(prev => ({ ...prev, pantSize: val }))}>
+                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>
+                      {['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'].map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Football Jersey Size <span className="text-destructive">*</span></Label>
+                  <Select value={state.equipmentJerseySize} onValueChange={(val) => setState(prev => ({ ...prev, equipmentJerseySize: val }))}>
+                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>
+                      {SHIRT_SIZES.map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── STEP 3 (baseball) / STEP 4 (football) — Review & Pay ── */}
+          {state.step === reviewStep && (
             <>
               <div className="space-y-3">
                 <div className="p-4 rounded-xl bg-secondary/20 space-y-2 text-sm">
@@ -638,6 +733,26 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       <span className="text-muted-foreground">Weight Estimate</span>
                       <span className="font-medium">{state.parentWeightEstimate} lbs</span>
                     </div>
+                  )}
+                  {activeSport === 'football' && state.helmetSize && (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Helmet Size</span>
+                        <span className="font-medium">{state.helmetSize}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Shoulder Pad Size</span>
+                        <span className="font-medium">{state.shoulderPadSize}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Pant Size</span>
+                        <span className="font-medium">{state.pantSize}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Football Jersey Size</span>
+                        <span className="font-medium">{state.equipmentJerseySize}</span>
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -684,7 +799,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             <div />
           )}
 
-          {state.step < 3 ? (
+          {state.step < totalSteps ? (
             <Button
               type="button"
               className="rounded-xl min-h-[44px] px-5"
@@ -693,7 +808,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 checkingDuplicate ||
                 (state.step === 1 && (!state.playerId || !state.seasonId || !state.divisionId || isDivisionClosed())) ||
                 (state.step === 2 && !state.shirtSize) ||
-                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate)
+                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
+                (state.step === 3 && activeSport === 'football' && (!state.helmetSize || !state.shoulderPadSize || !state.pantSize || !state.equipmentJerseySize))
               }
             >
               {checkingDuplicate ? (

@@ -5,21 +5,25 @@ import { use, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useDoc } from '@/firebase/firestore/use-doc';
-import { collection, collectionGroup, query, where, doc } from 'firebase/firestore';
+import { collection, collectionGroup, query, where, doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Phone, 
-  MessageSquare, 
-  AlertTriangle, 
-  Loader2, 
-  CalendarCheck, 
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
+import {
+  Phone,
+  MessageSquare,
+  AlertTriangle,
+  Loader2,
+  CalendarCheck,
   User as UserIcon,
   ChevronLeft,
   LifeBuoy,
-  Users
+  Users,
+  Scale,
 } from 'lucide-react';
 import Link from 'next/link';
 import { differenceInYears } from 'date-fns';
@@ -49,6 +53,12 @@ interface Player {
   emergencyContacts?: EmergencyContact[];
 }
 
+interface WeightEntry {
+  weight: number;
+  date: string;
+  recordedBy: string;
+}
+
 interface Enrollment {
   id: string;
   playerId: string;
@@ -56,6 +66,7 @@ interface Enrollment {
   jerseyNumber?: string;
   divisionId: string;
   parentUserId: string;
+  weightHistory?: WeightEntry[];
 }
 
 interface UserProfile {
@@ -77,6 +88,11 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const { user, isAdmin, isSiteAdmin } = useUser();
   const router = useRouter();
   const isMobile = useIsMobile();
+  const { toast } = useToast();
+
+  // Weight Tracker state
+  const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
+  const [weightSaving, setWeightSaving] = useState<Record<string, boolean>>({});
 
   // C2: Load the team doc to verify coach ownership
   const teamDocRef = useMemoFirebase(() => {
@@ -106,6 +122,34 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<Player>(playersQuery);
   const { data: allUsers, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
+
+  const handleAddWeight = async (enrollment: Enrollment) => {
+    const weightStr = weightInputs[enrollment.id];
+    const weight = parseFloat(weightStr);
+    if (!weight || weight < 40 || weight > 400) return;
+    if (!db || !user) return;
+
+    setWeightSaving(prev => ({ ...prev, [enrollment.id]: true }));
+    try {
+      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
+      const entry: WeightEntry = {
+        weight,
+        date: new Date().toISOString().split('T')[0],
+        recordedBy: user.uid,
+      };
+      await updateDoc(enrollmentRef, { weightHistory: arrayUnion(entry) });
+      setWeightInputs(prev => ({ ...prev, [enrollment.id]: '' }));
+      const player = allPlayers?.find(p => p.id === enrollment.playerId);
+      toast({
+        title: 'Weight recorded',
+        description: `${weight} lbs recorded for ${player?.firstName ?? 'player'}.`,
+      });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Error', description: err.message });
+    } finally {
+      setWeightSaving(prev => ({ ...prev, [enrollment.id]: false }));
+    }
+  };
 
   const calculateBaseballAge = (dob: string) => {
     if (!dob) return 'N/A';
@@ -161,141 +205,229 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
           <p className="text-muted-foreground mt-2">Detailed player profiles and parent contact hub.</p>
         </header>
 
-        {!enrollments || enrollments.length === 0 ? (
-          <Card className="border-none shadow-md py-12 text-center">
-            <CardContent>
-              <Users className="h-16 w-16 text-muted mx-auto mb-4" />
-              <h3 className="text-xl font-bold font-headline">No Players Found</h3>
-              <p className="text-sm text-muted-foreground">This team roster is currently empty or players are awaiting assignment.</p>
-              <Button className="mt-6" asChild variant="outline">
-                <Link href="/coach/teams">Check Other Teams</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        ) : isMobile ? (
-            /* ── Mobile: compact list rows ── */
-            <div className="space-y-2">
-              {enrollments.map((enrollment) => {
-                const player = allPlayers?.find(p => p.id === enrollment.playerId);
-                const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
-                if (!player) return null;
-                return (
-                  <div key={enrollment.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card hover:shadow-sm transition-shadow">
-                    {/* Avatar */}
-                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
-                      {enrollment.jerseyNumber || player.firstName?.[0] || '?'}
-                    </div>
-                    {/* Name + meta */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate">{player.firstName} {player.lastName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Age {calculateBaseballAge(player.dateOfBirth)}
-                        {enrollment.jerseyNumber ? ` · #${enrollment.jerseyNumber}` : ''}
-                        {' · '}{enrollment.divisionId}
-                      </p>
-                    </div>
-                    {/* Medical alert button */}
-                    <MedicalAlertButton player={player} iconSize="sm" />
-                    {/* Quick call */}
-                    {parent?.phoneNumber ? (
-                      <Button variant="outline" size="icon" className="h-8 w-8 rounded-full shrink-0" asChild>
-                        <a href={`tel:${parent.phoneNumber}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
-                      </Button>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-          /* ── Desktop: full cards ── */
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {enrollments.map((enrollment) => {
-              const player = allPlayers?.find(p => p.id === enrollment.playerId);
-              const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+        <Tabs defaultValue="roster" className="w-full">
+          <TabsList className="mb-6">
+            <TabsTrigger value="roster" className="flex items-center gap-2">
+              <Users className="h-4 w-4" /> Roster
+            </TabsTrigger>
+            <TabsTrigger value="weights" className="flex items-center gap-2">
+              <Scale className="h-4 w-4" /> Weight Tracker
+            </TabsTrigger>
+          </TabsList>
 
-              if (!player) return null;
-
-              return (
-                <Card key={enrollment.id} className="border-none shadow-lg overflow-hidden group hover:shadow-xl transition-all border-l-4 border-l-primary">
-                  <CardHeader className="bg-primary/5 pb-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl shadow-md">
-                          {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
-                        </div>
-                        <div>
-                          <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>
-                          <CardDescription className="flex items-center gap-2 mt-1">
-                            <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
-                              Age: {calculateBaseballAge(player.dateOfBirth)}
-                            </Badge>
-                            {enrollment.jerseyNumber && (
-                              <Badge variant="outline" className="text-[10px]">#{enrollment.jerseyNumber}</Badge>
-                            )}
-                          </CardDescription>
-                        </div>
+          {/* ── ROSTER TAB ── */}
+          <TabsContent value="roster">
+            {!enrollments || enrollments.length === 0 ? (
+              <Card className="border-none shadow-md py-12 text-center">
+                <CardContent>
+                  <Users className="h-16 w-16 text-muted mx-auto mb-4" />
+                  <h3 className="text-xl font-bold font-headline">No Players Found</h3>
+                  <p className="text-sm text-muted-foreground">This team roster is currently empty or players are awaiting assignment.</p>
+                  <Button className="mt-6" asChild variant="outline">
+                    <Link href="/coach/teams">Check Other Teams</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : isMobile ? (
+              /* ── Mobile: compact list rows ── */
+              <div className="space-y-2">
+                {enrollments.map((enrollment) => {
+                  const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                  const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+                  if (!player) return null;
+                  return (
+                    <div key={enrollment.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card hover:shadow-sm transition-shadow">
+                      {/* Avatar */}
+                      <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
+                        {enrollment.jerseyNumber || player.firstName?.[0] || '?'}
                       </div>
-                      <MedicalAlertButton player={player} iconSize="lg" />
+                      {/* Name + meta */}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm truncate">{player.firstName} {player.lastName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Age {calculateBaseballAge(player.dateOfBirth)}
+                          {enrollment.jerseyNumber ? ` · #${enrollment.jerseyNumber}` : ''}
+                          {' · '}{enrollment.divisionId}
+                        </p>
+                      </div>
+                      {/* Medical alert button */}
+                      <MedicalAlertButton player={player} iconSize="sm" />
+                      {/* Quick call */}
+                      {parent?.phoneNumber ? (
+                        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full shrink-0" asChild>
+                          <a href={`tel:${parent.phoneNumber}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
+                        </Button>
+                      ) : null}
                     </div>
-                  </CardHeader>
-                  <CardContent className="pt-6 space-y-4">
-                    <div className="space-y-3">
-                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                        <UserIcon className="h-3 w-3" /> Primary Guardian
-                      </h4>
-                      {parent ? (
-                        <div className="bg-secondary/20 p-4 rounded-xl space-y-3 border border-secondary">
-                          <p className="font-bold text-sm">{parent.displayName}</p>
-                          {parent.phoneNumber ? (
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
-                                asChild
-                              >
-                                <a href={`tel:${parent.phoneNumber}`}>
-                                  <Phone className="mr-2 h-3 w-3 text-primary" /> Call
-                                </a>
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
-                                asChild
-                              >
-                                <a href={`sms:${parent.phoneNumber}`}>
-                                  <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
-                                </a>
-                              </Button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* ── Desktop: full cards ── */
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {enrollments.map((enrollment) => {
+                  const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                  const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+
+                  if (!player) return null;
+
+                  return (
+                    <Card key={enrollment.id} className="border-none shadow-lg overflow-hidden group hover:shadow-xl transition-all border-l-4 border-l-primary">
+                      <CardHeader className="bg-primary/5 pb-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl shadow-md">
+                              {enrollment.jerseyNumber || player?.firstName?.[0] || '?'}
+                            </div>
+                            <div>
+                              <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>
+                              <CardDescription className="flex items-center gap-2 mt-1">
+                                <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
+                                  Age: {calculateBaseballAge(player.dateOfBirth)}
+                                </Badge>
+                                {enrollment.jerseyNumber && (
+                                  <Badge variant="outline" className="text-[10px]">#{enrollment.jerseyNumber}</Badge>
+                                )}
+                              </CardDescription>
+                            </div>
+                          </div>
+                          <MedicalAlertButton player={player} iconSize="lg" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-6 space-y-4">
+                        <div className="space-y-3">
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                            <UserIcon className="h-3 w-3" /> Primary Guardian
+                          </h4>
+                          {parent ? (
+                            <div className="bg-secondary/20 p-4 rounded-xl space-y-3 border border-secondary">
+                              <p className="font-bold text-sm">{parent.displayName}</p>
+                              {parent.phoneNumber ? (
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
+                                    asChild
+                                  >
+                                    <a href={`tel:${parent.phoneNumber}`}>
+                                      <Phone className="mr-2 h-3 w-3 text-primary" /> Call
+                                    </a>
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
+                                    asChild
+                                  >
+                                    <a href={`sms:${parent.phoneNumber}`}>
+                                      <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
+                                    </a>
+                                  </Button>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground italic">Contact info not shared</p>
+                              )}
                             </div>
                           ) : (
-                            <p className="text-xs text-muted-foreground italic">Contact info not shared</p>
+                            <div className="p-4 rounded-xl bg-muted/30 text-center border border-dashed">
+                              <p className="text-xs italic text-muted-foreground">Guardian info not linked</p>
+                            </div>
                           )}
                         </div>
-                      ) : (
-                        <div className="p-4 rounded-xl bg-muted/30 text-center border border-dashed">
-                          <p className="text-xs italic text-muted-foreground">Guardian info not linked</p>
+
+                        <div className="pt-4 border-t flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+                            <CalendarCheck className="h-3 w-3 text-primary" />
+                            <span>Enrolled</span>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] uppercase font-bold bg-secondary/30">
+                            {enrollment.divisionId}
+                          </Badge>
                         </div>
-                      )}
-                    </div>
-                    
-                    <div className="pt-4 border-t flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                        <CalendarCheck className="h-3 w-3 text-primary" />
-                        {/* L6: Show actual enrollment status rather than hardcoded "Verified Member" */}
-                        <span>Enrolled</span>
-                      </div>
-                      <Badge variant="outline" className="text-[10px] uppercase font-bold bg-secondary/30">
-                        {enrollment.divisionId}
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── WEIGHT TRACKER TAB ── */}
+          <TabsContent value="weights">
+            {!enrollments || enrollments.length === 0 ? (
+              <Card className="border-none shadow-md py-12 text-center">
+                <CardContent>
+                  <Scale className="h-16 w-16 text-muted mx-auto mb-4" />
+                  <p className="text-sm text-muted-foreground">No players enrolled on this team yet.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {enrollments.map((enrollment) => {
+                  const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                  if (!player) return null;
+                  const history = enrollment.weightHistory ?? [];
+                  const latest = history.length > 0 ? history[history.length - 1] : null;
+                  return (
+                    <Card key={enrollment.id} className="border-none shadow-md">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base font-headline flex items-center gap-2">
+                          {player.firstName} {player.lastName}
+                          {enrollment.jerseyNumber && (
+                            <Badge variant="outline" className="text-xs">#{enrollment.jerseyNumber}</Badge>
+                          )}
+                        </CardTitle>
+                        {latest ? (
+                          <CardDescription>
+                            Last recorded: <strong>{latest.weight} lbs</strong> on {latest.date}
+                          </CardDescription>
+                        ) : (
+                          <CardDescription>No weight entries yet.</CardDescription>
+                        )}
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {history.length > 0 && (
+                          <div className="space-y-1 max-h-32 overflow-y-auto rounded-lg bg-muted/20 p-2">
+                            {[...history].reverse().map((entry, i) => (
+                              <div key={i} className="flex justify-between text-sm px-1">
+                                <span className="text-muted-foreground">{entry.date}</span>
+                                <span className="font-medium">{entry.weight} lbs</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            type="number"
+                            min={40}
+                            max={400}
+                            placeholder="Weight (lbs)"
+                            className="rounded-xl max-w-[160px]"
+                            value={weightInputs[enrollment.id] ?? ''}
+                            onChange={(e) => setWeightInputs(prev => ({ ...prev, [enrollment.id]: e.target.value }))}
+                          />
+                          <Button
+                            size="sm"
+                            className="rounded-xl"
+                            disabled={weightSaving[enrollment.id] || !weightInputs[enrollment.id]}
+                            onClick={() => handleAddWeight(enrollment)}
+                          >
+                            {weightSaving[enrollment.id] ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              'Record'
+                            )}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
         </div>
       </main>
     </div>
