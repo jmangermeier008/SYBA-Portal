@@ -33,7 +33,6 @@ export default function DeveloperDashboardPage() {
   const [seeding, setSeeding] = useState(false);
   const [nuking, setNuking] = useState(false);
 
-  // Load all football seasons for the selector
   const seasonsQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(
@@ -44,7 +43,6 @@ export default function DeveloperDashboardPage() {
   }, [db]);
   const { data: seasons } = useCollection<Season>(seasonsQuery);
 
-  // ── Guards (all hooks declared above) ────────────────────────────────────────
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -77,42 +75,43 @@ export default function DeveloperDashboardPage() {
     );
   }
 
-  // ── Handlers ──────────────────────────────────────────────────────────────────
-  const handleSeed = async () => {
+  const runAction = async <T,>(
+    action: (id: string, token: string) => Promise<T>,
+    setLoading: (v: boolean) => void,
+    onSuccess: (result: T) => void,
+    errorTitle: string
+  ) => {
     if (!seasonId) return;
-    setSeeding(true);
+    setLoading(true);
     try {
       const token = await auth?.currentUser?.getIdToken();
       if (!token) throw new Error('Not authenticated.');
-      const result = await seedTestEnrollments(seasonId, token);
-      toast({
-        title: 'Test data seeded',
-        description: `${result.seeded} test players and enrollments created under the test parent profile.`,
-      });
+      onSuccess(await action(seasonId, token));
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Seed failed', description: err.message });
+      toast({ variant: 'destructive', title: errorTitle, description: err.message });
     } finally {
-      setSeeding(false);
+      setLoading(false);
     }
   };
 
-  const handleNuke = async () => {
-    if (!seasonId) return;
-    setNuking(true);
-    try {
-      const token = await auth?.currentUser?.getIdToken();
-      if (!token) throw new Error('Not authenticated.');
-      const result = await nukeTestSeason(seasonId, token);
-      toast({
+  const handleSeed = () =>
+    runAction(
+      seedTestEnrollments,
+      setSeeding,
+      (r) => toast({ title: 'Test data seeded', description: `${r.seeded} test players and enrollments created.` }),
+      'Seed failed'
+    );
+
+  const handleNuke = () =>
+    runAction(
+      nukeTestSeason,
+      setNuking,
+      (r) => toast({
         title: 'Test data deleted',
-        description: `Removed ${result.enrollmentsDeleted} enrollments, ${result.playersDeleted} players, ${result.gamesDeleted} games, ${result.practiceSlotsDeleted} practice slots.`,
-      });
-    } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Nuke failed', description: err.message });
-    } finally {
-      setNuking(false);
-    }
-  };
+        description: `Removed ${r.enrollmentsDeleted} enrollments, ${r.playersDeleted} players, ${r.gamesDeleted} games, ${r.practiceSlotsDeleted} practice slots.`,
+      }),
+      'Nuke failed'
+    );
 
   const selectedSeason = seasons?.find(s => s.id === seasonId);
 

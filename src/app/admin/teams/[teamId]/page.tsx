@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { differenceInYears } from 'date-fns';
+import { calculateLeagueAge } from '@/lib/utils';
 import {
   Dialog,
   DialogContent,
@@ -117,16 +117,6 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<Player>(playersQuery);
   const { data: allUsers, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
 
-  const calculateBaseballAge = (dob: string) => {
-    if (!dob) return 'N/A';
-    try {
-      const birthDate = new Date(dob);
-      const cutoffDate = new Date(new Date().getFullYear(), 4, 1);
-      return differenceInYears(cutoffDate, birthDate);
-    } catch (e) {
-      return 'N/A';
-    }
-  };
 
   const eligibleCoaches = allUsers?.filter(u =>
     (u.roles?.includes('Coach') || u.roles?.includes('Admin') || u.role === 'Coach' || u.role === 'Admin') &&
@@ -315,7 +305,7 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
                             <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>
                             <CardDescription className="flex items-center gap-2 mt-1">
                               <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
-                                Age: {calculateBaseballAge(player.dateOfBirth)}
+                                Age: {calculateLeagueAge(player.dateOfBirth)}
                               </Badge>
                               {enrollment.jerseyNumber && (
                                 <Badge variant="outline" className="text-[10px]">#{enrollment.jerseyNumber}</Badge>

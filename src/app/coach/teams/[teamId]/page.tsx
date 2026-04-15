@@ -1,7 +1,7 @@
 
 "use client";
 
-import { use, useState } from 'react';
+import { use, useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useDoc } from '@/firebase/firestore/use-doc';
@@ -26,7 +26,7 @@ import {
   Scale,
 } from 'lucide-react';
 import Link from 'next/link';
-import { differenceInYears } from 'date-fns';
+import { calculateLeagueAge } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
@@ -94,7 +94,6 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
   const [weightSaving, setWeightSaving] = useState<Record<string, boolean>>({});
 
-  // C2: Load the team doc to verify coach ownership
   const teamDocRef = useMemoFirebase(() => {
     if (!db || !teamId) return null;
     return doc(db, 'teams', teamId);
@@ -107,7 +106,6 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
     return query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId));
   }, [db, teamId, user]);
 
-  // Query all players - we'll filter them in memory based on enrollments for the POC
   const playersQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
     return collectionGroup(db, 'players');
@@ -122,6 +120,20 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<Player>(playersQuery);
   const { data: allUsers, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
+
+  const playerMap = useMemo(() => {
+    const m = new Map<string, Player>();
+    allPlayers?.forEach((p) => m.set(p.id, p));
+    return m;
+  }, [allPlayers]);
+
+  const reversedHistories = useMemo(() => {
+    const m: Record<string, WeightEntry[]> = {};
+    enrollments?.forEach((e) => {
+      if (e.weightHistory?.length) m[e.id] = [...e.weightHistory].reverse();
+    });
+    return m;
+  }, [enrollments]);
 
   const handleAddWeight = async (enrollment: Enrollment) => {
     const weightStr = weightInputs[enrollment.id];
@@ -139,7 +151,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
       };
       await updateDoc(enrollmentRef, { weightHistory: arrayUnion(entry) });
       setWeightInputs(prev => ({ ...prev, [enrollment.id]: '' }));
-      const player = allPlayers?.find(p => p.id === enrollment.playerId);
+      const player = playerMap.get(enrollment.playerId);
       toast({
         title: 'Weight recorded',
         description: `${weight} lbs recorded for ${player?.firstName ?? 'player'}.`,
@@ -151,20 +163,8 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
     }
   };
 
-  const calculateBaseballAge = (dob: string) => {
-    if (!dob) return 'N/A';
-    try {
-      const birthDate = new Date(dob);
-      const cutoffDate = new Date(new Date().getFullYear(), 4, 1);
-      return differenceInYears(cutoffDate, birthDate);
-    } catch (e) {
-      return 'N/A';
-    }
-  };
-
   const isLoading = loadingTeam || loadingEnrollments || loadingPlayers || loadingUsers;
 
-  // C2: Once team is loaded, verify the coach owns it
   const isAuthorizedCoach =
     isAdmin ||
     isSiteAdmin ||
@@ -232,7 +232,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
               /* ── Mobile: compact list rows ── */
               <div className="space-y-2">
                 {enrollments.map((enrollment) => {
-                  const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                  const player = playerMap.get(enrollment.playerId);
                   const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
                   if (!player) return null;
                   return (
@@ -245,7 +245,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm truncate">{player.firstName} {player.lastName}</p>
                         <p className="text-xs text-muted-foreground">
-                          Age {calculateBaseballAge(player.dateOfBirth)}
+                          Age {calculateLeagueAge(player.dateOfBirth)}
                           {enrollment.jerseyNumber ? ` · #${enrollment.jerseyNumber}` : ''}
                           {' · '}{enrollment.divisionId}
                         </p>
@@ -266,7 +266,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
               /* ── Desktop: full cards ── */
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {enrollments.map((enrollment) => {
-                  const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                  const player = playerMap.get(enrollment.playerId);
                   const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
 
                   if (!player) return null;
@@ -283,7 +283,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                               <CardTitle className="font-headline text-lg">{player.firstName} {player.lastName}</CardTitle>
                               <CardDescription className="flex items-center gap-2 mt-1">
                                 <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
-                                  Age: {calculateBaseballAge(player.dateOfBirth)}
+                                  Age: {calculateLeagueAge(player.dateOfBirth)}
                                 </Badge>
                                 {enrollment.jerseyNumber && (
                                   <Badge variant="outline" className="text-[10px]">#{enrollment.jerseyNumber}</Badge>
@@ -365,9 +365,10 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
             ) : (
               <div className="space-y-4">
                 {enrollments.map((enrollment) => {
-                  const player = allPlayers?.find(p => p.id === enrollment.playerId);
+                  const player = playerMap.get(enrollment.playerId);
                   if (!player) return null;
                   const history = enrollment.weightHistory ?? [];
+                  const reversed = reversedHistories[enrollment.id] ?? [];
                   const latest = history.length > 0 ? history[history.length - 1] : null;
                   return (
                     <Card key={enrollment.id} className="border-none shadow-md">
@@ -387,9 +388,9 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                         )}
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        {history.length > 0 && (
+                        {reversed.length > 0 && (
                           <div className="space-y-1 max-h-32 overflow-y-auto rounded-lg bg-muted/20 p-2">
-                            {[...history].reverse().map((entry, i) => (
+                            {reversed.map((entry, i) => (
                               <div key={i} className="flex justify-between text-sm px-1">
                                 <span className="text-muted-foreground">{entry.date}</span>
                                 <span className="font-medium">{entry.weight} lbs</span>
