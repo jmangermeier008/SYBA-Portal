@@ -21,6 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import {
   ShieldCheck,
   Lock,
@@ -33,6 +34,9 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
 type EquipmentStatus = 'not_issued' | 'issued' | 'returned';
+
+const JERSEY_SIZES = ['YS', 'YM', 'YL', 'AS', 'AM', 'AL', 'AXL'] as const;
+type JerseySize = typeof JERSEY_SIZES[number];
 
 interface EnrollmentRow {
   enrollmentId: string;
@@ -126,8 +130,8 @@ export default function EquipmentPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [bulkSaving, setBulkSaving] = useState(false);
-  // player name map: playerId → "First Last"
-  const [playerNameMap, setPlayerNameMap] = useState<Map<string, string>>(new Map());
+  // player data map: playerId → { name, jerseySize, equipmentStatus }
+  const [playerDataMap, setPlayerDataMap] = useState<Map<string, { name: string; jerseySize?: string; equipmentStatus?: string }>>(new Map());
   const [playersLoading, setPlayersLoading] = useState(false);
 
   // ── Firestore queries (all hooks before any early return) ─────────────────
@@ -167,11 +171,11 @@ export default function EquipmentPage() {
 
   const { data: teams } = useCollection<Team>(teamsQuery);
 
-  // ── Player name lookup — fetched once when enrollments load ───────────────
+  // ── Player data lookup — fetched once when enrollments load ─────────────
   useEffect(() => {
     if (!db || !enrollments || enrollments.length === 0) return;
     const missing = enrollments.filter(
-      (e) => e.playerId && !playerNameMap.has(e.playerId)
+      (e) => e.playerId && !playerDataMap.has(e.playerId)
     );
     if (missing.length === 0) return;
 
@@ -179,13 +183,17 @@ export default function EquipmentPage() {
     (async () => {
       try {
         const snap = await getDocs(collectionGroup(db, 'players'));
-        const map = new Map(playerNameMap);
+        const map = new Map(playerDataMap);
         snap.docs.forEach((d) => {
           const data = d.data();
           const name = [data.firstName, data.lastName].filter(Boolean).join(' ');
-          if (name) map.set(d.id, name);
+          if (name) map.set(d.id, {
+            name,
+            jerseySize: data.equipment?.jerseySize,
+            equipmentStatus: data.equipment?.status,
+          });
         });
-        setPlayerNameMap(map);
+        setPlayerDataMap(map);
       } catch {
         // non-fatal — table will show playerId as fallback
       } finally {
@@ -214,12 +222,12 @@ export default function EquipmentPage() {
     const q = searchQuery.toLowerCase();
     return enrollments.filter((e) => {
       if (!q) return true;
-      const name = (playerNameMap.get(e.playerId) ?? e.playerId).toLowerCase();
+      const name = (playerDataMap.get(e.playerId)?.name ?? e.playerId).toLowerCase();
       const div = (divisionMap.get(e.divisionId) ?? '').toLowerCase();
       const team = (e.teamId ? teamMap.get(e.teamId) ?? '' : '').toLowerCase();
       return name.includes(q) || div.includes(q) || team.includes(q);
     });
-  }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap]);
+  }, [enrollments, searchQuery, playerDataMap, divisionMap, teamMap]);
 
   // ── Select All logic ─────────────────────────────────────────────────────
   const allIds = filteredEnrollments.map((e) => e.enrollmentId);
@@ -266,6 +274,40 @@ export default function EquipmentPage() {
     }
   }
 
+  // ── Save a field on the player doc (equipment.jerseySize, equipment.status) ─
+  async function savePlayerField(
+    enrollment: EnrollmentRow,
+    updates: Record<string, any>
+  ) {
+    if (!db) return;
+    setSavingIds((prev) => new Set(prev).add(enrollment.enrollmentId));
+    try {
+      await updateDoc(
+        doc(db, 'userProfiles', enrollment.parentUserId, 'players', enrollment.playerId),
+        updates
+      );
+      // Update local cache so the UI reflects the new value immediately
+      setPlayerDataMap((prev) => {
+        const map = new Map(prev);
+        const existing = map.get(enrollment.playerId) ?? { name: enrollment.playerId };
+        map.set(enrollment.playerId, {
+          ...existing,
+          ...(updates['equipment.jerseySize'] !== undefined ? { jerseySize: updates['equipment.jerseySize'] as string } : {}),
+          ...(updates['equipment.status'] !== undefined ? { equipmentStatus: updates['equipment.status'] as string } : {}),
+        });
+        return map;
+      });
+    } catch (err: any) {
+      toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(enrollment.enrollmentId);
+        return next;
+      });
+    }
+  }
+
   // ── Bulk mark as Returned ─────────────────────────────────────────────────
   async function bulkMarkReturned() {
     if (!db || selectedIds.size === 0) return;
@@ -274,14 +316,15 @@ export default function EquipmentPage() {
       const targets = (enrollments ?? []).filter((e) => selectedIds.has(e.enrollmentId));
       const batch = writeBatch(db);
       targets.forEach((e) => {
-        const ref = doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.enrollmentId);
+        const playerRef = doc(db, 'userProfiles', e.parentUserId, 'players', e.playerId);
+        batch.update(playerRef, { 'equipment.status': 'returned' });
         if (activeSport === 'football') {
-          batch.update(ref, {
+          const enrollRef = doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.enrollmentId);
+          batch.update(enrollRef, {
             'footballEquipment.helmetStatus': 'returned',
             'footballEquipment.padStatus': 'returned',
           });
         }
-        // For baseball, "returned" isn't applicable — nothing to update
       });
       await batch.commit();
       toast({ title: 'Equipment marked as Returned', description: `${targets.length} player(s) updated.` });
@@ -332,8 +375,8 @@ export default function EquipmentPage() {
           </h1>
           <p className="text-sm text-muted-foreground">
             {isFootball
-              ? 'Manage jersey numbers, helmet and pad issuance and returns.'
-              : 'Assign jersey numbers for enrolled players.'}
+              ? 'Manage jersey sizes, numbers, helmet and pad issuance and returns.'
+              : 'Assign jersey sizes and track equipment issuance for enrolled players.'}
           </p>
         </header>
 
@@ -451,6 +494,8 @@ export default function EquipmentPage() {
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Player</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Division</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Team</th>
+                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Jersey Size</th>
+                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Issued</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Jersey #</th>
                       {isFootball && (
                         <>
@@ -465,7 +510,8 @@ export default function EquipmentPage() {
                     {filteredEnrollments.map((enrollment) => {
                       const isSaving = savingIds.has(enrollment.enrollmentId);
                       const isSelected = selectedIds.has(enrollment.enrollmentId);
-                      const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
+                      const playerData = playerDataMap.get(enrollment.playerId);
+                      const playerName = playerData?.name ?? enrollment.playerId;
                       const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
                       const teamName = enrollment.teamId ? (teamMap.get(enrollment.teamId) ?? '—') : '—';
                       const fe = enrollment.footballEquipment;
@@ -506,6 +552,49 @@ export default function EquipmentPage() {
                           {/* Team */}
                           <td className="px-4 py-2 text-muted-foreground hidden md:table-cell">
                             {teamName}
+                          </td>
+
+                          {/* Jersey Size */}
+                          <td className="px-4 py-2">
+                            <Select
+                              value={playerData?.jerseySize ?? ''}
+                              onValueChange={(v) => savePlayerField(enrollment, { 'equipment.jerseySize': v })}
+                              disabled={isSaving}
+                            >
+                              <SelectTrigger className="w-24 h-10 min-h-[44px] text-xs">
+                                <SelectValue placeholder="—" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {JERSEY_SIZES.map((s) => (
+                                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
+
+                          {/* Equipment Issued */}
+                          <td className="px-4 py-2">
+                            <div className="flex items-center gap-2 min-h-[44px]">
+                              <Switch
+                                checked={playerData?.equipmentStatus === 'issued' || playerData?.equipmentStatus === 'returned'}
+                                onCheckedChange={(checked) =>
+                                  savePlayerField(enrollment, { 'equipment.status': checked ? 'issued' : 'none' })
+                                }
+                                disabled={isSaving}
+                              />
+                              {playerData?.equipmentStatus && playerData.equipmentStatus !== 'none' && (
+                                <Badge
+                                  className={cn(
+                                    'text-[10px] border-none',
+                                    playerData.equipmentStatus === 'returned'
+                                      ? 'bg-green-100 text-green-700'
+                                      : 'bg-blue-100 text-blue-700'
+                                  )}
+                                >
+                                  {playerData.equipmentStatus === 'returned' ? 'Returned' : 'Issued'}
+                                </Badge>
+                              )}
+                            </div>
                           </td>
 
                           {/* Jersey # */}

@@ -3,18 +3,19 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { updateDoc, doc, collection, setDoc, deleteDoc } from 'firebase/firestore';
+import { updateDoc, doc, collection, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ShieldCheck, User as UserIcon, Lock, Trash2, Plus, Mail, Pencil, Search } from 'lucide-react';
+import { Loader2, ShieldCheck, User as UserIcon, Lock, Trash2, Plus, Mail, Pencil, Search, ToggleLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import Link from 'next/link';
@@ -127,7 +128,7 @@ export default function RolesPage() {
       : newRoles.includes('Board Member') ? 'Admin'
       : 'Parent';
 
-    const updateData: Record<string, unknown> = { role: primaryRole };
+    const updateData: Record<string, any> = { role: primaryRole };
     if (sportFilter !== 'all') {
       updateData[`sportRoles.${sportFilter}`] = newRoles;
     } else {
@@ -148,6 +149,25 @@ export default function RolesPage() {
     updateDoc(userRef, { officerTitles: titles })
       .then(() => toast({ title: "Titles Updated" }))
       .catch((error: any) => toast({ title: "Update Failed", description: error.message, variant: "destructive" }));
+  };
+
+  const handleSportAccessToggle = async (uid: string, sport: string, enabled: boolean) => {
+    const userRef = doc(db, 'userProfiles', uid);
+    const updateData: Record<string, any> = enabled
+      ? { [`sportRoles.${sport}`]: ['Parent'] }
+      : { [`sportRoles.${sport}`]: deleteField() };
+    updateDoc(userRef, updateData)
+      .then(() => {
+        toast({
+          title: enabled ? "Sport Access Granted" : "Sport Access Removed",
+          description: enabled
+            ? `User now has access to the ${sport} portal.`
+            : `User's ${sport} access has been revoked.`,
+        });
+      })
+      .catch((error: any) => {
+        toast({ title: "Update Failed", description: error.message, variant: "destructive" });
+      });
   };
 
   const handleCreateUser = async () => {
@@ -345,6 +365,14 @@ export default function RolesPage() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="pl-6">User</TableHead>
                       <TableHead className="hidden md:table-cell">Email</TableHead>
+                      {sportFilter !== 'all' && (
+                        <TableHead className="text-center hidden md:table-cell">
+                          <div className="flex items-center justify-center gap-1">
+                            <ToggleLeft className="h-3.5 w-3.5" />
+                            Sport Access
+                          </div>
+                        </TableHead>
+                      )}
                       {ALL_ROLES.map((role) => (
                         <TableHead key={role} className="text-center hidden md:table-cell">{role}</TableHead>
                       ))}
@@ -392,6 +420,18 @@ export default function RolesPage() {
                             </div>
                           </TableCell>
                           <TableCell className="hidden md:table-cell">{user.email}</TableCell>
+                          {sportFilter !== 'all' && (
+                            <TableCell className="text-center hidden md:table-cell">
+                              <div className="flex justify-center">
+                                <Switch
+                                  checked={(user.sportRoles?.[sportFilter]?.length ?? 0) > 0}
+                                  onCheckedChange={(enabled) =>
+                                    handleSportAccessToggle(user.id, sportFilter, enabled)
+                                  }
+                                />
+                              </div>
+                            </TableCell>
+                          )}
                           {ALL_ROLES.map((role) => (
                             <TableCell key={role} className="text-center hidden md:table-cell">
                               <Checkbox

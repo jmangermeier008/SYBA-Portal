@@ -47,6 +47,15 @@ interface Player {
   parentUserId: string;
   birthCertificateUrl?: string;
   ageVerified?: boolean;
+  verifiedBy?: string;
+  verifiedByName?: string;
+  verifiedAt?: string;
+  compliance?: {
+    birthCertificateVerified?: boolean;
+    physicalVerified?: boolean;
+    verifiedBy?: string;
+    verifiedAt?: string;
+  };
 }
 
 export default function AdminCompliancePage() {
@@ -131,13 +140,17 @@ export default function AdminCompliancePage() {
       }
 
       const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
+      const verifiedAt = new Date().toISOString();
       const updateData = {
         ageVerified: true,
         birthCertificateUrl: deleteField(),
         verifiedBy: user.uid,
         verifiedByName: profile?.displayName || 'Admin',
-        verifiedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        verifiedAt,
+        updatedAt: verifiedAt,
+        'compliance.birthCertificateVerified': true,
+        'compliance.verifiedBy': user.uid,
+        'compliance.verifiedAt': verifiedAt,
       };
 
       updateDoc(playerRef, updateData)
@@ -161,6 +174,35 @@ export default function AdminCompliancePage() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleVerifyPhysical = async (player: Player) => {
+    if (!db || !user) return;
+    setIsProcessing(true);
+    const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
+    const verifiedAt = new Date().toISOString();
+    const updateData = {
+      'compliance.physicalVerified': true,
+      'compliance.verifiedBy': user.uid,
+      'compliance.verifiedAt': verifiedAt,
+      updatedAt: verifiedAt,
+    };
+    updateDoc(playerRef, updateData)
+      .then(() => {
+        toast({ title: "Physical Verified", description: "Player's physical has been marked as verified." });
+      })
+      .catch((error: any) => {
+        if (error?.code === 'permission-denied') {
+          errorEmitter.emit('permission-error', new FirestorePermissionError({
+            path: playerRef.path,
+            operation: 'update',
+            requestResourceData: updateData
+          }));
+        } else {
+          console.error('[compliance] Verify physical error:', error);
+        }
+      })
+      .finally(() => setIsProcessing(false));
   };
 
   const getStatusIcon = (status?: string) => {
@@ -404,8 +446,9 @@ export default function AdminCompliancePage() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="pl-6">Player Name</TableHead>
                         <TableHead>Date of Birth</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="pr-6 text-right">Decision</TableHead>
+                        <TableHead>Birth Cert</TableHead>
+                        <TableHead>Physical</TableHead>
+                        <TableHead className="pr-6 text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -415,11 +458,21 @@ export default function AdminCompliancePage() {
                             {player.firstName} {player.lastName}
                           </TableCell>
                           <TableCell>{player.dateOfBirth}</TableCell>
+                          {/* Birth Certificate status */}
                           <TableCell>
                             {player.ageVerified ? (
-                              <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
-                                Verified & Redacted
-                              </Badge>
+                              <div className="space-y-0.5">
+                                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
+                                  Verified & Redacted
+                                </Badge>
+                                {player.verifiedBy && (
+                                  <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <History className="h-3 w-3" />
+                                    {player.verifiedByName || player.verifiedBy.slice(0, 8)}
+                                    {player.verifiedAt && ` · ${format(new Date(player.verifiedAt), 'MMM d, yyyy')}`}
+                                  </p>
+                                )}
+                              </div>
                             ) : player.birthCertificateUrl ? (
                               <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
                                 Pending Audit
@@ -428,30 +481,63 @@ export default function AdminCompliancePage() {
                               <Badge variant="outline">No Document</Badge>
                             )}
                           </TableCell>
+                          {/* Physical status */}
+                          <TableCell>
+                            {player.compliance?.physicalVerified ? (
+                              <div className="space-y-0.5">
+                                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
+                                  Verified
+                                </Badge>
+                                {player.compliance.verifiedBy && (
+                                  <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <History className="h-3 w-3" />
+                                    {player.compliance.verifiedBy.slice(0, 8)}
+                                    {player.compliance.verifiedAt && ` · ${format(new Date(player.compliance.verifiedAt), 'MMM d, yyyy')}`}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <Badge variant="outline">Not Verified</Badge>
+                            )}
+                          </TableCell>
+                          {/* Actions */}
                           <TableCell className="pr-6 text-right">
-                            {player.birthCertificateUrl && !player.ageVerified && (
-                              <div className="flex justify-end gap-2">
-                                <Button variant="outline" size="sm" className="rounded-full h-8" asChild>
-                                  <a href={player.birthCertificateUrl} target="_blank">
-                                    <Eye className="h-4 w-4 mr-1" /> View
-                                  </a>
-                                </Button>
-                                <Button 
-                                  variant="default" 
-                                  size="sm" 
-                                  className="rounded-full h-8 bg-green-600 hover:bg-green-700"
-                                  onClick={() => handleVerifyPlayer(player)}
+                            <div className="flex justify-end gap-2 flex-wrap">
+                              {player.birthCertificateUrl && !player.ageVerified && (
+                                <>
+                                  <Button variant="outline" size="sm" className="rounded-full h-8" asChild>
+                                    <a href={player.birthCertificateUrl} target="_blank">
+                                      <Eye className="h-4 w-4 mr-1" /> View
+                                    </a>
+                                  </Button>
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="rounded-full h-8 bg-green-600 hover:bg-green-700"
+                                    onClick={() => handleVerifyPlayer(player)}
+                                    disabled={isProcessing}
+                                  >
+                                    {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Redact"}
+                                  </Button>
+                                </>
+                              )}
+                              {!player.compliance?.physicalVerified && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-full h-8"
+                                  onClick={() => handleVerifyPhysical(player)}
                                   disabled={isProcessing}
                                 >
-                                  {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Redact"}
+                                  {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify Physical"}
                                 </Button>
-                              </div>
-                            )}
-                            {player.ageVerified && (
-                              <span className="text-[10px] text-muted-foreground italic flex items-center justify-end gap-1">
-                                <History className="h-3 w-3" /> Audited
-                              </span>
-                            )}
+                              )}
+                              {player.ageVerified && player.compliance?.physicalVerified && (
+                                <span className="text-[10px] text-muted-foreground italic flex items-center gap-1">
+                                  <History className="h-3 w-3" /> All Verified
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}

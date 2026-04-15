@@ -128,6 +128,14 @@ export default function AdminSettingsPage() {
   const { toast } = useToast();
 
   const [notifEmail, setNotifEmail] = useState('');
+  const [stripeConfigured, setStripeConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch('/api/stripe/status')
+      .then((r) => r.json())
+      .then((data) => setStripeConfigured(!!data.configured))
+      .catch(() => setStripeConfigured(false));
+  }, []);
 
   // Rain-out engine state
   const [rainoutDate, setRainoutDate] = useState('');
@@ -395,17 +403,35 @@ export default function AdminSettingsPage() {
                 </CardContent>
               </Card>
 
-              {/* Payments (read-only preview) */}
-              <Card className="border-none shadow-md opacity-60">
+              {/* Payments */}
+              <Card className="border-none shadow-md">
                 <CardHeader className="flex flex-row items-center gap-4">
                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
                     <CreditCard className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <CardTitle>Payments</CardTitle>
-                    <CardDescription>Stripe integration — coming soon</CardDescription>
+                    <CardDescription>Stripe registration fee collection</CardDescription>
                   </div>
+                  {stripeConfigured === null ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : stripeConfigured ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                      <Check className="h-3.5 w-3.5" /> Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-700">
+                      Not Configured
+                    </span>
+                  )}
                 </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    {stripeConfigured
+                      ? 'Stripe is active. Registration fees will be collected at checkout.'
+                      : 'Add STRIPE_SECRET_KEY to your environment to enable payment collection.'}
+                  </p>
+                </CardContent>
               </Card>
 
               {/* Security (read-only preview) */}

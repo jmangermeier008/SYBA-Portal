@@ -341,6 +341,17 @@ export interface Player {
   clearanceUrl?: string;
   emergencyContacts?: EmergencyContact[];
   medicalNotes?: string;
+  equipment?: {
+    jerseySize?: 'YS' | 'YM' | 'YL' | 'AS' | 'AM' | 'AL' | 'AXL';
+    status: 'none' | 'issued' | 'returned';
+    helmetNumber?: string;
+  };
+  compliance?: {
+    birthCertificateVerified: boolean;
+    physicalVerified: boolean;
+    verifiedBy?: string;   // UID of the admin who last verified
+    verifiedAt?: string;   // ISO timestamp of last verification
+  };
 }
 
 // ---------------------------------------------------------------------------
