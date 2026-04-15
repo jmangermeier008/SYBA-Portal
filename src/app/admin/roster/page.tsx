@@ -197,12 +197,15 @@ export default function MasterRosterPage() {
     return m;
   }, [parentProfiles]);
 
-  const needsAttentionCount = enrollments?.filter(e => e.profileStatus === 'incomplete').length ?? 0;
+  const needsAttentionCount = enrollments?.filter(e =>
+    e.profileStatus === 'incomplete' &&
+    (e.paymentStatus === 'paid' || e.payment_status === 'paid')
+  ).length ?? 0;
 
   const filteredEnrollments = enrollments?.filter(e => {
     if (selectedSeason && selectedSeason !== 'all-seasons' && e.seasonId !== selectedSeason) return false;
     if (selectedDivision && selectedDivision !== 'all-divisions' && e.divisionId !== selectedDivision) return false;
-    if (showNeedsAttention && e.profileStatus !== 'incomplete') return false;
+    if (showNeedsAttention && !(e.profileStatus === 'incomplete' && (e.paymentStatus === 'paid' || e.payment_status === 'paid'))) return false;
     if (searchQuery.trim()) {
       const p = players?.find(p => p.id === e.playerId);
       const name = p ? `${p.firstName} ${p.lastName}`.toLowerCase() : '';
@@ -738,7 +741,7 @@ export default function MasterRosterPage() {
                                 <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
                               </span>
                             )}
-                            {e.profileStatus === 'incomplete' && (
+                            {e.profileStatus === 'incomplete' && (e.paymentStatus === 'paid' || e.payment_status === 'paid') && (
                               <span title="Account not yet claimed — guest registration">
                                 <AlertCircle className="h-4 w-4 text-orange-400 shrink-0" />
                               </span>
