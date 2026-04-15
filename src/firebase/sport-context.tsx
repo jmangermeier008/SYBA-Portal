@@ -53,14 +53,17 @@ export function SportProvider({ children }: { children: ReactNode }) {
   const [sportLoaded, setSportLoaded] = useState(false);
 
   // Read sport from localStorage whenever the logged-in user changes (login/logout/switch).
-  // The empty-array version only ran on mount, so switching sports after logout required a manual
-  // refresh because the layout stays mounted across Next.js navigations.
+  // Depends on both user?.uid and loading so we don't clear localStorage during the initial
+  // render before auth has resolved — that would wipe a stored sport before we can read it.
   useEffect(() => {
     if (!user?.uid) {
-      // User logged out — clear stored sport so the next login starts fresh at the selector
-      localStorage.removeItem('syba_active_sport');
-      setActiveSportState(null);
-      setSportLoaded(true);
+      if (!loading) {
+        // Auth has fully resolved and there is no user — genuine logout, clear stored sport
+        localStorage.removeItem('syba_active_sport');
+        setActiveSportState(null);
+        setSportLoaded(true);
+      }
+      // Still resolving — don't touch localStorage yet; wait for the next effect run
       return;
     }
     const stored = localStorage.getItem('syba_active_sport');
@@ -70,8 +73,7 @@ export function SportProvider({ children }: { children: ReactNode }) {
       setActiveSportState(null);
     }
     setSportLoaded(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid]);
+  }, [user?.uid, loading]);
 
   // ── Sport-aware role derivation ───────────────────────────────────────────
   // Site Admin / Admin in legacy roles[] = cross-sport superuser bypass
