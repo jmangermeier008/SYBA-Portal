@@ -69,32 +69,32 @@ function getDefaultContext(roles: string[]): RoleContext {
 
 // ── Admin nav groups ──────────────────────────────────────────────────────────
 
-const adminSeasonItems = [
-  { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
-  { label: 'Standings', icon: BarChart3, href: '/admin/standings' },
-  { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
-  { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
+const adminSetupItems = [
   { label: 'Seasons', icon: Trophy, href: '/admin/seasons' },
-  { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
-];
-
-const adminPeopleItems = [
-  { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
-  { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
-  { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
-  { label: 'Teams', icon: Users, href: '/admin/teams' },
   { label: 'Divisions', icon: Layers, href: '/admin/divisions' },
+  { label: 'Teams', icon: Users, href: '/admin/teams' },
 ];
 
-const adminFacilitiesItems = [
+const adminRegistrationItems = [
+  { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
+  { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
+  { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
+];
+
+const adminRosterItems = [
+  { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
+  { label: 'Equipment', icon: ShieldCheck, href: '/admin/equipment', comingSoon: true },
+];
+
+const adminOperationsItems = [
+  { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
+  { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
+  { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
   { label: 'Fields', icon: MapPin, href: '/admin/fields' },
-  { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
-];
-
-const adminCommsItems = [
+  { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
   { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
   { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
-  { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
+  { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
 ];
 
 const adminSystemBaseItems = [
@@ -108,11 +108,11 @@ const adminSystemAdminItems = [
 ];
 
 function getAdminSectionForPath(p: string): string | null {
-  if (['/admin/games', '/admin/standings', '/admin/calendar', '/admin/practice-slots', '/admin/seasons', '/admin/concessions'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Management';
-  if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams', '/admin/divisions'].some(r => p === r || p.startsWith(r + '/'))) return 'People & Teams';
-  if (['/admin/fields', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Facilities & Finance';
-  if (['/admin/announcements', '/admin/board-meetings', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Communications';
-  if (['/admin/import', '/admin/roles', '/admin/settings', '/admin/developer'].some(r => p === r || p.startsWith(r + '/'))) return 'System';
+  if (['/admin/seasons', '/admin/divisions', '/admin/teams'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Setup';
+  if (['/admin/registration', '/admin/compliance', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Registration';
+  if (['/admin/roster', '/admin/equipment'].some(r => p === r || p.startsWith(r + '/'))) return 'Equipment & Rosters';
+  if (['/admin/calendar', '/admin/games', '/admin/practice-slots', '/admin/fields', '/admin/concessions', '/admin/announcements', '/admin/board-meetings', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Operations';
+  if (['/admin/import', '/admin/roles', '/admin/settings', '/admin/developer'].some(r => p === r || p.startsWith(r + '/'))) return 'System Maintenance';
   return null;
 }
 
@@ -297,11 +297,11 @@ export function Sidebar() {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
     const adminSection = getAdminSectionForPath(pathname);
     return {
-      'Season Management': adminSection === 'Season Management',
-      'People & Teams': adminSection === 'People & Teams',
-      'Facilities & Finance': adminSection === 'Facilities & Finance',
-      'Communications': adminSection === 'Communications',
-      'System': adminSection === 'System',
+      'Season Setup': adminSection === 'Season Setup',
+      'Registration': adminSection === 'Registration',
+      'Equipment & Rosters': adminSection === 'Equipment & Rosters',
+      'Season Operations': adminSection === 'Season Operations',
+      'System Maintenance': adminSection === 'System Maintenance',
       'Coaching': pathname.startsWith('/coach/'),
       'Family': pathname.startsWith('/parent/'),
     };
@@ -368,7 +368,7 @@ export function Sidebar() {
     setActiveContext(context);
     localStorage.setItem('syba_active_role', context);
     if (context === 'admin') {
-      const activeAdminSection = getAdminSectionForPath(pathname) ?? 'Season Management';
+      const activeAdminSection = getAdminSectionForPath(pathname) ?? 'Season Setup';
       setOpenSections(prev => {
         const allClosed = Object.fromEntries(Object.keys(prev).map(k => [k, false]));
         return { ...allClosed, [activeAdminSection]: true };
@@ -558,65 +558,65 @@ export function Sidebar() {
             )}
 
             <NavSection
-              label="Season Management"
-              sectionIcon={CalendarDays}
-              items={adminSeasonItems.map(item =>
-                activeSport === 'football' && item.href === '/admin/practice-slots'
-                  ? { ...item, comingSoon: true }
-                  : item
-              )}
-              pathname={pathname}
-              onNavigate={closeMenu}
-              isOpen={openSections['Season Management']}
-              onToggle={() => toggleSection('Season Management')}
-              collapsed={collapsed && !isMobile}
-            />
-            <hr className="border-border/40 mx-2 my-1" />
-            <NavSection
-              label="People & Teams"
-              sectionIcon={Users}
-              items={adminPeopleItems.map(item =>
+              label="Season Setup"
+              sectionIcon={Trophy}
+              items={adminSetupItems.map(item =>
                 activeSport === 'football' && item.href === '/admin/teams'
                   ? { ...item, comingSoon: true }
                   : item
               )}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['People & Teams']}
-              onToggle={() => toggleSection('People & Teams')}
+              isOpen={openSections['Season Setup']}
+              onToggle={() => toggleSection('Season Setup')}
               collapsed={collapsed && !isMobile}
             />
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
-              label="Facilities & Finance"
-              sectionIcon={Briefcase}
-              items={adminFacilitiesItems}
+              label="Registration"
+              sectionIcon={ClipboardList}
+              items={adminRegistrationItems}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['Facilities & Finance']}
-              onToggle={() => toggleSection('Facilities & Finance')}
+              isOpen={openSections['Registration']}
+              onToggle={() => toggleSection('Registration')}
               collapsed={collapsed && !isMobile}
             />
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
-              label="Communications"
-              sectionIcon={Megaphone}
-              items={adminCommsItems}
+              label="Equipment & Rosters"
+              sectionIcon={Users}
+              items={adminRosterItems}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['Communications']}
-              onToggle={() => toggleSection('Communications')}
+              isOpen={openSections['Equipment & Rosters']}
+              onToggle={() => toggleSection('Equipment & Rosters')}
               collapsed={collapsed && !isMobile}
             />
             <hr className="border-border/40 mx-2 my-1" />
             <NavSection
-              label="System"
+              label="Season Operations"
+              sectionIcon={CalendarDays}
+              items={adminOperationsItems.map(item =>
+                activeSport === 'football' && item.href === '/admin/practice-slots'
+                  ? { ...item, comingSoon: true }
+                  : item
+              )}
+              pathname={pathname}
+              onNavigate={closeMenu}
+              isOpen={openSections['Season Operations']}
+              onToggle={() => toggleSection('Season Operations')}
+              collapsed={collapsed && !isMobile}
+            />
+            <hr className="border-border/40 mx-2 my-1" />
+            <NavSection
+              label="System Maintenance"
               sectionIcon={Settings}
               items={[...adminSystemBaseItems, ...(isSiteAdmin ? adminSystemAdminItems : [])]}
               pathname={pathname}
               onNavigate={closeMenu}
-              isOpen={openSections['System']}
-              onToggle={() => toggleSection('System')}
+              isOpen={openSections['System Maintenance']}
+              onToggle={() => toggleSection('System Maintenance')}
               collapsed={collapsed && !isMobile}
             />
           </>
