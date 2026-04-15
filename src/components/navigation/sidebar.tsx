@@ -39,6 +39,7 @@ import {
   Layers,
   Megaphone,
   Briefcase,
+  FlaskConical,
 } from 'lucide-react';
 import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -103,6 +104,7 @@ const adminSystemBaseItems = [
 const adminSystemAdminItems = [
   { label: 'User Roles', icon: ShieldCheck, href: '/admin/roles' },
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
+  { label: 'Developer', icon: FlaskConical, href: '/admin/developer' },
 ];
 
 function getAdminSectionForPath(p: string): string | null {
@@ -110,7 +112,7 @@ function getAdminSectionForPath(p: string): string | null {
   if (['/admin/registration', '/admin/roster', '/admin/compliance', '/admin/teams', '/admin/divisions'].some(r => p === r || p.startsWith(r + '/'))) return 'People & Teams';
   if (['/admin/fields', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Facilities & Finance';
   if (['/admin/announcements', '/admin/board-meetings', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Communications';
-  if (['/admin/import', '/admin/roles', '/admin/settings'].some(r => p === r || p.startsWith(r + '/'))) return 'System';
+  if (['/admin/import', '/admin/roles', '/admin/settings', '/admin/developer'].some(r => p === r || p.startsWith(r + '/'))) return 'System';
   return null;
 }
 

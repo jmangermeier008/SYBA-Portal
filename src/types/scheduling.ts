@@ -45,6 +45,7 @@ export interface Season {
   createdAt: string;
   volunteerSlotsRequired?: number; // min concession slots required per enrolled player
   sport: Sport;
+  isTest?: boolean; // When true, this season is synthetic test data — excluded from live UI queries
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +413,8 @@ export interface Enrollment {
     jerseyNumber?: string;     // Assigned jersey number
     issuedAt?: string;         // ISO datetime when equipment kit was distributed
   };
+  isTest?: boolean; // Marks this enrollment as synthetic seed data; excluded from live roster/payment views
+  weightHistory?: { weight: number; date: string; recordedBy: string }[]; // Coach-recorded weigh-ins
 }
 
 // ---------------------------------------------------------------------------

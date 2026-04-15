@@ -56,6 +56,13 @@ export function SportProvider({ children }: { children: ReactNode }) {
   // The empty-array version only ran on mount, so switching sports after logout required a manual
   // refresh because the layout stays mounted across Next.js navigations.
   useEffect(() => {
+    if (!user?.uid) {
+      // User logged out — clear stored sport so the next login starts fresh at the selector
+      localStorage.removeItem('syba_active_sport');
+      setActiveSportState(null);
+      setSportLoaded(true);
+      return;
+    }
     const stored = localStorage.getItem('syba_active_sport');
     if (stored === 'baseball' || stored === 'football') {
       setActiveSportState(stored);
