@@ -9,6 +9,8 @@ const KEY = 'syba_active_sport';
 export function setActiveSport(sport: Sport) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(KEY, sport);
+    // Notify SportProvider (same tab) so it can update activeSport reactively
+    window.dispatchEvent(new Event('syba:sport-changed'));
   }
 }
 

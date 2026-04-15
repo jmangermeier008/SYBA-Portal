@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useUser } from './auth/use-user';
 import type { Sport } from '@/types/scheduling';
 
@@ -46,6 +46,7 @@ function RedirectToHome() {
 
 export function SportProvider({ children }: { children: ReactNode }) {
   const { user, profile, loading, roles } = useUser();
+  const pathname = usePathname();
   const [activeSport, setActiveSportState] = useState<Sport | null>(null);
   // Tracks whether the localStorage read has completed (always synchronous, but effect is async).
   // We must not show the gate until we've checked — otherwise a brief null activeSport
@@ -53,12 +54,12 @@ export function SportProvider({ children }: { children: ReactNode }) {
   const [sportLoaded, setSportLoaded] = useState(false);
 
   // Read sport from localStorage whenever the logged-in user changes (login/logout/switch).
-  // Depends on both user?.uid and loading so we don't clear localStorage during the initial
+  // Depends on both user?.uid AND loading so we don't clear localStorage during the initial
   // render before auth has resolved — that would wipe a stored sport before we can read it.
   useEffect(() => {
     if (!user?.uid) {
       if (!loading) {
-        // Auth has fully resolved and there is no user — genuine logout, clear stored sport
+        // Auth has fully resolved with no user — genuine logout, clear stored sport
         localStorage.removeItem('syba_active_sport');
         setActiveSportState(null);
         setSportLoaded(true);
@@ -74,6 +75,21 @@ export function SportProvider({ children }: { children: ReactNode }) {
     }
     setSportLoaded(true);
   }, [user?.uid, loading]);
+
+  // When the homepage writes a sport to localStorage (via setActiveSport from use-active-sport),
+  // it dispatches 'syba:sport-changed' so we can update the context state reactively.
+  // This allows the homepage's redirect to fire as soon as the user picks a sport.
+  useEffect(() => {
+    if (!user?.uid) return;
+    const handleSportChange = () => {
+      const stored = localStorage.getItem('syba_active_sport');
+      if (stored === 'baseball' || stored === 'football') {
+        setActiveSportState(stored as Sport);
+      }
+    };
+    window.addEventListener('syba:sport-changed', handleSportChange);
+    return () => window.removeEventListener('syba:sport-changed', handleSportChange);
+  }, [user?.uid]);
 
   // ── Sport-aware role derivation ───────────────────────────────────────────
   // Site Admin / Admin in legacy roles[] = cross-sport superuser bypass
@@ -95,13 +111,21 @@ export function SportProvider({ children }: { children: ReactNode }) {
   );
 
   // Always render the provider so useSport() never throws regardless of tree position.
-  // Only redirect when we've confirmed: logged-in user + localStorage read complete + no sport chosen.
-  // All other states (loading, unauthenticated, sport set) pass children through immediately so
-  // public pages and route-level layouts manage their own loading/auth states.
   return (
     <SportContext.Provider value={contextValue}>
-      {user && sportLoaded && !activeSport ? (
-        // Logged in but no sport in localStorage — redirect to home page to select sport
+      {loading || !sportLoaded ? (
+        // Wait for both auth AND localStorage read before evaluating the gate.
+        // sportLoaded prevents flashing the redirect for users who have a stored sport.
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </div>
+      ) : !user ? (
+        // Not logged in — pass through; auth pages and home page handle their own flow
+        children
+      ) : !activeSport && pathname !== '/' ? (
+        // Logged in, no sport, not on home page — redirect to home page to select sport.
+        // Guard excludes '/' to prevent an infinite redirect loop when the user is already
+        // on the home page waiting to pick a sport.
         <RedirectToHome />
       ) : (
         children

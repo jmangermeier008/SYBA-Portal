@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
+import { useUser, useSport, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { setActiveSport as writeActiveSport, clearActiveSport } from '@/hooks/use-active-sport';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
@@ -52,6 +52,7 @@ function formatTime(timeStr: string) {
 
 export default function Home() {
   const { user, profile, loading, isAdmin, isBoardMember, isCoach } = useUser();
+  const { activeSport: contextSport } = useSport();
   const router = useRouter();
   const db = useFirestore();
 
@@ -192,7 +193,10 @@ export default function Home() {
   }, [rawAnnouncements]);
 
   useEffect(() => {
-    if (!loading && user && profile) {
+    // Wait for sport selection before redirecting — prevents an infinite loop where
+    // the redirect fires before the user picks a sport, then the dashboard route triggers
+    // <RedirectToHome />, which sends them back here, and so on.
+    if (!loading && user && profile && contextSport) {
       if (isAdmin || isBoardMember) {
         router.push('/admin/dashboard');
       } else if (isCoach) {
@@ -201,7 +205,7 @@ export default function Home() {
         router.push('/parent/dashboard');
       }
     }
-  }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach]);
+  }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach, contextSport]);
 
   if (user && profile) return null; // redirect in flight — suppress flash
 
