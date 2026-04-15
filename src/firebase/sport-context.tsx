@@ -93,18 +93,12 @@ export function SportProvider({ children }: { children: ReactNode }) {
   );
 
   // Always render the provider so useSport() never throws regardless of tree position.
+  // Only redirect when we've confirmed: logged-in user + localStorage read complete + no sport chosen.
+  // All other states (loading, unauthenticated, sport set) pass children through immediately so
+  // public pages and route-level layouts manage their own loading/auth states.
   return (
     <SportContext.Provider value={contextValue}>
-      {loading || !sportLoaded ? (
-        // Wait for both auth AND localStorage read before evaluating the gate.
-        // sportLoaded prevents flashing the redirect for users who have a stored sport.
-        <div className="flex min-h-screen items-center justify-center bg-background">
-          <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        </div>
-      ) : !user ? (
-        // Not logged in — pass through; auth pages and home page handle their own flow
-        children
-      ) : !activeSport ? (
+      {user && sportLoaded && !activeSport ? (
         // Logged in but no sport in localStorage — redirect to home page to select sport
         <RedirectToHome />
       ) : (
