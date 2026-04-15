@@ -123,10 +123,18 @@ service cloud.firestore {
       match /enrollments/{enrollmentId} {
         allow read: if isUser(userId) || isBoardMember();
         allow create: if isUser(userId) || isAdmin();
-        allow update: if (isUser(userId) &&
-          !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['payment_status', 'paymentStatus', 'stripe_payment_id'])
-          ) || isAdmin();
+        allow update: if (
+          // Parent can update their own enrollment but not payment status, sport, or admin-only equipment fields
+          (isUser(userId) &&
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['payment_status', 'paymentStatus', 'stripe_payment_id', 'footballEquipment', 'sport']))
+          ) ||
+          // Admins have full update access
+          isAdmin() ||
+          // Board members (sport-scoped) can update equipment fields only
+          (isBoardMemberForSport(resource.data.sport) &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['footballEquipment']));
         allow delete: if isUser(userId) || isBoardMember();
       }
     }

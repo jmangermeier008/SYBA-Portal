@@ -398,6 +398,20 @@ export interface Enrollment {
   registered_at: string;       // ISO datetime
   enrollmentDate: string;      // ISO datetime — backward-compat alias for registered_at
   waitlisted_at?: string;      // ISO datetime — set only when paymentStatus = 'waitlisted'
+  // Sport scoping — required for collectionGroup queries
+  sport?: Sport;
+  // Football registration — parent-entered during registration
+  parentWeightEstimate?: number; // Parent weight estimate in lbs; verified by admin at weigh-in
+  // Football equipment — admin-managed after registration
+  footballEquipment?: {
+    verifiedWeight?: number;   // Official weigh-in result (lbs)
+    helmetSize?: string;       // e.g. "S", "M", "L", "XL"
+    shoulderPadSize?: string;  // e.g. "Youth S", "Youth M", "Adult S"
+    pantSize?: string;         // e.g. "Youth S", "Youth M", "Adult S"
+    jerseySize?: string;       // Football jersey size (may differ from shirt size)
+    jerseyNumber?: string;     // Assigned jersey number
+    issuedAt?: string;         // ISO datetime when equipment kit was distributed
+  };
 }
 
 // ---------------------------------------------------------------------------
