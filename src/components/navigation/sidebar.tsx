@@ -560,11 +560,7 @@ export function Sidebar() {
             <NavSection
               label="Season Setup"
               sectionIcon={Trophy}
-              items={adminSetupItems.map(item =>
-                activeSport === 'football' && item.href === '/admin/teams'
-                  ? { ...item, comingSoon: true }
-                  : item
-              )}
+              items={adminSetupItems}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['Season Setup']}
@@ -597,10 +593,8 @@ export function Sidebar() {
             <NavSection
               label="Season Operations"
               sectionIcon={CalendarDays}
-              items={adminOperationsItems.map(item =>
-                activeSport === 'football' && item.href === '/admin/practice-slots'
-                  ? { ...item, comingSoon: true }
-                  : item
+              items={adminOperationsItems.filter(item =>
+                !(activeSport === 'football' && item.href === '/admin/practice-slots')
               )}
               pathname={pathname}
               onNavigate={closeMenu}
