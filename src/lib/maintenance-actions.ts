@@ -150,6 +150,22 @@ export async function nukeTestSeason(
   return { enrollmentsDeleted, playersDeleted, gamesDeleted, practiceSlotsDeleted };
 }
 
+export async function forceDeleteSeasonEnrollments(
+  seasonId: string,
+  idToken: string
+): Promise<{ enrollmentsDeleted: number }> {
+  await verifyAdminCaller(idToken);
+  const db = getAdminFirestore();
+
+  const snap = await db
+    .collectionGroup('enrollments')
+    .where('seasonId', '==', seasonId)
+    .get();
+
+  const enrollmentsDeleted = await batchDelete(snap.docs);
+  return { enrollmentsDeleted };
+}
+
 export async function clearUserNotifications(
   idToken: string,
   email: string

@@ -17,10 +17,11 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useFirestore, useUser, useAuth, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, where, orderBy } from 'firebase/firestore';
-import { Loader2, FlaskConical, Trash2 } from 'lucide-react';
+import { collection, query, orderBy } from 'firebase/firestore';
+import { Input } from '@/components/ui/input';
+import { Loader2, FlaskConical, Trash2, TriangleAlert } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { seedTestEnrollments, nukeTestSeason } from '@/lib/maintenance-actions';
+import { seedTestEnrollments, nukeTestSeason, forceDeleteSeasonEnrollments } from '@/lib/maintenance-actions';
 import type { Season } from '@/types/scheduling';
 
 export default function DeveloperDashboardPage() {
@@ -32,12 +33,13 @@ export default function DeveloperDashboardPage() {
   const [seasonId, setSeasonId] = useState('');
   const [seeding, setSeeding] = useState(false);
   const [nuking, setNuking] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db) return null;
     return query(
       collection(db, 'seasons'),
-      where('sport', '==', 'football'),
       orderBy('name', 'asc')
     );
   }, [db]);
@@ -113,6 +115,17 @@ export default function DeveloperDashboardPage() {
       'Nuke failed'
     );
 
+  const handleClear = () =>
+    runAction(
+      forceDeleteSeasonEnrollments,
+      setClearing,
+      (r) => {
+        setConfirmText('');
+        toast({ title: 'Enrollments deleted', description: `Removed ${r.enrollmentsDeleted} enrollment(s) from the season.` });
+      },
+      'Clear failed'
+    );
+
   const selectedSeason = seasons?.find(s => s.id === seasonId);
 
   return (
@@ -134,12 +147,12 @@ export default function DeveloperDashboardPage() {
           <Card className="border-none shadow-md">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Target Season</CardTitle>
-              <CardDescription>Select a football season to seed or nuke test data for.</CardDescription>
+              <CardDescription>Select a season to target with the tools below.</CardDescription>
             </CardHeader>
             <CardContent>
               <Select value={seasonId} onValueChange={setSeasonId}>
                 <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="Select a football season…" />
+                  <SelectValue placeholder="Select a season…" />
                 </SelectTrigger>
                 <SelectContent>
                   {(seasons ?? []).map(s => (
@@ -230,6 +243,64 @@ export default function DeveloperDashboardPage() {
                       onClick={handleNuke}
                     >
                       Yes, nuke it
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </CardContent>
+          </Card>
+
+          {/* Force-clear card */}
+          <Card className="border-none shadow-md border-destructive/20">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <TriangleAlert className="h-4 w-4 text-destructive" />
+                Force-Clear All Enrollments
+              </CardTitle>
+              <CardDescription>
+                Permanently deletes <strong>every</strong> enrollment for the selected season — including
+                real registrations, not just test data. Use this to unblock season deletion when you need
+                to reset for testing. This action cannot be undone.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AlertDialog onOpenChange={(open) => { if (!open) setConfirmText(''); }}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" className="rounded-xl" disabled={!seasonId || clearing}>
+                    {clearing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Force-Clear Enrollments
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete ALL enrollments?</AlertDialogTitle>
+                    <AlertDialogDescription asChild>
+                      <div className="space-y-3">
+                        <p>
+                          This will permanently delete <strong>every enrollment</strong> for{' '}
+                          <strong>{selectedSeason?.name ?? 'the selected season'}</strong>, including any
+                          real registrations. This cannot be undone.
+                        </p>
+                        <p>
+                          Type <strong>{selectedSeason?.name}</strong> to confirm:
+                        </p>
+                        <Input
+                          value={confirmText}
+                          onChange={(e) => setConfirmText(e.target.value)}
+                          placeholder={selectedSeason?.name ?? ''}
+                          className="rounded-xl"
+                        />
+                      </div>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={confirmText !== selectedSeason?.name}
+                      onClick={handleClear}
+                    >
+                      Yes, delete all enrollments
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
