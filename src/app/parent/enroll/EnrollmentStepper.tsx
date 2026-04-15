@@ -155,6 +155,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       collection(db, 'seasons'),
       where('sport', '==', activeSport),
       where('status', '==', 'active'),
+      where('hasDivisions', '==', true),
       orderBy('name', 'asc'),
     );
   }, [db, activeSport]);
@@ -167,6 +168,17 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const { data: players } = useCollection<Player>(playersQuery);
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: rawDivisions } = useCollection<Division>(divisionsQuery);
+
+  // Warn if no seasons surfaced — most likely cause is a missing Firestore composite index
+  // on (sport, status, hasDivisions, name). The browser console error from Firestore will
+  // include a direct link to create the index automatically in the Firebase console.
+  if (activeSport && seasons != null && seasons.length === 0) {
+    console.warn(
+      `[EnrollmentStepper] No active ${activeSport} seasons with divisions found. ` +
+      'If a season exists and has divisions, check for a missing Firestore composite index ' +
+      '(sport + status + hasDivisions + name). The Firestore error in the console will have a direct link to create it.'
+    );
+  }
 
   // ── Derived values ────────────────────────────────────────────────────────
   // Compute the player DOB (existing or newly-entered) so we can calculate league age.

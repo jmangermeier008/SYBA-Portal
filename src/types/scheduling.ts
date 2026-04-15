@@ -47,6 +47,7 @@ export interface Season {
   ageCutoffDate?: string; // YYYY-MM-DD — baseball age is calculated as of this date (e.g. "2026-04-30")
   sport: Sport;
   isTest?: boolean; // When true, this season is synthetic test data — excluded from live UI queries
+  hasDivisions?: boolean; // True when at least one division subcollection doc exists; controls enrollment visibility
 }
 
 // ---------------------------------------------------------------------------

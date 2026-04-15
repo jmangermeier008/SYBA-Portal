@@ -1,23 +1,14 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { getAdminFirestore } from '@/lib/firebase-admin';
+import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
 
 async function verifyFirebaseToken(token: string): Promise<string | null> {
   try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken: token }),
-      }
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    return (data.users?.[0]?.localId as string) ?? null;
+    const decoded = await getAdminAuth().verifyIdToken(token);
+    return decoded.uid;
   } catch {
     return null;
   }

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Plus, Layers, Loader2, Trash2, Pencil, Lock, Check, X, Users } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, doc, addDoc, deleteDoc, updateDoc, setDoc, query, where, Timestamp } from 'firebase/firestore';
+import { collection, doc, addDoc, deleteDoc, getDocs, updateDoc, setDoc, query, where, Timestamp } from 'firebase/firestore';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -38,6 +38,7 @@ interface Season {
   id: string;
   name: string;
   status?: string;
+  hasDivisions?: boolean;
 }
 
 export default function DivisionsAdminPage() {
@@ -109,6 +110,9 @@ export default function DivisionsAdminPage() {
         });
       }
 
+      // Mark the season as having divisions so it appears in the enrollment dropdown
+      await setDoc(doc(db, 'seasons', selectedSeasonId), { hasDivisions: true }, { merge: true });
+
       toast({ title: 'Division Created', description: `${formData.name} has been added.` });
       setOpen(false);
       setFormData({ name: '', ageGroup: '', fee: '', capacity: '' });
@@ -147,6 +151,13 @@ export default function DivisionsAdminPage() {
     }
     try {
       await deleteDoc(doc(db, 'seasons', selectedSeasonId, 'divisions', deleteConfirmId));
+
+      // If no divisions remain, hide the season from the enrollment dropdown
+      const remaining = await getDocs(collection(db, 'seasons', selectedSeasonId, 'divisions'));
+      if (remaining.empty) {
+        await setDoc(doc(db, 'seasons', selectedSeasonId), { hasDivisions: false }, { merge: true });
+      }
+
       toast({ title: 'Division Deleted' });
     } catch {
       toast({ variant: 'destructive', title: 'Error', description: 'Could not delete division.' });

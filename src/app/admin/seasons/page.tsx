@@ -28,6 +28,7 @@ interface Season {
   volunteerSlotsRequired?: number;
   ageCutoffDate?: string;
   sport?: string;
+  hasDivisions?: boolean;
 }
 
 export default function SeasonsAdminPage() {
@@ -80,6 +81,7 @@ export default function SeasonsAdminPage() {
       ...formData,
       volunteerSlotsRequired: Number(formData.volunteerSlotsRequired),
       sport: activeSport,
+      hasDivisions: true,
     };
 
     try {
