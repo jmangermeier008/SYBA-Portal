@@ -40,7 +40,8 @@ export async function POST(req: Request) {
     // ── Multi-enrollment path (new) ──────────────────────────────────────────
     // Accepts enrollmentIds: string[] — reads enrollment docs from Firestore to build line items.
     if (body.enrollmentIds && Array.isArray(body.enrollmentIds)) {
-      const enrollmentIds: string[] = body.enrollmentIds;
+      // Fix #3: Deduplicate to prevent double-charging if the same ID appears twice
+      const enrollmentIds: string[] = [...new Set(body.enrollmentIds as string[])];
       if (enrollmentIds.length === 0) {
         return NextResponse.json({ error: 'No enrollments provided' }, { status: 400 });
       }
@@ -59,6 +60,13 @@ export async function POST(req: Request) {
         }
 
         const enrollment = enrollmentSnap.data() as any;
+
+        // Fix #2: Verify each enrollment belongs to the authenticated user
+        if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
+          console.error(`[stripe/checkout] Enrollment ${enrollmentId} does not belong to user ${userId}`);
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         const fee = enrollment.registrationFeeAmount as number;
 
         if (typeof fee !== 'number' || fee <= 0 || !isFinite(fee)) {

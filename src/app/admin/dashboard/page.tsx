@@ -352,6 +352,19 @@ export default function AdminDashboard({
     const REQUIRED = ['child_abuse', 'criminal'];
     const clearancesByCoach: Record<string, Record<string, string>> = {};
 
+    // Filter coaches to only those in the active sport. Coaches with a sport-specific
+    // 'Coach' role take precedence; fall back to global 'Coach' role for legacy accounts
+    // that predate sport-specific roles.
+    const sportCoaches = activeSport
+      ? coaches.filter((c: any) => {
+          const sportRole: string[] = c.sportRoles?.[activeSport] ?? [];
+          if (sportRole.includes('Coach')) return true;
+          // Legacy fallback: include if global role = Coach but no sport-specific roles yet
+          if (!c.sportRoles?.[activeSport] && (c.roles ?? []).includes('Coach')) return true;
+          return false;
+        })
+      : coaches;
+
     allClearances.forEach((c) => {
       const uid: string | undefined = (c as any).userId ?? (() => {
         const parts = ((c as any)._ref?.path ?? '').split('/');
@@ -364,15 +377,15 @@ export default function AdminDashboard({
 
     let cleared = 0;
     let issues = false;
-    coaches.forEach((coach: any) => {
+    sportCoaches.forEach((coach: any) => {
       const cMap = clearancesByCoach[coach.id] ?? {};
       const allApproved = REQUIRED.every((t) => cMap[t] === 'approved');
       if (allApproved) cleared++;
       else issues = true;
     });
 
-    return { clearedCoachCount: cleared, totalCoachCount: coaches.length, coachesWithIssues: issues };
-  }, [coaches, allClearances]);
+    return { clearedCoachCount: cleared, totalCoachCount: sportCoaches.length, coachesWithIssues: issues };
+  }, [coaches, allClearances, activeSport]);
 
   const fieldsWithClosures = useMemo(() => {
     if (!fields) return [];

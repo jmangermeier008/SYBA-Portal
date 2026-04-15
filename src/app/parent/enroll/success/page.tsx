@@ -8,13 +8,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CheckCircle2, Loader2, Mail, KeyRound, UserCheck } from 'lucide-react';
+import { CheckCircle2, Loader2, Mail, KeyRound, UserCheck, ListOrdered } from 'lucide-react';
 import Link from 'next/link';
 import { useUser, useAuth, useFirestore } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 
 // ---------------------------------------------------------------------------
 // Claim Account Form — shown to anonymous users who just paid
+// Fix #4: "Skip for now" removed — account creation is required to preserve
+// access to the paid enrollment.
 // ---------------------------------------------------------------------------
 
 function ClaimAccountForm() {
@@ -94,8 +96,9 @@ function ClaimAccountForm() {
       <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
         <KeyRound className="h-4 w-4 mt-0.5 shrink-0" />
         <p>
-          Create a password to save your registration and access your account anytime.
-          This is optional — your enrollment is already confirmed.
+          <strong>Create your account to access your registration.</strong> Without an account,
+          you will not be able to view your dashboard, update player info, or manage your enrollment
+          if you close this page.
         </p>
       </div>
 
@@ -141,23 +144,13 @@ function ClaimAccountForm() {
         />
       </div>
 
-      <div className="flex gap-3 pt-2">
-        <Button
-          type="button"
-          variant="outline"
-          className="flex-1 rounded-xl"
-          asChild
-        >
-          <Link href="/parent/dashboard">Skip for now</Link>
-        </Button>
-        <Button
-          type="submit"
-          className="flex-1 rounded-xl"
-          disabled={claiming}
-        >
-          {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Create Account'}
-        </Button>
-      </div>
+      <Button
+        type="submit"
+        className="w-full rounded-xl"
+        disabled={claiming}
+      >
+        {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Create Account & Go to Dashboard'}
+      </Button>
     </form>
   );
 }
@@ -171,6 +164,8 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
 
   const enrollmentId = typeof searchParams.enrollment_id === 'string' ? searchParams.enrollment_id : '';
   const enrollmentIds = typeof searchParams.enrollment_ids === 'string' ? searchParams.enrollment_ids : '';
+  // Fix #10: detect waitlist-only sessions passed via ?waitlisted=1
+  const isWaitlistedOnly = searchParams.waitlisted === '1';
 
   if (loading) {
     return (
@@ -189,7 +184,9 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
             <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-2" />
             <CardTitle className="font-headline text-2xl">Registration Complete!</CardTitle>
             <CardDescription>
-              Your payment was received. Set up an account to manage your registration and get updates.
+              {isWaitlistedOnly
+                ? "You've been added to the waitlist. Create an account to track your status and get notified when a spot opens."
+                : "Your payment was received. Create your account to manage your registration and get updates."}
             </CardDescription>
           </CardHeader>
           <CardContent className="pb-8">
@@ -200,7 +197,33 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
     );
   }
 
-  // Authenticated user — standard success screen
+  // Fix #10: Waitlist-only authenticated users see different messaging
+  if (isWaitlistedOnly) {
+    return (
+      <div className="max-w-lg mx-auto text-center">
+        <Card className="border-none shadow-xl">
+          <CardContent className="py-16 space-y-6">
+            <ListOrdered className="h-20 w-20 text-amber-500 mx-auto" />
+            <div className="space-y-2">
+              <h2 className="text-xl md:text-2xl font-bold font-headline">Added to Waitlist</h2>
+              <p className="text-sm text-muted-foreground">
+                No payment was taken. We&apos;ll contact you when a spot opens up.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 p-4 bg-muted/30 rounded-xl text-sm text-muted-foreground">
+              <Mail className="h-5 w-5 shrink-0 text-primary" />
+              <span>A waitlist confirmation email is on its way to your inbox.</span>
+            </div>
+            <Button asChild className="rounded-full px-8 text-base">
+              <Link href="/parent/dashboard">Back to Dashboard</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Authenticated user — standard payment success screen
   const displayId = enrollmentIds || enrollmentId;
 
   return (

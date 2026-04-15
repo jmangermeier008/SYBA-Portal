@@ -144,6 +144,9 @@ export default function AdminGamesPage() {
     open: boolean; game: Game | null; linkedShiftCount: number; isDeleting: boolean;
   }>({ open: false, game: null, linkedShiftCount: 0, isDeleting: false });
 
+  // Bulk practice confirmation
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+
   // Score dialog
   const [scoreDialog, setScoreDialog] = useState<{ open: boolean; game: Game | null; isSaving: boolean }>({
     open: false, game: null, isSaving: false,
@@ -1093,10 +1096,33 @@ export default function AdminGamesPage() {
                     ) : (
                       <>
                         <Button variant="outline" onClick={() => setRecurringStep('configure')}>Back</Button>
-                        <Button onClick={handleAddBulk} disabled={isSaving || previewDates.length === 0}>
-                          {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        <Button
+                          onClick={() => setBulkConfirmOpen(true)}
+                          disabled={isSaving || previewDates.length === 0}
+                        >
                           Create {previewDates.length} Practice{previewDates.length !== 1 ? 's' : ''}
                         </Button>
+                        <Dialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+                          <DialogContent className="rounded-2xl max-w-sm">
+                            <DialogHeader>
+                              <DialogTitle className="font-headline">Confirm Bulk Creation</DialogTitle>
+                              <DialogDescription>
+                                This will create <strong>{previewDates.length} practice{previewDates.length !== 1 ? 's' : ''}</strong> for{' '}
+                                <strong>{teamMap[form.teamId] ?? 'the selected team'}</strong>. This cannot be undone in bulk.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                              <Button variant="outline" onClick={() => setBulkConfirmOpen(false)}>Cancel</Button>
+                              <Button
+                                disabled={isSaving}
+                                onClick={() => { setBulkConfirmOpen(false); handleAddBulk(); }}
+                              >
+                                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Yes, Create {previewDates.length} Practice{previewDates.length !== 1 ? 's' : ''}
+                              </Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
                       </>
                     )
                   ) : (

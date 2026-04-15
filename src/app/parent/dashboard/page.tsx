@@ -154,11 +154,12 @@ export default function ParentDashboard({
     return collection(db, 'teams', selectedTeamId, 'games', nextGame.id, 'rsvps');
   }, [db, selectedTeamId, nextGame?.id]);
   const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string; gameId?: string }>(rsvpsQuery);
-  // H12: Fix RSVP status — use && to ensure both conditions match, and guard on gameId
+  // H12: Fix RSVP lookup — check by canonical doc ID first (which encodes gameId), then
+  // fall back to playerId+gameId match for older records that lack a composite doc ID.
   const currentRsvp = selectedPlayerId && nextGame
     ? rsvps?.find(r =>
-        (r.id === `${selectedPlayerId}_${nextGame.id}` || r.playerId === selectedPlayerId) &&
-        r.gameId === nextGame.id
+        r.id === `${selectedPlayerId}_${nextGame.id}` ||
+        (r.playerId === selectedPlayerId && r.gameId === nextGame.id)
       )
     : undefined;
 

@@ -56,6 +56,29 @@ export async function POST(req: Request) {
           continue; // Skip missing enrollments rather than failing the whole webhook
         }
 
+        const enrollment = enrollmentSnap.data() as any;
+
+        // Fix #2: Verify enrollment belongs to the user in the session metadata
+        if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
+          console.error(`[stripe/webhook] Enrollment ${enrollmentId} does not belong to user ${userId}`);
+          continue;
+        }
+
+        // Fix #1: Idempotency guard — if stripe_payment_id is already set this is a Stripe retry.
+        // Skip all writes to prevent double-incrementing registeredCount or re-marking as paid.
+        if (enrollment.stripe_payment_id) {
+          console.info(`[stripe/webhook] Duplicate event — enrollment ${enrollmentId} already paid, skipping`);
+          // Still collect player name for the email summary
+          try {
+            const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
+            if (playerSnap.exists) {
+              const p = playerSnap.data() as any;
+              playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+            }
+          } catch { /* non-fatal */ }
+          continue;
+        }
+
         await enrollmentRef.update({
           payment_status: 'paid',
           paymentStatus: 'paid',
@@ -66,7 +89,6 @@ export async function POST(req: Request) {
         console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
 
         // Increment registeredCount on the division
-        const enrollment = enrollmentSnap.data() as any;
         if (enrollment.seasonId && enrollment.divisionId) {
           const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
           divRef.update({ registeredCount: FieldValue.increment(1) })

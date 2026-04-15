@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, setDoc, updateDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useAuth } from '@/firebase';
 import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
 import { useSport } from '@/firebase/sport-context';
@@ -133,6 +133,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   // ── Cart state ────────────────────────────────────────────────────────────
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartView, setCartView] = useState(false); // true = showing cart review
+  const [cartRehydrated, setCartRehydrated] = useState(false);
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
@@ -247,6 +248,39 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     }
   }, [selectedDivision]);
 
+  // ── Fix #8: Rehydrate cart from localStorage on mount (once user is known) ──
+  useEffect(() => {
+    if (!user || cartRehydrated) return;
+    try {
+      const key = `syba_cart_${user.uid}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored) as CartItem[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCart(parsed);
+        }
+      }
+    } catch {
+      // Ignore parse errors — stale or corrupt data
+    }
+    setCartRehydrated(true);
+  }, [user, cartRehydrated]);
+
+  // ── Fix #8: Persist cart to localStorage on every change ──────────────────
+  useEffect(() => {
+    if (!user || !cartRehydrated) return;
+    try {
+      const key = `syba_cart_${user.uid}`;
+      if (cart.length > 0) {
+        localStorage.setItem(key, JSON.stringify(cart));
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // Non-fatal — storage may be unavailable
+    }
+  }, [cart, user, cartRehydrated]);
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStepLabel = (s: number) => {
     if (s === 1) return 'Season & Division';
@@ -260,6 +294,21 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     if (s === 2) return 'Confirm player info and emergency contacts.';
     if (activeSport === 'football' && s === 3) return 'Help us prepare your equipment kit. Sizes will be verified at distribution.';
     return 'Review your registration before proceeding.';
+  };
+
+  // Fix #7: Validate that every partially-filled emergency contact has all 3 fields,
+  // and that at least one complete contact exists.
+  const emergencyContactsValid = () => {
+    const contacts = state.emergencyContacts;
+    const hasAtLeastOne = contacts.some(c => c.name.trim() && c.phone.trim() && c.relationship.trim());
+    if (!hasAtLeastOne) return false;
+    // Any contact with ANY field filled must have ALL fields filled
+    for (const c of contacts) {
+      const anyFilled = c.name.trim() || c.phone.trim() || c.relationship.trim();
+      const allFilled = c.name.trim() && c.phone.trim() && c.relationship.trim();
+      if (anyFilled && !allFilled) return false;
+    }
+    return true;
   };
 
   const isDivisionClosed = () => {
@@ -507,11 +556,39 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         }
       }
 
-      // ── If all players are waitlisted, we're done ──────────────────────
+      // ── If all players are waitlisted, redirect to success page with waitlisted flag ──
       if (payableItems.length === 0) {
-        setSuccess(true);
-        setSubmitting(false);
+        try { localStorage.removeItem(`syba_cart_${user.uid}`); } catch { /* non-fatal */ }
+        router.push('/parent/enroll/success?waitlisted=1');
         return;
+      }
+
+      // Fix #5: Re-validate division capacity at checkout time to prevent overbooking.
+      // The page-load registeredCount may be stale if another family enrolled concurrently.
+      for (const item of payableItems) {
+        const divSnap = await getDoc(doc(db, 'seasons', item.seasonId, 'divisions', item.divisionId));
+        if (divSnap.exists()) {
+          const div = divSnap.data() as any;
+          const currentCount = div.registeredCount ?? 0;
+          const capacity = div.capacity ?? null;
+          if (capacity !== null && currentCount >= capacity) {
+            if (div.waitlistEnabled) {
+              toast({
+                variant: 'destructive',
+                title: 'Division Just Filled Up',
+                description: `${div.name ?? 'This division'} reached capacity while you were registering. You've been placed on the waitlist instead.`,
+              });
+            } else {
+              toast({
+                variant: 'destructive',
+                title: 'Division Now Closed',
+                description: `${div.name ?? 'This division'} is now full and does not have a waitlist. Please choose a different division.`,
+              });
+              setSubmitting(false);
+              return;
+            }
+          }
+        }
       }
 
       // ── Launch Stripe for payable items ────────────────────────────────
@@ -542,6 +619,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             )
           );
         }
+        // Clear persisted cart — payment is in flight
+        try { localStorage.removeItem(`syba_cart_${user.uid}`); } catch { /* non-fatal */ }
         toast({ title: 'Redirecting to Payment', description: 'Secure checkout via Stripe.' });
         router.push(data.url);
       } else {
@@ -939,7 +1018,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     size="sm"
                     className="rounded-full w-full"
                     onClick={handleResumePayment}
-                    disabled={submitting || !selectedDivision}
+                    disabled={submitting}
                   >
                     {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" />}
                     Resume Payment
@@ -1051,6 +1130,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 >
                   + Add Another Contact
                 </Button>
+                {!emergencyContactsValid() && state.emergencyContacts.some(c => c.name || c.phone || c.relationship) && (
+                  <p className="text-xs text-destructive">
+                    Please fill in all three fields (name, phone, relationship) for each contact.
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -1213,6 +1297,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   !state.seasonId || !state.divisionId || isDivisionClosed()
                 )) ||
                 (state.step === 2 && !state.shirtSize) ||
+                (state.step === 2 && !emergencyContactsValid()) ||
                 (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
                 (state.step === 3 && activeSport === 'football' && (!state.helmetSize || !state.shoulderPadSize || !state.pantSize || !state.equipmentJerseySize))
               }

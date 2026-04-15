@@ -39,6 +39,9 @@ export default function SeasonsAdminPage() {
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [editingSeason, setEditingSeason] = useState<Season | null>(null);
+  const [deletingSeason, setDeletingSeason] = useState<Season | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
   const [editFormData, setEditFormData] = useState({
     registrationOpen: '',
     registrationClose: '',
@@ -133,8 +136,10 @@ export default function SeasonsAdminPage() {
     }
   };
 
-  const handleDeleteSeason = async (id: string) => {
-    if (!confirm("Are you sure? This will permanently delete the season along with all its divisions, teams, and enrollments.")) return;
+  const handleDeleteSeason = async () => {
+    if (!deletingSeason) return;
+    setIsDeleting(true);
+    const id = deletingSeason.id;
     try {
       // 1. Delete all enrollments for this season
       const enrollmentsSnap = await getDocs(query(collectionGroup(db, 'enrollments'), where('seasonId', '==', id)));
@@ -157,6 +162,8 @@ export default function SeasonsAdminPage() {
       // 4. Delete the season document itself
       await deleteDoc(doc(db, 'seasons', id));
       toast({ title: "Season Deleted", description: "Season, divisions, teams, and enrollments have been removed." });
+      setDeletingSeason(null);
+      setDeleteConfirmName('');
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -166,6 +173,8 @@ export default function SeasonsAdminPage() {
       } else {
         toast({ variant: "destructive", title: "Delete Failed", description: error.message });
       }
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -399,7 +408,12 @@ export default function SeasonsAdminPage() {
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => handleDeleteSeason(season.id)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:bg-destructive/10"
+                        onClick={() => { setDeletingSeason(season); setDeleteConfirmName(''); }}
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -481,6 +495,49 @@ export default function SeasonsAdminPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Season Confirmation Dialog */}
+      <Dialog open={!!deletingSeason} onOpenChange={(o) => { if (!o) { setDeletingSeason(null); setDeleteConfirmName(''); } }}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-headline text-2xl text-destructive">Delete Season</DialogTitle>
+            <DialogDescription>
+              This action is <strong>permanent and cannot be undone</strong>. It will delete:
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="text-sm space-y-1 text-muted-foreground list-disc list-inside pl-1">
+            <li>The season: <strong>{deletingSeason?.name}</strong></li>
+            <li>All divisions within this season</li>
+            <li>All teams assigned to this season</li>
+            <li>All enrollment records associated with this season</li>
+          </ul>
+          <div className="space-y-2 pt-2">
+            <Label htmlFor="deleteConfirmName">
+              Type <strong>{deletingSeason?.name}</strong> to confirm
+            </Label>
+            <Input
+              id="deleteConfirmName"
+              className="rounded-xl"
+              placeholder={deletingSeason?.name}
+              value={deleteConfirmName}
+              onChange={(e) => setDeleteConfirmName(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeletingSeason(null); setDeleteConfirmName(''); }}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteConfirmName !== deletingSeason?.name || isDeleting}
+              onClick={handleDeleteSeason}
+            >
+              {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Delete Season
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
