@@ -3,6 +3,13 @@ import { useSport } from '@/firebase/sport-context';
 
 export const HUB_LOGO_URL = '/logo-hub.png';
 
+export interface SportDivisionDefault {
+  id: string;
+  name: string;
+  fee: number;
+  capacity: number;
+}
+
 export interface SportConfig {
   label: string;
   icon: string;
@@ -20,6 +27,7 @@ export interface SportConfig {
   practiceSlotsLabel: string;
   hasPracticeSlots: boolean; // Baseball uses the claim/approval slot system; Football does not
   hasTeams: boolean;          // Baseball has explicit Teams; Football uses Division-as-Team
+  defaultDivisions: SportDivisionDefault[];
 }
 
 export const SPORT_CONFIG: Record<Sport, SportConfig> = {
@@ -37,6 +45,11 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     practiceSlotsLabel: 'Practice Slots',
     hasPracticeSlots: true,
     hasTeams: true,
+    defaultDivisions: [
+      { id: 'tball', name: 'T-Ball', fee: 5000, capacity: 20 },
+      { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500, capacity: 20 },
+      { id: 'kid-pitch', name: 'Kid Pitch', fee: 10000, capacity: 20 },
+    ],
   },
   football: {
     label: 'Football',
@@ -52,6 +65,10 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     practiceSlotsLabel: 'Practices',
     hasPracticeSlots: false,
     hasTeams: false,
+    defaultDivisions: [
+      { id: 'midgets', name: 'Midgets', fee: 0, capacity: 40 },
+      { id: 'peewee', name: 'Pee Wee', fee: 0, capacity: 40 },
+    ],
   },
 };
 

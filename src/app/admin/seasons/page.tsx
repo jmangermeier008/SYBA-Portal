@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star, Pencil } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
+import { SPORT_CONFIG } from '@/config/sports';
 import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch, updateDoc } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
@@ -25,6 +26,7 @@ interface Season {
   isActive?: boolean;
   status?: string;
   volunteerSlotsRequired?: number;
+  sport?: string;
 }
 
 export default function SeasonsAdminPage() {
@@ -80,17 +82,33 @@ export default function SeasonsAdminPage() {
     try {
       await setDoc(seasonRef, seasonData);
 
-      const divisions = [
-        { id: 'tball', name: 'T-Ball', fee: 5000, capacity: 20, waitlistEnabled: true, registeredCount: 0 },
-        { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500, capacity: 20, waitlistEnabled: true, registeredCount: 0 },
-        { id: 'kid-pitch', name: 'Kid Pitch', fee: 10000, capacity: 20, waitlistEnabled: true, registeredCount: 0 },
-      ];
+      const sportConfig = SPORT_CONFIG[activeSport!];
+      const divisions = sportConfig.defaultDivisions.map(d => ({
+        ...d,
+        waitlistEnabled: true,
+        registeredCount: 0,
+      }));
 
       await Promise.all(
         divisions.map(div =>
           setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div)
         )
       );
+
+      if (!sportConfig.hasTeams) {
+        await Promise.all(
+          divisions.map(div =>
+            setDoc(doc(db, 'teams', `${seasonId}-${div.id}`), {
+              id: `${seasonId}-${div.id}`,
+              name: div.name,
+              seasonId,
+              divisionId: div.id,
+              sport: activeSport,
+              coachIds: [],
+            })
+          )
+        );
+      }
 
       toast({ title: "Season Created", description: `${formData.name} is now active.` });
       setOpen(false);
@@ -323,7 +341,16 @@ export default function SeasonsAdminPage() {
                         <Trophy className="h-5 w-5" />
                       </div>
                       <div>
-                        <CardTitle className="text-lg">{season.name}</CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-lg">{season.name}</CardTitle>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            season.sport === 'football'
+                              ? 'bg-orange-100 text-orange-700'
+                              : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {season.sport === 'football' ? '🏈 Football' : '⚾ Baseball'}
+                          </span>
+                        </div>
                         <CardDescription>
                           Registration: {season.registrationOpen} to {season.registrationClose}
                         </CardDescription>
