@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import Link from 'next/link';
+import { useSport } from '@/firebase/sport-context';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut as firebaseSignOut, sendPasswordResetEmail } from 'firebase/auth';
 import { firebaseConfig } from '@/firebase/config';
@@ -32,12 +33,14 @@ interface UserData {
   displayName: string;
   role: string;
   roles?: string[];
+  sportRoles?: Record<string, string[]>;
   officerTitle?: string;
   officerTitles?: string[];
   phoneNumber?: string;
 }
 
-function getUserRoles(user: UserData): string[] {
+function getUserRoles(user: UserData, sport?: string | null): string[] {
+  if (sport && user.sportRoles?.[sport]?.length) return user.sportRoles[sport];
   if (user.roles && user.roles.length > 0) return user.roles;
   return [user.role];
 }
@@ -53,6 +56,7 @@ export default function RolesPage() {
   const db = useFirestore();
   const { toast } = useToast();
   const { isSiteAdmin, loading: loadingUser } = useUser();
+  const { activeSport } = useSport();
 
   // Create user dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -83,19 +87,24 @@ export default function RolesPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [sportFilter, setSportFilter] = useState<string>(activeSport ?? 'all');
 
   const filteredUsers = useMemo(() => {
     if (!users) return [];
+    const activeSportFilter = sportFilter !== 'all' ? sportFilter : null;
     return users.filter((user) => {
+      const effectiveRoles = getUserRoles(user, activeSportFilter);
       const matchesSearch =
         !searchQuery ||
         user.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         user.email?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSport =
+        sportFilter === 'all' || (user.sportRoles?.[sportFilter]?.length ?? 0) > 0;
       const matchesRole =
-        roleFilter === 'all' || getUserRoles(user).includes(roleFilter);
-      return matchesSearch && matchesRole;
+        roleFilter === 'all' || effectiveRoles.includes(roleFilter);
+      return matchesSearch && matchesSport && matchesRole;
     });
-  }, [users, searchQuery, roleFilter]);
+  }, [users, searchQuery, roleFilter, sportFilter]);
 
   const handleRoleToggle = async (uid: string, role: Role, currentRoles: string[], checked: boolean) => {
     const newRoles = checked
@@ -113,7 +122,14 @@ export default function RolesPage() {
       : newRoles.includes('Board Member') ? 'Admin'
       : 'Parent';
 
-    updateDoc(userRef, { roles: newRoles, role: primaryRole })
+    const updateData: Record<string, unknown> = { role: primaryRole };
+    if (sportFilter !== 'all') {
+      updateData[`sportRoles.${sportFilter}`] = newRoles;
+    } else {
+      updateData.roles = newRoles;
+    }
+
+    updateDoc(userRef, updateData)
       .then(() => {
         toast({ title: "Roles Updated", description: `User roles updated to: ${newRoles.join(', ')}.` });
       })
@@ -154,6 +170,7 @@ export default function RolesPage() {
           email: newUser.email.trim().toLowerCase(),
           role: primaryRole,
           roles: newUser.roles,
+          ...(activeSport ? { sportRoles: { [activeSport]: newUser.roles } } : {}),
           createdAt: new Date().toISOString(),
         });
       } catch (firestoreError: any) {
@@ -270,6 +287,16 @@ export default function RolesPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <Select value={sportFilter} onValueChange={setSportFilter}>
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue placeholder="All Sports" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Sports</SelectItem>
+              <SelectItem value="baseball">Baseball</SelectItem>
+              <SelectItem value="football">Football</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={roleFilter} onValueChange={setRoleFilter}>
             <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Roles" />
@@ -322,8 +349,12 @@ export default function RolesPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.map((user) => {
-                      const userRoles = getUserRoles(user);
+                      const activeSportFilter = sportFilter !== 'all' ? sportFilter : null;
+                      const userRoles = getUserRoles(user, activeSportFilter);
                       const isBoardMember = userRoles.includes('Board Member');
+                      const userSports = Object.entries(user.sportRoles ?? {})
+                        .filter(([, roles]) => roles.length > 0)
+                        .map(([sport]) => sport);
                       return (
                         <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
                           <TableCell className="pl-6 py-3">
@@ -332,7 +363,15 @@ export default function RolesPage() {
                                 {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="h-5 w-5" />}
                               </div>
                               <div>
-                                <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
+                                  {userSports.includes('baseball') && (
+                                    <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">BB</span>
+                                  )}
+                                  {userSports.includes('football') && (
+                                    <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">FB</span>
+                                  )}
+                                </div>
                                 <div className="flex flex-wrap gap-1 mt-0.5">
                                   {userRoles.map((r) => (
                                     <Badge
@@ -520,7 +559,7 @@ export default function RolesPage() {
       {/* Mobile Edit Roles Dialog */}
       {(() => {
         const liveEditUser = editTarget ? (users?.find(u => u.id === editTarget.id) ?? editTarget) : null;
-        const editRoles = liveEditUser ? getUserRoles(liveEditUser) : [];
+        const editRoles = liveEditUser ? getUserRoles(liveEditUser, sportFilter !== 'all' ? sportFilter : null) : [];
         return (
           <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
             <DialogContent className="sm:max-w-sm">
