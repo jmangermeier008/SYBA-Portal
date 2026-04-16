@@ -78,14 +78,17 @@ export default function ParentSettingsPage() {
 
   // Fetch display info for already-linked secondary parents
   useEffect(() => {
-    if (!db || !players) return;
-    players.forEach(async (player) => {
-      if (player.secondaryParentId && !linkedParents[player.id]) {
+    let cancelled = false;
+    const fetchLinkedParents = async () => {
+      if (!db || !players) return;
+      for (const player of players) {
+        if (cancelled) break;
+        if (!player.secondaryParentId || linkedParents[player.id]) continue;
         try {
           const snap = await getDocs(
             query(collection(db, 'userProfiles'), where('__name__', '==', player.secondaryParentId))
           );
-          if (!snap.empty) {
+          if (!cancelled && !snap.empty) {
             const data = snap.docs[0].data();
             setLinkedParents(prev => ({
               ...prev,
@@ -94,7 +97,10 @@ export default function ParentSettingsPage() {
           }
         } catch {}
       }
-    });
+    };
+    fetchLinkedParents();
+    return () => { cancelled = true; };
+  // linkedParents intentionally omitted — including it causes a re-fetch loop on every state update
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [players, db]);
 

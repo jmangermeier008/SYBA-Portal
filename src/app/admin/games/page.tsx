@@ -1555,7 +1555,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
             title={hasScore ? 'Edit score' : 'Record score'}
           >
             <Trophy className="h-3.5 w-3.5" />
-            {hasScore ? 'Score' : 'Score'}
+            Score
           </Button>
         )}
         {!isCancelled && (

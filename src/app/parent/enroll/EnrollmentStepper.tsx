@@ -82,9 +82,6 @@ interface CartItem {
   preGeneratedPlayerId?: string;
 }
 
-const SHIRT_SIZES = ['Youth XS', 'Youth S', 'Youth M', 'Youth L', 'Youth XL', 'Adult S', 'Adult M', 'Adult L'];
-const EQUIPMENT_SIZES = ['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 'Adult L', 'Adult XL'];
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------

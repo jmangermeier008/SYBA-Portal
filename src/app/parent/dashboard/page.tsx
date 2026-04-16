@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, XCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -37,16 +36,7 @@ function useCountdown(targetDate: string | undefined) {
   return label;
 }
 
-export default function ParentDashboard({
-  params,
-  searchParams,
-}: {
-  params: Promise<any>;
-  searchParams: Promise<any>;
-}) {
-  use(params);
-  use(searchParams);
-
+export default function ParentDashboard() {
   const { profile, user, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const db = useFirestore();
