@@ -210,6 +210,15 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const totalSteps = 3;
 
 
+  // ── Auto-enter new-player mode when the user has no existing players ─────
+  // Without this, isNewPlayer stays false while playerId is '' — which permanently
+  // disables the Next button even after the user fills in name/DOB.
+  useEffect(() => {
+    if (players && players.length === 0 && !state.isNewPlayer) {
+      setState(prev => ({ ...prev, isNewPlayer: true }));
+    }
+  }, [players]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Pre-fill emergency contacts when player or step changes ──────────────
   useEffect(() => {
     if (selectedPlayer && state.step === 2) {
