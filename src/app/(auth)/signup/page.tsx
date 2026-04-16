@@ -1,20 +1,21 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { useAuth, useFirestore } from '@/firebase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-
 import Link from 'next/link';
 import { Trophy, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { setActiveSport } from '@/hooks/use-active-sport';
+import type { Sport } from '@/types/scheduling';
 
 // H3: Map Firebase Auth error codes to user-friendly messages
 function getAuthErrorMessage(code: string): string {
@@ -34,7 +35,7 @@ function getAuthErrorMessage(code: string): string {
   }
 }
 
-export default function SignupPage() {
+function SignupContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -42,6 +43,7 @@ export default function SignupPage() {
   const role = 'Parent';
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const auth = useAuth();
   const db = useFirestore();
@@ -93,7 +95,16 @@ export default function SignupPage() {
         description: `Welcome to SYBA as a ${role}.`,
       });
 
-      router.push(`/${role.toLowerCase()}/dashboard`);
+      // Write sport to localStorage so SportProvider and the enrollment stepper have context.
+      const sportParam = searchParams.get('sport') as Sport | null;
+      if (sportParam === 'baseball' || sportParam === 'football') {
+        setActiveSport(sportParam);
+      }
+
+      // Honor redirect param (e.g. coming from "Register Player" → login → signup).
+      const redirectTo = searchParams.get('redirect');
+      const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : `/${role.toLowerCase()}/dashboard`;
+      router.push(destination);
     } catch (error: any) {
       if (error.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -111,6 +122,13 @@ export default function SignupPage() {
       setLoading(false);
     }
   };
+
+  // Pass redirect + sport through to the login link so returning users land in the right place.
+  const redirectParam = searchParams.get('redirect');
+  const sportParam = searchParams.get('sport');
+  const loginHref = redirectParam
+    ? `/login?redirect=${encodeURIComponent(redirectParam)}${sportParam ? `&sport=${sportParam}` : ''}`
+    : '/login';
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
@@ -139,7 +157,6 @@ export default function SignupPage() {
                 <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 <p className="text-xs text-muted-foreground">Must be at least 6 characters.</p>
               </div>
-
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full h-11 rounded-lg" disabled={loading}>
@@ -147,12 +164,24 @@ export default function SignupPage() {
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 Already have an account?{" "}
-                <Link href="/login" className="text-primary font-medium hover:underline">Login</Link>
+                <Link href={loginHref} className="text-primary font-medium hover:underline">Login</Link>
               </p>
             </CardFooter>
           </form>
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    }>
+      <SignupContent />
+    </Suspense>
   );
 }

@@ -5,6 +5,8 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth, useFirestore, useUser } from '@/firebase';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { setActiveSport } from '@/hooks/use-active-sport';
+import type { Sport } from '@/types/scheduling';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -50,7 +52,11 @@ function LoginContent() {
   useEffect(() => {
     if (!loadingUser && user && profile) {
       const redirectTo = searchParams.get('redirect');
-      const sportParam = searchParams.get('sport');
+      const sportParam = searchParams.get('sport') as Sport | null;
+      // Write sport to localStorage so SportProvider and the enrollment stepper have context.
+      if (sportParam === 'baseball' || sportParam === 'football') {
+        setActiveSport(sportParam);
+      }
       const sportQuery = sportParam === 'baseball' || sportParam === 'football' ? `?sport=${sportParam}` : '';
       const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : null;
       if (destination) {
@@ -81,6 +87,11 @@ function LoginContent() {
         // H1: Support multi-role users — map roles to their correct dashboard paths
         const roles: string[] = userData.roles ?? [userData.role];
         const redirectTo = searchParams.get('redirect');
+        const sportParam = searchParams.get('sport') as Sport | null;
+        // Write sport to localStorage so SportProvider and the enrollment stepper have context.
+        if (sportParam === 'baseball' || sportParam === 'football') {
+          setActiveSport(sportParam);
+        }
         const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : null;
         if (destination) {
           router.push(destination);

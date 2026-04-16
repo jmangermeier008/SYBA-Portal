@@ -255,7 +255,7 @@ export default function ParentDashboard({
             <p className="text-sm text-muted-foreground">Here's what's happening with your family's {activeSport ?? 'baseball'} activities.</p>
           </div>
           <Button asChild className="rounded-full">
-            <Link href="/parent/family">Add New Player</Link>
+            <Link href="/parent/enroll">Add New Player</Link>
           </Button>
         </header>
 
