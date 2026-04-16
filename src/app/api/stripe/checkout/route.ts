@@ -105,7 +105,7 @@ export async function POST(req: Request) {
             currency: 'usd',
             unit_amount: fee,
             product_data: {
-              name: `SYBA Registration — ${divisionName || 'Division'}`,
+              name: `League Registration — ${divisionName || 'Division'}`,
               description: playerName ? `Player: ${playerName}` : undefined,
             },
           },

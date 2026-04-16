@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
-import { useUser, useFirestore, useMemoFirebase, useCollection, useAuth } from '@/firebase';
-import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
+import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -24,7 +23,7 @@ import { getLeagueAge, getSuggestedDivisions } from '@/lib/registration-logic';
 // ---------------------------------------------------------------------------
 
 interface StepperState {
-  step: 1 | 2 | 3 | 4;
+  step: 1 | 2 | 3;
   // Existing player selection (logged-in users)
   playerId: string;
   // New player entry (guests / anonymous)
@@ -82,7 +81,6 @@ const EQUIPMENT_SIZES = ['Youth S', 'Youth M', 'Youth L', 'Adult S', 'Adult M', 
 
 export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string }) {
   const { user, loading: loadingUser } = useUser();
-  const auth = useAuth();
   const { activeSport } = useSport();
   const db = useFirestore();
   const router = useRouter();
@@ -99,14 +97,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     }
   }, [searchParams]);
 
-  // ── Anonymous auth ────────────────────────────────────────────────────────
-  // If no user is signed in after auth loads, silently sign in anonymously so
-  // guests can write their player and enrollment docs before account creation.
-  useEffect(() => {
-    if (!loadingUser && !user) {
-      initiateAnonymousSignIn(auth);
-    }
-  }, [loadingUser, user, auth]);
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [state, setState] = useState<StepperState>({
@@ -146,7 +136,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   // All hooks MUST come before any conditional returns (Rules of Hooks).
 
   const playersQuery = useMemoFirebase(() => {
-    if (!db || !user || user.isAnonymous) return null;
+    if (!db || !user) return null;
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user]);
 
@@ -217,14 +207,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     [rawDivisions, state.divisionId],
   );
 
-  const totalSteps = activeSport === 'football' ? 4 : 3;
+  const totalSteps = 3;
 
-  // ── Auto-switch to new-player mode for anonymous users ────────────────────
-  useEffect(() => {
-    if (user?.isAnonymous) {
-      setState(prev => ({ ...prev, isNewPlayer: true }));
-    }
-  }, [user]);
 
   // ── Pre-fill emergency contacts when player or step changes ──────────────
   useEffect(() => {
@@ -285,14 +269,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const getStepLabel = (s: number) => {
     if (s === 1) return 'Season & Division';
     if (s === 2) return 'Player Details';
-    if (activeSport === 'football' && s === 3) return 'Equipment Sizing';
     return 'Review & Pay';
   };
 
   const getStepDescription = (s: number) => {
     if (s === 1) return 'Choose the season and division for your player.';
     if (s === 2) return 'Confirm player info and emergency contacts.';
-    if (activeSport === 'football' && s === 3) return 'Help us prepare your equipment kit. Sizes will be verified at distribution.';
     return 'Review your registration before proceeding.';
   };
 
@@ -366,13 +348,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       setState(prev => ({ ...prev, step: 2 }));
     } else if (state.step === 2) {
       setState(prev => ({ ...prev, step: 3 }));
-    } else if (state.step === 3 && activeSport === 'football') {
-      setState(prev => ({ ...prev, step: 4 }));
     }
   };
 
   const handleBack = () => {
-    setState(prev => ({ ...prev, step: (prev.step - 1) as 1 | 2 | 3 | 4 }));
+    setState(prev => ({ ...prev, step: (prev.step - 1) as 1 | 2 | 3 }));
   };
 
   const updateEmergencyContact = (index: number, field: keyof EmergencyContact, value: string) => {
@@ -412,7 +392,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     setState({
       step: 1,
       playerId: '',
-      isNewPlayer: user?.isAnonymous ?? false,
+      isNewPlayer: false,
       newPlayerFirst: '',
       newPlayerLast: '',
       newPlayerDOB: '',
@@ -455,7 +435,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
     try {
       const idToken = await user.getIdToken();
-      const isAnonymous = user.isAnonymous;
       const now = new Date().toISOString();
       const enrollmentIds: string[] = [];
       const waitlistedItems: CartItem[] = [];
@@ -515,7 +494,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           registered_at: now,
           enrollmentDate: now,
           sport: activeSport ?? undefined,
-          profileStatus: isAnonymous ? 'incomplete' : 'complete',
+          profileStatus: 'complete',
           weightHistory: [],
           ...(item.isWaitlisted ? { waitlisted_at: now } : {}),
           ...(activeSport === 'football' && item.parentWeightEstimate
@@ -1038,23 +1017,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Shirt Size</Label>
-                  <Select
-                    value={state.shirtSize}
-                    onValueChange={(val) => setState(prev => ({ ...prev, shirtSize: val }))}
-                  >
-                    <SelectTrigger className="rounded-xl">
-                      <SelectValue placeholder="Select Size" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SHIRT_SIZES.map(size => (
-                        <SelectItem key={size} value={size}>{size}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
                   <Label>Uniform # Preference <span className="text-muted-foreground text-xs">(optional)</span></Label>
                   <Input
                     className="rounded-xl"
@@ -1144,53 +1106,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             </>
           )}
 
-          {/* ── STEP 3 — Football Equipment Sizing (football only) ── */}
-          {activeSport === 'football' && state.step === 3 && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                All sizes are parent estimates — league staff will verify and adjust at equipment distribution.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Helmet Size <span className="text-destructive">*</span></Label>
-                  <Select value={state.helmetSize} onValueChange={(val) => setState(prev => ({ ...prev, helmetSize: val }))}>
-                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {EQUIPMENT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Shoulder Pad Size <span className="text-destructive">*</span></Label>
-                  <Select value={state.shoulderPadSize} onValueChange={(val) => setState(prev => ({ ...prev, shoulderPadSize: val }))}>
-                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {EQUIPMENT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Pant Size <span className="text-destructive">*</span></Label>
-                  <Select value={state.pantSize} onValueChange={(val) => setState(prev => ({ ...prev, pantSize: val }))}>
-                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {EQUIPMENT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Football Jersey Size <span className="text-destructive">*</span></Label>
-                  <Select value={state.equipmentJerseySize} onValueChange={(val) => setState(prev => ({ ...prev, equipmentJerseySize: val }))}>
-                    <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {SHIRT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </>
-          )}
-
           {/* ── REVIEW STEP ── */}
           {state.step === totalSteps && (
             <>
@@ -1208,10 +1123,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <span className="text-muted-foreground">Division</span>
                     <span className="font-medium">{selectedDivision?.name ?? '—'}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Shirt Size</span>
-                    <span className="font-medium">{state.shirtSize}</span>
-                  </div>
                   {state.uniformNumberPreference && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Uniform # Preference</span>
@@ -1223,26 +1134,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       <span className="text-muted-foreground">Weight Estimate</span>
                       <span className="font-medium">{state.parentWeightEstimate} lbs</span>
                     </div>
-                  )}
-                  {activeSport === 'football' && state.helmetSize && (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Helmet Size</span>
-                        <span className="font-medium">{state.helmetSize}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Shoulder Pad Size</span>
-                        <span className="font-medium">{state.shoulderPadSize}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Pant Size</span>
-                        <span className="font-medium">{state.pantSize}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Football Jersey Size</span>
-                        <span className="font-medium">{state.equipmentJerseySize}</span>
-                      </div>
-                    </>
                   )}
                 </div>
 
@@ -1272,7 +1163,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 <div className="flex items-start gap-3 p-4 bg-muted/30 rounded-xl">
                   <ShieldCheck className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
                   <p className="text-xs text-muted-foreground">
-                    By completing registration you agree to the SYBA Code of Conduct. Registration is not complete until payment is received (if applicable).
+                    By completing registration you agree to the League Code of Conduct. Registration is not complete until payment is received (if applicable).
                   </p>
                 </div>
               </div>
@@ -1301,10 +1192,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   (state.isNewPlayer && (!state.newPlayerFirst || !state.newPlayerLast || !state.newPlayerDOB)) ||
                   !state.seasonId || !state.divisionId || isDivisionClosed()
                 )) ||
-                (state.step === 2 && !state.shirtSize) ||
                 (state.step === 2 && !emergencyContactsValid()) ||
-                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
-                (state.step === 3 && activeSport === 'football' && (!state.helmetSize || !state.shoulderPadSize || !state.pantSize || !state.equipmentJerseySize))
+                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate)
               }
             >
               {checkingDuplicate ? (

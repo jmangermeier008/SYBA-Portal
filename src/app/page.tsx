@@ -216,7 +216,7 @@ export default function Home() {
       <div className="flex flex-col items-center text-center space-y-6 max-w-sm w-full">
         <Image
           src={publicSport ? SPORT_CONFIG[publicSport].logoUrl : HUB_LOGO_URL}
-          alt={publicSport ? SPORT_CONFIG[publicSport].label : 'Sharpsville Youth Athletics Hub'}
+          alt={publicSport ? SPORT_CONFIG[publicSport].label : 'The League'}
           width={160}
           height={160}
           className="object-contain drop-shadow-md transition-all duration-300"
@@ -224,9 +224,9 @@ export default function Home() {
         />
         <div className="space-y-1">
           <h1 className="text-2xl font-bold font-headline tracking-tight text-primary">
-            Sharpsville Youth Athletics Hub
+            The League
           </h1>
-          <p className="text-muted-foreground text-sm">The online home for Sharpsville Youth Athletics</p>
+          <p className="text-muted-foreground text-sm">The online home for youth athletics</p>
         </div>
       </div>
 
@@ -479,7 +479,7 @@ export default function Home() {
 
       {/* ── Footer ── */}
       <footer className="mt-12 text-xs text-muted-foreground text-center space-y-1">
-        <p>© {new Date().getFullYear()} Sharpsville Youth Athletics. All rights reserved. Sharpsville, PA.</p>
+        <p>© {new Date().getFullYear()} The League. All rights reserved.</p>
         <p>
           General inquiries:{' '}
           <a href={`mailto:${contactEmail}`} className="hover:text-primary hover:underline transition-colors">
