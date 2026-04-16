@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 
+function getAppUrl(sport?: string): string {
+  if (sport === 'football') return process.env.FOOTBALL_BASE_URL || 'https://sharpsvillefootball.com';
+  return process.env.NEXT_PUBLIC_BASE_URL || 'https://syba.blue';
+}
+
 function sportPrefix(sport?: string): string {
   if (sport === 'baseball') return '[SYBA Baseball] ';
   if (sport === 'football') return '[SYFA Football] ';
@@ -22,7 +27,7 @@ export async function POST(req: Request) {
       ``,
       `---`,
       inquiryId
-        ? `View this inquiry directly: ${process.env.NEXT_PUBLIC_APP_URL ?? 'https://syba-portal.vercel.app'}/admin/inquiries?id=${inquiryId}`
+        ? `View this inquiry directly: ${getAppUrl(sport)}/admin/inquiries?id=${inquiryId}`
         : `Log in to the SYBA Portal to view the full conversation.`,
     ].join('\n');
 

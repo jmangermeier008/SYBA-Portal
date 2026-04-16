@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 
+function getAppUrl(sport?: string): string {
+  if (sport === 'football') return process.env.FOOTBALL_BASE_URL || 'https://sharpsvillefootball.com';
+  return process.env.NEXT_PUBLIC_BASE_URL || 'https://syba.blue';
+}
+
 function sportPrefix(sport?: string): string {
   if (sport === 'baseball') return '[SYBA Baseball] ';
   if (sport === 'football') return '[SYFA Football] ';
@@ -25,7 +30,7 @@ export async function POST(req: Request) {
     }
 
     const subject = `${sportPrefix(sport)}Action Required: Player Document Needs Re-Upload`;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://syba-portal.vercel.app';
+    const appUrl = getAppUrl(sport);
     const body = [
       `Hello,`,
       ``,

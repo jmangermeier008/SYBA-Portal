@@ -3,7 +3,6 @@ import Stripe from 'stripe';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
 
 async function verifyFirebaseToken(token: string): Promise<string | null> {
   try {
@@ -26,6 +25,11 @@ export async function POST(req: Request) {
     if (!tokenUid) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Derive base URL from the request's Origin header so that Stripe redirects the
+    // user back to whichever domain they came from (syba.blue, sharpsvillefootball.com, etc.)
+    const origin = req.headers.get('origin');
+    const baseUrl = origin || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002';
 
     const body = await req.json();
     const { userId } = body;
