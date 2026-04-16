@@ -129,7 +129,7 @@ const coachItems = [
 
 const parentItems = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/parent/dashboard' },
-  { label: 'My Family', icon: UserIcon, href: '/parent/family' },
+  { label: 'My Players', icon: UserIcon, href: '/parent/family' },
   { label: 'Season Enrollment', icon: ClipboardList, href: '/parent/enroll' },
   { label: 'My Teams', icon: Users, href: '/parent/teams' },
   { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
