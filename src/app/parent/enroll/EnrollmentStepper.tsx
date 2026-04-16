@@ -482,6 +482,11 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             dateOfBirth: item.newPlayerDOB ?? '',
             parentIds: [user.uid],
             primaryParentId: user.uid,
+            compliance: {
+              birthCertificateVerified: false,
+              physicalVerified: false,
+              verificationStatus: 'pending',
+            },
           });
         }
 

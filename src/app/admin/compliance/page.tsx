@@ -55,6 +55,8 @@ interface Player {
     physicalVerified?: boolean;
     verifiedBy?: string;
     verifiedAt?: string;
+    verificationStatus?: 'pending' | 'approved' | 'rejected';
+    rejectionReason?: string;
   };
 }
 
@@ -67,6 +69,8 @@ export default function AdminCompliancePage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [reviewingClearance, setReviewingClearance] = useState<{ userId: string, clearance: any } | null>(null);
+  const [rejectingPlayer, setRejectingPlayer] = useState<Player | null>(null);
+  const [playerRejectionReason, setPlayerRejectionReason] = useState('');
 
   // Role-guarded queries to prevent permission errors for non-admins
   const usersQuery = useMemoFirebase(() => {
@@ -141,6 +145,7 @@ export default function AdminCompliancePage() {
 
       const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
       const verifiedAt = new Date().toISOString();
+      const bothVerified = player.compliance?.physicalVerified === true;
       const updateData = {
         ageVerified: true,
         birthCertificateUrl: deleteField(),
@@ -151,6 +156,8 @@ export default function AdminCompliancePage() {
         'compliance.birthCertificateVerified': true,
         'compliance.verifiedBy': user.uid,
         'compliance.verifiedAt': verifiedAt,
+        'compliance.verificationStatus': bothVerified ? 'approved' : 'pending',
+        'compliance.rejectionReason': deleteField(),
       };
 
       updateDoc(playerRef, updateData)
@@ -181,10 +188,13 @@ export default function AdminCompliancePage() {
     setIsProcessing(true);
     const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
     const verifiedAt = new Date().toISOString();
+    const birthCertAlsoVerified = player.ageVerified === true;
     const updateData = {
       'compliance.physicalVerified': true,
       'compliance.verifiedBy': user.uid,
       'compliance.verifiedAt': verifiedAt,
+      'compliance.verificationStatus': birthCertAlsoVerified ? 'approved' : 'pending',
+      'compliance.rejectionReason': deleteField(),
       updatedAt: verifiedAt,
     };
     updateDoc(playerRef, updateData)
@@ -203,6 +213,56 @@ export default function AdminCompliancePage() {
         }
       })
       .finally(() => setIsProcessing(false));
+  };
+
+  const handleRejectPlayer = async () => {
+    if (!rejectingPlayer || !db || !user) return;
+    if (!playerRejectionReason.trim()) {
+      toast({ variant: "destructive", title: "Reason Required", description: "Please provide a reason for rejection." });
+      return;
+    }
+
+    setIsProcessing(true);
+    const player = rejectingPlayer;
+    const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
+    const updatedAt = new Date().toISOString();
+    const updateData = {
+      'compliance.verificationStatus': 'rejected',
+      'compliance.rejectionReason': playerRejectionReason.trim(),
+      updatedAt,
+    };
+
+    try {
+      await updateDoc(playerRef, updateData);
+      toast({ title: "Document Rejected", description: "The player's documents have been marked as rejected." });
+
+      // Send rejection email to parent
+      await fetch('/api/email/player-document-rejection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parentUserId: player.parentUserId,
+          playerName: `${player.firstName} ${player.lastName}`,
+          rejectionReason: playerRejectionReason.trim(),
+        }),
+      });
+
+      setRejectingPlayer(null);
+      setPlayerRejectionReason('');
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: playerRef.path,
+          operation: 'update',
+          requestResourceData: updateData
+        }));
+      } else {
+        toast({ variant: "destructive", title: "Rejection Failed", description: error.message });
+        console.error('[compliance] Reject player error:', error);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const getStatusIcon = (status?: string) => {
@@ -262,7 +322,7 @@ export default function AdminCompliancePage() {
             const hasCR = uc.some(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type) && c.status === 'Approved');
             return hasCA && hasCR;
           }).length;
-          const pendingVerification = allPlayers?.filter(p => p.birthCertificateUrl && !p.ageVerified).length ?? 0;
+          const pendingVerification = allPlayers?.filter(p => p.compliance?.verificationStatus === 'pending' && p.birthCertificateUrl && !p.ageVerified).length ?? 0;
           const isReady = fullyCleared === users.length && users.length > 0;
           return (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -519,6 +579,15 @@ export default function AdminCompliancePage() {
                                   >
                                     {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Redact"}
                                   </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    className="rounded-full h-8"
+                                    onClick={() => setRejectingPlayer(player)}
+                                    disabled={isProcessing}
+                                  >
+                                    Reject
+                                  </Button>
                                 </>
                               )}
                               {!player.compliance?.physicalVerified && (
@@ -585,6 +654,47 @@ export default function AdminCompliancePage() {
                 disabled={isProcessing}
               >
                 Approve Document
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Player Document Rejection Dialog */}
+        <Dialog open={!!rejectingPlayer} onOpenChange={(open) => !open && setRejectingPlayer(null)}>
+          <DialogContent className="rounded-2xl max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reject Documents: {rejectingPlayer?.firstName} {rejectingPlayer?.lastName}</DialogTitle>
+              <DialogDescription>Provide a reason — this will be emailed to the parent.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Rejection Reason</Label>
+                <Textarea
+                  placeholder="e.g. Birth certificate is illegible. Please re-upload a clearer photo."
+                  value={playerRejectionReason}
+                  onChange={(e) => setPlayerRejectionReason(e.target.value)}
+                  className="rounded-xl h-24"
+                />
+                <p className="text-[10px] text-muted-foreground">Required. The parent will receive this message by email.</p>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                className="flex-1 rounded-xl"
+                onClick={() => { setRejectingPlayer(null); setPlayerRejectionReason(''); }}
+                disabled={isProcessing}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1 rounded-xl"
+                onClick={handleRejectPlayer}
+                disabled={isProcessing}
+              >
+                {isProcessing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Reject & Notify Parent
               </Button>
             </DialogFooter>
           </DialogContent>

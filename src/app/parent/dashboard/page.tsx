@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { use } from 'react';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard } from 'lucide-react';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, XCircle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -61,7 +62,16 @@ export default function ParentDashboard({
     if (!db || !user) return null;
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user?.uid]);
-  const { data: players, isLoading: loadingPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string }>(playersQuery);
+  const { data: players, isLoading: loadingPlayers } = useCollection<{
+    id: string;
+    firstName?: string;
+    lastName?: string;
+    birthCertificateUrl?: string;
+    compliance?: {
+      verificationStatus?: 'pending' | 'approved' | 'rejected';
+      rejectionReason?: string;
+    };
+  }>(playersQuery);
 
   // Enrollments to derive team assignment + payment status
   const enrollmentsQuery = useMemoFirebase(() => {
@@ -220,6 +230,13 @@ export default function ParentDashboard({
   }, [db, activeSport]);
   const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string }>(announcementsQuery);
 
+  const playersNeedingAction = useMemo(() => {
+    return players?.filter(p =>
+      p.compliance?.verificationStatus === 'rejected' ||
+      (p.compliance?.verificationStatus === 'pending' && p.birthCertificateUrl)
+    ) ?? [];
+  }, [players]);
+
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -241,6 +258,34 @@ export default function ParentDashboard({
             <Link href="/parent/family">Add New Player</Link>
           </Button>
         </header>
+
+        {/* Compliance Alerts */}
+        {playersNeedingAction.length > 0 && (
+          <div className="space-y-2 mb-6">
+            {playersNeedingAction.map(p => (
+              p.compliance?.verificationStatus === 'rejected' ? (
+                <Alert key={p.id} variant="destructive">
+                  <XCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    <span className="font-semibold">Action Required: {p.firstName} {p.lastName}</span>
+                    {' — '}
+                    {p.compliance.rejectionReason ?? 'A document was rejected.'}
+                    {' '}
+                    <Link href="/parent/family" className="underline font-medium">Log in and re-upload</Link> to resolve this.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert key={p.id} className="border-yellow-300 bg-yellow-50 text-yellow-900">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertDescription>
+                    <span className="font-semibold">{p.firstName} {p.lastName}</span>
+                    {' — Documents are pending admin review. We\'ll notify you once verified.'}
+                  </AlertDescription>
+                </Alert>
+              )
+            ))}
+          </div>
+        )}
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2 mb-8">
           <Card className="border-none shadow-md">

@@ -349,8 +349,10 @@ export interface Player {
   compliance?: {
     birthCertificateVerified: boolean;
     physicalVerified: boolean;
-    verifiedBy?: string;   // UID of the admin who last verified
-    verifiedAt?: string;   // ISO timestamp of last verification
+    verifiedBy?: string;         // UID of the admin who last verified
+    verifiedAt?: string;         // ISO timestamp of last verification
+    verificationStatus?: 'pending' | 'approved' | 'rejected';
+    rejectionReason?: string;    // Set when admin rejects; cleared on re-upload
   };
 }
 

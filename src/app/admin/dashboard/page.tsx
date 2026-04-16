@@ -29,6 +29,7 @@ import {
   Inbox,
   FileText,
   Dumbbell,
+  ShieldCheck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -295,6 +296,11 @@ export default function AdminDashboard({
     return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
   }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
 
+  const allPlayersQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collectionGroup(db, 'players');
+  }, [db, isAdmin, isBoardMember]);
+
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: coaches } = useCollection<any>(coachesQuery);
@@ -308,6 +314,7 @@ export default function AdminDashboard({
   const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
   const { data: allTeams } = useCollection<{ id: string; name: string }>(allTeamsQuery);
+  const { data: allPlayers } = useCollection<{ id: string; compliance?: { verificationStatus?: string } }>(allPlayersQuery);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -487,6 +494,12 @@ export default function AdminDashboard({
   }, [allGames, practiceSlots, allConcessionSlots]);
 
   const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
+
+  const playerComplianceSummary = useMemo(() => {
+    const total = allPlayers?.length ?? 0;
+    const cleared = allPlayers?.filter(p => p.compliance?.verificationStatus === 'approved').length ?? 0;
+    return { total, cleared };
+  }, [allPlayers]);
 
   const practiceSlotCoverage = useMemo(() => {
     const totalTeams = (allTeams ?? []).length;
@@ -679,6 +692,27 @@ export default function AdminDashboard({
                   : 0}
                 className="h-1.5"
               />
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* ── Zone 2.6: Player Compliance ── */}
+        <Link href="/admin/compliance">
+          <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer mb-4">
+            <CardContent className="px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className={`h-4 w-4 shrink-0 ${playerComplianceSummary.cleared === playerComplianceSummary.total && playerComplianceSummary.total > 0 ? 'text-green-500' : 'text-yellow-500'}`} />
+                  <p className="text-xs font-medium text-muted-foreground">Player Compliance</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{playerComplianceSummary.cleared}</span>
+                  <span>of</span>
+                  <span className="font-semibold text-foreground">{playerComplianceSummary.total}</span>
+                  <span>players cleared</span>
+                  <ChevronRight className="h-3.5 w-3.5 opacity-50" />
+                </div>
+              </div>
             </CardContent>
           </Card>
         </Link>

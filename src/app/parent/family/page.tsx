@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, collectionGroup, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, collectionGroup, doc, setDoc, updateDoc, deleteDoc, getDocs, query, where, deleteField } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -185,7 +185,11 @@ export default function FamilyPage() {
       const url = await getDownloadURL(snapshot.ref);
 
       const playerRef = doc(db, 'userProfiles', user.uid, 'players', playerId);
-      await updateDoc(playerRef, { birthCertificateUrl: url });
+      await updateDoc(playerRef, {
+        birthCertificateUrl: url,
+        'compliance.verificationStatus': 'pending',
+        'compliance.rejectionReason': deleteField(),
+      });
 
       toast({ title: "Birth Certificate Uploaded", description: "Identity verification document saved." });
     } catch (error: any) {
