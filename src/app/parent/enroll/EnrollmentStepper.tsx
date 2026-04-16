@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
-import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -10,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, CreditCard, ShieldCheck, ChevronRight, ChevronLeft, Clock, ListOrdered, CheckCircle2, UserPlus, ShoppingCart, Trash2 } from 'lucide-react';
+import { Loader2, CreditCard, ShieldCheck, ChevronRight, ChevronLeft, Clock, ListOrdered, CheckCircle2, UserPlus, ShoppingCart, Trash2, Upload, FileCheck2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { errorEmitter } from '@/firebase/error-emitter';
@@ -45,6 +46,11 @@ interface StepperState {
   shoulderPadSize: string;
   pantSize: string;
   equipmentJerseySize: string;
+  // Document uploads (step 2)
+  birthCertUrl: string;
+  physicalUrl: string;
+  // Pre-generated ID used as the storage path when uploading docs for a new player
+  preGeneratedPlayerId: string;
 }
 
 /** A completed cart entry — built from StepperState before being added to the cart array. */
@@ -70,6 +76,10 @@ interface CartItem {
   shoulderPadSize?: string;
   pantSize?: string;
   equipmentJerseySize?: string;
+  birthCertUrl?: string;
+  physicalUrl?: string;
+  // For new players: the ID used for storage upload paths (same ID used when creating the player doc)
+  preGeneratedPlayerId?: string;
 }
 
 const SHIRT_SIZES = ['Youth XS', 'Youth S', 'Youth M', 'Youth L', 'Youth XL', 'Adult S', 'Adult M', 'Adult L'];
@@ -83,6 +93,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const { user, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const db = useFirestore();
+  const storage = useStorage();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -118,6 +129,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     shoulderPadSize: '',
     pantSize: '',
     equipmentJerseySize: '',
+    birthCertUrl: '',
+    physicalUrl: '',
+    preGeneratedPlayerId: crypto.randomUUID(),
   });
 
   // ── Cart state ────────────────────────────────────────────────────────────
@@ -126,6 +140,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const [cartRehydrated, setCartRehydrated] = useState(false);
 
   // ── UI state ──────────────────────────────────────────────────────────────
+  const [birthCertUploading, setBirthCertUploading] = useState(false);
+  const [physicalUploading, setPhysicalUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [isDuplicate, setIsDuplicate] = useState(false);
@@ -370,6 +386,46 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     setState(prev => ({ ...prev, emergencyContacts: updated }));
   };
 
+  // ── Document upload ───────────────────────────────────────────────────────
+  const handleDocUpload = async (
+    docType: 'birth_cert' | 'physical',
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !storage) return;
+
+    const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!ALLOWED.includes(file.type)) {
+      toast({ variant: 'destructive', title: 'Invalid File', description: 'Upload a PDF, JPG, or PNG.' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ variant: 'destructive', title: 'File Too Large', description: 'Maximum 5 MB.' });
+      return;
+    }
+
+    const setSetter = docType === 'birth_cert' ? setBirthCertUploading : setPhysicalUploading;
+    setSetter(true);
+    try {
+      // Use preGeneratedPlayerId for new players so the storage path matches the eventual player doc
+      const playerId = state.isNewPlayer ? state.preGeneratedPlayerId : state.playerId;
+      const storageRef = ref(storage, `players/${playerId}/${docType}_${Date.now()}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(snapshot.ref);
+      setState(prev => ({
+        ...prev,
+        ...(docType === 'birth_cert' ? { birthCertUrl: url } : { physicalUrl: url }),
+      }));
+      toast({ title: 'Document Uploaded', description: docType === 'birth_cert' ? 'Birth certificate saved.' : 'Physical form saved.' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Upload Failed', description: err.message });
+    } finally {
+      setSetter(false);
+    }
+    // Reset the input so the same file can be re-selected if needed
+    e.target.value = '';
+  };
+
   // ── Add current form state to cart ────────────────────────────────────────
   const buildCartItem = (): CartItem => ({
     isNewPlayer: state.isNewPlayer,
@@ -393,6 +449,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     shoulderPadSize: state.shoulderPadSize || undefined,
     pantSize: state.pantSize || undefined,
     equipmentJerseySize: state.equipmentJerseySize || undefined,
+    birthCertUrl: state.birthCertUrl || undefined,
+    physicalUrl: state.physicalUrl || undefined,
+    preGeneratedPlayerId: state.isNewPlayer ? state.preGeneratedPlayerId : undefined,
   });
 
   const handleAddAnotherPlayer = () => {
@@ -420,6 +479,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       shoulderPadSize: '',
       pantSize: '',
       equipmentJerseySize: '',
+      birthCertUrl: '',
+      physicalUrl: '',
+      preGeneratedPlayerId: crypto.randomUUID(),
     });
     setIsDuplicate(false);
     setResumableEnrollmentId(null);
@@ -463,9 +525,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       // ── Write all Firestore documents ──────────────────────────────────
       for (const item of items) {
         // 1. Create player document if this is a new player
+        // Use preGeneratedPlayerId so the storage path (set during upload) matches the doc path.
         let playerId = item.playerId ?? '';
         if (item.isNewPlayer) {
-          playerId = crypto.randomUUID();
+          playerId = item.preGeneratedPlayerId || crypto.randomUUID();
           await setDoc(doc(db, 'userProfiles', user.uid, 'players', playerId), {
             id: playerId,
             firstName: item.newPlayerFirst ?? '',
@@ -473,11 +536,20 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             dateOfBirth: item.newPlayerDOB ?? '',
             parentIds: [user.uid],
             primaryParentId: user.uid,
+            ...(item.birthCertUrl ? { birthCertificateUrl: item.birthCertUrl } : {}),
+            ...(item.physicalUrl ? { physicalFormUrl: item.physicalUrl } : {}),
             compliance: {
               birthCertificateVerified: false,
               physicalVerified: false,
               verificationStatus: 'pending',
             },
+          });
+        } else if (item.playerId && (item.birthCertUrl || item.physicalUrl)) {
+          // Existing player — attach document URLs
+          await updateDoc(doc(db, 'userProfiles', user.uid, 'players', item.playerId), {
+            ...(item.birthCertUrl ? { birthCertificateUrl: item.birthCertUrl } : {}),
+            ...(item.physicalUrl ? { physicalFormUrl: item.physicalUrl } : {}),
+            'compliance.verificationStatus': 'pending',
           });
         }
 
@@ -1115,6 +1187,76 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   </p>
                 )}
               </div>
+
+              {/* ── Required Documents ── */}
+              <div className="space-y-3 border-t pt-4">
+                <div>
+                  <Label className="text-sm font-bold uppercase tracking-wider">
+                    Required Documents <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Both documents must be uploaded before proceeding.
+                  </p>
+                </div>
+
+                {/* Birth Certificate */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
+                  <div className="flex items-center gap-3">
+                    {state.birthCertUrl ? (
+                      <FileCheck2 className="h-5 w-5 text-green-600 shrink-0" />
+                    ) : birthCertUploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+                    ) : (
+                      <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium">Birth Certificate</p>
+                      <p className="text-xs text-muted-foreground">
+                        {state.birthCertUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
+                      </p>
+                    </div>
+                  </div>
+                  <Label className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${state.birthCertUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
+                    {state.birthCertUrl ? 'Replace' : 'Upload'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      disabled={birthCertUploading || physicalUploading}
+                      onChange={(e) => handleDocUpload('birth_cert', e)}
+                    />
+                  </Label>
+                </div>
+
+                {/* Physical Form */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
+                  <div className="flex items-center gap-3">
+                    {state.physicalUrl ? (
+                      <FileCheck2 className="h-5 w-5 text-green-600 shrink-0" />
+                    ) : physicalUploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+                    ) : (
+                      <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium">Physical Form</p>
+                      <p className="text-xs text-muted-foreground">
+                        {state.physicalUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
+                      </p>
+                    </div>
+                  </div>
+                  <Label className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${state.physicalUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
+                    {state.physicalUrl ? 'Replace' : 'Upload'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      disabled={birthCertUploading || physicalUploading}
+                      onChange={(e) => handleDocUpload('physical', e)}
+                    />
+                  </Label>
+                </div>
+              </div>
             </>
           )}
 
@@ -1199,13 +1341,15 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               onClick={handleNext}
               disabled={
                 checkingDuplicate ||
+                birthCertUploading || physicalUploading ||
                 (state.step === 1 && (
                   (!state.isNewPlayer && !state.playerId) ||
                   (state.isNewPlayer && (!state.newPlayerFirst || !state.newPlayerLast || !state.newPlayerDOB)) ||
                   !state.seasonId || !state.divisionId || isDivisionClosed()
                 )) ||
                 (state.step === 2 && !emergencyContactsValid()) ||
-                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate)
+                (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
+                (state.step === 2 && (!state.birthCertUrl || !state.physicalUrl))
               }
             >
               {checkingDuplicate ? (

@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { collection, collectionGroup, doc, updateDoc, query, where } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
@@ -15,6 +15,19 @@ import { Loader2, User as UserIcon, Calendar, ChevronRight, Trophy, CheckCircle2
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+
+interface Enrollment {
+  id: string;
+  playerId: string;
+  seasonId: string;
+  paymentStatus?: string;
+  payment_status?: string;
+}
+
+interface Season {
+  id: string;
+  status?: string;
+}
 
 interface EmergencyContact {
   name: string;
@@ -64,8 +77,33 @@ export default function FamilyPage() {
     return query(collectionGroup(db, 'players'), where('secondaryParentId', '==', user.uid));
   }, [db, user]);
 
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles', user.uid, 'enrollments');
+  }, [db, user]);
+
+  const activeSeasonsQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    return query(collection(db, 'seasons'), where('status', '==', 'active'));
+  }, [db]);
+
   const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
   const { data: sharedPlayers } = useCollection<Player>(sharedPlayersQuery);
+  const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
+  const { data: activeSeasons } = useCollection<Season>(activeSeasonsQuery);
+
+  // Set of player IDs that have a paid enrollment in any currently active season
+  const registeredPlayerIds = useMemo(() => {
+    const activeSeasonIds = new Set((activeSeasons ?? []).map(s => s.id));
+    const ids = new Set<string>();
+    (enrollments ?? []).forEach(e => {
+      const status = e.paymentStatus ?? e.payment_status;
+      if ((status === 'paid' || status === 'fee_waived') && activeSeasonIds.has(e.seasonId)) {
+        ids.add(e.playerId);
+      }
+    });
+    return ids;
+  }, [enrollments, activeSeasons]);
 
   const openEditDialog = (player: Player) => {
     setEditingPlayer(player);
@@ -174,15 +212,22 @@ export default function FamilyPage() {
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="space-y-3">
-                    <Button variant="outline" className="w-full justify-between h-auto py-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 border-none font-normal" asChild>
-                      <Link href={`/parent/enroll?playerId=${player.id}`}>
-                        <div className="flex items-center gap-3">
-                          <Trophy className="h-4 w-4 text-primary" />
-                          <span className="text-sm">Season Enrollment</span>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </Link>
-                    </Button>
+                    {registeredPlayerIds.has(player.id) ? (
+                      <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-green-50 border border-green-100">
+                        <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                        <span className="text-sm text-green-700 font-medium">Registered this season</span>
+                      </div>
+                    ) : (
+                      <Button variant="outline" className="w-full justify-between h-auto py-3 rounded-xl bg-secondary/20 hover:bg-secondary/40 border-none font-normal" asChild>
+                        <Link href={`/parent/enroll?playerId=${player.id}`}>
+                          <div className="flex items-center gap-3">
+                            <Trophy className="h-4 w-4 text-primary" />
+                            <span className="text-sm">Season Enrollment</span>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </Link>
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

@@ -45,10 +45,14 @@ import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType 
 interface Enrollment {
   id: string;
   seasonId: string;
+  playerId?: string;
   payment_status?: string;
   paymentStatus?: string;
   status?: string;
   registrationFeeAmount?: number;
+  gross_amount_paid?: number;
+  updatedAt?: string;
+  registered_at?: string;
 }
 
 interface Season {
@@ -314,7 +318,7 @@ export default function AdminDashboard({
   const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
   const { data: allTeams } = useCollection<{ id: string; name: string }>(allTeamsQuery);
-  const { data: allPlayers } = useCollection<{ id: string; compliance?: { verificationStatus?: string } }>(allPlayersQuery);
+  const { data: allPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string; compliance?: { verificationStatus?: string } }>(allPlayersQuery);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -500,6 +504,19 @@ export default function AdminDashboard({
     const cleared = allPlayers?.filter(p => p.compliance?.verificationStatus === 'approved').length ?? 0;
     return { total, cleared };
   }, [allPlayers]);
+
+  const playerMap = useMemo(() => {
+    const map = new Map<string, { firstName?: string; lastName?: string }>();
+    (allPlayers ?? []).forEach(p => map.set(p.id, p));
+    return map;
+  }, [allPlayers]);
+
+  const recentPayments = useMemo(() => {
+    return [...paidEnrollments]
+      .filter(e => e.playerId)
+      .sort((a, b) => (b.updatedAt ?? b.registered_at ?? '').localeCompare(a.updatedAt ?? a.registered_at ?? ''))
+      .slice(0, 5);
+  }, [paidEnrollments]);
 
   const practiceSlotCoverage = useMemo(() => {
     const totalTeams = (allTeams ?? []).length;
@@ -696,7 +713,47 @@ export default function AdminDashboard({
           </Card>
         </Link>
 
-        {/* ── Zone 2.6: Player Compliance ── */}
+        {/* ── Zone 2.6: Recent Payments ── */}
+        {recentPayments.length > 0 && (
+          <Card className="border-none shadow-sm hover:shadow-md transition-shadow mb-4">
+            <CardContent className="px-4 py-3">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-green-500 shrink-0" />
+                  <p className="text-xs font-medium text-muted-foreground">Recent Payments</p>
+                </div>
+                <Link href="/admin/registration" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  View all <ChevronRight className="h-3 w-3" />
+                </Link>
+              </div>
+              <div className="space-y-1.5">
+                {recentPayments.map(e => {
+                  const player = playerMap.get(e.playerId ?? '');
+                  const playerName = player
+                    ? `${player.firstName ?? ''} ${player.lastName ?? ''}`.trim()
+                    : '—';
+                  const amount = e.gross_amount_paid ?? e.registrationFeeAmount ?? 0;
+                  const dateStr = e.updatedAt ?? e.registered_at ?? '';
+                  return (
+                    <div key={e.id} className="flex items-center justify-between text-sm py-0.5">
+                      <span className="font-medium truncate max-w-[160px]">{playerName}</span>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <span className="text-xs text-muted-foreground">
+                          {dateStr ? format(parseISO(dateStr.slice(0, 10)), 'MMM d') : '—'}
+                        </span>
+                        <span className="font-semibold text-green-700 tabular-nums">
+                          {formatCents(amount)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Zone 2.7: Player Compliance ── */}
         <Link href="/admin/compliance">
           <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer mb-4">
             <CardContent className="px-4 py-3">

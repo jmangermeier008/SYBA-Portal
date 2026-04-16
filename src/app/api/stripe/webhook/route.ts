@@ -83,6 +83,8 @@ export async function POST(req: Request) {
           payment_status: 'paid',
           paymentStatus: 'paid',
           stripe_payment_id: session.payment_intent ?? '',
+          // Stripe amount_total is in cents — store as-is for consistency with registrationFeeAmount
+          gross_amount_paid: session.amount_total ?? 0,
           updatedAt: new Date().toISOString(),
         });
 

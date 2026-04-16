@@ -820,42 +820,62 @@ export default function MasterRosterPage() {
                         <TableCell className="hidden lg:table-cell">
                           {(() => {
                             const parent = profileMap.get(e.parentUserId);
-                            if (!parent?.roles?.includes('Coach')) return null;
-                            const isOverride = parent.manualComplianceOverride === true;
-                            const status = parent.complianceStatus;
-                            const isApproved = status === 'approved' || isOverride;
+                            if (parent?.roles?.includes('Coach')) {
+                              // Act 153 compliance — coaches only
+                              const isOverride = parent.manualComplianceOverride === true;
+                              const status = parent.complianceStatus;
+                              const isApproved = status === 'approved' || isOverride;
+                              return (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button className="flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 border transition-colors hover:bg-muted/50">
+                                      {isApproved ? (
+                                        <><ShieldCheck className="h-3.5 w-3.5 text-green-600" /><span className="text-green-700">{isOverride ? 'Override' : 'Approved'}</span></>
+                                      ) : (
+                                        <><ShieldAlert className="h-3.5 w-3.5 text-yellow-600" /><span className="text-yellow-700">Pending</span></>
+                                      )}
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-4" align="start">
+                                    <p className="text-sm font-semibold mb-1">PA Act 153 Compliance</p>
+                                    <p className="text-xs text-muted-foreground mb-3">
+                                      {isOverride
+                                        ? 'Admin override is active. Coach bypasses clearance check.'
+                                        : status === 'approved'
+                                        ? 'All clearances reviewed and approved.'
+                                        : 'Clearances not yet approved. Enable override to grant access.'}
+                                    </p>
+                                    <div className="flex items-center justify-between">
+                                      <label className="text-xs font-medium" htmlFor={`force-approve-${e.parentUserId}`}>
+                                        Force Approve
+                                      </label>
+                                      <Switch
+                                        id={`force-approve-${e.parentUserId}`}
+                                        checked={isOverride}
+                                        onCheckedChange={() => handleToggleForceApprove(e.parentUserId, isOverride)}
+                                      />
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              );
+                            }
+                            // Birth certificate status — player rows
+                            if (p?.ageVerified) {
+                              return (
+                                <span className="flex items-center gap-1 text-xs text-green-700">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" /> Verified
+                                </span>
+                              );
+                            }
+                            if (p?.birthCertificateUrl) {
+                              return (
+                                <span className="flex items-center gap-1 text-xs text-yellow-700">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" /> Pending Review
+                                </span>
+                              );
+                            }
                             return (
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <button className="flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 border transition-colors hover:bg-muted/50">
-                                    {isApproved ? (
-                                      <><ShieldCheck className="h-3.5 w-3.5 text-green-600" /><span className="text-green-700">{isOverride ? 'Override' : 'Approved'}</span></>
-                                    ) : (
-                                      <><ShieldAlert className="h-3.5 w-3.5 text-yellow-600" /><span className="text-yellow-700">Pending</span></>
-                                    )}
-                                  </button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-64 p-4" align="start">
-                                  <p className="text-sm font-semibold mb-1">PA Act 153 Compliance</p>
-                                  <p className="text-xs text-muted-foreground mb-3">
-                                    {isOverride
-                                      ? 'Admin override is active. Coach bypasses clearance check.'
-                                      : status === 'approved'
-                                      ? 'All clearances reviewed and approved.'
-                                      : 'Clearances not yet approved. Enable override to grant access.'}
-                                  </p>
-                                  <div className="flex items-center justify-between">
-                                    <label className="text-xs font-medium" htmlFor={`force-approve-${e.parentUserId}`}>
-                                      Force Approve
-                                    </label>
-                                    <Switch
-                                      id={`force-approve-${e.parentUserId}`}
-                                      checked={isOverride}
-                                      onCheckedChange={() => handleToggleForceApprove(e.parentUserId, isOverride)}
-                                    />
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              <span className="text-xs text-muted-foreground">Not uploaded</span>
                             );
                           })()}
                         </TableCell>
