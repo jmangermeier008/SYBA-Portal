@@ -397,11 +397,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
   const handleAddAnotherPlayer = () => {
     setCart(prev => [...prev, buildCartItem()]);
-    // Reset form for the next player
+    // Reset form for the next player.
+    // If there are no existing players, go straight into new-player mode so the
+    // Next button's disabled check uses the correct validation branch.
+    const noExistingPlayers = !players || players.length === 0;
     setState({
       step: 1,
       playerId: '',
-      isNewPlayer: false,
+      isNewPlayer: noExistingPlayers,
       newPlayerFirst: '',
       newPlayerLast: '',
       newPlayerDOB: '',
