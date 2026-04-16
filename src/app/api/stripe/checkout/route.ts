@@ -48,6 +48,7 @@ export async function POST(req: Request) {
 
       const db = getAdminFirestore();
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+      let enrollmentSport = ''; // captured from first enrollment for success URL
 
       for (const enrollmentId of enrollmentIds) {
         const enrollmentSnap = await db
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
         }
 
         const enrollment = enrollmentSnap.data() as any;
+        if (!enrollmentSport && enrollment.sport) enrollmentSport = enrollment.sport;
 
         // Fix #2: Verify each enrollment belongs to the authenticated user
         if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
@@ -115,12 +117,13 @@ export async function POST(req: Request) {
 
       // Stripe metadata value limit is 500 chars. UUIDs are 36 chars each + commas.
       const enrollmentIdsStr = enrollmentIds.join(',');
+      const sportParam = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         payment_method_types: ['card'],
         line_items: lineItems,
         metadata: { enrollmentIds: enrollmentIdsStr, userId },
-        success_url: `${baseUrl}/parent/enroll/success?session_id={CHECKOUT_SESSION_ID}&enrollment_ids=${encodeURIComponent(enrollmentIdsStr)}`,
+        success_url: `${baseUrl}/parent/enroll/success?session_id={CHECKOUT_SESSION_ID}&enrollment_ids=${encodeURIComponent(enrollmentIdsStr)}${sportParam}`,
         cancel_url: `${baseUrl}/parent/enroll`,
       });
 

@@ -1,7 +1,9 @@
 "use client";
 
-import { Suspense, use, useState } from 'react';
+import { Suspense, use, useState, useEffect } from 'react';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
+import { setActiveSport } from '@/hooks/use-active-sport';
+import type { Sport } from '@/types/scheduling';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -166,6 +168,15 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
   const enrollmentIds = typeof searchParams.enrollment_ids === 'string' ? searchParams.enrollment_ids : '';
   // Fix #10: detect waitlist-only sessions passed via ?waitlisted=1
   const isWaitlistedOnly = searchParams.waitlisted === '1';
+  const sport = typeof searchParams.sport === 'string' ? searchParams.sport as Sport : null;
+
+  // Ensure sport is written to localStorage so SportProvider has context when the
+  // user navigates to the dashboard after payment — prevents the blank-screen redirect loop.
+  useEffect(() => {
+    if (sport === 'baseball' || sport === 'football') {
+      setActiveSport(sport);
+    }
+  }, [sport]);
 
   if (loading) {
     return (

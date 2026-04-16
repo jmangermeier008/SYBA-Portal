@@ -207,7 +207,7 @@ export default function Home() {
     }
   }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach, contextSport]);
 
-  if (user && profile) return null; // redirect in flight — suppress flash
+  if (user && profile && contextSport) return null; // redirect in flight — suppress flash
 
   return (
     <div className="min-h-screen flex flex-col items-center bg-gradient-to-b from-blue-50 to-white px-4 py-12">
