@@ -19,9 +19,9 @@ import {
 import { useFirestore, useUser, useAuth, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
-import { Loader2, FlaskConical, Trash2, TriangleAlert } from 'lucide-react';
+import { Loader2, FlaskConical, Trash2, TriangleAlert, CreditCard } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { seedTestEnrollments, nukeTestSeason, forceDeleteSeasonEnrollments } from '@/lib/maintenance-actions';
+import { seedTestEnrollments, nukeTestSeason, forceDeleteSeasonEnrollments, purgeStripeTestData } from '@/lib/maintenance-actions';
 import type { Season } from '@/types/scheduling';
 
 export default function DeveloperDashboardPage() {
@@ -35,6 +35,7 @@ export default function DeveloperDashboardPage() {
   const [nuking, setNuking] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const [purging, setPurging] = useState(false);
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db) return null;
@@ -125,6 +126,20 @@ export default function DeveloperDashboardPage() {
       },
       'Clear failed'
     );
+
+  const handlePurge = async () => {
+    setPurging(true);
+    try {
+      const token = await auth?.currentUser?.getIdToken();
+      if (!token) throw new Error('Not authenticated.');
+      const r = await purgeStripeTestData(token);
+      toast({ title: 'Stripe test data purged', description: `Removed ${r.purged} enrollment(s) with Stripe test-mode payment IDs.` });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Purge failed', description: err.message });
+    } finally {
+      setPurging(false);
+    }
+  };
 
   const selectedSeason = seasons?.find(s => s.id === seasonId);
 
@@ -301,6 +316,52 @@ export default function DeveloperDashboardPage() {
                       onClick={handleClear}
                     >
                       Yes, delete all enrollments
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </CardContent>
+          </Card>
+
+          {/* Purge Stripe Test Payments card */}
+          <Card className="border-none shadow-md border-destructive/20">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-destructive" />
+                Purge Stripe Test Payments
+              </CardTitle>
+              <CardDescription>
+                Permanently deletes all enrollment records that were paid through Stripe&apos;s{' '}
+                <strong>test mode</strong> (session IDs starting with{' '}
+                <code className="text-xs bg-muted px-1 rounded">cs_test_</code>) or seeded with{' '}
+                <code className="text-xs bg-muted px-1 rounded">stripe_payment_id: &quot;test_seed&quot;</code>.
+                Operates across all seasons. This action cannot be undone.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" className="rounded-xl" disabled={purging}>
+                    {purging ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Purge Stripe Test Data
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Purge all Stripe test payments?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete every enrollment record where the Stripe session ID
+                      starts with <code>cs_test_</code> or the payment ID is <code>test_seed</code>.
+                      This affects all seasons and cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={handlePurge}
+                    >
+                      Yes, purge test payments
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

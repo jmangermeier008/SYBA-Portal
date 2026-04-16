@@ -157,6 +157,31 @@ export interface Game {
   originalFieldName?: string;
 }
 
+/**
+ * A game or practice event in the `teams/{teamId}/games` subcollection (coach/parent-facing).
+ * IMPORTANT: Different shape from the top-level `Game` type:
+ *   - `dateTime` is a single ISO string ("YYYY-MM-DDTHH:MM:00") instead of separate `date` + `time`
+ *   - `type` values are capitalized ('Game' | 'Practice') instead of lowercase
+ *   - `cancelled: boolean` represents cancellation status instead of a `status` field
+ */
+export interface TeamGame {
+  id: string;
+  teamId: string;
+  seasonId: string;
+  type: 'Game' | 'Practice';    // Always capitalized — differs from top-level GameType
+  dateTime: string;              // ISO combined: "YYYY-MM-DDTHH:MM:00"
+  location: string;              // fieldName
+  fieldId: string;
+  opponentName?: string;         // The OTHER team's name (only for 'Game' type)
+  cancelled: boolean;
+  cancellationReason?: string;
+  practiceSlotId?: string;       // Links to practiceSlots/{id} when applicable
+  coachUserId?: string;
+  umpireName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Concession Slots  (collection: concessionSlots)
 // ---------------------------------------------------------------------------

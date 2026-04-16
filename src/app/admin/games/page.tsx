@@ -325,7 +325,8 @@ export default function AdminGamesPage() {
     }
     setIsSaving(true);
     try {
-      const CHUNK = 499;
+      // Each practice generates 2 writes (games/ + teams/{id}/games/), so chunk at 249 to stay under Firestore's 500-write-per-batch limit.
+      const CHUNK = 249;
       const recurrenceId = crypto.randomUUID();
       const selectedDivision = (divisions ?? []).find(d => d.id === form.divisionId);
       const baseFields = {
@@ -348,11 +349,22 @@ export default function AdminGamesPage() {
       for (let i = 0; i < previewDates.length; i += CHUNK) {
         const batch = writeBatch(db);
         for (const date of previewDates.slice(i, i + CHUNK)) {
-          batch.set(doc(collection(db, 'games')), {
+          // Use an explicit ID so the same ID can be used in the team subcollection write.
+          const practiceId = crypto.randomUUID();
+          batch.set(doc(db, 'games', practiceId), {
             ...baseFields,
             date,
             createdAt: Timestamp.now(),
           });
+          // Dual Game Model: mirror to team subcollection so coaches/parents see recurring practices.
+          if (form.teamId) {
+            batch.set(doc(db, 'teams', form.teamId, 'games', practiceId), {
+              id: practiceId, seasonId: activeSeason.id, teamId: form.teamId,
+              type: 'Practice', dateTime: `${date}T${form.time}:00`,
+              location: fieldMap[form.fieldId] ?? '', fieldId: form.fieldId,
+              cancelled: false, isRecurring: true, recurrenceId, createdAt: Timestamp.now(),
+            });
+          }
         }
         await batch.commit();
       }
@@ -446,8 +458,24 @@ export default function AdminGamesPage() {
           }
         }
 
-        // No cascade needed — just update the game
-        await updateDoc(doc(db, 'games', editingGame.id), payload);
+        // No cascade needed — batch update the game and its team subcollection mirrors atomically.
+        const editBatch = writeBatch(db);
+        editBatch.update(doc(db, 'games', editingGame.id), payload);
+
+        const teamUpdatePayload = {
+          dateTime: `${form.date}T${form.time}:00`,
+          location: fieldMap[form.fieldId] ?? '',
+          fieldId: form.fieldId,
+          updatedAt: Timestamp.now(),
+        };
+        if (editingGame.type === 'game') {
+          if (editingGame.homeTeamId) editBatch.update(doc(db, 'teams', editingGame.homeTeamId, 'games', editingGame.id), teamUpdatePayload);
+          if (editingGame.awayTeamId) editBatch.update(doc(db, 'teams', editingGame.awayTeamId, 'games', editingGame.id), teamUpdatePayload);
+        } else if (editingGame.teamId) {
+          editBatch.update(doc(db, 'teams', editingGame.teamId, 'games', editingGame.id), teamUpdatePayload);
+        }
+        await editBatch.commit();
+
         if (user) {
           writeAuditLog(db, {
             action: 'game.updated',
@@ -478,23 +506,47 @@ export default function AdminGamesPage() {
         sport: activeSport ?? undefined,
       };
 
-      if (shiftForm.enabled && form.type === 'game') {
+      // Always use a batch so team subcollection writes are atomic with the top-level game doc.
+      {
         const batch = writeBatch(db);
         batch.set(doc(db, 'games', gameId), createPayload);
-        batch.set(doc(db, 'concessionSlots', crypto.randomUUID()), {
-          gameId, isStandalone: false, gameDate: form.date,
-          startTime: shiftForm.startTime || form.time, endTime: shiftForm.endTime,
-          capacity: Number(shiftForm.capacity), claimedCount: 0,
-          cancelCutoffHours: 24, description: shiftForm.description.trim(),
-          status: 'active', signups: [], createdAt: Timestamp.now(),
-        });
+
+        // Dual Game Model: mirror to team subcollections so coaches/parents can see this game.
+        const dateTime = `${form.date}T${form.time}:00`;
+        if (form.type === 'game' && form.homeTeamId && form.awayTeamId) {
+          batch.set(doc(db, 'teams', form.homeTeamId, 'games', gameId), {
+            id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.homeTeamId,
+            type: 'Game', dateTime, location: fieldMap[form.fieldId] ?? '',
+            fieldId: form.fieldId, opponentName: teamMap[form.awayTeamId] ?? '',
+            cancelled: false, createdAt: Timestamp.now(),
+          });
+          batch.set(doc(db, 'teams', form.awayTeamId, 'games', gameId), {
+            id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.awayTeamId,
+            type: 'Game', dateTime, location: fieldMap[form.fieldId] ?? '',
+            fieldId: form.fieldId, opponentName: teamMap[form.homeTeamId] ?? '',
+            cancelled: false, createdAt: Timestamp.now(),
+          });
+        } else if (form.type === 'practice' && form.teamId) {
+          batch.set(doc(db, 'teams', form.teamId, 'games', gameId), {
+            id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.teamId,
+            type: 'Practice', dateTime, location: fieldMap[form.fieldId] ?? '',
+            fieldId: form.fieldId, cancelled: false, createdAt: Timestamp.now(),
+          });
+        }
+
+        if (shiftForm.enabled && form.type === 'game') {
+          batch.set(doc(db, 'concessionSlots', crypto.randomUUID()), {
+            gameId, isStandalone: false, gameDate: form.date,
+            startTime: shiftForm.startTime || form.time, endTime: shiftForm.endTime,
+            capacity: Number(shiftForm.capacity), claimedCount: 0,
+            cancelCutoffHours: 24, description: shiftForm.description.trim(),
+            status: 'active', signups: [], createdAt: Timestamp.now(),
+          });
+        }
+
         await batch.commit();
         if (user) writeAuditLog(db, auditCreateOpts);
-        toast({ title: 'Saved', description: 'Game and concession shift added.' });
-      } else {
-        await setDoc(doc(db, 'games', gameId), createPayload);
-        if (user) writeAuditLog(db, auditCreateOpts);
-        toast({ title: 'Saved', description: `${form.type === 'game' ? 'Game' : 'Practice'} added.` });
+        toast({ title: 'Saved', description: shiftForm.enabled && form.type === 'game' ? 'Game and concession shift added.' : `${form.type === 'game' ? 'Game' : 'Practice'} added.` });
       }
 
       closeDialog();
@@ -514,6 +566,17 @@ export default function AdminGamesPage() {
       const payload = { ...buildGamePayload(), updatedAt: Timestamp.now() };
       const batch = writeBatch(db);
       batch.update(doc(db, 'games', editingGame.id), payload);
+
+      // Dual Game Model: sync date/time/field changes to team subcollections.
+      const rescheduledTeamPayload = {
+        dateTime: `${form.date}T${form.time}:00`,
+        location: fieldMap[form.fieldId] ?? '',
+        fieldId: form.fieldId,
+        updatedAt: Timestamp.now(),
+      };
+      if (editingGame.homeTeamId) batch.update(doc(db, 'teams', editingGame.homeTeamId, 'games', editingGame.id), rescheduledTeamPayload);
+      if (editingGame.awayTeamId) batch.update(doc(db, 'teams', editingGame.awayTeamId, 'games', editingGame.id), rescheduledTeamPayload);
+      if (editingGame.teamId) batch.update(doc(db, 'teams', editingGame.teamId, 'games', editingGame.id), rescheduledTeamPayload);
 
       const affectedParentIds = new Set<string>();
       pendingShiftsRef.current.forEach(shiftDoc => {
@@ -588,6 +651,12 @@ export default function AdminGamesPage() {
         updatedAt: Timestamp.now(),
       });
 
+      // Dual Game Model: mark cancelled in team subcollections so coaches/parents see cancellation.
+      const cancelTeamPayload = { cancelled: true, cancellationReason: 'Game cancelled by admin', updatedAt: Timestamp.now() };
+      if (game.homeTeamId) batch.update(doc(db, 'teams', game.homeTeamId, 'games', game.id), cancelTeamPayload);
+      if (game.awayTeamId) batch.update(doc(db, 'teams', game.awayTeamId, 'games', game.id), cancelTeamPayload);
+      if (game.teamId) batch.update(doc(db, 'teams', game.teamId, 'games', game.id), cancelTeamPayload);
+
       const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       const affectedParentIds = new Set<string>();
       shiftsSnap.forEach(shiftDoc => {
@@ -648,6 +717,12 @@ export default function AdminGamesPage() {
     try {
       const batch = writeBatch(db);
       batch.delete(doc(db, 'games', game.id));
+
+      // Dual Game Model: remove from team subcollections so coaches/parents no longer see the game.
+      if (game.homeTeamId) batch.delete(doc(db, 'teams', game.homeTeamId, 'games', game.id));
+      if (game.awayTeamId) batch.delete(doc(db, 'teams', game.awayTeamId, 'games', game.id));
+      if (game.teamId) batch.delete(doc(db, 'teams', game.teamId, 'games', game.id));
+
       const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       shiftsSnap.forEach(shiftDoc => batch.delete(shiftDoc.ref));
       await batch.commit();

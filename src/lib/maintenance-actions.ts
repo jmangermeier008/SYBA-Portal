@@ -166,6 +166,36 @@ export async function forceDeleteSeasonEnrollments(
   return { enrollmentsDeleted };
 }
 
+export async function purgeStripeTestData(
+  idToken: string
+): Promise<{ purged: number }> {
+  await verifyAdminCaller(idToken);
+  const db = getAdminFirestore();
+
+  // Two detection signals for Stripe test-mode enrollments:
+  // 1. stripeSessionId starts with 'cs_test_' (Stripe test mode checkout sessions)
+  // 2. stripe_payment_id === 'test_seed' (records from seedTestEnrollments)
+  const [testSessionSnap, testSeedSnap] = await Promise.all([
+    db.collectionGroup('enrollments')
+      .where('stripeSessionId', '>=', 'cs_test_')
+      .where('stripeSessionId', '<', 'cs_test_~')
+      .get(),
+    db.collectionGroup('enrollments')
+      .where('stripe_payment_id', '==', 'test_seed')
+      .get(),
+  ]);
+
+  // De-duplicate by Firestore document path
+  const docsById = new Map<string, QueryDocumentSnapshot>();
+  [...testSessionSnap.docs, ...testSeedSnap.docs].forEach(d => docsById.set(d.ref.path, d));
+  const uniqueDocs = [...docsById.values()];
+
+  if (uniqueDocs.length === 0) return { purged: 0 };
+
+  const purged = await batchDelete(uniqueDocs);
+  return { purged };
+}
+
 export async function clearUserNotifications(
   idToken: string,
   email: string

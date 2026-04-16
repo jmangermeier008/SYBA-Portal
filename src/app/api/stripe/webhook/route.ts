@@ -88,6 +88,20 @@ export async function POST(req: Request) {
 
         console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
 
+        // Write in-app payment confirmation notification (fire-and-forget)
+        db.collection('notifications').doc().set({
+          userId,
+          type: 'paymentConfirmed',
+          title: 'Registration Payment Confirmed',
+          body: 'Your payment has been confirmed. Your player\'s registration is now complete.',
+          relatedDocId: enrollmentId,
+          relatedDocType: 'enrollment',
+          read: false,
+          createdAt: new Date().toISOString(),
+        }).catch((err: any) =>
+          console.error('[stripe/webhook] notification write error:', err.message)
+        );
+
         // Increment registeredCount on the division
         if (enrollment.seasonId && enrollment.divisionId) {
           const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);

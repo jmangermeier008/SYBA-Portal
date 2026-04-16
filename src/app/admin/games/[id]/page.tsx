@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { doc, collection, query, where, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, collection, query, where, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   CalendarDays,
   MapPin,
@@ -112,12 +112,13 @@ export default function GameDetailPage({
     }
     setIsSavingScore(true);
     try {
-      await updateDoc(doc(db, 'games', game.id), {
-        homeScore,
-        awayScore,
-        status: 'completed',
-        updatedAt: new Date().toISOString(),
-      });
+      const batch = writeBatch(db);
+      const updatedAt = new Date().toISOString();
+      batch.update(doc(db, 'games', game.id), { homeScore, awayScore, status: 'completed', updatedAt });
+      // Dual Game Model: sync completion status to team subcollections.
+      if (game.homeTeamId) batch.update(doc(db, 'teams', game.homeTeamId, 'games', game.id), { cancelled: false, updatedAt });
+      if (game.awayTeamId) batch.update(doc(db, 'teams', game.awayTeamId, 'games', game.id), { cancelled: false, updatedAt });
+      await batch.commit();
       setGame(prev => prev ? { ...prev, homeScore, awayScore, status: 'completed' } : prev);
       setEditingScore(false);
       toast({ title: 'Score Saved', description: 'Final score has been recorded and game marked complete.' });
@@ -132,10 +133,13 @@ export default function GameDetailPage({
     if (!game) return;
     setIsMarkingComplete(true);
     try {
-      await updateDoc(doc(db, 'games', game.id), {
-        status: 'completed',
-        updatedAt: new Date().toISOString(),
-      });
+      const batch = writeBatch(db);
+      const updatedAt = new Date().toISOString();
+      batch.update(doc(db, 'games', game.id), { status: 'completed', updatedAt });
+      // Dual Game Model: sync completion status to team subcollections.
+      if (game.homeTeamId) batch.update(doc(db, 'teams', game.homeTeamId, 'games', game.id), { cancelled: false, updatedAt });
+      if (game.awayTeamId) batch.update(doc(db, 'teams', game.awayTeamId, 'games', game.id), { cancelled: false, updatedAt });
+      await batch.commit();
       setGame(prev => prev ? { ...prev, status: 'completed' } : prev);
       toast({ title: 'Game Marked Complete' });
     } catch {
