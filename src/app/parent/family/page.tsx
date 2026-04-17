@@ -43,6 +43,7 @@ interface Player {
   parentUserId: string;
   medicalNotes?: string;
   ageVerified?: boolean;
+  birthCertificateUrl?: string;
   emergencyContacts?: EmergencyContact[];
   primaryParentId?: string;
   secondaryParentId?: string;
@@ -193,11 +194,15 @@ export default function FamilyPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {player.ageVerified && (
+                      {player.ageVerified ? (
                         <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
                           <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
                         </Badge>
-                      )}
+                      ) : player.birthCertificateUrl ? (
+                        <Badge variant="default" className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-none">
+                          Pending Review
+                        </Badge>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="icon"

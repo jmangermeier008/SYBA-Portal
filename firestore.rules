@@ -82,6 +82,10 @@ service cloud.firestore {
       allow read: if isBoardMember();
     }
 
+    match /{path=**}/divisions/{divisionId} {
+      allow read: if isSignedIn();
+    }
+
     match /{path=**}/rsvps/{rsvpId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.parentUserId == request.auth.uid;
@@ -116,7 +120,10 @@ service cloud.firestore {
           (isSignedIn() && resource.data.secondaryParentId == request.auth.uid);
         allow create: if isUser(userId) || isAdmin();
         allow update: if isUser(userId) || isAdmin() ||
-          (isSignedIn() && resource.data.secondaryParentId == request.auth.uid);
+          (isSignedIn() && resource.data.secondaryParentId == request.auth.uid) ||
+          (isBoardMember() && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['ageVerified', 'compliance', 'dateOfBirth', 'divisionId',
+                      'verifiedBy', 'verifiedByName', 'verifiedAt', 'updatedAt']));
         allow delete: if isUser(userId) || isAdmin();
       }
 
