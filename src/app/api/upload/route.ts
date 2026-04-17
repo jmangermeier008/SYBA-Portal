@@ -30,9 +30,11 @@ export async function POST(req: NextRequest) {
     const fileRef = bucket.file(path);
     const buffer = Buffer.from(await file.arrayBuffer());
     await fileRef.save(buffer, { contentType: file.type });
-    await fileRef.makePublic();
 
-    const url = `https://storage.googleapis.com/syba-bucket/${encodeURIComponent(path).replace(/%2F/g, '/')}`;
+    const [url] = await fileRef.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 10 * 365 * 24 * 60 * 60 * 1000, // 10 years
+    });
     return NextResponse.json({ url });
   } catch (err: any) {
     console.error('[upload] error:', err);
