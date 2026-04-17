@@ -1,0 +1,17 @@
+[
+  {
+    "origin": [
+      "https://sharpsvillesports.com",
+      "https://syba-portal.vercel.app",
+      "http://localhost:9002"
+    ],
+    "method": ["GET", "POST", "PUT", "DELETE", "HEAD"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": [
+      "Content-Type",
+      "Authorization",
+      "Content-Length",
+      "X-Requested-With"
+    ]
+  }
+]
