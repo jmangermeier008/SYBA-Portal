@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
-import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -90,7 +89,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
   const { user, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const db = useFirestore();
-  const storage = useStorage();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -389,7 +387,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = e.target.files?.[0];
-    if (!file || !user || !storage) return;
+    if (!file || !user) return;
 
     const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png'];
     if (!ALLOWED.includes(file.type)) {
@@ -404,11 +402,26 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     const setSetter = docType === 'birth_cert' ? setBirthCertUploading : setPhysicalUploading;
     setSetter(true);
     try {
-      // Use preGeneratedPlayerId for new players so the storage path matches the eventual player doc
       const playerId = state.isNewPlayer ? state.preGeneratedPlayerId : state.playerId;
-      const storageRef = ref(storage, `players/${playerId}/${docType}_${Date.now()}`);
-      const snapshot = await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(snapshot.ref);
+      const path = `players/${playerId}/${docType}_${Date.now()}`;
+
+      const idToken = await user.getIdToken();
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', path);
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Upload failed');
+      }
+
+      const { url } = await res.json();
       setState(prev => ({
         ...prev,
         ...(docType === 'birth_cert' ? { birthCertUrl: url } : { physicalUrl: url }),
