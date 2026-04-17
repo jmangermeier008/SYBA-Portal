@@ -1,6 +1,7 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { getStorage } from 'firebase-admin/storage';
 
 function getAdminApp() {
   if (getApps().length > 0) {
@@ -13,7 +14,7 @@ function getAdminApp() {
   }
 
   const credential = cert(JSON.parse(serviceAccountKey));
-  return initializeApp({ credential });
+  return initializeApp({ credential, storageBucket: 'syba-bucket' });
 }
 
 export function getAdminFirestore() {
@@ -24,4 +25,9 @@ export function getAdminFirestore() {
 export function getAdminAuth() {
   const app = getAdminApp();
   return getAuth(app);
+}
+
+export function getAdminStorage() {
+  const app = getAdminApp();
+  return getStorage(app);
 }
