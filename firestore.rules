@@ -124,7 +124,7 @@ service cloud.firestore {
           (isBoardMember() && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['ageVerified', 'compliance', 'dateOfBirth', 'divisionId',
                       'verifiedBy', 'verifiedByName', 'verifiedAt', 'updatedAt']));
-        allow delete: if isUser(userId) || isAdmin();
+        allow delete: if isUser(userId) || isAdmin() || isSiteAdmin();
       }
 
       match /enrollments/{enrollmentId} {
