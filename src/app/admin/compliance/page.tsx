@@ -22,7 +22,8 @@ import {
   Eye,
   History,
   FileText,
-  Lock
+  Lock,
+  Download
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -271,6 +272,41 @@ export default function AdminCompliancePage() {
       .finally(() => setIsProcessing(false));
   };
 
+  const exportPlayersCSV = () => {
+    const headers = [
+      'Player Name', 'Division', 'Age', 'DOB',
+      'Birth Cert Status', 'Birth Cert Verified By', 'Birth Cert Verified At',
+      'Physical Status', 'Physical Verified At',
+    ];
+    const rows = filteredPlayers.map(player => {
+      const divName = player.divisionId ? (divisionNameMap.get(player.divisionId) ?? '') : '';
+      const age = getLeagueAge(player.dateOfBirth) ?? '';
+      const birthCertStatus = player.ageVerified ? 'Verified' : player.birthCertificateUrl ? 'Pending' : 'No Document';
+      const physicalStatus = player.compliance?.physicalVerified ? 'Verified' : player.physicalFormUrl ? 'Pending' : 'No Document';
+      return [
+        `${player.firstName} ${player.lastName}`,
+        divName,
+        String(age),
+        player.dateOfBirth ?? '',
+        birthCertStatus,
+        player.verifiedByName ?? '',
+        player.verifiedAt ?? '',
+        physicalStatus,
+        player.compliance?.verifiedAt ?? '',
+      ];
+    });
+    const csv = [headers, ...rows]
+      .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `player-identity-compliance-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const getStatusIcon = (status?: string) => {
     switch (status) {
       case 'Approved': return <CheckCircle2 className="h-4 w-4 text-green-500" />;
@@ -426,6 +462,10 @@ export default function AdminCompliancePage() {
                   <p className="text-xs text-muted-foreground ml-auto">
                     {filteredPlayers.length} player{filteredPlayers.length !== 1 ? 's' : ''}
                   </p>
+                  <Button variant="outline" size="sm" className="rounded-xl h-9" onClick={exportPlayersCSV} disabled={filteredPlayers.length === 0}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
+                  </Button>
                 </div>
 
                 {/* Table */}
