@@ -335,6 +335,8 @@ export interface UserProfile {
   enrolledPlayerIds?: string[];
   // Coaches — all teams they are assigned to:
   teamIds?: string[];
+  // Football coaches — divisions they are assigned to (football has no teams):
+  divisionIds?: string[];
   notificationPrefs?: NotificationPrefs;
   preferredSport?: Sport;
   complianceStatus?: 'pending' | 'approved' | 'action_required';

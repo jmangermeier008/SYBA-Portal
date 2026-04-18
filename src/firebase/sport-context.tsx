@@ -17,6 +17,8 @@ interface SportContextState {
   isBoardMember: boolean;
   isCoach: boolean;
   isParent: boolean;
+  // Football coaches — divisions they are assigned to (empty for baseball / non-coaches)
+  coachDivisionIds: string[];
   // Branding — derived from SPORT_CONFIG; safe to destructure in any component
   logoUrl: string;      // resolves to SPORT_CONFIG[activeSport].logoUrl, falls back to HUB_LOGO_URL
   leagueName: string;   // full org name, e.g. "Sharpsville Youth Baseball Association"
@@ -29,6 +31,7 @@ const SportContext = createContext<SportContextState>({
   isBoardMember: false,
   isCoach: false,
   isParent: false,
+  coachDivisionIds: [],
   logoUrl: HUB_LOGO_URL,
   leagueName: 'Athletics Hub',
 });
@@ -115,14 +118,16 @@ export function SportProvider({ children }: { children: ReactNode }) {
   // Parents are not sport-specific — fall back to legacy roles for parent check
   const isParent = sportRoleList.includes('Parent') || roles.includes('Parent');
 
+  const coachDivisionIds: string[] = (activeSport === 'football' ? profile?.divisionIds : undefined) ?? [];
+
   // Branding — derived from SPORT_CONFIG for the active sport
   const logoUrl = activeSport ? SPORT_CONFIG[activeSport].logoUrl : HUB_LOGO_URL;
   const leagueName = activeSport ? SPORT_CONFIG[activeSport].leagueName : 'Athletics Hub';
 
   const contextValue = useMemo(
-    () => ({ activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl, leagueName }),
+    () => ({ activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, coachDivisionIds, logoUrl, leagueName }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl, leagueName]
+    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, coachDivisionIds, logoUrl, leagueName]
   );
 
   // Always render the provider so useSport() never throws regardless of tree position.

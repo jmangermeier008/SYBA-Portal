@@ -384,14 +384,18 @@ export default function ConcessionsAdminPage() {
       const season = { id: seasonDoc.id, ...seasonDoc.data() } as Season;
       setSelectedSeason(season);
 
-      // Unique parent IDs from enrollments
+      // Unique parent IDs from enrollments; also count enrollments per parent for per-player requirement
       const enrollmentsSnap = await getDocs(
         query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
       );
       const parentIds = new Set<string>();
+      const enrollmentCountByParent = new Map<string, number>();
       enrollmentsSnap.docs.forEach(d => {
         const pid = d.data().parentUserId as string;
-        if (pid) parentIds.add(pid);
+        if (pid) {
+          parentIds.add(pid);
+          enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
+        }
       });
 
       if (parentIds.size === 0) { setFamilies([]); return; }
@@ -439,14 +443,14 @@ export default function ConcessionsAdminPage() {
         }
       });
 
-      const required = season.volunteerSlotsRequired ?? 1;
+      const slotsPerPlayer = season.volunteerSlotsRequired ?? 1;
       const result: FamilyCompliance[] = parentIdArray.map(pid => ({
         parentUserId: pid,
         displayName: profileMap.get(pid)?.displayName ?? pid,
         email: profileMap.get(pid)?.email ?? '',
         workedCount: workedCountMap.get(pid) ?? 0,
         pendingCount: pendingCountMap.get(pid) ?? 0,
-        required,
+        required: (enrollmentCountByParent.get(pid) ?? 1) * slotsPerPlayer,
       }));
 
       result.sort((a, b) => {

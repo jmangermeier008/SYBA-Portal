@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import {
+  addDoc,
   collection,
   collectionGroup,
   doc,
@@ -20,6 +21,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
   ShieldCheck,
   Lock,
@@ -27,6 +30,9 @@ import {
   Users,
   RotateCcw,
   Search,
+  Package,
+  Tag,
+  Plus,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -151,6 +157,32 @@ interface Team {
   divisionId: string;
 }
 
+type ShedItemType = 'helmet' | 'shoulder_pads' | 'game_jersey' | 'scrimmage_jersey' | 'practice_jersey' | 'game_pants' | 'practice_pants';
+
+interface ShedItem {
+  id: string;
+  tagNumber: string;
+  type: ShedItemType;
+  size: string;
+  status: 'available' | 'issued';
+  issuedToPlayerId?: string;
+  issuedToParentUserId?: string;
+  issuedToEnrollmentId?: string;
+  issuedAt?: string;
+  returnedAt?: string;
+  notes?: string;
+}
+
+const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
+  helmet: 'Helmet',
+  shoulder_pads: 'Shoulder Pads',
+  game_jersey: 'Game Jersey',
+  scrimmage_jersey: 'Scrimmage Jersey',
+  practice_jersey: 'Practice Jersey',
+  game_pants: 'Game Pants',
+  practice_pants: 'Practice Pants',
+};
+
 const ALL_STATUS_FIELDS: (keyof FootballEquipment)[] = [
   'helmetStatus',
   'padStatus',
@@ -167,6 +199,7 @@ export default function EquipmentPage() {
   const { activeSport } = useSport();
   const { toast } = useToast();
 
+  const [activeTab, setActiveTab] = useState<'assignments' | 'shed'>('assignments');
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -174,6 +207,15 @@ export default function EquipmentPage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [playerNameMap, setPlayerNameMap] = useState<Map<string, string>>(new Map());
   const [playersLoading, setPlayersLoading] = useState(false);
+
+  // Shed Inventory state
+  const [shedSearchQuery, setShedSearchQuery] = useState('');
+  const [addItemDialog, setAddItemDialog] = useState(false);
+  const [addItemForm, setAddItemForm] = useState({ tagNumber: '', type: 'helmet' as ShedItemType, size: '', notes: '' });
+  const [addItemSaving, setAddItemSaving] = useState(false);
+  const [checkOutDialog, setCheckOutDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
+  const [checkOutPlayerId, setCheckOutPlayerId] = useState('');
+  const [checkOutSaving, setCheckOutSaving] = useState(false);
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -206,6 +248,13 @@ export default function EquipmentPage() {
   }, [db, isAdmin, isBoardMember, activeSport, selectedSeasonId]);
 
   const { data: teams } = useCollection<Team>(teamsQuery);
+
+  const shedQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'equipmentInventory');
+  }, [db, isAdmin, isBoardMember]);
+
+  const { data: shedItems } = useCollection<ShedItem>(shedQuery);
 
   useEffect(() => {
     if (!db || !enrollments || enrollments.length === 0) return;
@@ -344,6 +393,80 @@ export default function EquipmentPage() {
     }
   }
 
+  const filteredShedItems = useMemo(() => {
+    if (!shedItems) return [];
+    const q = shedSearchQuery.toLowerCase();
+    if (!q) return shedItems;
+    return shedItems.filter(item =>
+      item.tagNumber.toLowerCase().includes(q) ||
+      SHED_ITEM_TYPES[item.type].toLowerCase().includes(q) ||
+      item.size.toLowerCase().includes(q) ||
+      (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
+    );
+  }, [shedItems, shedSearchQuery, playerNameMap]);
+
+  async function handleAddShedItem() {
+    if (!db || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()) return;
+    setAddItemSaving(true);
+    try {
+      await addDoc(collection(db, 'equipmentInventory'), {
+        tagNumber: addItemForm.tagNumber.trim(),
+        type: addItemForm.type,
+        size: addItemForm.size.trim(),
+        status: 'available',
+        notes: addItemForm.notes.trim() || '',
+      });
+      toast({ title: 'Item added', description: `Tag #${addItemForm.tagNumber} added to Shed.` });
+      setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '' });
+      setAddItemDialog(false);
+    } catch (err: any) {
+      toast({ title: 'Failed to add item', description: err.message, variant: 'destructive' });
+    } finally {
+      setAddItemSaving(false);
+    }
+  }
+
+  async function handleCheckOut() {
+    if (!db || !checkOutDialog.item || !checkOutPlayerId) return;
+    const item = checkOutDialog.item;
+    // Find the enrollment for the selected player in the current season
+    const enrollment = (enrollments ?? []).find(e => e.playerId === checkOutPlayerId);
+    setCheckOutSaving(true);
+    try {
+      await updateDoc(doc(db, 'equipmentInventory', item.id), {
+        status: 'issued',
+        issuedToPlayerId: checkOutPlayerId,
+        issuedToParentUserId: enrollment?.parentUserId ?? '',
+        issuedToEnrollmentId: enrollment?.id ?? '',
+        issuedAt: new Date().toISOString(),
+        returnedAt: '',
+      });
+      toast({ title: 'Checked out', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(checkOutPlayerId) ?? checkOutPlayerId}.` });
+      setCheckOutDialog({ open: false, item: null });
+      setCheckOutPlayerId('');
+    } catch (err: any) {
+      toast({ title: 'Check-out failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setCheckOutSaving(false);
+    }
+  }
+
+  async function handleReturnShedItem(item: ShedItem) {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'equipmentInventory', item.id), {
+        status: 'available',
+        issuedToPlayerId: '',
+        issuedToParentUserId: '',
+        issuedToEnrollmentId: '',
+        returnedAt: new Date().toISOString(),
+      });
+      toast({ title: 'Item returned', description: `Tag #${item.tagNumber} is now available.` });
+    } catch (err: any) {
+      toast({ title: 'Return failed', description: err.message, variant: 'destructive' });
+    }
+  }
+
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -401,8 +524,17 @@ export default function EquipmentPage() {
           </p>
         </header>
 
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'assignments' | 'shed')} className="space-y-6">
+          <TabsList className="rounded-xl">
+            <TabsTrigger value="assignments" className="rounded-lg">Player Assignments</TabsTrigger>
+            <TabsTrigger value="shed" className="rounded-lg flex items-center gap-1.5">
+              <Package className="h-3.5 w-3.5" /> Shed Inventory
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="assignments" className="space-y-4">
         {/* Season + search */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
           <div className="space-y-1 w-64">
             <Label>Select Season</Label>
             <Select value={selectedSeasonId} onValueChange={(v) => { setSelectedSeasonId(v); setSelectedIds(new Set()); }}>
@@ -705,6 +837,220 @@ export default function EquipmentPage() {
             </p>
           </>
         )}
+          </TabsContent>
+
+          <TabsContent value="shed" className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end justify-between">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search tag, type, size, player…"
+                  value={shedSearchQuery}
+                  onChange={(e) => setShedSearchQuery(e.target.value)}
+                  className="pl-9 w-72"
+                />
+              </div>
+              <Button onClick={() => setAddItemDialog(true)} className="rounded-xl gap-1.5">
+                <Plus className="h-4 w-4" /> Add Item
+              </Button>
+            </div>
+
+            {(!shedItems || shedItems.length === 0) && !shedSearchQuery && (
+              <Card className="border-none shadow-md">
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                  <Package className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground font-medium">No inventory items yet</p>
+                  <p className="text-sm text-muted-foreground">Add items using the button above to start tracking gear by tag number.</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {filteredShedItems.length === 0 && shedSearchQuery && (
+              <Card className="border-none shadow-md">
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                  <Package className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground font-medium">No items match your search</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {filteredShedItems.length > 0 && (
+              <Card className="border-none shadow-md overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Tag #</th>
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Type</th>
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Size</th>
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Status</th>
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden sm:table-cell">Issued To</th>
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden md:table-cell">Issued At</th>
+                        <th className="px-4 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredShedItems.map((item) => (
+                        <tr key={item.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
+                          <td className="px-4 py-2 font-medium">
+                            <span className="flex items-center gap-1.5">
+                              <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+                              {item.tagNumber}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2">{SHED_ITEM_TYPES[item.type]}</td>
+                          <td className="px-4 py-2">{item.size}</td>
+                          <td className="px-4 py-2">
+                            <span className={cn(
+                              'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
+                              item.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                            )}>
+                              {item.status === 'available' ? 'Available' : 'Issued'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">
+                            {item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? item.issuedToPlayerId) : '—'}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground hidden md:table-cell">
+                            {item.issuedAt ? new Date(item.issuedAt).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {item.status === 'available' ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-full h-8 text-xs gap-1.5"
+                                onClick={() => { setCheckOutDialog({ open: true, item }); setCheckOutPlayerId(''); }}
+                              >
+                                Check Out
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-full h-8 text-xs gap-1.5"
+                                onClick={() => handleReturnShedItem(item)}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" /> Return
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              {shedItems?.length ?? 0} item{(shedItems?.length ?? 0) !== 1 ? 's' : ''} in inventory
+              {' · '}{shedItems?.filter(i => i.status === 'available').length ?? 0} available
+              {' · '}{shedItems?.filter(i => i.status === 'issued').length ?? 0} issued
+            </p>
+          </TabsContent>
+        </Tabs>
+
+        {/* Add Item Dialog */}
+        <Dialog open={addItemDialog} onOpenChange={setAddItemDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Package className="h-5 w-5 text-primary" /> Add Shed Item
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label>Tag Number <span className="text-destructive">*</span></Label>
+                <Input
+                  placeholder="e.g. H-042"
+                  value={addItemForm.tagNumber}
+                  onChange={(e) => setAddItemForm(f => ({ ...f, tagNumber: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Item Type <span className="text-destructive">*</span></Label>
+                <Select value={addItemForm.type} onValueChange={(v) => setAddItemForm(f => ({ ...f, type: v as ShedItemType }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(Object.entries(SHED_ITEM_TYPES) as [ShedItemType, string][]).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Size <span className="text-destructive">*</span></Label>
+                <Input
+                  placeholder="e.g. YM, AS, L"
+                  value={addItemForm.size}
+                  onChange={(e) => setAddItemForm(f => ({ ...f, size: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <Input
+                  placeholder="Condition, color, etc."
+                  value={addItemForm.notes}
+                  onChange={(e) => setAddItemForm(f => ({ ...f, notes: e.target.value }))}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAddItemDialog(false)}>Cancel</Button>
+              <Button
+                onClick={handleAddShedItem}
+                disabled={addItemSaving || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()}
+              >
+                {addItemSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Add Item
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Check Out Dialog */}
+        <Dialog open={checkOutDialog.open} onOpenChange={(open) => setCheckOutDialog(d => ({ ...d, open }))}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Tag className="h-5 w-5 text-primary" />
+                Check Out — Tag #{checkOutDialog.item?.tagNumber}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                {checkOutDialog.item && `${SHED_ITEM_TYPES[checkOutDialog.item.type]} · Size ${checkOutDialog.item.size}`}
+              </p>
+              <div className="space-y-1">
+                <Label>Assign to Player <span className="text-destructive">*</span></Label>
+                <Select value={checkOutPlayerId} onValueChange={setCheckOutPlayerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a player…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(enrollments ?? []).map(e => (
+                      <SelectItem key={e.playerId} value={e.playerId}>
+                        {playerNameMap.get(e.playerId) ?? e.playerId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!selectedSeasonId && (
+                  <p className="text-xs text-muted-foreground mt-1">Select a season on the Player Assignments tab to see players.</p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCheckOutDialog({ open: false, item: null })}>Cancel</Button>
+              <Button onClick={handleCheckOut} disabled={checkOutSaving || !checkOutPlayerId}>
+                {checkOutSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Confirm Check Out
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </main>
     </div>
   );

@@ -21,6 +21,8 @@ export interface UserProfile {
   phoneNumber?: string | null;
   shareContactInfo?: boolean;
   enrolledPlayerIds?: string[];
+  teamIds?: string[];
+  divisionIds?: string[];  // Football coach division assignments
   preferredSport?: Sport;
   complianceStatus?: 'pending' | 'approved' | 'action_required';
   manualComplianceOverride?: boolean;

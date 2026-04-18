@@ -26,8 +26,9 @@ export interface SportConfig {
   practiceLabel: string;
   // Scheduling
   practiceSlotsLabel: string;
-  hasPracticeSlots: boolean; // Baseball uses the claim/approval slot system; Football does not
-  hasTeams: boolean;          // Baseball has explicit Teams; Football uses Division-as-Team
+  hasPracticeSlots: boolean;    // Baseball uses the claim/approval slot system; Football does not
+  hasTeams: boolean;            // Baseball has explicit Teams; Football uses Division-as-Team
+  hasDivisionRosters: boolean;  // Football: coaches/admins see full division roster; Baseball: team-scoped
   defaultDivisions: SportDivisionDefault[];
 }
 
@@ -47,6 +48,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     practiceSlotsLabel: 'Practice Slots',
     hasPracticeSlots: true,
     hasTeams: true,
+    hasDivisionRosters: false,
     defaultDivisions: [
       { id: 'tball', name: 'T-Ball', fee: 5000, capacity: 20 },
       { id: 'coach-pitch', name: 'Coach Pitch', fee: 7500, capacity: 20 },
@@ -68,6 +70,7 @@ export const SPORT_CONFIG: Record<Sport, SportConfig> = {
     practiceSlotsLabel: 'Practices',
     hasPracticeSlots: false,
     hasTeams: false,
+    hasDivisionRosters: true,
     defaultDivisions: [
       { id: 'midgets', name: 'Midgets', fee: 0, capacity: 40 },
       { id: 'peewee', name: 'Pee Wee', fee: 0, capacity: 40 },

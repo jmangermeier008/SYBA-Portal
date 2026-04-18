@@ -71,6 +71,9 @@ interface Player {
   medicalNotes?: string;
   birthCertificateUrl?: string;
   ageVerified?: boolean;
+  compliance?: {
+    physicalVerified?: boolean;
+  };
 }
 
 interface Team {
@@ -716,6 +719,9 @@ export default function MasterRosterPage() {
                     <TableHead className="hidden md:table-cell">Parent</TableHead>
                     <TableHead>Paid</TableHead>
                     {activeSport === 'football' && (
+                      <TableHead className="hidden sm:table-cell">Eligibility</TableHead>
+                    )}
+                    {activeSport === 'football' && (
                       <TableHead className="hidden sm:table-cell">Weight</TableHead>
                     )}
                     {activeSport !== 'football' && (
@@ -796,6 +802,19 @@ export default function MasterRosterPage() {
                             <XCircle className="h-5 w-5 text-destructive" />
                           )}
                         </TableCell>
+                        {activeSport === 'football' && (
+                          <TableCell className="hidden sm:table-cell">
+                            {(p?.ageVerified && p?.compliance?.physicalVerified) ? (
+                              <span className="flex items-center gap-1 text-xs font-semibold text-green-700">
+                                <ShieldCheck className="h-3.5 w-3.5 text-green-600" /> Cleared
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-xs font-semibold text-red-700">
+                                <ShieldAlert className="h-3.5 w-3.5 text-red-600" /> Not Cleared
+                              </span>
+                            )}
+                          </TableCell>
+                        )}
                         {activeSport === 'football' ? (
                           <TableCell className="hidden sm:table-cell">
                             <div className="text-sm">
@@ -880,23 +899,29 @@ export default function MasterRosterPage() {
                           })()}
                         </TableCell>
                         <TableCell>
-                          <Select
-                            value={e.teamId || "unassigned"}
-                            onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
-                          >
-                            <SelectTrigger className={cn(
-                              "w-full min-w-[100px] md:w-[180px] rounded-xl",
-                              !e.teamId ? "border-dashed border-primary" : ""
-                            )}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unassigned">-- Unassigned --</SelectItem>
-                              {teams?.filter(t => t.divisionId === e.divisionId && t.seasonId === e.seasonId).map(t => (
-                                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {activeSport === 'football' ? (
+                            <span className="text-xs text-muted-foreground uppercase">
+                              {divisionsForSeason?.find(d => d.id === e.divisionId)?.name ?? e.divisionId}
+                            </span>
+                          ) : (
+                            <Select
+                              value={e.teamId || "unassigned"}
+                              onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
+                            >
+                              <SelectTrigger className={cn(
+                                "w-full min-w-[100px] md:w-[180px] rounded-xl",
+                                !e.teamId ? "border-dashed border-primary" : ""
+                              )}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned">-- Unassigned --</SelectItem>
+                                {teams?.filter(t => t.divisionId === e.divisionId && t.seasonId === e.seasonId).map(t => (
+                                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </TableCell>
                         <TableCell className="pr-4">
                           <DropdownMenu>
