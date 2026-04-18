@@ -153,6 +153,19 @@ export default function RegistrationDashboardPage() {
     return map;
   }, [allEnrollments]);
 
+  // Filter divisions to only those belonging to the current sport's seasons.
+  // Divisions are stored as seasons/{seasonId}/divisions/{id}, so we extract
+  // the seasonId from _refPath and check it against sportSeasonIds.
+  const sportFilteredDivisions = useMemo(() => {
+    if (!allDivisions) return [];
+    return allDivisions.filter(d => {
+      const refPath = (d as any)._refPath as string | undefined;
+      if (!refPath) return false;
+      const seasonId = refPath.split('/')[1];
+      return sportSeasonIds.has(seasonId);
+    });
+  }, [allDivisions, sportSeasonIds]);
+
   const pendingVerifications = useMemo(() => {
     return (allPlayers ?? []).filter(p =>
       (p.birthCertificateUrl && !p.ageVerified) ||
@@ -356,7 +369,7 @@ export default function RegistrationDashboardPage() {
               <PlayerTable
                 players={allPlayers ?? []}
                 enrollments={allEnrollments ?? []}
-                divisions={allDivisions ?? []}
+                divisions={sportFilteredDivisions}
                 playerSportMap={playerSportMap}
                 isSiteAdmin={isSiteAdmin}
                 isProcessing={globalProcessing}

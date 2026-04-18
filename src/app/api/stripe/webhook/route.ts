@@ -69,20 +69,22 @@ export async function POST(req: Request) {
         if (enrollment.stripe_payment_id) {
           console.info(`[stripe/webhook] Duplicate event — enrollment ${enrollmentId} already paid, skipping`);
           // Still collect player name for the email summary
-          try {
-            const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
-            if (playerSnap.exists) {
-              const p = playerSnap.data() as any;
-              playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
-            }
-          } catch { /* non-fatal */ }
+          if (enrollment.playerId) {
+            try {
+              const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
+              if (playerSnap.exists) {
+                const p = playerSnap.data() as any;
+                playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+              }
+            } catch { /* non-fatal */ }
+          }
           continue;
         }
 
         await enrollmentRef.update({
           payment_status: 'paid',
           paymentStatus: 'paid',
-          stripe_payment_id: session.payment_intent ?? '',
+          stripe_payment_id: session.payment_intent ?? session.id,
           // Stripe amount_total is in cents — store as-is for consistency with registrationFeeAmount
           gross_amount_paid: session.amount_total ?? 0,
           updatedAt: new Date().toISOString(),
@@ -112,14 +114,16 @@ export async function POST(req: Request) {
         }
 
         // Collect player names for the confirmation email
-        try {
-          const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
-          if (playerSnap.exists) {
-            const p = playerSnap.data() as any;
-            playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+        if (enrollment.playerId) {
+          try {
+            const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
+            if (playerSnap.exists) {
+              const p = playerSnap.data() as any;
+              playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+            }
+          } catch {
+            // Non-fatal
           }
-        } catch {
-          // Non-fatal
         }
       }
 
@@ -130,12 +134,22 @@ export async function POST(req: Request) {
           db.doc(`userProfiles/${userId}/enrollments/${enrollmentIds[0]}`).get(),
         ]);
 
+        if (!userSnap.exists || !firstEnrollmentSnap.exists) {
+          console.error('[stripe/webhook] Missing user or enrollment snapshot for email, skipping');
+          return NextResponse.json({ received: true });
+        }
+
         const firstEnrollment = firstEnrollmentSnap.data() as any;
         const user = userSnap.data() as any;
 
+        if (!firstEnrollment?.seasonId || !firstEnrollment?.divisionId) {
+          console.error('[stripe/webhook] Missing seasonId or divisionId on enrollment, skipping email');
+          return NextResponse.json({ received: true });
+        }
+
         const [seasonSnap, divisionSnap] = await Promise.all([
-          db.doc(`seasons/${firstEnrollment?.seasonId}`).get(),
-          db.doc(`seasons/${firstEnrollment?.seasonId}/divisions/${firstEnrollment?.divisionId}`).get(),
+          db.doc(`seasons/${firstEnrollment.seasonId}`).get(),
+          db.doc(`seasons/${firstEnrollment.seasonId}/divisions/${firstEnrollment.divisionId}`).get(),
         ]);
 
         const toEmail = session.customer_details?.email ?? user?.email ?? '';

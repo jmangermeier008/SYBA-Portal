@@ -112,8 +112,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     newPlayerFirst: '',
     newPlayerLast: '',
     newPlayerDOB: '',
-    seasonId: '',
-    divisionId: '',
+    seasonId: searchParams.get('seasonId') ?? '',
+    divisionId: searchParams.get('divisionId') ?? '',
     isWaitlisted: false,
     shirtSize: '',
     uniformNumberPreference: '',
@@ -452,7 +452,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     isWaitlisted: state.isWaitlisted,
     shirtSize: state.shirtSize,
     uniformNumberPreference: state.uniformNumberPreference,
-    emergencyContacts: state.emergencyContacts.filter(c => c.name),
+    emergencyContacts: state.emergencyContacts.filter(c => c.name && c.phone && c.relationship),
     medicalNotes: state.medicalNotes,
     parentWeightEstimate: state.parentWeightEstimate || undefined,
     helmetSize: state.helmetSize || undefined,
@@ -1131,30 +1131,89 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     onChange={(e) => setState(prev => ({ ...prev, uniformNumberPreference: e.target.value }))}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Shirt Size <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                  <Select value={state.shirtSize} onValueChange={(v) => setState(prev => ({ ...prev, shirtSize: v }))}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="Select size" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL', 'A2XL'].map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {activeSport === 'football' && (
-                <div className="space-y-2">
-                  <Label htmlFor="weightEstimate">
-                    Weight Estimate <span className="text-destructive">*</span>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="weightEstimate"
-                      className="rounded-xl"
-                      type="number"
-                      min={40}
-                      max={350}
-                      placeholder="e.g. 95"
-                      value={state.parentWeightEstimate}
-                      onChange={(e) => setState(prev => ({ ...prev, parentWeightEstimate: e.target.value }))}
-                    />
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">lbs</span>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="weightEstimate">
+                      Weight Estimate <span className="text-destructive">*</span>
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="weightEstimate"
+                        className="rounded-xl"
+                        type="number"
+                        min={40}
+                        max={350}
+                        placeholder="e.g. 95"
+                        value={state.parentWeightEstimate}
+                        onChange={(e) => setState(prev => ({ ...prev, parentWeightEstimate: e.target.value }))}
+                      />
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">lbs</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Parent estimate — will be verified by league staff at equipment distribution.
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Parent estimate — will be verified by league staff at equipment distribution.
-                  </p>
-                </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-bold uppercase tracking-wider">Equipment Sizing <span className="text-muted-foreground text-xs font-normal normal-case">(optional — helps us prepare gear)</span></Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Helmet</Label>
+                        <Select value={state.helmetSize} onValueChange={(v) => setState(prev => ({ ...prev, helmetSize: v }))}>
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue placeholder="Size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {['XS', 'S', 'M', 'L', 'XL'].map(s => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Shoulder Pads</Label>
+                        <Select value={state.shoulderPadSize} onValueChange={(v) => setState(prev => ({ ...prev, shoulderPadSize: v }))}>
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue placeholder="Size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {['XS', 'S', 'M', 'L', 'XL'].map(s => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Pants</Label>
+                        <Select value={state.pantSize} onValueChange={(v) => setState(prev => ({ ...prev, pantSize: v }))}>
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue placeholder="Size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {['YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'].map(s => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </>
               )}
 
               <div className="space-y-2">
@@ -1305,10 +1364,22 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       <span className="font-medium">#{state.uniformNumberPreference}</span>
                     </div>
                   )}
+                  {state.shirtSize && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Shirt Size</span>
+                      <span className="font-medium">{state.shirtSize}</span>
+                    </div>
+                  )}
                   {activeSport === 'football' && state.parentWeightEstimate && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Weight Estimate</span>
                       <span className="font-medium">{state.parentWeightEstimate} lbs</span>
+                    </div>
+                  )}
+                  {activeSport === 'football' && state.helmetSize && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Helmet Size</span>
+                      <span className="font-medium">{state.helmetSize}</span>
                     </div>
                   )}
                 </div>

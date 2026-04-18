@@ -132,8 +132,8 @@ export default function CoachCompliancePage() {
               <div className="grid gap-6">
                 {CLEARANCE_TYPES.map((clearanceType) => {
                   const clearance = getClearance(clearanceType.id);
-                  const isExpiringSoon = clearance && isBefore(new Date(clearance.expirationDate), addMonths(new Date(), 2));
-                  const isExpired = clearance && isBefore(new Date(clearance.expirationDate), new Date());
+                  const isExpiringSoon = clearance?.expirationDate && isBefore(new Date(clearance.expirationDate), addMonths(new Date(), 2));
+                  const isExpired = clearance?.expirationDate && isBefore(new Date(clearance.expirationDate), new Date());
 
                   return (
                     <Card key={clearanceType.id} className="border-none shadow-lg overflow-hidden">
@@ -173,11 +173,13 @@ export default function CoachCompliancePage() {
                                 <span>Expires: <span className={cn(
                                   "font-bold",
                                   isExpired ? "text-destructive" : isExpiringSoon ? "text-yellow-600" : "text-green-600"
-                                )}>{format(new Date(clearance.expirationDate), 'MMMM d, yyyy')}</span></span>
+                                )}>{clearance.expirationDate ? format(new Date(clearance.expirationDate), 'MMMM d, yyyy') : 'Not set'}</span></span>
                               </div>
-                              <Button variant="link" size="sm" asChild className="p-0 h-auto font-bold text-primary">
-                                <a href={clearance.fileUrl} target="_blank" rel="noopener noreferrer">View Current File</a>
-                              </Button>
+                              {clearance.fileUrl && (
+                                <Button variant="link" size="sm" asChild className="p-0 h-auto font-bold text-primary">
+                                  <a href={clearance.fileUrl} target="_blank" rel="noopener noreferrer">View Current File</a>
+                                </Button>
+                              )}
                             </div>
                           )}
 

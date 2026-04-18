@@ -393,7 +393,10 @@ export default function AdminDashboard({
     if (activeSport === 'football') {
       const enrolledPlayerIds = new Set(seasonEnrollments.map((e) => e.playerId).filter(Boolean));
       const missingDocs = (allPlayers ?? []).filter(
-        (p) => enrolledPlayerIds.has(p.id) && (!p.compliance?.birthCertificateVerified || !p.compliance?.physicalVerified)
+        (p) => enrolledPlayerIds.has(p.id) && (
+          !(p.compliance?.birthCertificateVerified || (p as any).ageVerified) ||
+          !p.compliance?.physicalVerified
+        )
       ).length;
       if (missingDocs > 0) {
         items.push({

@@ -44,6 +44,12 @@ export async function POST(req: Request) {
 
       const enrollment = enrollmentSnap.data() as any;
 
+      // Defense-in-depth: enrollment must belong to the requesting user
+      if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
+        console.error(`[stripe/confirm] Enrollment ${enrollmentId} does not belong to user ${userId}`);
+        continue;
+      }
+
       // Already paid — skip to avoid double side-effects
       if (enrollment.stripe_payment_id) continue;
 

@@ -74,6 +74,7 @@ interface Player {
   ageVerified?: boolean;
   compliance?: {
     physicalVerified?: boolean;
+    birthCertificateVerified?: boolean;
   };
 }
 
@@ -242,7 +243,8 @@ export default function MasterRosterPage() {
       }
       if (activeFilter === 'action_required') {
         const p = players?.find(p => p.id === e.playerId);
-        if (p?.ageVerified && p?.compliance?.physicalVerified) return false;
+        const birthCertOk = p?.ageVerified || p?.compliance?.birthCertificateVerified;
+        if (birthCertOk && p?.compliance?.physicalVerified) return false;
       }
       return true;
     });
