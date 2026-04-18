@@ -4,9 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight } from 'lucide-react';
+import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Label } from '@/components/ui/label';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,6 +46,7 @@ export default function ParentDashboard() {
   const isMobile = useIsMobile();
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [resumingPayment, setResumingPayment] = useState(false);
+  const [uploadingPhysicalFor, setUploadingPhysicalFor] = useState<string | null>(null);
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -59,6 +61,7 @@ export default function ParentDashboard() {
     firstName?: string;
     lastName?: string;
     birthCertificateUrl?: string;
+    physicalFormUrl?: string;
     compliance?: {
       verificationStatus?: 'pending' | 'approved' | 'rejected';
       rejectionReason?: string;
@@ -125,6 +128,34 @@ export default function ParentDashboard() {
       toast({ variant: 'destructive', title: 'Error', description: err.message });
     } finally {
       setResumingPayment(false);
+    }
+  };
+
+  const handlePhysicalUpload = async (playerId: string, file: File) => {
+    if (!user || !db) return;
+    setUploadingPhysicalFor(playerId);
+    try {
+      const idToken = await user.getIdToken();
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', `players/${playerId}/physical_${Date.now()}`);
+      const resp = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: formData,
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Upload failed');
+      await updateDoc(doc(db, 'userProfiles', user.uid, 'players', playerId), {
+        physicalFormUrl: data.url,
+        'compliance.physicalVerified': false,
+        'compliance.verificationStatus': 'pending',
+      });
+      toast({ title: 'Physical form uploaded', description: "It will be reviewed by an admin." });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Upload failed', description: err.message });
+    } finally {
+      setUploadingPhysicalFor(null);
     }
   };
 
@@ -232,6 +263,16 @@ export default function ParentDashboard() {
     ) ?? [];
   }, [players]);
 
+  const playersMissingPhysical = useMemo(() => {
+    if (!players || !enrollments) return [];
+    const enrolledIds = new Set(enrollments.map(e => e.playerId));
+    return players.filter(p =>
+      enrolledIds.has(p.id) &&
+      !p.physicalFormUrl &&
+      p.compliance?.verificationStatus !== 'rejected'
+    );
+  }, [players, enrollments]);
+
   // Derived: pending player details for payment card
   const pendingPlayer = useMemo(() => {
     if (!pendingEnrollment || !players) return null;
@@ -322,6 +363,33 @@ export default function ParentDashboard() {
                     </AlertDescription>
                   </Alert>
                 )
+              ))}
+            </div>
+          )}
+
+          {/* Physical form upload prompts */}
+          {playersMissingPhysical.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {playersMissingPhysical.map(p => (
+                <div key={p.id} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-blue-900">Physical form needed for {p.firstName}</p>
+                    <p className="text-sm text-blue-800 mt-0.5">Upload a copy to complete {p.firstName}&apos;s registration.</p>
+                  </div>
+                  <Label className="cursor-pointer shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-100 transition-colors flex items-center gap-1.5">
+                    {uploadingPhysicalFor === p.id
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <Upload className="h-3.5 w-3.5" />}
+                    Upload
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      disabled={!!uploadingPhysicalFor}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handlePhysicalUpload(p.id, f); }}
+                    />
+                  </Label>
+                </div>
               ))}
             </div>
           )}

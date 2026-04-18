@@ -1198,14 +1198,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 )}
               </div>
 
-              {/* ── Required Documents ── */}
+              {/* ── Documents ── */}
               <div className="space-y-3 border-t pt-4">
                 <div>
                   <Label className="text-sm font-bold uppercase tracking-wider">
-                    Required Documents <span className="text-destructive">*</span>
+                    Documents
                   </Label>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Both documents must be uploaded before proceeding.
+                    Birth certificate is required. Physical form can be uploaded after enrollment.
                   </p>
                 </div>
 
@@ -1249,7 +1249,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
                     )}
                     <div>
-                      <p className="text-sm font-medium">Physical Form</p>
+                      <p className="text-sm font-medium">Physical Form <span className="text-xs font-normal text-muted-foreground">(Optional)</span></p>
                       <p className="text-xs text-muted-foreground">
                         {state.physicalUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
                       </p>
@@ -1359,7 +1359,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 )) ||
                 (state.step === 2 && !emergencyContactsValid()) ||
                 (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
-                (state.step === 2 && (!state.birthCertUrl || !state.physicalUrl))
+                (state.step === 2 && !state.birthCertUrl)
               }
             >
               {checkingDuplicate ? (
