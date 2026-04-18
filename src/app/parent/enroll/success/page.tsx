@@ -166,6 +166,7 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
 
   const enrollmentId = typeof searchParams.enrollment_id === 'string' ? searchParams.enrollment_id : '';
   const enrollmentIds = typeof searchParams.enrollment_ids === 'string' ? searchParams.enrollment_ids : '';
+  const sessionId = typeof searchParams.session_id === 'string' ? searchParams.session_id : '';
   // Fix #10: detect waitlist-only sessions passed via ?waitlisted=1
   const isWaitlistedOnly = searchParams.waitlisted === '1';
   const sport = typeof searchParams.sport === 'string' ? searchParams.sport as Sport : null;
@@ -177,6 +178,25 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
       setActiveSport(sport);
     }
   }, [sport]);
+
+  // Confirm payment immediately on page load — handles cases where the Stripe webhook
+  // is delayed or unreachable (e.g. local dev). Idempotent: the endpoint skips enrollments
+  // that are already marked paid.
+  useEffect(() => {
+    if (!user || !sessionId || isWaitlistedOnly) return;
+    const ids = enrollmentIds
+      ? enrollmentIds.split(',').map(s => s.trim()).filter(Boolean)
+      : enrollmentId ? [enrollmentId] : [];
+    if (ids.length === 0) return;
+
+    user.getIdToken().then(idToken =>
+      fetch('/api/stripe/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ sessionId, enrollmentIds: ids, userId: user.uid }),
+      })
+    ).catch(() => { /* non-fatal — webhook will cover it */ });
+  }, [user, sessionId, enrollmentIds, enrollmentId, isWaitlistedOnly]);
 
   if (loading) {
     return (
