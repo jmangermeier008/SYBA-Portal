@@ -5,7 +5,7 @@ import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, updateDoc, query, where, collectionGroup } from 'firebase/firestore';
+import { collection, doc, updateDoc, deleteDoc, query, where, collectionGroup } from 'firebase/firestore';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,10 +23,12 @@ import {
   History,
   FileText,
   Lock,
-  Download
+  Download,
+  Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -85,6 +87,7 @@ export default function AdminCompliancePage() {
 
   // Audit dialog state
   const [auditingPlayer, setAuditingPlayer] = useState<Player | null>(null);
+  const [deletingPlayer, setDeletingPlayer] = useState<Player | null>(null);
   const [auditDocTab, setAuditDocTab] = useState<'birthCert' | 'physical'>('birthCert');
   const [auditDob, setAuditDob] = useState('');
   const [auditDivisionId, setAuditDivisionId] = useState('');
@@ -268,6 +271,26 @@ export default function AdminCompliancePage() {
           console.error('[compliance] Audit submit error:', error);
           toast({ variant: "destructive", title: "Save Failed", description: error.message });
         }
+      })
+      .finally(() => setIsProcessing(false));
+  };
+
+  const handleDeletePlayer = async (player: Player) => {
+    if (!db) return;
+    const parentUserId = player.parentUserId ?? (player as any)._refPath?.split('/')?.[1];
+    if (!parentUserId) {
+      toast({ variant: "destructive", title: "Error", description: "Cannot determine parent user for this player." });
+      return;
+    }
+    setIsProcessing(true);
+    const playerRef = doc(db, 'userProfiles', parentUserId, 'players', player.id);
+    deleteDoc(playerRef)
+      .then(() => {
+        toast({ title: "Player Deleted", description: `${player.firstName} ${player.lastName} has been removed.` });
+        setDeletingPlayer(null);
+      })
+      .catch((error: any) => {
+        toast({ variant: "destructive", title: "Delete Failed", description: error.message });
       })
       .finally(() => setIsProcessing(false));
   };
@@ -548,6 +571,7 @@ export default function AdminCompliancePage() {
                               <TableCell className="pr-6 text-right">
                                 <div className="flex justify-end gap-2">
                                   {isSiteAdmin && (
+                                    <>
                                     <Button
                                       variant="default"
                                       size="sm"
@@ -557,6 +581,17 @@ export default function AdminCompliancePage() {
                                     >
                                       Audit
                                     </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="rounded-full h-8 text-destructive border-destructive/30 hover:bg-destructive/10"
+                                      onClick={() => setDeletingPlayer(player)}
+                                      disabled={isProcessing}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                      Delete
+                                    </Button>
+                                    </>
                                   )}
                                   {player.ageVerified && player.compliance?.physicalVerified && (
                                     <span className="text-[10px] text-muted-foreground italic flex items-center gap-1">
@@ -887,6 +922,27 @@ export default function AdminCompliancePage() {
             </div>
           </DialogContent>
         </Dialog>
+
+        <AlertDialog open={!!deletingPlayer} onOpenChange={open => { if (!open) setDeletingPlayer(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Player?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{deletingPlayer?.firstName} {deletingPlayer?.lastName}</strong> and all their compliance data. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isProcessing}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive hover:bg-destructive/90"
+                disabled={isProcessing}
+                onClick={() => deletingPlayer && handleDeletePlayer(deletingPlayer)}
+              >
+                {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Player'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );
