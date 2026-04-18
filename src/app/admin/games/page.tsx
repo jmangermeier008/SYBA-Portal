@@ -429,7 +429,7 @@ export default function AdminGamesPage() {
       toast({ title: 'Missing fields', description: 'Date, time, and field are required.', variant: 'destructive' });
       return;
     }
-    if (form.type === 'game' && !form.divisionId) {
+    if (form.type === 'game' && !isFootballGame && !form.divisionId) {
       toast({ title: 'Missing division', description: 'Please select a division before saving.', variant: 'destructive' });
       return;
     }
@@ -1100,34 +1100,17 @@ export default function AdminGamesPage() {
                   {form.type === 'game' && activeSport === 'football' && (
                     <>
                       <div className="space-y-1.5">
-                        <Label>Division</Label>
-                        <Select
-                          value={form.divisionId}
-                          onValueChange={v => setForm({ ...form, divisionId: v, homeTeamId: '' })}
-                          disabled={!activeSeason}
-                        >
-                          <SelectTrigger className="rounded-xl">
-                            <SelectValue placeholder={activeSeason ? 'Select a division' : 'No active season'} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(divisions ?? []).map(d => (
-                              <SelectItem key={d.id} value={d.id}>
-                                {d.name}{d.ageGroup ? ` (${d.ageGroup})` : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
                         <Label>Our Team</Label>
                         <Select
                           value={form.homeTeamId}
-                          onValueChange={v => setForm({ ...form, homeTeamId: v })}
-                          disabled={!form.divisionId}
+                          onValueChange={v => {
+                            const selectedTeam = (teams ?? []).find(t => t.id === v);
+                            setForm({ ...form, homeTeamId: v, divisionId: selectedTeam?.divisionId ?? '' });
+                          }}
                         >
-                          <SelectTrigger className="rounded-xl"><SelectValue placeholder={form.divisionId ? 'Select team' : 'Select a division first'} /></SelectTrigger>
+                          <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select team" /></SelectTrigger>
                           <SelectContent>
-                            {(teams ?? []).filter(t => !form.divisionId || t.divisionId === form.divisionId).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                            {(teams ?? []).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
