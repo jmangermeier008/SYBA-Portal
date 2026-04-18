@@ -25,7 +25,6 @@ import {
   Loader2,
   Lock,
   ShoppingCart,
-  UserCheck,
   Inbox,
   FileText,
   Dumbbell,
@@ -224,16 +223,6 @@ export default function AdminDashboard({
     return collectionGroup(db, 'enrollments');
   }, [db, isAdmin, isBoardMember]);
 
-  const coachesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'userProfiles'), where('roles', 'array-contains', 'Coach'));
-  }, [db, isAdmin, isBoardMember]);
-
-  const allClearancesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collectionGroup(db, 'clearances');
-  }, [db, isAdmin, isBoardMember]);
-
   // This week's concession slots (for Concessions tab)
   const concessionSlotsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -307,8 +296,6 @@ export default function AdminDashboard({
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
-  const { data: coaches } = useCollection<any>(coachesQuery);
-  const { data: allClearances } = useCollection<any>(allClearancesQuery);
   const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionSlotsQuery);
   const { data: fields } = useCollection<Field>(fieldsQuery);
   const { data: boardMeetings } = useCollection<BoardMeeting>(boardMeetingsQuery);
@@ -318,7 +305,7 @@ export default function AdminDashboard({
   const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
   const { data: allTeams } = useCollection<{ id: string; name: string }>(allTeamsQuery);
-  const { data: allPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string; compliance?: { verificationStatus?: string } }>(allPlayersQuery);
+  const { data: allPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string; compliance?: { verificationStatus?: string; birthCertificateVerified?: boolean; physicalVerified?: boolean } }>(allPlayersQuery);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -358,46 +345,6 @@ export default function AdminDashboard({
     [paidEnrollments]
   );
 
-  const { clearedCoachCount, totalCoachCount, coachesWithIssues } = useMemo(() => {
-    if (!coaches || !allClearances) return { clearedCoachCount: 0, totalCoachCount: 0, coachesWithIssues: false };
-    const REQUIRED = ['child_abuse', 'criminal'];
-    const clearancesByCoach: Record<string, Record<string, string>> = {};
-
-    // Filter coaches to only those in the active sport. Coaches with a sport-specific
-    // 'Coach' role take precedence; fall back to global 'Coach' role for legacy accounts
-    // that predate sport-specific roles.
-    const sportCoaches = activeSport
-      ? coaches.filter((c: any) => {
-          const sportRole: string[] = c.sportRoles?.[activeSport] ?? [];
-          if (sportRole.includes('Coach')) return true;
-          // Legacy fallback: include if global role = Coach but no sport-specific roles yet
-          if (!c.sportRoles?.[activeSport] && (c.roles ?? []).includes('Coach')) return true;
-          return false;
-        })
-      : coaches;
-
-    allClearances.forEach((c) => {
-      const uid: string | undefined = (c as any).userId ?? (() => {
-        const parts = ((c as any)._ref?.path ?? '').split('/');
-        return parts.length >= 4 ? parts[1] : undefined;
-      })();
-      if (!uid) return;
-      if (!clearancesByCoach[uid]) clearancesByCoach[uid] = {};
-      clearancesByCoach[uid][c.type] = c.status;
-    });
-
-    let cleared = 0;
-    let issues = false;
-    sportCoaches.forEach((coach: any) => {
-      const cMap = clearancesByCoach[coach.id] ?? {};
-      const allApproved = REQUIRED.every((t) => cMap[t] === 'approved');
-      if (allApproved) cleared++;
-      else issues = true;
-    });
-
-    return { clearedCoachCount: cleared, totalCoachCount: sportCoaches.length, coachesWithIssues: issues };
-  }, [coaches, allClearances, activeSport]);
-
   const fieldsWithClosures = useMemo(() => {
     if (!fields) return [];
     return fields.filter((f) =>
@@ -415,9 +362,6 @@ export default function AdminDashboard({
   const alerts = useMemo(() => {
     const items: { severity: 'red' | 'orange' | 'blue'; message: string; href: string }[] = [];
 
-    if (coachesWithIssues) {
-      items.push({ severity: 'red', message: 'Coaches missing clearance approvals', href: '/admin/compliance' });
-    }
     if (undercoveredSlots.length > 0) {
       items.push({
         severity: 'orange',
@@ -482,7 +426,7 @@ export default function AdminDashboard({
     });
 
     return items;
-  }, [coachesWithIssues, undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries, thisWeekGames, todayISO]);
+  }, [undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries, thisWeekGames, todayISO]);
 
   // Calendar tab events
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
@@ -499,11 +443,22 @@ export default function AdminDashboard({
 
   const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
 
-  const playerComplianceSummary = useMemo(() => {
-    const total = allPlayers?.length ?? 0;
-    const cleared = allPlayers?.filter(p => p.compliance?.verificationStatus === 'approved').length ?? 0;
-    return { total, cleared };
-  }, [allPlayers]);
+  const { totalEnrollmentsCount, missingDocumentsCount, verifiedCount, enrolledPlayersCount, pendingPaymentsCount } = useMemo(() => {
+    const total = seasonEnrollments.length;
+    const enrolledPlayerIds = new Set(seasonEnrollments.map((e) => e.playerId).filter(Boolean));
+    const enrolled = (allPlayers ?? []).filter((p) => enrolledPlayerIds.has(p.id));
+    const missing = enrolled.filter(
+      (p) => !p.compliance?.birthCertificateVerified || !p.compliance?.physicalVerified
+    ).length;
+    const pending = seasonEnrollments.filter((e) => getEnrollmentStatus(e) === 'pending_payment').length;
+    return {
+      totalEnrollmentsCount: total,
+      missingDocumentsCount: missing,
+      verifiedCount: enrolled.length - missing,
+      enrolledPlayersCount: enrolled.length,
+      pendingPaymentsCount: pending,
+    };
+  }, [seasonEnrollments, allPlayers]);
 
   const playerMap = useMemo(() => {
     const map = new Map<string, { firstName?: string; lastName?: string }>();
@@ -631,54 +586,58 @@ export default function AdminDashboard({
           )}
         </div>
 
-        {/* ── Zone 2: Season Pulse — compact stat row ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {/* ── Zone 2: Action Row ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           <Link href="/admin/registration">
-            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="px-4 py-3 flex items-center gap-3">
-                <Users className="h-4 w-4 text-blue-500 shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Enrolled</p>
-                  <p className="text-xl font-bold leading-none">{paidEnrollments.length}</p>
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+              <CardContent className="px-4 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-blue-100 p-2 shrink-0">
+                    <Users className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground leading-none mb-1">Season Enrollments</p>
+                    <p className="text-2xl font-bold leading-none">{totalEnrollmentsCount}</p>
+                  </div>
                 </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link href="/admin/roster">
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+              <CardContent className="px-4 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn('rounded-lg p-2 shrink-0', missingDocumentsCount > 0 ? 'bg-yellow-100' : 'bg-green-100')}>
+                    <ShieldCheck className={cn('h-4 w-4', missingDocumentsCount > 0 ? 'text-yellow-600' : 'text-green-600')} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground leading-none mb-1">Identity & Medical</p>
+                    <p className="text-2xl font-bold leading-none">
+                      {verifiedCount}
+                      <span className="text-sm font-normal text-muted-foreground"> / {enrolledPlayersCount} verified</span>
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
               </CardContent>
             </Card>
           </Link>
 
           <Link href="/admin/registration">
-            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="px-4 py-3 flex items-center gap-3">
-                <DollarSign className="h-4 w-4 text-green-500 shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Revenue</p>
-                  <p className="text-xl font-bold leading-none">{formatCents(revenueCollected)}</p>
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+              <CardContent className="px-4 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn('rounded-lg p-2 shrink-0', pendingPaymentsCount > 0 ? 'bg-red-100' : 'bg-green-100')}>
+                    <DollarSign className={cn('h-4 w-4', pendingPaymentsCount > 0 ? 'text-red-600' : 'text-green-600')} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground leading-none mb-1">Pending Payments</p>
+                    <p className="text-2xl font-bold leading-none">{pendingPaymentsCount}</p>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/admin/compliance">
-            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="px-4 py-3 flex items-center gap-3">
-                <UserCheck className="h-4 w-4 text-purple-500 shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Coaches Cleared</p>
-                  <p className="text-xl font-bold leading-none">
-                    {clearedCoachCount}<span className="text-sm font-normal text-muted-foreground"> / {totalCoachCount}</span>
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/admin/registration">
-            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="px-4 py-3 flex items-center gap-3">
-                <Clock className="h-4 w-4 text-orange-500 shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground leading-none mb-0.5">Pending Payments</p>
-                  <p className="text-xl font-bold leading-none">{pendingPaymentCount}</p>
-                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
               </CardContent>
             </Card>
           </Link>
@@ -752,27 +711,6 @@ export default function AdminDashboard({
             </CardContent>
           </Card>
         )}
-
-        {/* ── Zone 2.7: Player Compliance ── */}
-        <Link href="/admin/compliance">
-          <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer mb-4">
-            <CardContent className="px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className={`h-4 w-4 shrink-0 ${playerComplianceSummary.cleared === playerComplianceSummary.total && playerComplianceSummary.total > 0 ? 'text-green-500' : 'text-yellow-500'}`} />
-                  <p className="text-xs font-medium text-muted-foreground">Player Compliance</p>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">{playerComplianceSummary.cleared}</span>
-                  <span>of</span>
-                  <span className="font-semibold text-foreground">{playerComplianceSummary.total}</span>
-                  <span>players cleared</span>
-                  <ChevronRight className="h-3.5 w-3.5 opacity-50" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
 
         {/* ── Zone 3: This Week — tabbed card ── */}
         <Card className="border-none shadow-md">
