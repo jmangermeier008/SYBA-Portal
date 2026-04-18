@@ -117,6 +117,14 @@ export default function RegistrationDashboardPage() {
     [seasons]
   );
 
+  // teamsQuery depends on sportSeasonIds so it must come after that memo
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember) || sportSeasonIds.size === 0) return null;
+    return query(collection(db, 'teams'), where('seasonId', 'in', [...sportSeasonIds]));
+  }, [db, isAdmin, isBoardMember, sportSeasonIds]);
+
+  const { data: sportTeams } = useCollection<any>(teamsQuery);
+
   const enrollments = useMemo(() => {
     if (!allEnrollments) return [];
     const sportFiltered = allEnrollments.filter(e => sportSeasonIds.has(e.seasonId));
@@ -165,6 +173,28 @@ export default function RegistrationDashboardPage() {
       return sportSeasonIds.has(seasonId);
     });
   }, [allDivisions, sportSeasonIds]);
+
+  const sportTeamIds = useMemo(() =>
+    new Set((sportTeams ?? []).map((t: any) => t.id as string)),
+    [sportTeams]
+  );
+
+  const sportDivisionIds = useMemo(() =>
+    new Set(sportFilteredDivisions.map(d => d.id)),
+    [sportFilteredDivisions]
+  );
+
+  const sportFilteredCoaches = useMemo(() => {
+    if (!coaches) return [];
+    return coaches.filter(c => {
+      const profile = c as any;
+      const coachTeamIds: string[] = profile.teamIds ?? [];
+      const coachDivIds: string[] = profile.divisionIds ?? [];
+      if (coachTeamIds.length === 0 && coachDivIds.length === 0) return true;
+      return coachTeamIds.some((id: string) => sportTeamIds.has(id)) ||
+             coachDivIds.some((id: string) => sportDivisionIds.has(id));
+    });
+  }, [coaches, sportTeamIds, sportDivisionIds]);
 
   const pendingVerifications = useMemo(() => {
     return (allPlayers ?? []).filter(p =>
@@ -223,6 +253,19 @@ export default function RegistrationDashboardPage() {
     try {
       await deleteDoc(playerRef);
       toast({ title: 'Player Deleted', description: `${player.firstName} ${player.lastName} has been removed.` });
+      return true;
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Delete Failed', description: error.message });
+      return false;
+    }
+  };
+
+  const handleDeleteCoach = async (coach: CoachProfile): Promise<boolean> => {
+    if (!db) return false;
+    const coachRef = doc(db, 'userProfiles', coach.id);
+    try {
+      await deleteDoc(coachRef);
+      toast({ title: 'Coach Removed', description: `${coach.displayName} has been deleted.` });
       return true;
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Delete Failed', description: error.message });
@@ -510,10 +553,12 @@ export default function RegistrationDashboardPage() {
           {/* ── Coaches Tab ── */}
           <TabsContent value="coaches">
             <CoachComplianceTable
-              coaches={coaches ?? []}
+              coaches={sportFilteredCoaches}
               clearances={allClearances ?? []}
               isLoading={loadingCoaches}
+              isSiteAdmin={isSiteAdmin}
               onUpdateStatus={handleUpdateClearanceStatus}
+              onDeleteCoach={handleDeleteCoach}
             />
           </TabsContent>
         </Tabs>

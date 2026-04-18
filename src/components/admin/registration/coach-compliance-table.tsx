@@ -19,7 +19,18 @@ import {
   FileText,
   History,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export interface CoachProfile {
   id: string;
@@ -43,12 +54,14 @@ interface CoachComplianceTableProps {
   coaches: CoachProfile[];
   clearances: ClearanceRecord[];
   isLoading: boolean;
+  isSiteAdmin: boolean;
   onUpdateStatus: (
     userId: string,
     clearanceId: string,
     status: 'Approved' | 'Rejected',
     reason?: string
   ) => Promise<boolean>;
+  onDeleteCoach: (coach: CoachProfile) => Promise<boolean>;
 }
 
 function getStatusIcon(status?: string) {
@@ -64,12 +77,16 @@ export function CoachComplianceTable({
   coaches,
   clearances,
   isLoading,
+  isSiteAdmin,
   onUpdateStatus,
+  onDeleteCoach,
 }: CoachComplianceTableProps) {
   const [statusFilter, setStatusFilter] = useState<'incomplete' | 'cleared' | 'all'>('incomplete');
   const [reviewingClearance, setReviewingClearance] = useState<{ userId: string; clearance: ClearanceRecord } | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [deletingCoach, setDeletingCoach] = useState<CoachProfile | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const volunteerClearanceData = useMemo(() => {
     return coaches.map(u => {
@@ -104,6 +121,14 @@ export function CoachComplianceTable({
       setRejectionReason('');
       setReviewingClearance(null);
     }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingCoach) return;
+    setIsDeleting(true);
+    const success = await onDeleteCoach(deletingCoach);
+    setIsDeleting(false);
+    if (success) setDeletingCoach(null);
   };
 
   return (
@@ -185,6 +210,7 @@ export function CoachComplianceTable({
                         </Badge>
                       </TableCell>
                       <TableCell className="pr-6 text-right">
+                        <div className="flex justify-end gap-2">
                         <Dialog>
                           <DialogTrigger asChild>
                             <Button variant="default" size="sm" className="rounded-full h-8">Audit</Button>
@@ -247,6 +273,18 @@ export function CoachComplianceTable({
                             </div>
                           </DialogContent>
                         </Dialog>
+                        {isSiteAdmin && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full h-8 text-destructive border-destructive/30 hover:bg-destructive/10"
+                            onClick={() => setDeletingCoach(u)}
+                            disabled={isDeleting}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -256,6 +294,28 @@ export function CoachComplianceTable({
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deletingCoach} onOpenChange={open => { if (!open) setDeletingCoach(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Coach?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{deletingCoach?.displayName}</strong> and their compliance records. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={handleDelete}
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Coach'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Clearance Decision Dialog */}
       <Dialog open={!!reviewingClearance} onOpenChange={open => !open && setReviewingClearance(null)}>
