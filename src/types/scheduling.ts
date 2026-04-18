@@ -449,14 +449,27 @@ export interface Enrollment {
   // Football equipment — admin-managed after registration
   footballEquipment?: {
     verifiedWeight?: number;   // Official weigh-in result (lbs)
-    helmetSize?: string;       // e.g. "S", "M", "L", "XL"
-    helmetStatus?: 'not_issued' | 'issued' | 'returned'; // admin-tracked per-item status
-    shoulderPadSize?: string;  // e.g. "Youth S", "Youth M", "Adult S"
-    padStatus?: 'not_issued' | 'issued' | 'returned';    // admin-tracked per-item status
-    pantSize?: string;         // e.g. "Youth S", "Youth M", "Adult S"
-    jerseySize?: string;       // Football jersey size (may differ from shirt size)
-    jerseyNumber?: string;     // Assigned jersey number
-    issuedAt?: string;         // ISO datetime when equipment kit was distributed
+    // Helmet
+    helmetSize?: string;
+    helmetStatus?: 'not_issued' | 'issued' | 'returned';
+    // Shoulder pads
+    shoulderPadSize?: string;
+    padStatus?: 'not_issued' | 'issued' | 'returned';
+    // Game jersey
+    jerseySize?: string;
+    jerseyNumber?: string;
+    gameJerseyStatus?: 'not_issued' | 'issued' | 'returned';
+    // Scrimmage jersey
+    scrimmageJerseyStatus?: 'not_issued' | 'issued' | 'returned';
+    // Practice jersey
+    practiceJerseyStatus?: 'not_issued' | 'issued' | 'returned';
+    // Game pants
+    gamePantsSize?: string;
+    gamePantsStatus?: 'not_issued' | 'issued' | 'returned';
+    // Practice pants
+    practicePantsSize?: string;
+    practicePantsStatus?: 'not_issued' | 'issued' | 'returned';
+    issuedAt?: string;
   };
   // Admin-assigned jersey number (both sports) — distinct from parent-entered uniformNumberPreference
   assignedJerseyNumber?: string;

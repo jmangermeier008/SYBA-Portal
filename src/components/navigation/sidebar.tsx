@@ -81,10 +81,7 @@ const adminRegistrationItems = [
   { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
 ];
 
-const adminRosterItems = [
-  { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
-  { label: 'Equipment', icon: ShieldCheck, href: '/admin/equipment' },
-];
+// adminRosterItems is built inside the component where activeSport is available
 
 const adminOperationsItems = [
   { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
@@ -293,6 +290,13 @@ export function Sidebar() {
   const [hasUnread, setHasUnread] = useState(false);
   const [hasUnreadCoach, setHasUnreadCoach] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
+  const adminRosterItems = [
+    { label: 'Master Roster', icon: ClipboardList, href: '/admin/roster' },
+    ...(activeSport === 'football'
+      ? [{ label: 'Equipment', icon: ShieldCheck, href: '/admin/equipment' }]
+      : []),
+  ];
+
   const [activeContext, setActiveContext] = useState<RoleContext | null>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
     const adminSection = getAdminSectionForPath(pathname);
