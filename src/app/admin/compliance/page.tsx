@@ -171,7 +171,14 @@ export default function AdminCompliancePage() {
   const handleAuditSubmit = async (player: Player) => {
     if (!db || !user) return;
     setIsProcessing(true);
-    const playerRef = doc(db, 'userProfiles', player.parentUserId, 'players', player.id);
+    // parentUserId may be absent on older docs — fall back to extracting it from the document path
+    const parentUserId = player.parentUserId ?? (player as any)._refPath?.split('/')?.[1];
+    if (!parentUserId) {
+      toast({ variant: "destructive", title: "Error", description: "Cannot determine parent user for this player." });
+      setIsProcessing(false);
+      return;
+    }
+    const playerRef = doc(db, 'userProfiles', parentUserId, 'players', player.id);
     const now = new Date().toISOString();
     const updateData: Record<string, unknown> = {
       'compliance.verifiedBy': user.uid,
