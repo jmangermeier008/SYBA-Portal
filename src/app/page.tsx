@@ -242,17 +242,19 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Sign In / Register — always visible, sport pre-fills the link */}
-        <div className="flex gap-3 justify-center">
-          <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
-            <Link href={publicSport ? `/login?sport=${publicSport}` : '/login'}>Sign In</Link>
-          </Button>
-          <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
-            <Link href={publicSport ? `/login?redirect=/parent/enroll&sport=${publicSport}` : '/login?redirect=/parent/enroll'}>
-              Register Player
-            </Link>
-          </Button>
-        </div>
+        {/* Sign In / Register — only after sport selection */}
+        {publicSport && (
+          <div className="flex gap-3 justify-center">
+            <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
+              <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
+            </Button>
+            <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
+              <Link href={`/login?redirect=/parent/enroll&sport=${publicSport}`}>
+                Register Player
+              </Link>
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ── Sport Selection Gate — shown only for new visitors (no localStorage preference) ── */}
@@ -306,10 +308,6 @@ export default function Home() {
           <p className="mt-3 text-sm text-muted-foreground text-center">
             Have a question?{' '}
             <Link href="/contact" className="text-primary hover:underline font-medium">Contact us</Link>
-            {' '}or email{' '}
-            <a href={`mailto:${contactEmail}`} className="text-primary hover:underline font-medium">
-              {contactEmail}
-            </a>
           </p>
         </>
       ) : null}
