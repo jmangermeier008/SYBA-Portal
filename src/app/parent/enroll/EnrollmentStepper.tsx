@@ -907,8 +907,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         ))}
       </div>
 
-      <Card className="border-none shadow-xl">
-        <CardHeader className="bg-primary text-primary-foreground">
+      <Card className="border-none shadow-xl flex flex-col max-h-[calc(100dvh-280px)] md:max-h-none">
+        <CardHeader className="bg-primary text-primary-foreground shrink-0">
           <CardTitle className="text-2xl font-headline">
             {getStepLabel(state.step)}
           </CardTitle>
@@ -917,7 +917,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-6 pt-6 pb-24">
+        <CardContent className="space-y-6 pt-6 overflow-y-auto flex-1 min-h-0">
 
           {/* ── STEP 1 ── */}
           {state.step === 1 && (
@@ -1335,7 +1335,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           )}
         </CardContent>
 
-        <CardFooter className="flex gap-3 justify-between sticky bottom-0 z-10 bg-card border-t shadow-sm rounded-b-xl">
+        <CardFooter className="flex gap-3 justify-between shrink-0 bg-card border-t shadow-sm rounded-b-xl">
           {state.step > 1 ? (
             <Button type="button" variant="outline" className="rounded-xl min-h-[44px] px-5" onClick={handleBack} disabled={submitting}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back

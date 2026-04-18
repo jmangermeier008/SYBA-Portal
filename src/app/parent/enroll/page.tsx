@@ -40,7 +40,7 @@ export default function EnrollPage({
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 pb-20 md:pb-6">
         <header className="mb-4 md:mb-6">
           <h1 className="text-xl md:text-2xl font-bold font-headline">Season Enrollment</h1>
           <p className="text-sm text-muted-foreground">Register your players for the upcoming season.</p>
