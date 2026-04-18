@@ -33,6 +33,11 @@ import { cn } from '@/lib/utils';
 
 type EquipmentStatus = 'not_issued' | 'issued' | 'returned';
 
+const HELMET_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'S', 'M', 'L', 'XL', '2XL'] as const;
+const PAD_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+const JERSEY_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+const PANTS_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+
 const STATUS_LABELS: Record<EquipmentStatus, string> = {
   not_issued: 'Not Issued',
   issued: 'Issued',
@@ -76,6 +81,31 @@ function StatusSelect({
   );
 }
 
+function SizeSelect({
+  value,
+  sizes,
+  onChange,
+  disabled,
+}: {
+  value: string | undefined;
+  sizes: readonly string[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select value={value ?? ''} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger className="h-9 text-xs w-24">
+        <SelectValue placeholder="—" />
+      </SelectTrigger>
+      <SelectContent>
+        {sizes.map((s) => (
+          <SelectItem key={s} value={s}>{s}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 interface FootballEquipment {
   helmetSize?: string;
   helmetStatus?: EquipmentStatus;
@@ -94,10 +124,10 @@ interface FootballEquipment {
   verifiedWeight?: number;
 }
 
+// id is injected by useCollection (doc.id) — enrollment documents store 'id' not 'enrollmentId'
 interface EnrollmentRow {
-  enrollmentId: string;
+  id: string;
   parentUserId?: string;
-  _refPath?: string;
   playerId: string;
   seasonId: string;
   divisionId: string;
@@ -226,7 +256,7 @@ export default function EquipmentPage() {
     });
   }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap]);
 
-  const allIds = filteredEnrollments.map((e) => e.enrollmentId);
+  const allIds = filteredEnrollments.map((e) => e.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
   const someSelected = selectedIds.size > 0;
 
@@ -242,21 +272,18 @@ export default function EquipmentPage() {
     });
   }
 
-  function resolveParentUserId(enrollment: EnrollmentRow): string | undefined {
-    return enrollment.parentUserId || enrollment._refPath?.split('/')[1];
-  }
-
+  // enrollment.parentUserId is stored in the document; enrollment.id is the document ID
   async function saveField(enrollment: EnrollmentRow, field: string, value: string) {
     if (!db) return;
-    const parentUserId = resolveParentUserId(enrollment);
-    if (!parentUserId) {
-      toast({ title: 'Save failed', description: 'Could not resolve parent user.', variant: 'destructive' });
+    const { parentUserId, id } = enrollment;
+    if (!parentUserId || !id) {
+      toast({ title: 'Save failed', description: 'Missing enrollment reference — please refresh the page.', variant: 'destructive' });
       return;
     }
-    setSavingIds((prev) => new Set(prev).add(enrollment.enrollmentId));
+    setSavingIds((prev) => new Set(prev).add(id));
     try {
       await updateDoc(
-        doc(db, 'userProfiles', parentUserId, 'enrollments', enrollment.enrollmentId),
+        doc(db, 'userProfiles', parentUserId, 'enrollments', id),
         { [field]: value }
       );
     } catch (err: any) {
@@ -264,7 +291,7 @@ export default function EquipmentPage() {
     } finally {
       setSavingIds((prev) => {
         const next = new Set(prev);
-        next.delete(enrollment.enrollmentId);
+        next.delete(id);
         return next;
       });
     }
@@ -272,26 +299,23 @@ export default function EquipmentPage() {
 
   async function returnAll(enrollment: EnrollmentRow) {
     if (!db) return;
-    const parentUserId = resolveParentUserId(enrollment);
-    if (!parentUserId) {
-      toast({ title: 'Save failed', description: 'Could not resolve parent user.', variant: 'destructive' });
+    const { parentUserId, id } = enrollment;
+    if (!parentUserId || !id) {
+      toast({ title: 'Save failed', description: 'Missing enrollment reference — please refresh the page.', variant: 'destructive' });
       return;
     }
-    setSavingIds((prev) => new Set(prev).add(enrollment.enrollmentId));
+    setSavingIds((prev) => new Set(prev).add(id));
     try {
       const updates: Record<string, string> = {};
       ALL_STATUS_FIELDS.forEach((f) => { updates[`footballEquipment.${f}`] = 'returned'; });
-      await updateDoc(
-        doc(db, 'userProfiles', parentUserId, 'enrollments', enrollment.enrollmentId),
-        updates
-      );
-      toast({ title: 'Equipment returned', description: `All items marked returned.` });
+      await updateDoc(doc(db, 'userProfiles', parentUserId, 'enrollments', id), updates);
+      toast({ title: 'Equipment returned', description: 'All items marked as returned.' });
     } catch (err: any) {
       toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
     } finally {
       setSavingIds((prev) => {
         const next = new Set(prev);
-        next.delete(enrollment.enrollmentId);
+        next.delete(id);
         return next;
       });
     }
@@ -301,16 +325,14 @@ export default function EquipmentPage() {
     if (!db || selectedIds.size === 0) return;
     setBulkSaving(true);
     try {
-      const targets = (enrollments ?? []).filter((e) => selectedIds.has(e.enrollmentId));
+      const targets = (enrollments ?? []).filter((e) => selectedIds.has(e.id));
       const batch = writeBatch(db);
       const statusUpdates: Record<string, string> = {};
       ALL_STATUS_FIELDS.forEach((f) => { statusUpdates[`footballEquipment.${f}`] = 'returned'; });
 
       targets.forEach((e) => {
-        const parentUserId = resolveParentUserId(e);
-        if (!parentUserId) return;
-        const enrollRef = doc(db, 'userProfiles', parentUserId, 'enrollments', e.enrollmentId);
-        batch.update(enrollRef, statusUpdates);
+        if (!e.parentUserId || !e.id) return;
+        batch.update(doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.id), statusUpdates);
       });
       await batch.commit();
       toast({ title: 'Equipment marked as Returned', description: `${targets.length} player(s) updated.` });
@@ -472,26 +494,20 @@ export default function EquipmentPage() {
                   <thead>
                     <tr className="border-b bg-muted/30">
                       <th className="px-3 py-3 w-10">
-                        <div className="flex items-center justify-center">
-                          <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
-                        </div>
+                        <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
                       </th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Player</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden sm:table-cell">Division</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden md:table-cell">Team</th>
-                      {/* Helmet */}
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Size</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet</th>
-                      {/* Pads */}
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Size</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads</th>
-                      {/* Game Jersey */}
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey #</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey Size</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Jersey</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Scrimmage Jersey</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Jersey</th>
-                      {/* Pants */}
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Size</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Size</th>
@@ -501,8 +517,8 @@ export default function EquipmentPage() {
                   </thead>
                   <tbody>
                     {filteredEnrollments.map((enrollment) => {
-                      const isSaving = savingIds.has(enrollment.enrollmentId);
-                      const isSelected = selectedIds.has(enrollment.enrollmentId);
+                      const isSaving = savingIds.has(enrollment.id);
+                      const isSelected = selectedIds.has(enrollment.id);
                       const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
                       const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
                       const teamName = enrollment.teamId ? (teamMap.get(enrollment.teamId) ?? '—') : '—';
@@ -510,7 +526,7 @@ export default function EquipmentPage() {
 
                       return (
                         <tr
-                          key={enrollment.enrollmentId}
+                          key={enrollment.id}
                           className={cn(
                             'border-b last:border-0 transition-colors',
                             isSelected ? 'bg-primary/5' : 'hover:bg-muted/20',
@@ -518,13 +534,11 @@ export default function EquipmentPage() {
                           )}
                         >
                           <td className="px-3 py-2">
-                            <div className="flex items-center justify-center">
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={() => toggleRow(enrollment.enrollmentId)}
-                                aria-label={`Select ${playerName}`}
-                              />
-                            </div>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => toggleRow(enrollment.id)}
+                              aria-label={`Select ${playerName}`}
+                            />
                           </td>
 
                           <td className="px-4 py-2 font-medium whitespace-nowrap">
@@ -534,26 +548,16 @@ export default function EquipmentPage() {
                             </div>
                           </td>
 
-                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
-                            {divisionName}
-                          </td>
-
-                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap hidden md:table-cell">
-                            {teamName}
-                          </td>
+                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap hidden sm:table-cell">{divisionName}</td>
+                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap hidden md:table-cell">{teamName}</td>
 
                           {/* Helmet Size */}
                           <td className="px-4 py-2">
-                            <Input
-                              defaultValue={fe.helmetSize ?? ''}
-                              placeholder="—"
-                              className="w-20 h-9 text-center"
+                            <SizeSelect
+                              value={fe.helmetSize}
+                              sizes={HELMET_SIZES}
                               disabled={isSaving}
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (fe.helmetSize ?? ''))
-                                  saveField(enrollment, 'footballEquipment.helmetSize', val);
-                              }}
+                              onChange={(v) => saveField(enrollment, 'footballEquipment.helmetSize', v)}
                             />
                           </td>
 
@@ -568,16 +572,11 @@ export default function EquipmentPage() {
 
                           {/* Pads Size */}
                           <td className="px-4 py-2">
-                            <Input
-                              defaultValue={fe.shoulderPadSize ?? ''}
-                              placeholder="—"
-                              className="w-20 h-9 text-center"
+                            <SizeSelect
+                              value={fe.shoulderPadSize}
+                              sizes={PAD_SIZES}
                               disabled={isSaving}
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (fe.shoulderPadSize ?? ''))
-                                  saveField(enrollment, 'footballEquipment.shoulderPadSize', val);
-                              }}
+                              onChange={(v) => saveField(enrollment, 'footballEquipment.shoulderPadSize', v)}
                             />
                           </td>
 
@@ -607,16 +606,11 @@ export default function EquipmentPage() {
 
                           {/* Jersey Size */}
                           <td className="px-4 py-2">
-                            <Input
-                              defaultValue={fe.jerseySize ?? ''}
-                              placeholder="—"
-                              className="w-20 h-9 text-center"
+                            <SizeSelect
+                              value={fe.jerseySize}
+                              sizes={JERSEY_SIZES}
                               disabled={isSaving}
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (fe.jerseySize ?? ''))
-                                  saveField(enrollment, 'footballEquipment.jerseySize', val);
-                              }}
+                              onChange={(v) => saveField(enrollment, 'footballEquipment.jerseySize', v)}
                             />
                           </td>
 
@@ -649,16 +643,11 @@ export default function EquipmentPage() {
 
                           {/* Game Pants Size */}
                           <td className="px-4 py-2">
-                            <Input
-                              defaultValue={fe.gamePantsSize ?? ''}
-                              placeholder="—"
-                              className="w-20 h-9 text-center"
+                            <SizeSelect
+                              value={fe.gamePantsSize}
+                              sizes={PANTS_SIZES}
                               disabled={isSaving}
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (fe.gamePantsSize ?? ''))
-                                  saveField(enrollment, 'footballEquipment.gamePantsSize', val);
-                              }}
+                              onChange={(v) => saveField(enrollment, 'footballEquipment.gamePantsSize', v)}
                             />
                           </td>
 
@@ -673,16 +662,11 @@ export default function EquipmentPage() {
 
                           {/* Practice Pants Size */}
                           <td className="px-4 py-2">
-                            <Input
-                              defaultValue={fe.practicePantsSize ?? ''}
-                              placeholder="—"
-                              className="w-20 h-9 text-center"
+                            <SizeSelect
+                              value={fe.practicePantsSize}
+                              sizes={PANTS_SIZES}
                               disabled={isSaving}
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (fe.practicePantsSize ?? ''))
-                                  saveField(enrollment, 'footballEquipment.practicePantsSize', val);
-                              }}
+                              onChange={(v) => saveField(enrollment, 'footballEquipment.practicePantsSize', v)}
                             />
                           </td>
 
@@ -717,7 +701,7 @@ export default function EquipmentPage() {
             </Card>
 
             <p className="mt-3 text-xs text-muted-foreground">
-              {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — changes save automatically on field blur or status change.
+              {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — changes save automatically on selection or field blur.
             </p>
           </>
         )}
