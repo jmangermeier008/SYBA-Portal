@@ -380,7 +380,7 @@ export default function AdminDashboard({
       items.push({
         severity: 'blue',
         message: `${pendingPaymentCount} pending payment${pendingPaymentCount > 1 ? 's' : ''}`,
-        href: '/admin/registration',
+        href: activeSport === 'football' ? '/admin/roster?filter=pending' : '/admin/registration',
       });
     }
     if (waitlistedCount > 0) {
@@ -389,6 +389,19 @@ export default function AdminDashboard({
         message: `${waitlistedCount} on waitlist`,
         href: '/admin/registration',
       });
+    }
+    if (activeSport === 'football') {
+      const enrolledPlayerIds = new Set(seasonEnrollments.map((e) => e.playerId).filter(Boolean));
+      const missingDocs = (allPlayers ?? []).filter(
+        (p) => enrolledPlayerIds.has(p.id) && (!p.compliance?.birthCertificateVerified || !p.compliance?.physicalVerified)
+      ).length;
+      if (missingDocs > 0) {
+        items.push({
+          severity: 'orange',
+          message: `${missingDocs} player${missingDocs > 1 ? 's' : ''} missing verified documents`,
+          href: '/admin/roster?filter=action_required',
+        });
+      }
     }
     const openInquiryCount = openInquiries?.length ?? 0;
     if (openInquiryCount > 0) {
@@ -426,7 +439,7 @@ export default function AdminDashboard({
     });
 
     return items;
-  }, [undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries, thisWeekGames, todayISO]);
+  }, [undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries, thisWeekGames, todayISO, activeSport, seasonEnrollments, allPlayers]);
 
   // Calendar tab events
   const calendarEvents = useMemo<CalendarEvent[]>(() => {

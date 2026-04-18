@@ -1,8 +1,8 @@
 
 "use client";
 
-import { useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
@@ -18,7 +18,8 @@ import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescript
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle, ShieldCheck, ShieldAlert, X } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -104,6 +105,11 @@ export default function MasterRosterPage() {
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const urlFilter = searchParams.get('filter') as 'action_required' | 'pending' | null;
+  const [activeFilter, setActiveFilter] = useState<'action_required' | 'pending' | 'all'>(urlFilter ?? 'all');
+  const [activeTab, setActiveTab] = useState<string>('all');
+
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -200,6 +206,48 @@ export default function MasterRosterPage() {
     return m;
   }, [parentProfiles]);
 
+  const activeSeason = useMemo(() =>
+    seasons?.find((s: any) => s.status === 'active' || s.isActive) ?? seasons?.[0] ?? null,
+  [seasons]);
+
+  useEffect(() => {
+    if (activeSeason?.id && !selectedSeason) {
+      setSelectedSeason(activeSeason.id);
+    }
+  }, [activeSeason?.id, selectedSeason]);
+
+  const divisionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    (enrollments ?? [])
+      .filter(e => !selectedSeason || selectedSeason === 'all-seasons' || e.seasonId === selectedSeason)
+      .forEach(e => {
+        if (e.divisionId) counts.set(e.divisionId, (counts.get(e.divisionId) ?? 0) + 1);
+      });
+    return counts;
+  }, [enrollments, selectedSeason]);
+
+  const footballFilteredEnrollments = useMemo(() => {
+    if (activeSport !== 'football') return [];
+    return (enrollments ?? []).filter(e => {
+      if (selectedSeason && selectedSeason !== 'all-seasons' && e.seasonId !== selectedSeason) return false;
+      if (searchQuery.trim()) {
+        const p = players?.find(p => p.id === e.playerId);
+        const name = p ? `${p.firstName} ${p.lastName}`.toLowerCase() : '';
+        if (!name.includes(searchQuery.toLowerCase())) return false;
+      }
+      if (activeTab !== 'all' && e.divisionId !== activeTab) return false;
+      if (activeFilter === 'pending') {
+        const status = getPaymentStatus(e);
+        if (status === 'paid' || status === 'fee_waived') return false;
+      }
+      if (activeFilter === 'action_required') {
+        const p = players?.find(p => p.id === e.playerId);
+        if (p?.ageVerified && p?.compliance?.physicalVerified) return false;
+      }
+      return true;
+    });
+  }, [enrollments, activeSport, selectedSeason, searchQuery, activeTab, activeFilter, players]);
+
   const needsAttentionCount = enrollments?.filter(e =>
     e.profileStatus === 'incomplete' &&
     (e.paymentStatus === 'paid' || e.payment_status === 'paid')
@@ -216,6 +264,8 @@ export default function MasterRosterPage() {
     }
     return true;
   });
+
+  const displayEnrollments = activeSport === 'football' ? footballFilteredEnrollments : filteredEnrollments;
 
   const handleAssignTeam = (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
@@ -500,6 +550,31 @@ export default function MasterRosterPage() {
     }
   };
 
+  const handleQuickVerify = async (enrollment: Enrollment, player: Player, field: 'birthCert' | 'physical') => {
+    if (!db) return;
+    try {
+      const playerRef = doc(db, 'userProfiles', enrollment.parentUserId, 'players', player.id);
+      if (field === 'birthCert') {
+        await updateDoc(playerRef, {
+          ageVerified: true,
+          'compliance.birthCertificateVerified': true,
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        await updateDoc(playerRef, {
+          'compliance.physicalVerified': true,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      toast({
+        title: 'Document verified',
+        description: `${field === 'birthCert' ? 'Birth certificate' : 'Physical form'} marked as verified for ${player.firstName} ${player.lastName}.`,
+      });
+    } catch (error: any) {
+      toast({ title: 'Verification failed', description: error.message, variant: 'destructive' });
+    }
+  };
+
   const handleSaveEquipment = async () => {
     if (!db || !equipmentDialog.enrollment) return;
     const { enrollment, form } = equipmentDialog;
@@ -525,14 +600,14 @@ export default function MasterRosterPage() {
   };
 
   const exportRosterCSV = () => {
-    if (!filteredEnrollments || filteredEnrollments.length === 0) return;
+    if (!displayEnrollments || displayEnrollments.length === 0) return;
 
     const isFootball = activeSport === 'football';
     const headers = isFootball
       ? ["First Name", "Last Name", "Division", "Parent Est. (lbs)", "Verified Weight (lbs)", "Helmet Size", "Shoulder Pad Size", "Pant Size", "Jersey Size", "Jersey Number", "Equipment Issued", "Payment Status"]
       : ["First Name", "Last Name", "Team", "Division", "Jersey Size", "Payment Status", "Clearance"];
 
-    const rows = filteredEnrollments.map(e => {
+    const rows = displayEnrollments.map(e => {
       const p = players?.find(p => p.id === e.playerId);
       const t = teams?.find(t => t.id === e.teamId);
       const eq = e.footballEquipment;
@@ -618,7 +693,7 @@ export default function MasterRosterPage() {
             <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
               <Upload className="mr-2 h-4 w-4" /> Import Assignments
             </Button>
-            <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!filteredEnrollments?.length}>
+            <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
               <Download className="mr-2 h-4 w-4" /> Export for Uniforms
             </Button>
           </div>
@@ -648,25 +723,27 @@ export default function MasterRosterPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Division</label>
-                <Select value={selectedDivision} onValueChange={setSelectedDivision}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="All Divisions" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all-divisions">All Divisions</SelectItem>
-                    {Array.from(new Set(enrollments?.map(e => e.divisionId) || [])).map(divId => (
-                      <SelectItem key={divId} value={divId}>{divId}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {activeSport !== 'football' && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase text-muted-foreground">Division</label>
+                  <Select value={selectedDivision} onValueChange={setSelectedDivision}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="All Divisions" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all-divisions">All Divisions</SelectItem>
+                      {Array.from(new Set(enrollments?.map(e => e.divisionId) || [])).map(divId => (
+                        <SelectItem key={divId} value={divId}>{divId}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="flex items-end">
                 <div className="bg-secondary/20 p-3 rounded-xl w-full flex items-center justify-between border">
                   <div>
                     <p className="text-[10px] font-bold uppercase text-muted-foreground">Total Enrolled</p>
-                    <p className="text-xl font-bold">{filteredEnrollments?.length || 0}</p>
+                    <p className="text-xl font-bold">{displayEnrollments?.length || 0}</p>
                   </div>
                   <Users className="h-5 w-5 text-primary opacity-50" />
                 </div>
@@ -695,19 +772,66 @@ export default function MasterRosterPage() {
           </CardContent>
         </Card>
 
+        {/* Football URL filter banner */}
+        {activeSport === 'football' && activeFilter !== 'all' && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 text-sm text-amber-800">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span className="flex-1">
+              {activeFilter === 'action_required'
+                ? 'Showing players with missing or unverified documents'
+                : 'Showing players with pending payment'}
+            </span>
+            <button
+              onClick={() => setActiveFilter('all')}
+              className="flex items-center gap-1 text-xs font-medium hover:text-amber-900 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" /> Clear filter
+            </button>
+          </div>
+        )}
+
         <Card className="border-none shadow-xl overflow-hidden">
           <CardHeader className="bg-primary text-primary-foreground">
-            <CardTitle className="text-xl font-headline">Registration Queue</CardTitle>
-            <CardDescription className="text-primary-foreground/80">Monitor compliance and assign teams.</CardDescription>
+            <CardTitle className="text-xl font-headline">
+              {activeSport === 'football' ? 'Football Roster' : 'Registration Queue'}
+            </CardTitle>
+            <CardDescription className="text-primary-foreground/80">
+              {activeSport === 'football'
+                ? 'Players grouped by division — verify documents and track payments.'
+                : 'Monitor compliance and assign teams.'}
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
+            {/* Football division tabs */}
+            {activeSport === 'football' && divisionsForSeason && divisionsForSeason.length > 0 && (
+              <div className="px-4 pt-4 pb-0 border-b">
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                  <TabsList className="h-auto flex-wrap gap-1 bg-transparent p-0">
+                    <TabsTrigger value="all" className="rounded-full text-xs h-7 px-3">
+                      All Players ({divisionCounts.size > 0
+                        ? Array.from(divisionCounts.values()).reduce((a, b) => a + b, 0)
+                        : 0})
+                    </TabsTrigger>
+                    {divisionsForSeason.map(div => (
+                      <TabsTrigger key={div.id} value={div.id} className="rounded-full text-xs h-7 px-3">
+                        {div.name} ({divisionCounts.get(div.id) ?? 0})
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              </div>
+            )}
             {loadingEnrollments ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
-            ) : !filteredEnrollments || filteredEnrollments.length === 0 ? (
+            ) : !displayEnrollments || displayEnrollments.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
-                No matching registrations found.
+                {activeFilter !== 'all'
+                  ? activeFilter === 'action_required'
+                    ? 'No players with missing documents in this view.'
+                    : 'No players with pending payments in this view.'
+                  : 'No matching registrations found.'}
               </div>
             ) : (
               <>
@@ -728,12 +852,12 @@ export default function MasterRosterPage() {
                       <TableHead className="hidden sm:table-cell">Clearance</TableHead>
                     )}
                     <TableHead className="hidden lg:table-cell">Compliance</TableHead>
-                    <TableHead>Assignment</TableHead>
+                    <TableHead>{activeSport === 'football' ? 'Division' : 'Assignment'}</TableHead>
                     <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredEnrollments.map((e) => {
+                  {displayEnrollments.map((e) => {
                     const p = players?.find(p => p.id === e.playerId);
                     const status = getPaymentStatus(e);
                     const canWaive = status !== 'paid' && !e.fee_waived;
@@ -948,6 +1072,18 @@ export default function MasterRosterPage() {
                                 <Pencil className="mr-2 h-4 w-4" />
                                 Edit Player
                               </DropdownMenuItem>
+                              {activeSport === 'football' && p && !p.ageVerified && (
+                                <DropdownMenuItem onClick={() => handleQuickVerify(e, p, 'birthCert')}>
+                                  <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
+                                  Verify Birth Certificate
+                                </DropdownMenuItem>
+                              )}
+                              {activeSport === 'football' && p && !p.compliance?.physicalVerified && (
+                                <DropdownMenuItem onClick={() => handleQuickVerify(e, p, 'physical')}>
+                                  <ShieldCheck className="mr-2 h-4 w-4 text-green-500" />
+                                  Verify Physical Form
+                                </DropdownMenuItem>
+                              )}
                               {activeSport === 'football' && (
                                 <DropdownMenuItem
                                   onClick={() => setTimeout(() => setEquipmentDialog({
