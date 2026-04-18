@@ -77,7 +77,6 @@ const adminSetupItems = [
 
 const adminRegistrationItems = [
   { label: 'Registrations', icon: BarChart3, href: '/admin/registration' },
-  { label: 'Compliance Report', icon: FileCheck, href: '/admin/compliance' },
   { label: 'Inquiries', icon: Inbox, href: '/admin/inquiries' },
 ];
 
@@ -106,7 +105,7 @@ const adminSystemAdminItems = [
 
 function getAdminSectionForPath(p: string): string | null {
   if (['/admin/seasons', '/admin/divisions', '/admin/teams'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Setup';
-  if (['/admin/registration', '/admin/compliance', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Registration';
+  if (['/admin/registration', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Registration';
   if (['/admin/roster', '/admin/equipment'].some(r => p === r || p.startsWith(r + '/'))) return 'Equipment & Rosters';
   if (['/admin/calendar', '/admin/games', '/admin/practice-slots', '/admin/fields', '/admin/concessions', '/admin/announcements', '/admin/board-meetings', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Operations';
   if (['/admin/import', '/admin/roles', '/admin/settings', '/admin/developer'].some(r => p === r || p.startsWith(r + '/'))) return 'System Maintenance';
