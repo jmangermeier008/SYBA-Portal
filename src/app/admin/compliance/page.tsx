@@ -304,9 +304,8 @@ export default function AdminCompliancePage() {
             const hasCR = uc.some(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type) && c.status === 'Approved');
             return hasCA && hasCR;
           }).length;
-          const isReady = fullyCleared === users.length && users.length > 0;
           return (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <Card className="border-none shadow-md">
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
