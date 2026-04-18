@@ -3,7 +3,7 @@
 import { useUser, useSport, useFirestore, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { setActiveSport as writeActiveSport, clearActiveSport } from '@/hooks/use-active-sport';
 import { useRouter } from 'next/navigation';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Link from 'next/link';
@@ -59,6 +59,9 @@ export default function Home() {
   // Public sport selector — localStorage-only (no auth required)
   const [publicSport, setPublicSportState] = useState<Sport | null>(null);
   const [sportInitialized, setSportInitialized] = useState(false);
+  // Track whether the user explicitly selected a sport on this page.
+  // When true, we suppress the auto-redirect so they can click Register Player.
+  const sportSelectedOnPage = useRef(false);
   useEffect(() => {
     const saved = localStorage.getItem('syba_active_sport') as Sport | null;
     if (saved === 'baseball' || saved === 'football') {
@@ -67,6 +70,7 @@ export default function Home() {
     setSportInitialized(true);
   }, []);
   function selectPublicSport(sport: Sport) {
+    sportSelectedOnPage.current = true;
     setPublicSportState(sport);
     writeActiveSport(sport);
   }
@@ -198,7 +202,9 @@ export default function Home() {
     // Wait for sport selection before redirecting — prevents an infinite loop where
     // the redirect fires before the user picks a sport, then the dashboard route triggers
     // <RedirectToHome />, which sends them back here, and so on.
-    if (!loading && user && profile && contextSport) {
+    // Skip the auto-redirect if the user explicitly selected a sport on this page —
+    // they are likely about to click "Register Player" and should not be redirected away.
+    if (!loading && user && profile && contextSport && !sportSelectedOnPage.current) {
       if (isAdmin || isBoardMember) {
         router.push('/admin/dashboard');
       } else if (isCoach) {
@@ -209,7 +215,7 @@ export default function Home() {
     }
   }, [user, profile, loading, router, isAdmin, isBoardMember, isCoach, contextSport]);
 
-  if (user && profile && contextSport) return (
+  if (user && profile && contextSport && !sportSelectedOnPage.current) return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <Loader2 className="h-10 w-10 animate-spin text-primary" />
     </div>
@@ -249,7 +255,10 @@ export default function Home() {
               <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
             </Button>
             <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
-              <Link href={`/login?redirect=/parent/enroll&sport=${publicSport}`}>
+              <Link href={user
+                ? `/parent/enroll?sport=${publicSport}`
+                : `/login?redirect=/parent/enroll&sport=${publicSport}`
+              }>
                 Register Player
               </Link>
             </Button>

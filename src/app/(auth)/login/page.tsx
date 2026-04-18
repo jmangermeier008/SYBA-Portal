@@ -128,6 +128,13 @@ function LoginContent() {
     }
   };
 
+  const signupHref = (() => {
+    const redirectParam = searchParams.get('redirect');
+    const sport = searchParams.get('sport');
+    if (!redirectParam) return '/signup';
+    return `/signup?redirect=${encodeURIComponent(redirectParam)}${sport ? `&sport=${sport}` : ''}`;
+  })();
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
       <div className="w-full max-w-md">
@@ -170,7 +177,7 @@ function LoginContent() {
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 New to SYBA?{" "}
-                <Link href="/signup" className="text-primary font-medium hover:underline">Create an account</Link>
+                <Link href={signupHref} className="text-primary font-medium hover:underline">Create an account</Link>
               </p>
             </CardFooter>
           </form>
