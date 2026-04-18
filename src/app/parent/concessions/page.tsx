@@ -72,7 +72,7 @@ export default function ParentConcessionsPage() {
   const activeSeason = useMemo(() => activeSeasons?.[0] ?? null, [activeSeasons]);
 
   const slotsQuery = useMemoFirebase(() => {
-    if (!db || !profile || !activeSeason || !activeSport) return null;
+    if (!db || !profile || !activeSeason || !activeSeason.startDate || !activeSport) return null;
     return query(
       collection(db, 'concessionSlots'),
       where('sport', '==', activeSport),
