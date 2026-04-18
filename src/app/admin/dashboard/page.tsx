@@ -660,7 +660,7 @@ export default function AdminDashboard({
         </div>
 
         {/* ── Zone 2.5: Practice Slot Coverage ── */}
-        <Link href="/admin/practice-slots?tab=distribution">
+        {activeSport !== 'football' && <Link href="/admin/practice-slots?tab=distribution">
           <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer mb-4">
             <CardContent className="px-4 py-3">
               <div className="flex items-center justify-between mb-2">
@@ -686,7 +686,7 @@ export default function AdminDashboard({
               />
             </CardContent>
           </Card>
-        </Link>
+        </Link>}
 
         {/* ── Zone 2.6: Recent Payments ── */}
         {recentPayments.length > 0 && (
