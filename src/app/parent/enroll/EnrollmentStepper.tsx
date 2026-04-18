@@ -563,7 +563,18 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           });
         }
 
-        // 2. Create enrollment document
+        // 2. For football, resolve the team that matches this division
+        let resolvedTeamId: string | undefined;
+        if (activeSport === 'football' && item.divisionId) {
+          const teamsSnap = await getDocs(
+            query(collection(db, 'teams'), where('divisionId', '==', item.divisionId))
+          );
+          if (!teamsSnap.empty) {
+            resolvedTeamId = teamsSnap.docs[0].id;
+          }
+        }
+
+        // 3. Create enrollment document
         const enrollmentId = crypto.randomUUID();
         enrollmentIds.push(enrollmentId);
         const paymentStatus = item.isWaitlisted ? 'waitlisted' : 'pending_payment';
@@ -573,6 +584,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           playerId,
           seasonId: item.seasonId,
           divisionId: item.divisionId,
+          ...(resolvedTeamId ? { teamId: resolvedTeamId } : {}),
           parentUserId: user.uid,
           shirtSize: item.shirtSize,
           jerseySize: item.shirtSize,
