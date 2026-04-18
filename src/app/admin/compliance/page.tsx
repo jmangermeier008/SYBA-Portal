@@ -229,13 +229,8 @@ export default function AdminCompliancePage() {
   const handleAuditSubmit = async (player: Player) => {
     if (!db || !user) return;
     setIsProcessing(true);
-    const parentUserId = player.parentUserId ?? (player as any)._refPath?.split('/')?.[1];
-    if (!parentUserId) {
-      toast({ variant: "destructive", title: "Error", description: "Cannot determine parent user for this player." });
-      setIsProcessing(false);
-      return;
-    }
-    const playerRef = doc(db, 'userProfiles', parentUserId, 'players', player.id);
+    const refPath = (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`;
+    const playerRef = doc(db, refPath);
     const now = new Date().toISOString();
     const updateData: Record<string, unknown> = {
       'compliance.verifiedBy': user.uid,
@@ -277,13 +272,9 @@ export default function AdminCompliancePage() {
 
   const handleDeletePlayer = async (player: Player) => {
     if (!db) return;
-    const parentUserId = player.parentUserId ?? (player as any)._refPath?.split('/')?.[1];
-    if (!parentUserId) {
-      toast({ variant: "destructive", title: "Error", description: "Cannot determine parent user for this player." });
-      return;
-    }
+    const refPath = (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`;
     setIsProcessing(true);
-    const playerRef = doc(db, 'userProfiles', parentUserId, 'players', player.id);
+    const playerRef = doc(db, refPath);
     deleteDoc(playerRef)
       .then(() => {
         toast({ title: "Player Deleted", description: `${player.firstName} ${player.lastName} has been removed.` });
