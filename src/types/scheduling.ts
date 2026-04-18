@@ -132,9 +132,10 @@ export interface Game {
   awayTeamName?: string;
   division?: string;
   divisionId?: string;
-  // Practices (team-specific):
+  // Practices (team-specific) and football games (external opponent):
   teamId?: string;
   teamName?: string;
+  opponentName?: string;   // Football: external school name (not an internal team)
   notes?: string;
   // Final scores (populated when status = 'completed'):
   homeScore?: number;
@@ -173,6 +174,7 @@ export interface TeamGame {
   location: string;              // fieldName
   fieldId: string;
   opponentName?: string;         // The OTHER team's name (only for 'Game' type)
+  locationType?: 'home' | 'away'; // Football: whether game is at home or away
   cancelled: boolean;
   cancellationReason?: string;
   practiceSlotId?: string;       // Links to practiceSlots/{id} when applicable

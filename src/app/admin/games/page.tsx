@@ -49,6 +49,8 @@ interface Game {
   divisionId?: string;
   teamId?: string;
   teamName?: string;
+  opponentName?: string;
+  locationType?: 'home' | 'away';
   notes?: string;
   scrimmageNote?: string;
   status?: GameStatus;
@@ -90,6 +92,9 @@ const EMPTY_FORM = {
   date: '', time: '', fieldId: '',
   divisionId: '',
   homeTeamId: '', awayTeamId: '', teamId: '', notes: '', scrimmageNote: '',
+  opponentName: '',
+  locationType: 'home' as 'home' | 'away',
+  awayLocation: '',
   // Recurring practice fields
   isRecurring: false,
   recurringWeekdays: [] as number[],
@@ -200,8 +205,12 @@ export default function AdminGamesPage() {
       eventType: g.type === 'game' ? 'game' as const : 'practice' as const,
       date: g.date,
       startTime: g.time,
-      title: g.type === 'game' && g.homeTeamName && g.awayTeamName
-        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+      title: g.type === 'game'
+        ? (g.opponentName && g.teamName
+            ? `${g.teamName} vs. ${g.opponentName}`
+            : g.homeTeamName && g.awayTeamName
+              ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+              : 'Game')
         : g.teamName ? `${g.teamName} Practice` : 'Practice',
       status: g.status ?? 'scheduled',
       fieldName: g.fieldName,
@@ -274,12 +283,14 @@ export default function AdminGamesPage() {
 
   const buildGamePayload = () => {
     const selectedDivision = (divisions ?? []).find(d => d.id === form.divisionId);
+    const isFootballGame = activeSport === 'football' && form.type === 'game';
+    const isAwayGame = isFootballGame && form.locationType === 'away';
     const payload: Record<string, any> = {
       type: form.type,
       date: form.date,
       time: form.time,
-      fieldId: form.fieldId,
-      fieldName: fieldMap[form.fieldId] ?? '',
+      fieldId: isAwayGame ? '' : form.fieldId,
+      fieldName: isAwayGame ? form.awayLocation : fieldMap[form.fieldId] ?? '',
       notes: form.notes,
       scrimmageNote: form.scrimmageNote.trim() || null,
       sport: activeSport,
@@ -287,10 +298,17 @@ export default function AdminGamesPage() {
       division: selectedDivision?.name ?? '',
     };
     if (form.type === 'game') {
-      payload.homeTeamId = form.homeTeamId;
-      payload.homeTeamName = teamMap[form.homeTeamId] ?? '';
-      payload.awayTeamId = form.awayTeamId;
-      payload.awayTeamName = teamMap[form.awayTeamId] ?? '';
+      if (activeSport === 'football') {
+        payload.teamId = form.homeTeamId;
+        payload.teamName = teamMap[form.homeTeamId] ?? '';
+        payload.opponentName = form.opponentName;
+        payload.locationType = form.locationType;
+      } else {
+        payload.homeTeamId = form.homeTeamId;
+        payload.homeTeamName = teamMap[form.homeTeamId] ?? '';
+        payload.awayTeamId = form.awayTeamId;
+        payload.awayTeamName = teamMap[form.awayTeamId] ?? '';
+      }
     } else {
       payload.teamId = form.teamId;
       payload.teamName = teamMap[form.teamId] ?? '';
@@ -306,10 +324,11 @@ export default function AdminGamesPage() {
     setRecurringStep('configure');
   };
 
-  const gameLabel = (game: Game) =>
-    game.homeTeamName && game.awayTeamName
-      ? `${game.homeTeamName} vs. ${game.awayTeamName}`
-      : game.teamName ?? 'the game';
+  const gameLabel = (game: Game) => {
+    if (game.opponentName && game.teamName) return `${game.teamName} vs. ${game.opponentName}`;
+    if (game.homeTeamName && game.awayTeamName) return `${game.homeTeamName} vs. ${game.awayTeamName}`;
+    return game.teamName ?? 'the game';
+  };
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -383,13 +402,16 @@ export default function AdminGamesPage() {
       type: game.type,
       date: game.date,
       time: game.time,
-      fieldId: game.fieldId,
+      fieldId: game.fieldId ?? '',
       divisionId: game.divisionId ?? '',
-      homeTeamId: game.homeTeamId ?? '',
+      homeTeamId: game.homeTeamId ?? game.teamId ?? '',
       awayTeamId: game.awayTeamId ?? '',
       teamId: game.teamId ?? '',
       notes: game.notes ?? '',
       scrimmageNote: game.scrimmageNote ?? '',
+      opponentName: game.opponentName ?? '',
+      locationType: game.locationType ?? 'home',
+      awayLocation: game.locationType === 'away' ? (game.fieldName ?? '') : '',
       isRecurring: false,
       recurringWeekdays: [],
       recurringStartDate: '',
@@ -401,7 +423,9 @@ export default function AdminGamesPage() {
 
   const handleSave = async () => {
     if (!db) return;
-    if (!form.date || !form.time || !form.fieldId) {
+    const isFootballGame = activeSport === 'football' && form.type === 'game';
+    const isFootballAway = isFootballGame && form.locationType === 'away';
+    if (!form.date || !form.time || (!form.fieldId && !isFootballAway)) {
       toast({ title: 'Missing fields', description: 'Date, time, and field are required.', variant: 'destructive' });
       return;
     }
@@ -409,11 +433,19 @@ export default function AdminGamesPage() {
       toast({ title: 'Missing division', description: 'Please select a division before saving.', variant: 'destructive' });
       return;
     }
-    if (form.type === 'game' && (!form.homeTeamId || !form.awayTeamId)) {
+    if (isFootballGame && (!form.homeTeamId || !form.opponentName.trim())) {
+      toast({ title: 'Missing info', description: 'Select a team and enter the opponent name.', variant: 'destructive' });
+      return;
+    }
+    if (isFootballAway && !form.awayLocation.trim()) {
+      toast({ title: 'Missing location', description: 'Enter the away game location.', variant: 'destructive' });
+      return;
+    }
+    if (!isFootballGame && form.type === 'game' && (!form.homeTeamId || !form.awayTeamId)) {
       toast({ title: 'Missing teams', description: 'Games require a home and away team.', variant: 'destructive' });
       return;
     }
-    if (form.type === 'game' && form.homeTeamId === form.awayTeamId) {
+    if (!isFootballGame && form.type === 'game' && form.homeTeamId === form.awayTeamId) {
       toast({ title: 'Invalid teams', description: 'Home and away team cannot be the same.', variant: 'destructive' });
       return;
     }
@@ -513,7 +545,17 @@ export default function AdminGamesPage() {
 
         // Dual Game Model: mirror to team subcollections so coaches/parents can see this game.
         const dateTime = `${form.date}T${form.time}:00`;
-        if (form.type === 'game' && form.homeTeamId && form.awayTeamId) {
+        if (form.type === 'game' && activeSport === 'football' && form.homeTeamId) {
+          const location = form.locationType === 'away' ? form.awayLocation : fieldMap[form.fieldId] ?? '';
+          batch.set(doc(db, 'teams', form.homeTeamId, 'games', gameId), {
+            id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.homeTeamId,
+            type: 'Game', dateTime, location,
+            fieldId: form.locationType === 'home' ? form.fieldId : '',
+            opponentName: form.opponentName,
+            locationType: form.locationType,
+            cancelled: false, createdAt: Timestamp.now(),
+          });
+        } else if (form.type === 'game' && form.homeTeamId && form.awayTeamId) {
           batch.set(doc(db, 'teams', form.homeTeamId, 'games', gameId), {
             id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.homeTeamId,
             type: 'Game', dateTime, location: fieldMap[form.fieldId] ?? '',
@@ -568,10 +610,11 @@ export default function AdminGamesPage() {
       batch.update(doc(db, 'games', editingGame.id), payload);
 
       // Dual Game Model: sync date/time/field changes to team subcollections.
+      const isReschedulingAwayFootball = activeSport === 'football' && form.type === 'game' && form.locationType === 'away';
       const rescheduledTeamPayload = {
         dateTime: `${form.date}T${form.time}:00`,
-        location: fieldMap[form.fieldId] ?? '',
-        fieldId: form.fieldId,
+        location: isReschedulingAwayFootball ? form.awayLocation : fieldMap[form.fieldId] ?? '',
+        fieldId: isReschedulingAwayFootball ? '' : form.fieldId,
         updatedAt: Timestamp.now(),
       };
       if (editingGame.homeTeamId) batch.update(doc(db, 'teams', editingGame.homeTeamId, 'games', editingGame.id), rescheduledTeamPayload);
@@ -1042,17 +1085,89 @@ export default function AdminGamesPage() {
                     </div>
                   )}
 
-                  <div className="space-y-1.5">
-                    <Label>Field</Label>
-                    <Select value={form.fieldId} onValueChange={v => setForm({ ...form, fieldId: v })}>
-                      <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select a field" /></SelectTrigger>
-                      <SelectContent>
-                        {(fields ?? []).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {!(activeSport === 'football' && form.type === 'game' && form.locationType === 'away') && (
+                    <div className="space-y-1.5">
+                      <Label>Field</Label>
+                      <Select value={form.fieldId} onValueChange={v => setForm({ ...form, fieldId: v })}>
+                        <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select a field" /></SelectTrigger>
+                        <SelectContent>
+                          {(fields ?? []).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
-                  {form.type === 'game' && (
+                  {form.type === 'game' && activeSport === 'football' && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label>Division</Label>
+                        <Select
+                          value={form.divisionId}
+                          onValueChange={v => setForm({ ...form, divisionId: v, homeTeamId: '' })}
+                          disabled={!activeSeason}
+                        >
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue placeholder={activeSeason ? 'Select a division' : 'No active season'} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(divisions ?? []).map(d => (
+                              <SelectItem key={d.id} value={d.id}>
+                                {d.name}{d.ageGroup ? ` (${d.ageGroup})` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Our Team</Label>
+                        <Select
+                          value={form.homeTeamId}
+                          onValueChange={v => setForm({ ...form, homeTeamId: v })}
+                          disabled={!form.divisionId}
+                        >
+                          <SelectTrigger className="rounded-xl"><SelectValue placeholder={form.divisionId ? 'Select team' : 'Select a division first'} /></SelectTrigger>
+                          <SelectContent>
+                            {(teams ?? []).filter(t => !form.divisionId || t.divisionId === form.divisionId).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Opponent</Label>
+                        <Input
+                          className="rounded-xl"
+                          placeholder="e.g. Farrell High School"
+                          value={form.opponentName}
+                          onChange={e => setForm({ ...form, opponentName: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Location</Label>
+                        <Select
+                          value={form.locationType}
+                          onValueChange={(v: 'home' | 'away') => setForm({ ...form, locationType: v, awayLocation: '', fieldId: '' })}
+                        >
+                          <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="home">Home</SelectItem>
+                            <SelectItem value="away">Away</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {form.locationType === 'away' && (
+                        <div className="space-y-1.5">
+                          <Label>Away Location</Label>
+                          <Input
+                            className="rounded-xl"
+                            placeholder="e.g. Farrell High School - Main Field"
+                            value={form.awayLocation}
+                            onChange={e => setForm({ ...form, awayLocation: e.target.value })}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {form.type === 'game' && activeSport !== 'football' && (
                     <>
                       <div className="space-y-1.5">
                         <Label>Division</Label>
@@ -1376,7 +1491,9 @@ export default function AdminGamesPage() {
             <DialogTitle className="font-headline">Record Final Score</DialogTitle>
             {scoreDialog.game && (
               <DialogDescription>
-                {scoreDialog.game.homeTeamName} vs. {scoreDialog.game.awayTeamName}
+                {scoreDialog.game.opponentName && scoreDialog.game.teamName
+                ? `${scoreDialog.game.teamName} vs. ${scoreDialog.game.opponentName}`
+                : `${scoreDialog.game.homeTeamName} vs. ${scoreDialog.game.awayTeamName}`}
                 {' · '}{format(parseISO(scoreDialog.game.date), 'MMM d')}
               </DialogDescription>
             )}
@@ -1520,7 +1637,11 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold truncate">
-              {isGame ? `${game.homeTeamName} vs. ${game.awayTeamName}` : `${game.teamName} Practice`}
+              {isGame
+                ? (game.opponentName && game.teamName
+                    ? `${game.teamName} vs. ${game.opponentName}`
+                    : `${game.homeTeamName} vs. ${game.awayTeamName}`)
+                : `${game.teamName} Practice`}
             </p>
             {isGame && game.division && (
               <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-primary/70 bg-primary/5 border-primary/20">{game.division}</span>
