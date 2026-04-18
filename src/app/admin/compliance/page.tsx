@@ -329,19 +329,6 @@ export default function AdminCompliancePage() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className={`border-none shadow-md ${isReady ? 'bg-green-50' : 'bg-orange-50'}`}>
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isReady ? 'bg-green-100' : 'bg-orange-100'}`}>
-                    <CheckCircle2 className={`h-6 w-6 ${isReady ? 'text-green-600' : 'text-orange-500'}`} />
-                  </div>
-                  <div>
-                    <p className={`text-lg font-bold font-headline ${isReady ? 'text-green-700' : 'text-orange-600'}`}>
-                      {isReady ? 'All Clear' : 'Action Needed'}
-                    </p>
-                    <p className="text-sm text-muted-foreground">Season Eligibility</p>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           );
         })()}
