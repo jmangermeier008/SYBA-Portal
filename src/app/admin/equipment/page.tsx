@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
@@ -8,6 +9,7 @@ import {
   addDoc,
   collection,
   collectionGroup,
+  deleteDoc,
   doc,
   getDocs,
   query,
@@ -24,6 +26,16 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   ShieldCheck,
   Lock,
   Loader2,
@@ -33,6 +45,11 @@ import {
   Package,
   Tag,
   Plus,
+  Trash2,
+  Upload,
+  Download,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -183,6 +200,19 @@ const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
   practice_pants: 'Practice Pants',
 };
 
+interface ImportRow {
+  tagNumber: string;
+  type: ShedItemType;
+  size: string;
+  notes?: string;
+}
+
+interface ImportError {
+  row: number;
+  reason: string;
+  rawData: Record<string, string>;
+}
+
 const ALL_STATUS_FIELDS: (keyof FootballEquipment)[] = [
   'helmetStatus',
   'padStatus',
@@ -216,6 +246,12 @@ export default function EquipmentPage() {
   const [checkOutDialog, setCheckOutDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
   const [checkOutPlayerId, setCheckOutPlayerId] = useState('');
   const [checkOutSaving, setCheckOutSaving] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
+  const [importDialog, setImportDialog] = useState(false);
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importErrors, setImportErrors] = useState<ImportError[]>([]);
+  const [importSaving, setImportSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -464,6 +500,122 @@ export default function EquipmentPage() {
       toast({ title: 'Item returned', description: `Tag #${item.tagNumber} is now available.` });
     } catch (err: any) {
       toast({ title: 'Return failed', description: err.message, variant: 'destructive' });
+    }
+  }
+
+  async function handleDeleteShedItem(item: ShedItem) {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'equipmentInventory', item.id));
+      toast({ title: 'Item deleted', description: `Tag #${item.tagNumber} removed from inventory.` });
+    } catch (err: any) {
+      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeleteDialog({ open: false, item: null });
+    }
+  }
+
+  function downloadTemplate() {
+    const wb = XLSX.utils.book_new();
+
+    const data = [
+      ['Tag Number', 'Type', 'Size', 'Notes'],
+      ['H-001', 'helmet', 'YM', 'Blue stripe'],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+
+    const validTypes = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
+    const valuesData: (string | string[])[][] = [
+      ['Valid Types', '', 'Valid Sizes (Helmets)', '', 'Valid Sizes (All Others)'],
+      ...Array.from({ length: Math.max(validTypes.length, HELMET_SIZES.length, PAD_SIZES.length) }, (_, i) => [
+        validTypes[i] ?? '',
+        '',
+        HELMET_SIZES[i] ?? '',
+        '',
+        PAD_SIZES[i] ?? '',
+      ]),
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(valuesData);
+    ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Valid Values');
+
+    XLSX.writeFile(wb, 'equipment_inventory_template.xlsx');
+  }
+
+  async function parseImportFile(file: File): Promise<{ valid: ImportRow[]; errors: ImportError[] }> {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
+
+    const existingTags = new Set((shedItems ?? []).map((i) => i.tagNumber.toLowerCase()));
+    const seenTags = new Set<string>();
+    const validTypes = new Set(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]);
+
+    const valid: ImportRow[] = [];
+    const errors: ImportError[] = [];
+
+    rows.forEach((row, idx) => {
+      const rowNum = idx + 2;
+      const tagNumber = String(row['Tag Number'] ?? '').trim();
+      const type = String(row['Type'] ?? '').trim().toLowerCase();
+      const size = String(row['Size'] ?? '').trim();
+      const notes = String(row['Notes'] ?? '').trim();
+
+      if (!tagNumber) {
+        errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row });
+        return;
+      }
+      if (existingTags.has(tagNumber.toLowerCase())) {
+        errors.push({ row: rowNum, reason: `Tag #${tagNumber} already exists in inventory`, rawData: row });
+        return;
+      }
+      if (seenTags.has(tagNumber.toLowerCase())) {
+        errors.push({ row: rowNum, reason: `Duplicate Tag #${tagNumber} in this file`, rawData: row });
+        return;
+      }
+      if (!validTypes.has(type as ShedItemType)) {
+        errors.push({ row: rowNum, reason: `Unknown type "${type}" — must be one of: ${[...validTypes].join(', ')}`, rawData: row });
+        return;
+      }
+      if (!size) {
+        errors.push({ row: rowNum, reason: 'Size is required', rawData: row });
+        return;
+      }
+
+      seenTags.add(tagNumber.toLowerCase());
+      valid.push({ tagNumber, type: type as ShedItemType, size, notes: notes || undefined });
+    });
+
+    return { valid, errors };
+  }
+
+  async function handleImport() {
+    if (!db || importRows.length === 0) return;
+    setImportSaving(true);
+    try {
+      const batch = writeBatch(db);
+      importRows.forEach((row) => {
+        const ref = doc(collection(db, 'equipmentInventory'));
+        batch.set(ref, {
+          tagNumber: row.tagNumber,
+          type: row.type,
+          size: row.size,
+          status: 'available',
+          notes: row.notes ?? '',
+        });
+      });
+      await batch.commit();
+      toast({ title: 'Import complete', description: `${importRows.length} item${importRows.length !== 1 ? 's' : ''} added to inventory.` });
+      setImportDialog(false);
+      setImportRows([]);
+      setImportErrors([]);
+    } catch (err: any) {
+      toast({ title: 'Import failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setImportSaving(false);
     }
   }
 
@@ -850,9 +1002,21 @@ export default function EquipmentPage() {
                   className="pl-9 w-72"
                 />
               </div>
-              <Button onClick={() => setAddItemDialog(true)} className="rounded-xl gap-1.5">
-                <Plus className="h-4 w-4" /> Add Item
-              </Button>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" onClick={downloadTemplate} className="rounded-xl gap-1.5">
+                  <Download className="h-4 w-4" /> Download Template
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => { setImportRows([]); setImportErrors([]); setImportDialog(true); }}
+                  className="rounded-xl gap-1.5"
+                >
+                  <Upload className="h-4 w-4" /> Import from Excel
+                </Button>
+                <Button onClick={() => setAddItemDialog(true)} className="rounded-xl gap-1.5">
+                  <Plus className="h-4 w-4" /> Add Item
+                </Button>
+              </div>
             </div>
 
             {(!shedItems || shedItems.length === 0) && !shedSearchQuery && (
@@ -915,25 +1079,38 @@ export default function EquipmentPage() {
                             {item.issuedAt ? new Date(item.issuedAt).toLocaleDateString() : '—'}
                           </td>
                           <td className="px-4 py-2 text-right">
-                            {item.status === 'available' ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-full h-8 text-xs gap-1.5"
-                                onClick={() => { setCheckOutDialog({ open: true, item }); setCheckOutPlayerId(''); }}
-                              >
-                                Check Out
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-full h-8 text-xs gap-1.5"
-                                onClick={() => handleReturnShedItem(item)}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" /> Return
-                              </Button>
-                            )}
+                            <div className="flex items-center justify-end gap-2">
+                              {item.status === 'available' ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-full h-8 text-xs gap-1.5"
+                                  onClick={() => { setCheckOutDialog({ open: true, item }); setCheckOutPlayerId(''); }}
+                                >
+                                  Check Out
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-full h-8 text-xs gap-1.5"
+                                  onClick={() => handleReturnShedItem(item)}
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" /> Return
+                                </Button>
+                              )}
+                              {item.status === 'available' && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="rounded-full h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteDialog({ open: true, item })}
+                                  aria-label={`Delete tag #${item.tagNumber}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1046,6 +1223,146 @@ export default function EquipmentPage() {
               <Button onClick={handleCheckOut} disabled={checkOutSaving || !checkOutPlayerId}>
                 {checkOutSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Confirm Check Out
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog(d => ({ ...d, open }))}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Tag #{deleteDialog.item?.tagNumber}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove{' '}
+                {deleteDialog.item && `${SHED_ITEM_TYPES[deleteDialog.item.type]} (Size ${deleteDialog.item.size})`}{' '}
+                from the shed inventory. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => deleteDialog.item && handleDeleteShedItem(deleteDialog.item)}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Import Dialog */}
+        <Dialog open={importDialog} onOpenChange={(open) => { setImportDialog(open); if (!open) { setImportRows([]); setImportErrors([]); } }}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Upload className="h-5 w-5 text-primary" /> Import from Excel
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                Upload a <strong>.xlsx</strong> or <strong>.csv</strong> file with columns: <code className="bg-muted px-1 rounded text-xs">Tag Number</code>, <code className="bg-muted px-1 rounded text-xs">Type</code>, <code className="bg-muted px-1 rounded text-xs">Size</code>, <code className="bg-muted px-1 rounded text-xs">Notes</code>.
+                Use the Download Template button to get a pre-formatted file.
+              </p>
+
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const { valid, errors } = await parseImportFile(file);
+                    setImportRows(valid);
+                    setImportErrors(errors);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-xl gap-1.5"
+                >
+                  <Upload className="h-4 w-4" /> Choose File
+                </Button>
+              </div>
+
+              {(importRows.length > 0 || importErrors.length > 0) && (
+                <div className="space-y-3">
+                  {importRows.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <span className="text-sm font-medium text-green-700">{importRows.length} valid row{importRows.length !== 1 ? 's' : ''} ready to import</span>
+                      </div>
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/30 border-b">
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Tag #</th>
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Type</th>
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Size</th>
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importRows.map((row, i) => (
+                              <tr key={i} className="border-b last:border-0">
+                                <td className="px-3 py-1.5 font-medium">{row.tagNumber}</td>
+                                <td className="px-3 py-1.5">{SHED_ITEM_TYPES[row.type]}</td>
+                                <td className="px-3 py-1.5">{row.size}</td>
+                                <td className="px-3 py-1.5 text-muted-foreground">{row.notes ?? '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {importErrors.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <AlertCircle className="h-4 w-4 text-destructive" />
+                        <span className="text-sm font-medium text-destructive">{importErrors.length} row{importErrors.length !== 1 ? 's' : ''} skipped</span>
+                      </div>
+                      <div className="rounded-lg border border-destructive/20 overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-destructive/5 border-b">
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Row</th>
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Reason</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importErrors.map((err, i) => (
+                              <tr key={i} className="border-b last:border-0">
+                                <td className="px-3 py-1.5 font-medium">{err.row}</td>
+                                <td className="px-3 py-1.5 text-destructive">{err.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setImportDialog(false); setImportRows([]); setImportErrors([]); }}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleImport}
+                disabled={importSaving || importRows.length === 0}
+              >
+                {importSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Confirm Import ({importRows.length} item{importRows.length !== 1 ? 's' : ''})
               </Button>
             </DialogFooter>
           </DialogContent>
