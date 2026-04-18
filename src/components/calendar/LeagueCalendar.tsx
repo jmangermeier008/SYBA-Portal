@@ -427,13 +427,14 @@ function EventPill({
       <PopoverTrigger asChild>
         <button
           className={cn(
-            'w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate transition-opacity hover:opacity-80 leading-snug',
+            'w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate transition-all hover:opacity-80 active:scale-[.98] leading-snug flex items-center gap-0.5',
             pillCls,
-            (event.status === 'cancelled' || event.status === 'unscheduled') && 'opacity-40 line-through'
+            (event.status === 'cancelled' || event.status === 'unscheduled') && 'opacity-50 line-through cancelled-stripe'
           )}
           style={pillStyle}
         >
-          {event.title}
+          <span className="flex-1 truncate">{event.title}</span>
+          <ChevronRight className="h-2.5 w-2.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-0 shadow-lg" align="start">
@@ -836,8 +837,28 @@ export function LeagueCalendar({
 }: LeagueCalendarProps) {
   const isMobile = useIsMobile();
   const { activeSport } = useSport();
-  const [view, setView] = useState<'month' | 'week' | 'day'>(defaultView ?? 'month');
-  const [hasUserSetView, setHasUserSetView] = useState(defaultView !== undefined);
+
+  // Persist user's last-chosen view to localStorage; respect caller's defaultView if set
+  const [view, setView] = useState<'month' | 'week' | 'day'>(() => {
+    if (defaultView) return defaultView;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('syba_cal_view') as 'month' | 'week' | 'day' | null;
+      if (saved === 'month' || saved === 'week' || saved === 'day') return saved;
+    }
+    return 'month';
+  });
+  const [hasUserSetView, setHasUserSetView] = useState(() => {
+    if (defaultView) return true;
+    if (typeof window !== 'undefined') return !!localStorage.getItem('syba_cal_view');
+    return false;
+  });
+
+  const setViewAndPersist = (v: 'month' | 'week' | 'day') => {
+    setView(v);
+    setHasUserSetView(true);
+    if (typeof window !== 'undefined') localStorage.setItem('syba_cal_view', v);
+  };
+
   // On mobile, default to day view unless the user has explicitly chosen (or caller passed defaultView)
   const effectiveView = !hasUserSetView && isMobile ? 'day' : view;
   const [focusDate, setFocusDate] = useState<Date>(new Date());
@@ -895,8 +916,7 @@ export function LeagueCalendar({
   // When "+N more" clicked in month view → drill to day view for that date
   const handleDayClick = (day: Date) => {
     setFocusDate(day);
-    setView('day');
-    setHasUserSetView(true);
+    setViewAndPersist('day');
   };
 
   return (
@@ -909,7 +929,7 @@ export function LeagueCalendar({
         {/* View toggle */}
         <div className="flex items-center rounded-lg border bg-secondary/30 p-0.5 self-start">
           <button
-            onClick={() => { setView('month'); setHasUserSetView(true); }}
+            onClick={() => setViewAndPersist('month')}
             className={cn(
               'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
               effectiveView === 'month'
@@ -920,7 +940,7 @@ export function LeagueCalendar({
             Month
           </button>
           <button
-            onClick={() => { setView('week'); setHasUserSetView(true); }}
+            onClick={() => setViewAndPersist('week')}
             className={cn(
               'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
               effectiveView === 'week'
@@ -931,7 +951,7 @@ export function LeagueCalendar({
             Week
           </button>
           <button
-            onClick={() => { setView('day'); setHasUserSetView(true); }}
+            onClick={() => setViewAndPersist('day')}
             className={cn(
               'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
               effectiveView === 'day'
@@ -963,21 +983,26 @@ export function LeagueCalendar({
         </div>
       </div>
 
-      {/* Toolbar — row 2: filters + add event */}
-      <div className="flex flex-wrap items-center gap-4">
-        {shown.map(key => (
-          <div key={key} className="flex items-center gap-1.5">
-            <Checkbox
-              id={`filter-${key}`}
-              checked={!!filters[key as 'games' | 'practices' | 'concessions']}
-              onCheckedChange={(v) => onFilterChange(key as 'games' | 'practices' | 'concessions', !!v)}
-            />
-            <Label htmlFor={`filter-${key}`} className="flex items-center gap-1.5 cursor-pointer text-sm">
-              <span className={cn('w-2 h-2 rounded-full', dotColors[filterKeyToEventType[key]])} />
+      {/* Toolbar — row 2: filters as visible pill chips + add event */}
+      <div className="flex flex-wrap items-center gap-2">
+        {shown.map(key => {
+          const isOn = !!filters[key as 'games' | 'practices' | 'concessions'];
+          return (
+            <button
+              key={key}
+              onClick={() => onFilterChange(key as 'games' | 'practices' | 'concessions', !isOn)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition-colors',
+                isOn
+                  ? 'bg-foreground/5 border-foreground/20 text-foreground'
+                  : 'border-dashed border-muted-foreground/30 text-muted-foreground'
+              )}
+            >
+              <span className={cn('w-2 h-2 rounded-full shrink-0', isOn ? dotColors[filterKeyToEventType[key]] : 'bg-muted-foreground/30')} />
               {filterLabels[key]}
-            </Label>
-          </div>
-        ))}
+            </button>
+          );
+        })}
 
         {/* "My Kids Only" toggle — parent view only, when myTeamIds provided */}
         {myTeamIds && myTeamIds.length > 0 && (

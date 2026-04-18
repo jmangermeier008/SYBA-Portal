@@ -58,11 +58,13 @@ export default function Home() {
 
   // Public sport selector — localStorage-only (no auth required)
   const [publicSport, setPublicSportState] = useState<Sport | null>(null);
+  const [sportInitialized, setSportInitialized] = useState(false);
   useEffect(() => {
     const saved = localStorage.getItem('syba_active_sport') as Sport | null;
     if (saved === 'baseball' || saved === 'football') {
       setPublicSportState(saved);
     }
+    setSportInitialized(true);
   }, []);
   function selectPublicSport(sport: Sport) {
     setPublicSportState(sport);
@@ -227,15 +229,34 @@ export default function Home() {
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
         <div className="space-y-1">
+          {publicSport && registrationBanner && !registrationBanner.closed && (
+            <p className="text-xs font-semibold text-primary uppercase tracking-widest mb-1">
+              {registrationBanner.text}
+            </p>
+          )}
           <h1 className="text-2xl font-bold font-headline tracking-tight text-primary">
-            The League
+            {publicSport ? SPORT_CONFIG[publicSport].label : 'The League'}
           </h1>
-          <p className="text-muted-foreground text-sm">The online home for youth athletics</p>
+          <p className="text-muted-foreground text-sm">
+            {publicSport ? 'Sharpsville Youth Athletics' : 'The online home for youth athletics'}
+          </p>
+        </div>
+
+        {/* Sign In / Register — always visible, sport pre-fills the link */}
+        <div className="flex gap-3 justify-center">
+          <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
+            <Link href={publicSport ? `/login?sport=${publicSport}` : '/login'}>Sign In</Link>
+          </Button>
+          <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
+            <Link href={publicSport ? `/login?redirect=/parent/enroll&sport=${publicSport}` : '/login?redirect=/parent/enroll'}>
+              Register Player
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {/* ── Sport Selection Gate — must pick a sport before seeing anything else ── */}
-      {!publicSport ? (
+      {/* ── Sport Selection Gate — shown only for new visitors (no localStorage preference) ── */}
+      {sportInitialized && !publicSport ? (
         <div className="mt-10 w-full max-w-lg text-center">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-6">
             Pick Your Sport
@@ -269,7 +290,7 @@ export default function Home() {
             ))}
           </div>
         </div>
-      ) : (
+      ) : publicSport ? (
         <>
           <button
             onClick={() => {
@@ -281,18 +302,8 @@ export default function Home() {
             Change sport
           </button>
 
-          {/* Sign In / Register — visible only after sport selection */}
-          <div className="mt-6 flex gap-3 justify-center">
-            <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
-              <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
-            </Button>
-            <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
-              <Link href={`/login?redirect=/parent/enroll&sport=${publicSport}`}>Register Player</Link>
-            </Button>
-          </div>
-
           {/* Contact */}
-          <p className="mt-4 text-sm text-muted-foreground text-center">
+          <p className="mt-3 text-sm text-muted-foreground text-center">
             Have a question?{' '}
             <Link href="/contact" className="text-primary hover:underline font-medium">Contact us</Link>
             {' '}or email{' '}
@@ -301,7 +312,7 @@ export default function Home() {
             </a>
           </p>
         </>
-      )}
+      ) : null}
 
       {/* ── Schedule & Content (visible only after sport selection) ── */}
       {publicSport && <>
@@ -314,19 +325,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* Registration banner */}
-      {registrationBanner && (
-        <div className={`mt-4 w-full max-w-sm rounded-xl border px-4 py-2.5 text-sm font-medium text-center text-balance ${
-          registrationBanner.closed
-            ? 'bg-muted/20 border-muted/30 text-muted-foreground'
-            : 'bg-primary/10 border-primary/20 text-primary'
-        }`}>
+      {/* Registration banner — closed-only variant (open registration shown in hero eyebrow) */}
+      {registrationBanner?.closed && (
+        <div className="mt-4 w-full max-w-sm rounded-xl border px-4 py-2.5 text-sm font-medium text-center text-balance bg-muted/20 border-muted/30 text-muted-foreground">
           {registrationBanner.text}
         </div>
       )}
 
       {/* ── This Week's Games ── */}
-      <div className="mt-10 w-full max-w-xl">
+      <div className="mt-10 w-full max-w-2xl">
         <div className="flex items-center gap-2 mb-3">
           <Calendar className="h-4 w-4 text-muted-foreground" />
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
@@ -336,36 +343,60 @@ export default function Home() {
         {visibleGames.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">No games scheduled this week</p>
         ) : (
-          <div className="flex flex-col gap-2">
+          <>
+            {/* Mobile: date-pill scroller */}
+            {(() => {
+              const dates = [...new Set(visibleGames.map(g => g.date))];
+              return dates.length > 1 ? (
+                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 mb-3 md:hidden">
+                  {dates.map(d => {
+                    const label = new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    return (
+                      <a
+                        key={d}
+                        href={`#games-${d}`}
+                        className="shrink-0 px-3 py-1.5 rounded-full border bg-white/80 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary transition-colors whitespace-nowrap"
+                      >
+                        {label}
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : null;
+            })()}
+            {/* Desktop: 2-column grid grouped by day; Mobile: single column with day anchors */}
             {divisionOrder.map((div, divIdx) => (
               <div key={div}>
                 <p className={cn(
-                  'text-[11px] font-bold uppercase tracking-widest text-primary/60 mb-1.5 px-1',
+                  'text-xs font-bold uppercase tracking-widest text-primary/60 mb-1.5 px-1',
                   divIdx > 0 && 'mt-3',
                 )}>
                   {div}
                 </p>
-                {(gamesByDivision.get(div) ?? []).map(g => (
-                  <div
-                    key={g.id}
-                    className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2 last:mb-0"
-                  >
-                    <div>
-                      <p className="font-medium text-sm">
-                        {g.homeTeamName ?? 'TBD'} vs. {g.awayTeamName ?? 'TBD'}
-                      </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {(gamesByDivision.get(div) ?? []).map(g => (
+                    <div
+                      key={g.id}
+                      id={`games-${g.date}`}
+                      className="rounded-xl border bg-white/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1"
+                    >
+                      <div>
+                        <p className="font-medium text-sm">
+                          {g.homeTeamName ?? 'TBD'} vs. {g.awayTeamName ?? 'TBD'}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-medium">{formatGameDate(g.date)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTime(g.time)}{g.fieldName ? ` · ${g.fieldName}` : ''}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-medium">{formatGameDate(g.date)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatTime(g.time)}{g.fieldName ? ` · ${g.fieldName}` : ''}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             ))}
-          </div>
+          </>
         )}
       </div>
 
@@ -442,7 +473,7 @@ export default function Home() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 py-2">
                   {fullBoardOfficers.map((o) => (
                     <div key={o.id} className="rounded-lg border bg-white/80 px-3 py-2">
-                      <p className="text-[11px] text-muted-foreground leading-tight">{o.title}</p>
+                      <p className="text-xs text-muted-foreground leading-tight">{o.title}</p>
                       <p className="text-sm font-semibold leading-tight mt-0.5">{o.name}</p>
                     </div>
                   ))}
@@ -470,7 +501,7 @@ export default function Home() {
                 alt={`Sponsor ${i + 1}`}
                 width={240}
                 height={80}
-                className="h-20 w-auto object-contain grayscale hover:grayscale-0 transition-all duration-300"
+                className="h-20 w-auto object-contain transition-all duration-300"
                 style={{ width: 'auto' }}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
               />

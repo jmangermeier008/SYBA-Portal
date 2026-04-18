@@ -24,6 +24,30 @@
     --input: 214 32% 91%;
     --ring: 210 63% 49%;
     --radius: 0.75rem;
+
+    /* Semantic event colors */
+    --color-game: hsl(210 63% 49%);         /* primary blue */
+    --color-game-50: hsl(210 63% 96%);
+    --color-practice: #16a34a;               /* forest green */
+    --color-practice-50: #f0fdf4;
+    --color-concession: #d97706;             /* amber */
+    --color-concession-50: #fffbeb;
+
+    /* Semantic status colors */
+    --color-success: #16a34a;
+    --color-success-50: #f0fdf4;
+    --color-success-700: #15803d;
+    --color-warning: #d97706;
+    --color-warning-50: #fffbeb;
+    --color-warning-700: #b45309;
+    --color-danger: #dc2626;
+    --color-danger-50: #fef2f2;
+    --color-danger-700: #b91c1c;
+
+    /* Elevation system */
+    --shadow-flat: none;                     /* content cards — rely on border */
+    --shadow-surface: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04); /* toolbars, sticky headers */
+    --shadow-float: 0 4px 16px rgba(0,0,0,.10), 0 1px 4px rgba(0,0,0,.06);  /* modals, popovers */
   }
 }
 
@@ -60,5 +84,21 @@
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
+  }
+
+  /* Safe-area bottom padding for iPhone notch/home indicator */
+  .pb-safe {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  /* Cancelled event diagonal stripe pattern */
+  .cancelled-stripe {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,.08) 3px,
+      rgba(0,0,0,.08) 4px
+    );
   }
 }

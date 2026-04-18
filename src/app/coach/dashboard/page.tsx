@@ -7,7 +7,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
-import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone } from 'lucide-react';
+import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -101,8 +101,28 @@ export default function CoachDashboard() {
   const { data: rsvps } = useCollection(rsvpsQuery);
 
   const attendingCount = rsvps?.filter((r: any) => r.status === 'Attending').length ?? 0;
+  const maybeCount = rsvps?.filter((r: any) => r.status === 'Maybe').length ?? 0;
+  const notAttendingCount = rsvps?.filter((r: any) => r.status === 'Not Attending').length ?? 0;
   const totalRsvpCount = rsvps?.length ?? 0;
-  const attendanceRate = totalRsvpCount > 0 ? Math.round((attendingCount / totalRsvpCount) * 100) : null;
+  const unrepliedCount = Math.max(0, (enrollments?.filter(e => e.teamId === firstTeamId).length ?? 0) - totalRsvpCount);
+
+  // Contextual primary action — changes based on when next event is
+  const contextualAction = useMemo(() => {
+    if (!nextGame) return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
+    const now = new Date();
+    const eventTime = new Date(nextGame.dateTime);
+    const hoursDiff = (eventTime.getTime() - now.getTime()) / 3600000;
+    if (nextGame.type === 'Practice' && hoursDiff > 0 && hoursDiff <= 24) {
+      return { label: 'Claim Practice Slot', href: '/coach/practice-slots', icon: ClipboardList };
+    }
+    if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
+      return { label: 'Take Attendance', href: '/coach/teams', icon: UserCheck };
+    }
+    if (nextGame.type === 'Game' && hoursDiff < -2 && hoursDiff > -26) {
+      return { label: 'Log Score', href: '/coach/schedules', icon: ClipboardList };
+    }
+    return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
+  }, [nextGame]);
 
   // Latest announcements — scoped to active sport
   const announcementsQuery = useMemoFirebase(() => {
@@ -141,15 +161,20 @@ export default function CoachDashboard() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 pb-20 md:pb-6">
         <header className="mb-4">
-          <h1 className="text-2xl font-bold font-headline">Coach Dashboard</h1>
+          <h1 className="text-2xl font-bold font-headline">
+            Coach Dashboard
+            {teams && teams.length > 1 && teams[clampedTeamIndex] && (
+              <span className="ml-2 text-base font-normal text-muted-foreground">· {teams[clampedTeamIndex].name}</span>
+            )}
+          </h1>
           <p className="text-sm text-muted-foreground">Manage your teams and plan your next practice.</p>
         </header>
 
-        {/* Team selector — horizontal scroll, sits above action grid */}
+        {/* Team selector — tap-to-switch, shows team name in title */}
         {teams && teams.length > 1 && (
-          <div className="mb-4 overflow-x-auto">
+          <div className="mb-4 overflow-x-auto no-scrollbar">
             <div className="flex items-center gap-2 w-max">
               {teams.map((team, i) => (
                 <button
@@ -169,33 +194,42 @@ export default function CoachDashboard() {
           </div>
         )}
 
-        {/* 2×2 Action Grid — always above the fold on mobile */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        {/* Contextual primary action — changes based on event timing */}
+        <Link
+          href={contextualAction.href}
+          className="flex items-center justify-between gap-3 rounded-xl bg-primary text-primary-foreground px-4 py-3.5 mb-4 active:scale-[.98] transition-transform shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <contextualAction.icon className="h-5 w-5 shrink-0" />
+            <span className="font-semibold text-sm">{contextualAction.label}</span>
+          </div>
+          <ChevronRight className="h-4 w-4 opacity-70" />
+        </Link>
+
+        {/* Secondary quick actions */}
+        <div className="grid grid-cols-4 gap-2 mb-5">
           {[
-            { href: '/coach/teams', icon: Users, label: 'Roster', sub: 'Players & contacts' },
-            { href: '/coach/drills', icon: Dumbbell, label: 'Drills', sub: `${activeSport ?? 'Baseball'} drills` },
-            { href: '/coach/schedules', icon: ClipboardList, label: 'Log Score', sub: 'Game results' },
-            { href: '/coach/contact', icon: Phone, label: 'Contact', sub: 'League office' },
-          ].map(({ href, icon: Icon, label, sub }) => (
+            { href: '/coach/teams', icon: Users, label: 'Roster' },
+            { href: '/coach/drills', icon: Dumbbell, label: 'Drills' },
+            { href: '/coach/schedules', icon: ClipboardList, label: 'Schedule' },
+            { href: '/coach/contact', icon: Phone, label: 'Contact' },
+          ].map(({ href, icon: Icon, label }) => (
             <Link
               key={href}
               href={href}
-              className="flex items-center gap-3 rounded-xl border bg-card p-3 shadow-sm active:scale-95 transition-transform"
+              className="flex flex-col items-center gap-1.5 rounded-xl border bg-card p-2.5 active:scale-95 transition-transform text-center"
             >
-              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <Icon className="h-4 w-4 text-primary" />
               </div>
-              <div>
-                <p className="text-sm font-semibold leading-tight">{label}</p>
-                <p className="text-[10px] text-muted-foreground leading-tight">{sub}</p>
-              </div>
+              <p className="text-xs font-medium leading-tight text-muted-foreground">{label}</p>
             </Link>
           ))}
         </div>
 
         {/* Stats strip — 2 cols on mobile, 4 on desktop */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          <Card className="border-none shadow-md">
+          <Card className="border shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground">My Teams</CardTitle>
               <Users className="h-3.5 w-3.5 text-primary" />
@@ -206,24 +240,24 @@ export default function CoachDashboard() {
               ) : (
                 <>
                   <div className="text-xl font-bold">{teams?.length ?? 0}</div>
-                  <p className="text-[10px] text-muted-foreground truncate">
+                  <p className="text-xs text-muted-foreground truncate">
                     {teams?.map(t => t.name).join(', ') || 'No teams assigned'}
                   </p>
                 </>
               )}
             </CardContent>
           </Card>
-          <Card className="border-none shadow-md">
+          <Card className="border shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground">Players</CardTitle>
               <Star className="h-3.5 w-3.5 text-accent-foreground" />
             </CardHeader>
             <CardContent className="px-4 pb-3">
               <div className="text-xl font-bold">{playerCount}</div>
-              <p className="text-[10px] text-muted-foreground">Roster size</p>
+              <p className="text-xs text-muted-foreground">Roster size</p>
             </CardContent>
           </Card>
-          <Card className="border-none shadow-md">
+          <Card className="border shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground">Next Event</CardTitle>
               <Calendar className="h-3.5 w-3.5 text-primary" />
@@ -232,33 +266,48 @@ export default function CoachDashboard() {
               {nextGame ? (
                 <>
                   <div className="text-xl font-bold">{nextGame.type}</div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {format(new Date(nextGame.dateTime), 'EEE, MMM d @ h:mm a')}
                   </p>
                 </>
               ) : (
                 <>
                   <div className="text-xl font-bold">—</div>
-                  <p className="text-[10px] text-muted-foreground">No upcoming events</p>
+                  <p className="text-xs text-muted-foreground">No upcoming events</p>
                 </>
               )}
             </CardContent>
           </Card>
-          <Card className="border-none shadow-md">
+          <Card className="border shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground">Attendance</CardTitle>
               <UserCheck className="h-3.5 w-3.5 text-accent-foreground" />
             </CardHeader>
             <CardContent className="px-4 pb-3">
-              {attendanceRate !== null ? (
+              {totalRsvpCount > 0 ? (
                 <>
-                  <div className="text-xl font-bold">{attendanceRate}%</div>
-                  <p className="text-[10px] text-muted-foreground">{attendingCount}/{totalRsvpCount} confirmed</p>
+                  <div className="text-sm font-bold text-foreground mb-1">
+                    {unrepliedCount > 0
+                      ? `${unrepliedCount} haven't replied`
+                      : `${attendingCount} confirmed`}
+                  </div>
+                  {/* RSVP bar: attending / maybe / no / unreplied */}
+                  <div className="flex h-1.5 rounded-full overflow-hidden gap-px mb-1">
+                    {attendingCount > 0 && <div className="bg-green-500 rounded-full" style={{ flex: attendingCount }} />}
+                    {maybeCount > 0 && <div className="bg-yellow-400 rounded-full" style={{ flex: maybeCount }} />}
+                    {notAttendingCount > 0 && <div className="bg-red-400 rounded-full" style={{ flex: notAttendingCount }} />}
+                    {unrepliedCount > 0 && <div className="bg-muted-foreground/20 rounded-full" style={{ flex: unrepliedCount }} />}
+                  </div>
+                  {unrepliedCount > 0 && (
+                    <Link href="/coach/teams" className="text-xs text-primary font-medium">
+                      Tap to nudge →
+                    </Link>
+                  )}
                 </>
               ) : (
                 <>
                   <div className="text-xl font-bold">—</div>
-                  <p className="text-[10px] text-muted-foreground">No RSVPs yet</p>
+                  <p className="text-xs text-muted-foreground">No RSVPs yet</p>
                 </>
               )}
             </CardContent>
@@ -266,7 +315,7 @@ export default function CoachDashboard() {
         </div>
 
         <div className="grid gap-5 md:grid-cols-3">
-          <Card className="md:col-span-2 border-none shadow-md">
+          <Card className="md:col-span-2 border shadow-sm">
             <CardHeader className="flex flex-row items-start justify-between pb-3">
               <div>
                 <CardTitle className="font-headline text-base">Team Schedule</CardTitle>
@@ -321,7 +370,7 @@ export default function CoachDashboard() {
                           <p className="text-sm font-semibold leading-tight">
                             {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
                           </p>
-                          <p className="text-[10px] text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             {format(new Date(game.dateTime), 'EEE, MMM d')} · {format(new Date(game.dateTime), 'h:mm a')}
                           </p>
                         </div>
@@ -336,7 +385,7 @@ export default function CoachDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="border-none shadow-md">
+          <Card className="border shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="font-headline text-base">Announcements</CardTitle>
               <CardDescription className="text-xs">Latest updates from the league</CardDescription>
@@ -363,9 +412,9 @@ export default function CoachDashboard() {
                       </div>
                       <div>
                         <p className="text-xs font-semibold">{a.title}</p>
-                        <p className="text-[10px] text-muted-foreground line-clamp-2">{a.body}</p>
+                        <p className="text-xs text-muted-foreground line-clamp-2">{a.body}</p>
                         {a.publishedAt && (
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                          <p className="text-xs text-muted-foreground mt-0.5">
                             {format(new Date(a.publishedAt), 'MMM d')}
                           </p>
                         )}

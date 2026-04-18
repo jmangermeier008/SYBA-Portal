@@ -724,6 +724,23 @@ export function Sidebar() {
     </aside>
   );
 
+  // Bottom tab bar tabs for parent and coach roles
+  const parentTabs = [
+    { href: '/parent/dashboard', icon: LayoutDashboard, label: 'Home', badge: false },
+    { href: '/parent/schedule', icon: Calendar, label: 'Schedule', badge: false },
+    { href: '/parent/family', icon: Users, label: 'Family', badge: false },
+    { href: '/parent/notifications', icon: Bell, label: 'Inbox', badge: hasUnreadNotifs },
+  ];
+  const coachTabs = [
+    { href: '/coach/dashboard', icon: LayoutDashboard, label: 'Home', badge: false },
+    { href: '/coach/schedules', icon: Calendar, label: 'Schedule', badge: false },
+    { href: '/coach/teams', icon: Users, label: 'Team', badge: false },
+    { href: '/coach/notifications', icon: Bell, label: 'Inbox', badge: hasUnreadNotifs },
+  ];
+  const bottomTabs = activeContext === 'parent' && isParent ? parentTabs
+    : activeContext === 'coach' && isCoach ? coachTabs
+    : null;
+
   if (isMobile) {
     return (
       <>
@@ -749,7 +766,7 @@ export function Sidebar() {
               onError={(e) => { (e.target as HTMLImageElement).src = HUB_LOGO_URL; }}
             />
             {activeSport && (
-              <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                 {SPORT_CONFIG[activeSport].acronym}
               </span>
             )}
@@ -770,6 +787,33 @@ export function Sidebar() {
             />
             {sidebarInner}
           </>
+        )}
+
+        {/* Bottom tab bar — parent and coach only */}
+        {bottomTabs && (
+          <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t pb-safe">
+            <div className="flex h-14">
+              {bottomTabs.map(({ href, icon: Icon, label, badge }) => {
+                const isActive = pathname === href || pathname.startsWith(href + '/');
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className={cn(
+                      'relative flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors',
+                      isActive ? 'text-primary' : 'text-muted-foreground'
+                    )}
+                  >
+                    <Icon className={cn('h-5 w-5', isActive ? 'text-primary' : 'text-muted-foreground')} />
+                    {label}
+                    {badge && (
+                      <span className="absolute top-2 left-[calc(50%+6px)] w-2 h-2 bg-red-500 rounded-full" />
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
         )}
       </>
     );
