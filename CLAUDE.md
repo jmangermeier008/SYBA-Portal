@@ -101,12 +101,14 @@ src/
 - `name`, `seasonId`, `divisionId`
 - `coachIds: string[]` — multi-coach support
 - `coach_uid` — legacy single-coach field (backward compat)
+- **Football:** teams are auto-created when a division is created (`src/app/admin/divisions/page.tsx` line ~102). One team per division, named identically to the division (e.g. division `Sharpsville Pee Wees` → team `Sharpsville Pee Wees`). Do not create football teams manually.
 
 **`teams/{teamId}/games/{gameId}`** (subcollection — team-specific)
 > **IMPORTANT:** Different shape from top-level `games` collection — see Two Game Data Models below.
 - `dateTime: string` — combined ISO datetime (e.g. `"2026-05-01T18:00:00Z"`)
 - `type: 'Game' | 'Practice'` (capitalized, unlike top-level)
 - `opponentName`, `location`, `fieldId`
+- `locationType?: 'home' | 'away'` — football only
 - `cancelled: boolean`, `cancellationReason: string`
 
 **`teams/{teamId}/games/{gameId}/rsvps/{rsvpId}`** (subcollection)
@@ -121,7 +123,8 @@ src/
 - `time: string` (HH:MM 24-hour) — separate from `date`
 - `fieldId`, `fieldName`
 - `status: 'scheduled' | 'cancelled' | 'completed' | 'postponed'`
-- For games: `homeTeamId`, `homeTeamName`, `awayTeamId`, `awayTeamName`, `division`
+- For baseball games: `homeTeamId`, `homeTeamName`, `awayTeamId`, `awayTeamName`, `division`
+- For football games: `teamId`, `teamName` (SYBA team), `opponentName` (external school — free text), `locationType: 'home' | 'away'`; away games store venue in `fieldName`, `fieldId` is `''`
 - For practices: `teamId`, `teamName`
 
 **`fields/{fieldId}`**
@@ -168,6 +171,19 @@ This is the most critical architectural distinction in the codebase:
 | Normalizer | `normalizeGame(g)` | `normalizeTeamGame(g, teamId)` |
 
 Always use the right collection. Admin pages write and read `games/{id}`. Coach and parent pages query `teams/{teamId}/games`.
+
+### Football vs Baseball game shape
+
+Baseball games use `homeTeamId`/`awayTeamId` (both internal teams). Football games use a different shape because opponents are external schools never stored in the database:
+
+| Field | Baseball game | Football game |
+|---|---|---|
+| Our team(s) | `homeTeamId` + `awayTeamId` | `teamId` (SYBA team only) |
+| Opponent | `awayTeamName` (internal) | `opponentName` (free text, e.g. `"Farrell Steelers"`) |
+| Location | `fieldId` + `fieldName` (always) | Home: `fieldId` + `fieldName`; Away: `fieldId: ''`, `fieldName` = venue text |
+| `locationType` | not set | `'home'` or `'away'` |
+
+Football games only mirror to **one** team subcollection (the SYBA team). Baseball games mirror to two (home + away).
 
 ---
 
