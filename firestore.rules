@@ -305,6 +305,10 @@ service cloud.firestore {
     // Other collections
     // ---------------------------------------------------------------------------
 
+    match /equipmentInventory/{itemId} {
+      allow read, write: if isBoardMember();
+    }
+
     match /sponsors/{sponsorId} {
       allow read, write: if isBoardMember();
     }
