@@ -88,6 +88,10 @@ export default function RolesPage() {
   // Mobile edit roles dialog
   const [editTarget, setEditTarget] = useState<UserData | null>(null);
 
+  // Grant sport access dialog
+  const [grantAccessOpen, setGrantAccessOpen] = useState(false);
+  const [grantAccessSearch, setGrantAccessSearch] = useState('');
+
   // Edit user profile dialog
   const [editUserDialog, setEditUserDialog] = useState<{
     open: boolean;
@@ -115,6 +119,23 @@ export default function RolesPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+
+  const usersWithoutSportAccess = useMemo(() => {
+    if (!users || sportFilter === 'all') return [];
+    return users.filter((user) => {
+      if (user.isSiteAdmin) return false;
+      return user.sportRoles?.[sportFilter] === undefined;
+    });
+  }, [users, sportFilter]);
+
+  const filteredGrantUsers = useMemo(() => {
+    if (!grantAccessSearch.trim()) return usersWithoutSportAccess;
+    const q = grantAccessSearch.toLowerCase();
+    return usersWithoutSportAccess.filter(u =>
+      u.displayName?.toLowerCase().includes(q) ||
+      u.email?.toLowerCase().includes(q)
+    );
+  }, [usersWithoutSportAccess, grantAccessSearch]);
 
   const filteredUsers = useMemo(() => {
     if (!users) return [];
@@ -345,6 +366,16 @@ export default function RolesPage() {
               ))}
             </SelectContent>
           </Select>
+          {activeSportFilter && isSiteAdmin && (
+            <Button
+              variant="outline"
+              className="rounded-full px-4 shrink-0"
+              onClick={() => { setGrantAccessSearch(''); setGrantAccessOpen(true); }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Grant {activeSportFilter.charAt(0).toUpperCase() + activeSportFilter.slice(1)} Access
+            </Button>
+          )}
         </div>
 
         <Card className="border-none shadow-xl overflow-hidden">
@@ -628,6 +659,63 @@ export default function RolesPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Grant Sport Access Dialog */}
+      {activeSportFilter && (
+        <Dialog open={grantAccessOpen} onOpenChange={(o) => { if (!o) setGrantAccessOpen(false); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-headline">
+                Grant {activeSportFilter.charAt(0).toUpperCase() + activeSportFilter.slice(1)} Access
+              </DialogTitle>
+              <DialogDescription>
+                Find an existing user and add them to the {activeSportFilter} portal. You can assign their roles after granting access.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name or email…"
+                  className="pl-9"
+                  value={grantAccessSearch}
+                  onChange={(e) => setGrantAccessSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-0.5">
+                {filteredGrantUsers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    {grantAccessSearch.trim()
+                      ? 'No users found matching that search.'
+                      : `All existing users already have ${activeSportFilter} access.`}
+                  </p>
+                ) : filteredGrantUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-secondary/40 transition-colors text-left"
+                    onClick={async () => {
+                      await handleSportAccessToggle(user.id, activeSportFilter, true);
+                      setGrantAccessOpen(false);
+                    }}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">
+                      {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="h-4 w-4" />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{user.displayName || 'Unnamed User'}</p>
+                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" className="rounded-full" onClick={() => setGrantAccessOpen(false)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Create User Dialog */}
       <Dialog open={createOpen} onOpenChange={(o) => { if (!creating) { setCreateOpen(o); if (!o) setNewUser(EMPTY_NEW_USER); } }}>
