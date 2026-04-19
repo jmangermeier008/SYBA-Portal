@@ -1227,7 +1227,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               </div>
 
               <div className="space-y-3">
-                <Label>Emergency Contact</Label>
+                <Label>Emergency Contact <span className="text-destructive">*</span></Label>
                 {state.emergencyContacts.map((contact, i) => (
                   <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <Input

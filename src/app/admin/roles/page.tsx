@@ -437,14 +437,18 @@ export default function RolesPage() {
                             <TableCell>{user.email}</TableCell>
                             {activeSportFilter && (
                               <TableCell className="text-center">
-                                <div className="flex justify-center">
-                                  <Switch
-                                    checked={(user.sportRoles?.[activeSportFilter] !== undefined)}
-                                    onCheckedChange={(enabled) =>
-                                      handleSportAccessToggle(user.id, activeSportFilter, enabled)
-                                    }
-                                  />
-                                </div>
+                                {user.isSiteAdmin ? (
+                                  <span className="text-[10px] font-medium text-muted-foreground">Full Access</span>
+                                ) : (
+                                  <div className="flex justify-center">
+                                    <Switch
+                                      checked={(user.sportRoles?.[activeSportFilter] !== undefined)}
+                                      onCheckedChange={(enabled) =>
+                                        handleSportAccessToggle(user.id, activeSportFilter, enabled)
+                                      }
+                                    />
+                                  </div>
+                                )}
                               </TableCell>
                             )}
                             {activeSportFilter && ALL_SPORT_ROLES.map((role) => (
