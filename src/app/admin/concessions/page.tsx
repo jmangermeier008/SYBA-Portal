@@ -845,18 +845,92 @@ export default function ConcessionsAdminPage() {
                     className="max-w-sm"
                   />
 
-                  {/* Compliance table */}
-                  <Card className="border-none shadow-md overflow-hidden">
+                  {/* Mobile card list */}
+                  <div className="sm:hidden space-y-2">
+                    {filteredFamilies.map(family => {
+                      const status = complianceStatus(family);
+                      return (
+                        <Card key={family.parentUserId} className="border shadow-sm">
+                          <div className="p-4">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm leading-tight">{family.displayName}</p>
+                                {family.playerNames.length > 0 && (
+                                  <p className="text-xs text-muted-foreground mt-0.5">{family.playerNames.join(' · ')}</p>
+                                )}
+                              </div>
+                              <div className="shrink-0">
+                                {status === 'met' && (
+                                  <Badge className="bg-green-100 text-green-700 border-green-200 gap-1 text-xs">
+                                    <CheckCircle2 className="h-3 w-3" /> Met
+                                  </Badge>
+                                )}
+                                {status === 'partial' && (
+                                  <Badge variant="secondary" className="gap-1 text-xs">
+                                    <AlertCircle className="h-3 w-3" /> Partial
+                                  </Badge>
+                                )}
+                                {status === 'none' && (
+                                  <Badge variant="destructive" className="gap-1 text-xs">
+                                    <XCircle className="h-3 w-3" /> Not Signed Up
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4 mt-2 text-sm">
+                              <span className="font-medium">
+                                Worked {family.workedCount + family.manualCredits} / {family.required}
+                              </span>
+                              {family.pendingCount > 0 && (
+                                <span className="text-yellow-600 font-medium">+{family.pendingCount} upcoming</span>
+                              )}
+                            </div>
+                            {(status !== 'met' || family.manualCredits > 0) && (
+                              <div className="flex gap-2 mt-3">
+                                {status !== 'met' && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => { setCreditDialog({ open: true, parentId: family.parentUserId, currentCredits: family.manualCredits }); setCreditInput(1); }}
+                                    className="rounded-full text-xs gap-1.5"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> Adjust Credits
+                                  </Button>
+                                )}
+                                {family.manualCredits > 0 && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={overriding.has(family.parentUserId)}
+                                    onClick={() => handleResetManualCredits(family.parentUserId)}
+                                    className="rounded-full text-xs gap-1.5 text-destructive hover:text-destructive"
+                                  >
+                                    {overriding.has(family.parentUserId)
+                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      : <XCircle className="h-3.5 w-3.5" />}
+                                    Reset Credits
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  {/* Desktop table */}
+                  <Card className="hidden sm:block border-none shadow-md overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b bg-muted/30">
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Family</th>
-                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Email</th>
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Email</th>
                             <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Worked</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Pending</th>
+                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Pending</th>
                             <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Status</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Actions</th>
+                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -864,12 +938,17 @@ export default function ConcessionsAdminPage() {
                             const status = complianceStatus(family);
                             return (
                               <tr key={family.parentUserId} className="border-b last:border-0 hover:bg-muted/20">
-                                <td className="px-4 py-3 font-medium">{family.displayName}</td>
-                                <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{family.email}</td>
+                                <td className="px-4 py-3">
+                                  <span className="font-medium block">{family.displayName}</span>
+                                  {family.playerNames.length > 0 && (
+                                    <span className="text-xs text-muted-foreground">{family.playerNames.join(' · ')}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">{family.email}</td>
                                 <td className="px-4 py-3 text-center font-medium">
                                   {family.workedCount + family.manualCredits} / {family.required}
                                 </td>
-                                <td className="px-4 py-3 text-center text-muted-foreground hidden sm:table-cell">
+                                <td className="px-4 py-3 text-center text-muted-foreground">
                                   {family.pendingCount > 0
                                     ? <span className="text-yellow-600 font-medium">+{family.pendingCount} upcoming</span>
                                     : '—'}
@@ -891,7 +970,7 @@ export default function ConcessionsAdminPage() {
                                     </Badge>
                                   )}
                                 </td>
-                                <td className="px-4 py-3 text-center hidden sm:table-cell">
+                                <td className="px-4 py-3 text-center">
                                   {status !== 'met' && (
                                     <Button
                                       size="sm"
