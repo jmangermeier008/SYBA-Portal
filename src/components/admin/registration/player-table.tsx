@@ -43,6 +43,8 @@ export interface PlayerWithDocs {
 export interface EnrollmentRecord {
   id: string;
   playerId: string;
+  divisionId?: string;
+  sport?: string;
   paymentStatus?: string;
   payment_status?: string;
   fee_waived?: boolean;
@@ -139,7 +141,8 @@ export function PlayerTable({
         statusFilter === 'all' ? true :
         statusFilter === 'verified' ? !!fullyVerified :
         !fullyVerified;
-      const matchesDivision = divisionFilter === 'all' || p.divisionId === divisionFilter;
+      const playerDivisionId = playerEnrollmentMap.get(p.id)?.divisionId ?? p.divisionId;
+      const matchesDivision = divisionFilter === 'all' || playerDivisionId === divisionFilter;
       return matchesStatus && matchesDivision;
     });
   }, [players, statusFilter, divisionFilter]);
@@ -267,8 +270,9 @@ export function PlayerTable({
                 </TableHeader>
                 <TableBody>
                   {filteredPlayers.map(player => {
-                    const divisionName = player.divisionId ? (divisionNameMap.get(player.divisionId) ?? '—') : '—';
                     const enrollment = playerEnrollmentMap.get(player.id);
+                    const divisionId = enrollment?.divisionId ?? player.divisionId;
+                    const divisionName = divisionId ? (divisionNameMap.get(divisionId) ?? '—') : '—';
                     return (
                       <TableRow key={player.id}>
                         <TableCell className="pl-6 py-4">

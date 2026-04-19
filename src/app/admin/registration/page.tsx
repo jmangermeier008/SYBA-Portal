@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
 import { collectionGroup, collection, query, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -128,7 +128,7 @@ export default function RegistrationDashboardPage() {
   const enrollments = useMemo(() => {
     if (!allEnrollments) return [];
     const sportFiltered = allEnrollments.filter(e => sportSeasonIds.has(e.seasonId));
-    if (!selectedSeason || selectedSeason === 'all-seasons') return sportFiltered;
+    if (!selectedSeason || selectedSeason === 'all-seasons') return [];
     return sportFiltered.filter(e => e.seasonId === selectedSeason);
   }, [allEnrollments, selectedSeason, sportSeasonIds]);
 
@@ -182,6 +182,26 @@ export default function RegistrationDashboardPage() {
   const sportDivisionIds = useMemo(() =>
     new Set(sportFilteredDivisions.map(d => d.id)),
     [sportFilteredDivisions]
+  );
+
+  // Auto-select the first season when seasons load
+  useEffect(() => {
+    if (seasons && seasons.length > 0 && !selectedSeason) {
+      setSelectedSeason(seasons[0].id);
+    }
+  }, [seasons, selectedSeason]);
+
+  const sportEnrolledPlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    (allEnrollments ?? []).forEach(e => {
+      if (sportSeasonIds.has(e.seasonId) && e.playerId) ids.add(e.playerId);
+    });
+    return ids;
+  }, [allEnrollments, sportSeasonIds]);
+
+  const sportFilteredPlayers = useMemo(() =>
+    (allPlayers ?? []).filter(p => sportEnrolledPlayerIds.has(p.id)),
+    [allPlayers, sportEnrolledPlayerIds]
   );
 
   const sportFilteredCoaches = useMemo(() => {
@@ -410,8 +430,8 @@ export default function RegistrationDashboardPage() {
               </div>
             ) : (
               <PlayerTable
-                players={allPlayers ?? []}
-                enrollments={allEnrollments ?? []}
+                players={sportFilteredPlayers}
+                enrollments={enrollments}
                 divisions={sportFilteredDivisions}
                 playerSportMap={playerSportMap}
                 isSiteAdmin={isSiteAdmin}
@@ -434,7 +454,6 @@ export default function RegistrationDashboardPage() {
                       <SelectValue placeholder="All Seasons" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all-seasons">All Seasons</SelectItem>
                       {seasons?.map((s: any) => (
                         <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                       ))}

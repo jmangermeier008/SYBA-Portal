@@ -48,6 +48,7 @@ export async function POST(req: Request) {
       const playerNames: string[] = [];
 
       for (const enrollmentId of enrollmentIds) {
+        console.log(`[stripe/webhook] Processing for User: ${userId} | Enrollment: ${enrollmentId}`);
         const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
         const enrollmentSnap = await enrollmentRef.get();
 
