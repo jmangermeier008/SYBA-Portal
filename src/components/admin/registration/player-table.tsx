@@ -10,10 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, History, Loader2, Download, Trash2 } from 'lucide-react';
+import { CheckCircle2, History, Loader2, Download, Maximize2, Trash2 } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
 import type { Division } from '@/types/scheduling';
 
@@ -143,6 +143,7 @@ export function PlayerTable({
   const [approveAge, setApproveAge] = useState(false);
   const [approvePhysical, setApprovePhysical] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
+  const [docViewerExpanded, setDocViewerExpanded] = useState(false);
 
   const playerEnrollmentMap = useMemo(() => {
     const map = new Map<string, EnrollmentRecord>();
@@ -446,9 +447,9 @@ export function PlayerTable({
       {/* Audit Dialog */}
       <Dialog open={!!auditingPlayer} onOpenChange={open => !open && setAuditingPlayer(null)}>
         <DialogContent className="w-[95vw] sm:max-w-4xl rounded-2xl p-0 overflow-hidden">
-          <div className="flex flex-col sm:flex-row max-h-[85vh] sm:h-[82vh]">
+          <div className="flex flex-col sm:flex-row sm:h-[82vh]">
             {/* Left: document viewer */}
-            <div className="flex-1 bg-secondary/10 sm:border-r flex flex-col min-w-0 min-h-[40vh] sm:min-h-0">
+            <div className={`flex-1 bg-secondary/10 sm:border-r flex flex-col min-w-0 ${isMobile ? (docViewerExpanded ? 'h-[70vh]' : 'h-[25vh]') : ''} sm:min-h-0`}>
               <div className="flex border-b bg-white shrink-0 items-center">
                 <button
                   className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${auditDocTab === 'birthCert' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}
@@ -468,21 +469,17 @@ export function PlayerTable({
                     <span className="ml-1.5 text-yellow-500">●</span>
                   )}
                 </button>
-                {(auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl) && (
-                  <a
-                    href={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
-                    download
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 flex items-center gap-1 px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                    title="Download document"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Download</span>
-                  </a>
-                )}
               </div>
-              <div className="flex-1 flex flex-col overflow-hidden p-4">
+              <div className="flex-1 flex flex-col overflow-hidden p-4 relative">
+                {isMobile && (
+                  <button
+                    className="absolute top-2 right-2 z-10 bg-background/80 rounded-md p-1 border text-muted-foreground hover:text-foreground"
+                    onClick={() => setDocViewerExpanded(v => !v)}
+                    title={docViewerExpanded ? 'Collapse viewer' : 'Expand viewer'}
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 {renderDocViewer(
                   auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl,
                   auditDocTab === 'birthCert' ? 'birth certificate' : 'physical form'
@@ -493,13 +490,30 @@ export function PlayerTable({
             {/* Right: audit form */}
             <div className="w-full sm:w-80 flex flex-col shrink-0 border-t sm:border-t-0">
               <DialogHeader className="p-5 border-b bg-primary/5">
-                <DialogTitle className="font-headline">
-                  {auditingPlayer?.firstName} {auditingPlayer?.lastName}
-                </DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {auditingPlayer?.divisionId ? (divisionNameMap.get(auditingPlayer.divisionId) ?? '—') : '—'}
-                  {' · '}Age {getLeagueAge(auditingPlayer?.dateOfBirth ?? '')}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <DialogTitle className="font-headline">
+                      {auditingPlayer?.firstName} {auditingPlayer?.lastName}
+                    </DialogTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {auditingPlayer?.divisionId ? (divisionNameMap.get(auditingPlayer.divisionId) ?? '—') : '—'}
+                      {' · '}Age {getLeagueAge(auditingPlayer?.dateOfBirth ?? '')}
+                    </p>
+                  </div>
+                  {(auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl) && (
+                    <Button variant="outline" size="sm" asChild className="shrink-0 text-xs h-8">
+                      <a
+                        href={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
+                        download
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Download className="h-3.5 w-3.5 mr-1" />
+                        {auditDocTab === 'birthCert' ? 'Download Birth Cert' : 'Download Physical'}
+                      </a>
+                    </Button>
+                  )}
+                </div>
               </DialogHeader>
 
               <ScrollArea className="flex-1 p-5">
@@ -583,7 +597,7 @@ export function PlayerTable({
                 </div>
               </ScrollArea>
 
-              <div className="p-5 border-t">
+              <DialogFooter className="sticky bottom-0 bg-background border-t p-4 z-20">
                 <Button
                   className="w-full rounded-xl bg-green-600 hover:bg-green-700"
                   onClick={handleAuditSubmit}
@@ -592,7 +606,7 @@ export function PlayerTable({
                   {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Save Audit
                 </Button>
-              </div>
+              </DialogFooter>
             </div>
           </div>
         </DialogContent>
