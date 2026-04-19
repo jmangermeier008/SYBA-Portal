@@ -383,7 +383,7 @@ export default function ConcessionsAdminPage() {
       enrollmentsSnap.docs.forEach(d => {
         const data = d.data();
         const pid = data.parentUserId as string;
-        const playerId = d.ref.parent.parent?.id;
+        const playerId = data.playerId as string;
         if (pid) {
           parentIds.add(pid);
           enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
