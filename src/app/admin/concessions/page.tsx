@@ -89,6 +89,7 @@ interface FamilyCompliance {
   pendingCount: number;
   required: number;
   manualCredits: number;
+  playerNames: string[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -378,14 +379,20 @@ export default function ConcessionsAdminPage() {
       const parentIds = new Set<string>();
       const enrollmentCountByParent = new Map<string, number>();
       const manualCreditsMap = new Map<string, number>();
+      const playerIdsByParent = new Map<string, string[]>();
       enrollmentsSnap.docs.forEach(d => {
         const data = d.data();
         const pid = data.parentUserId as string;
+        const playerId = d.ref.parent.parent?.id;
         if (pid) {
           parentIds.add(pid);
           enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
           const mc = (data.manualConcessionCredits as number) ?? 0;
           if (mc > 0) manualCreditsMap.set(pid, (manualCreditsMap.get(pid) ?? 0) + mc);
+          if (playerId) {
+            const existing = playerIdsByParent.get(pid) ?? [];
+            if (!existing.includes(playerId)) playerIdsByParent.set(pid, [...existing, playerId]);
+          }
         }
       });
 
@@ -393,8 +400,9 @@ export default function ConcessionsAdminPage() {
 
       const parentIdArray = Array.from(parentIds);
       const profileMap = new Map<string, { displayName: string; email: string }>();
-      await Promise.all(
-        parentIdArray.map(async pid => {
+      const playerNamesMap = new Map<string, string[]>();
+      await Promise.all([
+        ...parentIdArray.map(async pid => {
           const profileDoc = await getDoc(doc(db, 'userProfiles', pid));
           if (profileDoc.exists()) {
             const data = profileDoc.data();
@@ -402,8 +410,21 @@ export default function ConcessionsAdminPage() {
           } else {
             profileMap.set(pid, { displayName: pid, email: '' });
           }
-        })
-      );
+        }),
+        ...Array.from(playerIdsByParent.entries()).map(async ([pid, playerIds]) => {
+          const names = await Promise.all(
+            playerIds.map(async playerId => {
+              const playerDoc = await getDoc(doc(db, 'userProfiles', pid, 'players', playerId));
+              if (playerDoc.exists()) {
+                const d = playerDoc.data();
+                return `${d.firstName || ''} ${d.lastName || ''}`.trim();
+              }
+              return '';
+            })
+          );
+          playerNamesMap.set(pid, names.filter(Boolean));
+        }),
+      ]);
 
       // Build worked/pending counts from concession slot signups
       const allSlotsSnap = await getDocs(collection(db, 'concessionSlots'));
@@ -443,6 +464,7 @@ export default function ConcessionsAdminPage() {
         pendingCount: pendingCountMap.get(pid) ?? 0,
         required: (enrollmentCountByParent.get(pid) ?? 1) * slotsPerPlayer,
         manualCredits: manualCreditsMap.get(pid) ?? 0,
+        playerNames: playerNamesMap.get(pid) ?? [],
       }));
 
       result.sort((a, b) => {

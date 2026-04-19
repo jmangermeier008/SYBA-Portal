@@ -147,7 +147,7 @@ export default function RolesPage() {
         user.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         user.email?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesSport =
-        sportFilter === 'all' || (user.sportRoles?.[sportFilter]?.length ?? 0) > 0 || user.isSiteAdmin;
+        sportFilter === 'all' || user.sportRoles?.[sportFilter] !== undefined || user.isSiteAdmin;
       const matchesRole =
         roleFilter === 'all' || displayRoles.includes(roleFilter);
       return matchesSearch && matchesSport && matchesRole;
