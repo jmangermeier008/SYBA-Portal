@@ -10,8 +10,10 @@ import {
   collection,
   collectionGroup,
   deleteDoc,
+  deleteField,
   doc,
   getDocs,
+  getDoc,
   query,
   updateDoc,
   where,
@@ -35,6 +37,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import {
   ShieldCheck,
   Lock,
@@ -50,6 +54,7 @@ import {
   Download,
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -61,48 +66,17 @@ const PAD_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AX
 const JERSEY_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
 const PANTS_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
 
-const STATUS_LABELS: Record<EquipmentStatus, string> = {
-  not_issued: 'Not Issued',
-  issued: 'Issued',
-  returned: 'Returned',
-};
-
 const STATUS_COLORS: Record<EquipmentStatus, string> = {
   not_issued: 'bg-muted text-muted-foreground',
   issued: 'bg-blue-100 text-blue-700',
   returned: 'bg-green-100 text-green-700',
 };
 
-function StatusSelect({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: EquipmentStatus | undefined;
-  onChange: (v: EquipmentStatus) => void;
-  disabled?: boolean;
-}) {
-  const current = value ?? 'not_issued';
-  return (
-    <Select value={current} onValueChange={(v) => onChange(v as EquipmentStatus)} disabled={disabled}>
-      <SelectTrigger
-        className={cn(
-          'h-9 text-xs font-medium border-0 rounded-full px-3 w-32',
-          STATUS_COLORS[current]
-        )}
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {(Object.keys(STATUS_LABELS) as EquipmentStatus[]).map((s) => (
-          <SelectItem key={s} value={s}>
-            {STATUS_LABELS[s]}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
+const STATUS_LABELS: Record<EquipmentStatus, string> = {
+  not_issued: 'Not Issued',
+  issued: 'Issued',
+  returned: 'Returned',
+};
 
 function SizeSelect({
   value,
@@ -129,25 +103,39 @@ function SizeSelect({
   );
 }
 
+function SizeBadge({ value }: { value?: string }) {
+  return (
+    <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-mono text-muted-foreground bg-muted/40 h-9 min-w-[4rem] justify-center">
+      {value ?? '—'}
+    </span>
+  );
+}
+
 interface FootballEquipment {
   helmetSize?: string;
   helmetStatus?: EquipmentStatus;
+  helmetInventoryId?: string;
   shoulderPadSize?: string;
   padStatus?: EquipmentStatus;
+  padInventoryId?: string;
   jerseySize?: string;
   jerseyNumber?: string;
   gameJerseyStatus?: EquipmentStatus;
+  gameJerseyInventoryId?: string;
   scrimmageJerseyStatus?: EquipmentStatus;
+  scrimmageJerseyInventoryId?: string;
   practiceJerseyStatus?: EquipmentStatus;
+  practiceJerseyInventoryId?: string;
   gamePantsSize?: string;
   gamePantsStatus?: EquipmentStatus;
+  gamePantsInventoryId?: string;
   practicePantsSize?: string;
   practicePantsStatus?: EquipmentStatus;
+  practicePantsInventoryId?: string;
   issuedAt?: string;
   verifiedWeight?: number;
 }
 
-// id is injected by useCollection (doc.id) — enrollment documents store 'id' not 'enrollmentId'
 interface EnrollmentRow {
   id: string;
   parentUserId?: string;
@@ -223,6 +211,30 @@ const ALL_STATUS_FIELDS: (keyof FootballEquipment)[] = [
   'practicePantsStatus',
 ];
 
+const ALL_INVENTORY_ID_FIELDS: (keyof FootballEquipment)[] = [
+  'helmetInventoryId',
+  'padInventoryId',
+  'gameJerseyInventoryId',
+  'scrimmageJerseyInventoryId',
+  'practiceJerseyInventoryId',
+  'gamePantsInventoryId',
+  'practicePantsInventoryId',
+];
+
+const EQUIP_FIELD_MAP: Record<ShedItemType, {
+  statusField: keyof FootballEquipment;
+  sizeField: keyof FootballEquipment | null;
+  inventoryIdField: keyof FootballEquipment;
+}> = {
+  helmet:           { statusField: 'helmetStatus',           sizeField: 'helmetSize',       inventoryIdField: 'helmetInventoryId' },
+  shoulder_pads:    { statusField: 'padStatus',              sizeField: 'shoulderPadSize',  inventoryIdField: 'padInventoryId' },
+  game_jersey:      { statusField: 'gameJerseyStatus',       sizeField: 'jerseySize',       inventoryIdField: 'gameJerseyInventoryId' },
+  scrimmage_jersey: { statusField: 'scrimmageJerseyStatus',  sizeField: null,               inventoryIdField: 'scrimmageJerseyInventoryId' },
+  practice_jersey:  { statusField: 'practiceJerseyStatus',   sizeField: null,               inventoryIdField: 'practiceJerseyInventoryId' },
+  game_pants:       { statusField: 'gamePantsStatus',        sizeField: 'gamePantsSize',    inventoryIdField: 'gamePantsInventoryId' },
+  practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId' },
+};
+
 export default function EquipmentPage() {
   const db = useFirestore();
   const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
@@ -237,6 +249,7 @@ export default function EquipmentPage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [playerNameMap, setPlayerNameMap] = useState<Map<string, string>>(new Map());
   const [playersLoading, setPlayersLoading] = useState(false);
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
 
   // Shed Inventory state
   const [shedSearchQuery, setShedSearchQuery] = useState('');
@@ -341,6 +354,35 @@ export default function EquipmentPage() {
     });
   }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap]);
 
+  // Pre-build combobox options per type from the live shed subscription
+  const inventoryOptionsByType = useMemo(() => {
+    const result = {} as Record<ShedItemType, ComboboxOption[]>;
+    const types = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
+    for (const type of types) {
+      result[type] = (shedItems ?? [])
+        .filter((item) => item.type === type)
+        .sort((a, b) => a.tagNumber.localeCompare(b.tagNumber))
+        .map((item) => ({
+          value: item.id,
+          label: `#${item.tagNumber} · ${item.size}`,
+          sublabel: item.status === 'issued'
+            ? (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? 'Issued') : 'Issued')
+            : undefined,
+          disabled: item.status === 'issued',
+        }));
+    }
+    return result;
+  }, [shedItems, playerNameMap]);
+
+  // Per-row: re-enable the item currently assigned to this enrollment so it still shows
+  function getOptionsForType(type: ShedItemType, currentInventoryId: string | undefined): ComboboxOption[] {
+    return inventoryOptionsByType[type].map((opt) =>
+      opt.value === currentInventoryId
+        ? { ...opt, disabled: false, sublabel: 'Assigned' }
+        : opt
+    );
+  }
+
   const allIds = filteredEnrollments.map((e) => e.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
   const someSelected = selectedIds.size > 0;
@@ -357,7 +399,14 @@ export default function EquipmentPage() {
     });
   }
 
-  // enrollment.parentUserId is stored in the document; enrollment.id is the document ID
+  function toggleCard(id: string) {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
   async function saveField(enrollment: EnrollmentRow, field: string, value: string) {
     if (!db) return;
     const { parentUserId, id } = enrollment;
@@ -382,6 +431,116 @@ export default function EquipmentPage() {
     }
   }
 
+  async function assignInventoryItem(enrollment: EnrollmentRow, item: ShedItem, equipType: ShedItemType) {
+    if (!db) return;
+    const { parentUserId, id: enrollmentId } = enrollment;
+    if (!parentUserId || !enrollmentId) {
+      toast({ title: 'Save failed', description: 'Missing enrollment reference.', variant: 'destructive' });
+      return;
+    }
+
+    // Pre-check for race condition: verify item is still free (or already assigned here)
+    const freshSnap = await getDoc(doc(db, 'equipmentInventory', item.id));
+    const freshData = freshSnap.data();
+    if (freshData?.status === 'issued' && freshData?.issuedToEnrollmentId !== enrollmentId) {
+      toast({
+        title: 'Item already issued',
+        description: `Tag #${item.tagNumber} was just assigned to another player. Please try a different item.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const { statusField, sizeField, inventoryIdField } = EQUIP_FIELD_MAP[equipType];
+    const fe = enrollment.footballEquipment ?? {};
+    const prevInventoryId = fe[inventoryIdField] as string | undefined;
+
+    setSavingIds((prev) => new Set(prev).add(enrollmentId));
+    try {
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+
+      const enrollmentUpdates: Record<string, any> = {
+        [`footballEquipment.${String(statusField)}`]: 'issued',
+        [`footballEquipment.${String(inventoryIdField)}`]: item.id,
+        'footballEquipment.issuedAt': now,
+      };
+      if (sizeField) {
+        enrollmentUpdates[`footballEquipment.${String(sizeField)}`] = item.size;
+      }
+      batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId), enrollmentUpdates);
+
+      batch.update(doc(db, 'equipmentInventory', item.id), {
+        status: 'issued',
+        issuedToPlayerId: enrollment.playerId,
+        issuedToParentUserId: parentUserId,
+        issuedToEnrollmentId: enrollmentId,
+        issuedAt: now,
+        returnedAt: '',
+      });
+
+      // If a different item was previously assigned for this slot, return it to available
+      if (prevInventoryId && prevInventoryId !== item.id) {
+        batch.update(doc(db, 'equipmentInventory', prevInventoryId), {
+          status: 'available',
+          issuedToPlayerId: '',
+          issuedToParentUserId: '',
+          issuedToEnrollmentId: '',
+          returnedAt: now,
+        });
+      }
+
+      await batch.commit();
+      toast({ title: 'Assigned', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(enrollment.playerId) ?? 'player'}.` });
+    } catch (err: any) {
+      toast({ title: 'Assignment failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(enrollmentId);
+        return next;
+      });
+    }
+  }
+
+  async function returnInventoryItem(enrollment: EnrollmentRow, item: ShedItem, equipType: ShedItemType) {
+    if (!db) return;
+    const { parentUserId, id: enrollmentId } = enrollment;
+    if (!parentUserId || !enrollmentId) return;
+
+    const { statusField, inventoryIdField } = EQUIP_FIELD_MAP[equipType];
+
+    setSavingIds((prev) => new Set(prev).add(enrollmentId));
+    try {
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+
+      batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId), {
+        [`footballEquipment.${String(statusField)}`]: 'returned',
+        [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
+      });
+
+      batch.update(doc(db, 'equipmentInventory', item.id), {
+        status: 'available',
+        issuedToPlayerId: '',
+        issuedToParentUserId: '',
+        issuedToEnrollmentId: '',
+        returnedAt: now,
+      });
+
+      await batch.commit();
+      toast({ title: 'Returned', description: `Tag #${item.tagNumber} is now available.` });
+    } catch (err: any) {
+      toast({ title: 'Return failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(enrollmentId);
+        return next;
+      });
+    }
+  }
+
   async function returnAll(enrollment: EnrollmentRow) {
     if (!db) return;
     const { parentUserId, id } = enrollment;
@@ -391,9 +550,31 @@ export default function EquipmentPage() {
     }
     setSavingIds((prev) => new Set(prev).add(id));
     try {
-      const updates: Record<string, string> = {};
-      ALL_STATUS_FIELDS.forEach((f) => { updates[`footballEquipment.${f}`] = 'returned'; });
-      await updateDoc(doc(db, 'userProfiles', parentUserId, 'enrollments', id), updates);
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+      const fe = enrollment.footballEquipment ?? {};
+
+      const enrollmentUpdates: Record<string, any> = {};
+      ALL_STATUS_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = 'returned'; });
+      ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
+      batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', id), enrollmentUpdates);
+
+      // Return each linked shed item
+      const linkedIds = ALL_INVENTORY_ID_FIELDS
+        .map((f) => fe[f] as string | undefined)
+        .filter(Boolean) as string[];
+
+      for (const itemId of linkedIds) {
+        batch.update(doc(db, 'equipmentInventory', itemId), {
+          status: 'available',
+          issuedToPlayerId: '',
+          issuedToParentUserId: '',
+          issuedToEnrollmentId: '',
+          returnedAt: now,
+        });
+      }
+
+      await batch.commit();
       toast({ title: 'Equipment returned', description: 'All items marked as returned.' });
     } catch (err: any) {
       toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
@@ -412,13 +593,34 @@ export default function EquipmentPage() {
     try {
       const targets = (enrollments ?? []).filter((e) => selectedIds.has(e.id));
       const batch = writeBatch(db);
-      const statusUpdates: Record<string, string> = {};
-      ALL_STATUS_FIELDS.forEach((f) => { statusUpdates[`footballEquipment.${f}`] = 'returned'; });
+      const now = new Date().toISOString();
+
+      const enrollmentUpdates: Record<string, any> = {};
+      ALL_STATUS_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = 'returned'; });
+      ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
+
+      const allLinkedItemIds: string[] = [];
 
       targets.forEach((e) => {
         if (!e.parentUserId || !e.id) return;
-        batch.update(doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.id), statusUpdates);
+        batch.update(doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.id), enrollmentUpdates);
+        const fe = e.footballEquipment ?? {};
+        ALL_INVENTORY_ID_FIELDS.forEach((f) => {
+          const itemId = fe[f] as string | undefined;
+          if (itemId) allLinkedItemIds.push(itemId);
+        });
       });
+
+      for (const itemId of allLinkedItemIds) {
+        batch.update(doc(db, 'equipmentInventory', itemId), {
+          status: 'available',
+          issuedToPlayerId: '',
+          issuedToParentUserId: '',
+          issuedToEnrollmentId: '',
+          returnedAt: now,
+        });
+      }
+
       await batch.commit();
       toast({ title: 'Equipment marked as Returned', description: `${targets.length} player(s) updated.` });
       setSelectedIds(new Set());
@@ -465,18 +667,38 @@ export default function EquipmentPage() {
   async function handleCheckOut() {
     if (!db || !checkOutDialog.item || !checkOutPlayerId) return;
     const item = checkOutDialog.item;
-    // Find the enrollment for the selected player in the current season
     const enrollment = (enrollments ?? []).find(e => e.playerId === checkOutPlayerId);
     setCheckOutSaving(true);
     try {
-      await updateDoc(doc(db, 'equipmentInventory', item.id), {
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+
+      batch.update(doc(db, 'equipmentInventory', item.id), {
         status: 'issued',
         issuedToPlayerId: checkOutPlayerId,
         issuedToParentUserId: enrollment?.parentUserId ?? '',
         issuedToEnrollmentId: enrollment?.id ?? '',
-        issuedAt: new Date().toISOString(),
+        issuedAt: now,
         returnedAt: '',
       });
+
+      if (enrollment?.parentUserId && enrollment?.id) {
+        const { statusField, sizeField, inventoryIdField } = EQUIP_FIELD_MAP[item.type];
+        const enrollmentUpdates: Record<string, any> = {
+          [`footballEquipment.${String(statusField)}`]: 'issued',
+          [`footballEquipment.${String(inventoryIdField)}`]: item.id,
+          'footballEquipment.issuedAt': now,
+        };
+        if (sizeField) {
+          enrollmentUpdates[`footballEquipment.${String(sizeField)}`] = item.size;
+        }
+        batch.update(
+          doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id),
+          enrollmentUpdates
+        );
+      }
+
+      await batch.commit();
       toast({ title: 'Checked out', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(checkOutPlayerId) ?? checkOutPlayerId}.` });
       setCheckOutDialog({ open: false, item: null });
       setCheckOutPlayerId('');
@@ -490,13 +712,29 @@ export default function EquipmentPage() {
   async function handleReturnShedItem(item: ShedItem) {
     if (!db) return;
     try {
-      await updateDoc(doc(db, 'equipmentInventory', item.id), {
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+
+      batch.update(doc(db, 'equipmentInventory', item.id), {
         status: 'available',
         issuedToPlayerId: '',
         issuedToParentUserId: '',
         issuedToEnrollmentId: '',
-        returnedAt: new Date().toISOString(),
+        returnedAt: now,
       });
+
+      if (item.issuedToParentUserId && item.issuedToEnrollmentId) {
+        const { statusField, inventoryIdField } = EQUIP_FIELD_MAP[item.type];
+        batch.update(
+          doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId),
+          {
+            [`footballEquipment.${String(statusField)}`]: 'returned',
+            [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
+          }
+        );
+      }
+
+      await batch.commit();
       toast({ title: 'Item returned', description: `Tag #${item.tagNumber} is now available.` });
     } catch (err: any) {
       toast({ title: 'Return failed', description: err.message, variant: 'destructive' });
@@ -517,7 +755,6 @@ export default function EquipmentPage() {
 
   function downloadTemplate() {
     const wb = XLSX.utils.book_new();
-
     const data = [
       ['Tag Number', 'Type', 'Size', 'Notes'],
       ['H-001', 'helmet', 'YM', 'Blue stripe'],
@@ -540,7 +777,6 @@ export default function EquipmentPage() {
     const ws2 = XLSX.utils.aoa_to_sheet(valuesData);
     ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'Valid Values');
-
     XLSX.writeFile(wb, 'equipment_inventory_template.xlsx');
   }
 
@@ -564,26 +800,11 @@ export default function EquipmentPage() {
       const size = String(row['Size'] ?? '').trim();
       const notes = String(row['Notes'] ?? '').trim();
 
-      if (!tagNumber) {
-        errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row });
-        return;
-      }
-      if (existingTags.has(tagNumber.toLowerCase())) {
-        errors.push({ row: rowNum, reason: `Tag #${tagNumber} already exists in inventory`, rawData: row });
-        return;
-      }
-      if (seenTags.has(tagNumber.toLowerCase())) {
-        errors.push({ row: rowNum, reason: `Duplicate Tag #${tagNumber} in this file`, rawData: row });
-        return;
-      }
-      if (!validTypes.has(type as ShedItemType)) {
-        errors.push({ row: rowNum, reason: `Unknown type "${type}" — must be one of: ${[...validTypes].join(', ')}`, rawData: row });
-        return;
-      }
-      if (!size) {
-        errors.push({ row: rowNum, reason: 'Size is required', rawData: row });
-        return;
-      }
+      if (!tagNumber) { errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row }); return; }
+      if (existingTags.has(tagNumber.toLowerCase())) { errors.push({ row: rowNum, reason: `Tag #${tagNumber} already exists in inventory`, rawData: row }); return; }
+      if (seenTags.has(tagNumber.toLowerCase())) { errors.push({ row: rowNum, reason: `Duplicate Tag #${tagNumber} in this file`, rawData: row }); return; }
+      if (!validTypes.has(type as ShedItemType)) { errors.push({ row: rowNum, reason: `Unknown type "${type}" — must be one of: ${[...validTypes].join(', ')}`, rawData: row }); return; }
+      if (!size) { errors.push({ row: rowNum, reason: 'Size is required', rawData: row }); return; }
 
       seenTags.add(tagNumber.toLowerCase());
       valid.push({ tagNumber, type: type as ShedItemType, size, notes: notes || undefined });
@@ -672,7 +893,7 @@ export default function EquipmentPage() {
             Equipment Tracking
           </h1>
           <p className="text-sm text-muted-foreground">
-            Track helmet, pads, jerseys, and pants issuance and returns for enrolled players.
+            Assign specific tagged gear from the shed to enrolled players. Assignments sync automatically.
           </p>
         </header>
 
@@ -684,313 +905,618 @@ export default function EquipmentPage() {
             </TabsTrigger>
           </TabsList>
 
+          {/* ── Player Assignments Tab ─────────────────────────────── */}
           <TabsContent value="assignments" className="space-y-4">
-        {/* Season + search */}
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-          <div className="space-y-1 w-64">
-            <Label>Select Season</Label>
-            <Select value={selectedSeasonId} onValueChange={(v) => { setSelectedSeasonId(v); setSelectedIds(new Set()); }}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a season…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(seasons ?? [])
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+              <div className="space-y-1 w-64">
+                <Label>Select Season</Label>
+                <Select value={selectedSeasonId} onValueChange={(v) => { setSelectedSeasonId(v); setSelectedIds(new Set()); }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a season…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(seasons ?? [])
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {selectedSeasonId && (
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search player, division, team…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 w-64"
-              />
+              {selectedSeasonId && (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search player, division, team…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 w-64"
+                  />
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        {!selectedSeasonId && (
-          <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-              <Users className="h-12 w-12 text-muted-foreground/40 mb-4" />
-              <p className="text-muted-foreground font-medium">Select a season to view equipment</p>
-              <p className="text-sm text-muted-foreground">Enrolled players will appear once a season is selected.</p>
-            </CardContent>
-          </Card>
-        )}
+            {!selectedSeasonId && (
+              <Card className="border-none shadow-md">
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                  <Users className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground font-medium">Select a season to view equipment</p>
+                  <p className="text-sm text-muted-foreground">Enrolled players will appear once a season is selected.</p>
+                </CardContent>
+              </Card>
+            )}
 
-        {selectedSeasonId && tableLoading && (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          </div>
-        )}
-
-        {selectedSeasonId && !tableLoading && filteredEnrollments.length === 0 && (
-          <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-              <Users className="h-12 w-12 text-muted-foreground/40 mb-4" />
-              <p className="text-muted-foreground font-medium">No enrolled players found</p>
-              <p className="text-sm text-muted-foreground">
-                {searchQuery ? 'Try adjusting your search.' : 'No registrations have been recorded for this season yet.'}
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {selectedSeasonId && !tableLoading && filteredEnrollments.length > 0 && (
-          <>
-            {someSelected && (
-              <div className="mb-3 flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-2.5">
-                <span className="text-sm font-medium text-primary">{selectedIds.size} selected</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={bulkMarkReturned}
-                  disabled={bulkSaving}
-                  className="rounded-full h-8 gap-1.5"
-                >
-                  {bulkSaving
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <RotateCcw className="h-3.5 w-3.5" />}
-                  Mark All Returned
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setSelectedIds(new Set())}
-                  className="rounded-full h-8 ml-auto text-muted-foreground"
-                >
-                  Clear selection
-                </Button>
+            {selectedSeasonId && tableLoading && (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
             )}
 
-            <Card className="border-none shadow-md overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/30">
-                      <th className="px-3 py-3 w-10">
-                        <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
-                      </th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Player</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden sm:table-cell">Division</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden md:table-cell">Team</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Size</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Size</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey #</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey Size</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Jersey</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Scrimmage Jersey</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Jersey</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Size</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Size</th>
-                      <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants</th>
-                      <th className="px-4 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEnrollments.map((enrollment) => {
-                      const isSaving = savingIds.has(enrollment.id);
-                      const isSelected = selectedIds.has(enrollment.id);
-                      const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
-                      const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
-                      const teamName = enrollment.teamId ? (teamMap.get(enrollment.teamId) ?? '—') : '—';
-                      const fe = enrollment.footballEquipment ?? {};
+            {selectedSeasonId && !tableLoading && filteredEnrollments.length === 0 && (
+              <Card className="border-none shadow-md">
+                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                  <Users className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-muted-foreground font-medium">No enrolled players found</p>
+                  <p className="text-sm text-muted-foreground">
+                    {searchQuery ? 'Try adjusting your search.' : 'No registrations have been recorded for this season yet.'}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
-                      return (
-                        <tr
-                          key={enrollment.id}
-                          className={cn(
-                            'border-b last:border-0 transition-colors',
-                            isSelected ? 'bg-primary/5' : 'hover:bg-muted/20',
-                            isSaving && 'opacity-60'
-                          )}
-                        >
-                          <td className="px-3 py-2">
-                            <Checkbox
-                              checked={isSelected}
-                              onCheckedChange={() => toggleRow(enrollment.id)}
-                              aria-label={`Select ${playerName}`}
-                            />
-                          </td>
+            {selectedSeasonId && !tableLoading && filteredEnrollments.length > 0 && (
+              <>
+                {someSelected && (
+                  <div className="mb-3 flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-2.5">
+                    <span className="text-sm font-medium text-primary">{selectedIds.size} selected</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={bulkMarkReturned}
+                      disabled={bulkSaving}
+                      className="rounded-full h-8 gap-1.5"
+                    >
+                      {bulkSaving
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <RotateCcw className="h-3.5 w-3.5" />}
+                      Mark All Returned
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setSelectedIds(new Set())}
+                      className="rounded-full h-8 ml-auto text-muted-foreground"
+                    >
+                      Clear selection
+                    </Button>
+                  </div>
+                )}
 
-                          <td className="px-4 py-2 font-medium whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              {playerName}
-                              {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap hidden sm:table-cell">{divisionName}</td>
-                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap hidden md:table-cell">{teamName}</td>
-
-                          {/* Helmet Size */}
-                          <td className="px-4 py-2">
-                            <SizeSelect
-                              value={fe.helmetSize}
-                              sizes={HELMET_SIZES}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.helmetSize', v)}
-                            />
-                          </td>
-
-                          {/* Helmet Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.helmetStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.helmetStatus', v)}
-                            />
-                          </td>
-
-                          {/* Pads Size */}
-                          <td className="px-4 py-2">
-                            <SizeSelect
-                              value={fe.shoulderPadSize}
-                              sizes={PAD_SIZES}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.shoulderPadSize', v)}
-                            />
-                          </td>
-
-                          {/* Pads Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.padStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.padStatus', v)}
-                            />
-                          </td>
-
-                          {/* Jersey # */}
-                          <td className="px-4 py-2">
-                            <Input
-                              defaultValue={fe.jerseyNumber ?? ''}
-                              placeholder="—"
-                              className="w-16 h-9 text-center"
-                              disabled={isSaving}
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (fe.jerseyNumber ?? ''))
-                                  saveField(enrollment, 'footballEquipment.jerseyNumber', val);
-                              }}
-                            />
-                          </td>
-
-                          {/* Jersey Size */}
-                          <td className="px-4 py-2">
-                            <SizeSelect
-                              value={fe.jerseySize}
-                              sizes={JERSEY_SIZES}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.jerseySize', v)}
-                            />
-                          </td>
-
-                          {/* Game Jersey Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.gameJerseyStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.gameJerseyStatus', v)}
-                            />
-                          </td>
-
-                          {/* Scrimmage Jersey Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.scrimmageJerseyStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.scrimmageJerseyStatus', v)}
-                            />
-                          </td>
-
-                          {/* Practice Jersey Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.practiceJerseyStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.practiceJerseyStatus', v)}
-                            />
-                          </td>
-
-                          {/* Game Pants Size */}
-                          <td className="px-4 py-2">
-                            <SizeSelect
-                              value={fe.gamePantsSize}
-                              sizes={PANTS_SIZES}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.gamePantsSize', v)}
-                            />
-                          </td>
-
-                          {/* Game Pants Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.gamePantsStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.gamePantsStatus', v)}
-                            />
-                          </td>
-
-                          {/* Practice Pants Size */}
-                          <td className="px-4 py-2">
-                            <SizeSelect
-                              value={fe.practicePantsSize}
-                              sizes={PANTS_SIZES}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.practicePantsSize', v)}
-                            />
-                          </td>
-
-                          {/* Practice Pants Status */}
-                          <td className="px-4 py-2">
-                            <StatusSelect
-                              value={fe.practicePantsStatus}
-                              disabled={isSaving}
-                              onChange={(v) => saveField(enrollment, 'footballEquipment.practicePantsStatus', v)}
-                            />
-                          </td>
-
-                          {/* Return All */}
-                          <td className="px-4 py-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={isSaving}
-                              onClick={() => returnAll(enrollment)}
-                              className="rounded-full h-8 gap-1.5 whitespace-nowrap text-xs"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              Return All
-                            </Button>
-                          </td>
+                {/* ── Desktop table (md and up) ─────────────────── */}
+                <Card className="border-none shadow-md overflow-hidden hidden md:block">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/30">
+                          <th className="px-3 py-3 w-10">
+                            <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
+                          </th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Player</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Division</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Team</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Size</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Size</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey #</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey Size</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Jersey</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Scrimmage</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Jersey</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Size</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Size</th>
+                          <th className="px-4 py-3" />
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                      </thead>
+                      <tbody>
+                        {filteredEnrollments.map((enrollment) => {
+                          const isSaving = savingIds.has(enrollment.id);
+                          const isSelected = selectedIds.has(enrollment.id);
+                          const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
+                          const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
+                          const teamName = enrollment.teamId ? (teamMap.get(enrollment.teamId) ?? '—') : '—';
+                          const fe = enrollment.footballEquipment ?? {};
 
-            <p className="mt-3 text-xs text-muted-foreground">
-              {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — changes save automatically on selection or field blur.
-            </p>
-          </>
-        )}
+                          return (
+                            <tr
+                              key={enrollment.id}
+                              className={cn(
+                                'border-b last:border-0 transition-colors',
+                                isSelected ? 'bg-primary/5' : 'hover:bg-muted/20',
+                                isSaving && 'opacity-60'
+                              )}
+                            >
+                              <td className="px-3 py-2">
+                                <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(enrollment.id)} aria-label={`Select ${playerName}`} />
+                              </td>
+
+                              <td className="px-4 py-2 font-medium whitespace-nowrap">
+                                <div className="flex items-center gap-2">
+                                  {playerName}
+                                  {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{divisionName}</td>
+                              <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{teamName}</td>
+
+                              {/* Helmet Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('helmet', fe.helmetInventoryId)}
+                                  value={fe.helmetInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'helmet');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.helmetInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'helmet');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+                              {/* Helmet Size */}
+                              <td className="px-4 py-2">
+                                {fe.helmetInventoryId
+                                  ? <SizeBadge value={fe.helmetSize} />
+                                  : <SizeSelect value={fe.helmetSize} sizes={HELMET_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.helmetSize', v)} />
+                                }
+                              </td>
+
+                              {/* Pads Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('shoulder_pads', fe.padInventoryId)}
+                                  value={fe.padInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'shoulder_pads');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.padInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'shoulder_pads');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+                              {/* Pads Size */}
+                              <td className="px-4 py-2">
+                                {fe.padInventoryId
+                                  ? <SizeBadge value={fe.shoulderPadSize} />
+                                  : <SizeSelect value={fe.shoulderPadSize} sizes={PAD_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.shoulderPadSize', v)} />
+                                }
+                              </td>
+
+                              {/* Jersey # */}
+                              <td className="px-4 py-2">
+                                <Input
+                                  defaultValue={fe.jerseyNumber ?? ''}
+                                  placeholder="—"
+                                  className="w-16 h-9 text-center"
+                                  disabled={isSaving}
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (val !== (fe.jerseyNumber ?? ''))
+                                      saveField(enrollment, 'footballEquipment.jerseyNumber', val);
+                                  }}
+                                />
+                              </td>
+
+                              {/* Jersey Size */}
+                              <td className="px-4 py-2">
+                                {fe.gameJerseyInventoryId
+                                  ? <SizeBadge value={fe.jerseySize} />
+                                  : <SizeSelect value={fe.jerseySize} sizes={JERSEY_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.jerseySize', v)} />
+                                }
+                              </td>
+
+                              {/* Game Jersey Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('game_jersey', fe.gameJerseyInventoryId)}
+                                  value={fe.gameJerseyInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'game_jersey');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.gameJerseyInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'game_jersey');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+
+                              {/* Scrimmage Jersey Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('scrimmage_jersey', fe.scrimmageJerseyInventoryId)}
+                                  value={fe.scrimmageJerseyInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'scrimmage_jersey');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.scrimmageJerseyInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'scrimmage_jersey');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+
+                              {/* Practice Jersey Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('practice_jersey', fe.practiceJerseyInventoryId)}
+                                  value={fe.practiceJerseyInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'practice_jersey');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.practiceJerseyInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'practice_jersey');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+
+                              {/* Game Pants Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('game_pants', fe.gamePantsInventoryId)}
+                                  value={fe.gamePantsInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'game_pants');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.gamePantsInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'game_pants');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+                              {/* Game Pants Size */}
+                              <td className="px-4 py-2">
+                                {fe.gamePantsInventoryId
+                                  ? <SizeBadge value={fe.gamePantsSize} />
+                                  : <SizeSelect value={fe.gamePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.gamePantsSize', v)} />
+                                }
+                              </td>
+
+                              {/* Practice Pants Tag */}
+                              <td className="px-4 py-2">
+                                <Combobox
+                                  options={getOptionsForType('practice_pants', fe.practicePantsInventoryId)}
+                                  value={fe.practicePantsInventoryId}
+                                  onSelect={(itemId) => {
+                                    const item = (shedItems ?? []).find(i => i.id === itemId);
+                                    if (item) assignInventoryItem(enrollment, item, 'practice_pants');
+                                  }}
+                                  onClear={() => {
+                                    const item = (shedItems ?? []).find(i => i.id === fe.practicePantsInventoryId);
+                                    if (item) returnInventoryItem(enrollment, item, 'practice_pants');
+                                  }}
+                                  disabled={isSaving}
+                                />
+                              </td>
+                              {/* Practice Pants Size */}
+                              <td className="px-4 py-2">
+                                {fe.practicePantsInventoryId
+                                  ? <SizeBadge value={fe.practicePantsSize} />
+                                  : <SizeSelect value={fe.practicePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.practicePantsSize', v)} />
+                                }
+                              </td>
+
+                              {/* Return All */}
+                              <td className="px-4 py-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isSaving}
+                                  onClick={() => returnAll(enrollment)}
+                                  className="rounded-full h-8 gap-1.5 whitespace-nowrap text-xs"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  Return All
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                {/* ── Mobile cards (below md) ───────────────────── */}
+                <div className="md:hidden space-y-3">
+                  {filteredEnrollments.map((enrollment) => {
+                    const isSaving = savingIds.has(enrollment.id);
+                    const isSelected = selectedIds.has(enrollment.id);
+                    const isExpanded = expandedCards.has(enrollment.id);
+                    const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
+                    const divisionName = divisionMap.get(enrollment.divisionId) ?? '';
+                    const fe = enrollment.footballEquipment ?? {};
+
+                    const equipSummary: { label: string; status: EquipmentStatus; inventoryId?: string }[] = [
+                      { label: 'Helmet', status: fe.helmetStatus ?? 'not_issued', inventoryId: fe.helmetInventoryId },
+                      { label: 'Pads', status: fe.padStatus ?? 'not_issued', inventoryId: fe.padInventoryId },
+                      { label: 'Game Jersey', status: fe.gameJerseyStatus ?? 'not_issued', inventoryId: fe.gameJerseyInventoryId },
+                      { label: 'Scrimmage', status: fe.scrimmageJerseyStatus ?? 'not_issued', inventoryId: fe.scrimmageJerseyInventoryId },
+                      { label: 'Practice Jersey', status: fe.practiceJerseyStatus ?? 'not_issued', inventoryId: fe.practiceJerseyInventoryId },
+                      { label: 'Game Pants', status: fe.gamePantsStatus ?? 'not_issued', inventoryId: fe.gamePantsInventoryId },
+                      { label: 'Prac. Pants', status: fe.practicePantsStatus ?? 'not_issued', inventoryId: fe.practicePantsInventoryId },
+                    ];
+
+                    return (
+                      <Card key={enrollment.id} className={cn('border-none shadow-md transition-colors', isSelected && 'ring-1 ring-primary')}>
+                        <Collapsible open={isExpanded} onOpenChange={() => toggleCard(enrollment.id)}>
+                          <CollapsibleTrigger asChild>
+                            <button type="button" className="w-full text-left">
+                              <CardContent className="p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-3 min-w-0">
+                                    <Checkbox
+                                      checked={isSelected}
+                                      onCheckedChange={() => toggleRow(enrollment.id)}
+                                      aria-label={`Select ${playerName}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="mt-0.5 shrink-0"
+                                    />
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-sm flex items-center gap-2">
+                                        {playerName}
+                                        {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                                      </div>
+                                      {divisionName && <p className="text-xs text-muted-foreground">{divisionName}</p>}
+                                    </div>
+                                  </div>
+                                  <ChevronDown className={cn('h-4 w-4 text-muted-foreground shrink-0 mt-0.5 transition-transform', isExpanded && 'rotate-180')} />
+                                </div>
+
+                                {/* Status badge summary */}
+                                <div className="flex flex-wrap gap-1.5 mt-3 ml-7">
+                                  {equipSummary.map((eq) => (
+                                    <span
+                                      key={eq.label}
+                                      className={cn(
+                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
+                                        eq.inventoryId ? STATUS_COLORS.issued : STATUS_COLORS[eq.status]
+                                      )}
+                                    >
+                                      {eq.label}
+                                      {eq.inventoryId && (
+                                        <span className="ml-1 font-mono">
+                                          #{(shedItems ?? []).find(i => i.id === eq.inventoryId)?.tagNumber ?? '?'}
+                                        </span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              </CardContent>
+                            </button>
+                          </CollapsibleTrigger>
+
+                          <CollapsibleContent>
+                            <CardContent className="pt-0 pb-4 border-t mx-4 space-y-4">
+                              {/* Jersey # */}
+                              <div className="pt-4 flex items-center gap-3">
+                                <span className="text-xs font-medium w-32 shrink-0">Jersey #</span>
+                                <Input
+                                  defaultValue={fe.jerseyNumber ?? ''}
+                                  placeholder="—"
+                                  className="w-20 h-9 text-center text-xs"
+                                  disabled={isSaving}
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (val !== (fe.jerseyNumber ?? ''))
+                                      saveField(enrollment, 'footballEquipment.jerseyNumber', val);
+                                  }}
+                                />
+                              </div>
+
+                              {/* Helmet */}
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Helmet</p>
+                                <div className="flex items-center gap-3">
+                                  <Combobox
+                                    options={getOptionsForType('helmet', fe.helmetInventoryId)}
+                                    value={fe.helmetInventoryId}
+                                    onSelect={(itemId) => {
+                                      const item = (shedItems ?? []).find(i => i.id === itemId);
+                                      if (item) assignInventoryItem(enrollment, item, 'helmet');
+                                    }}
+                                    onClear={() => {
+                                      const item = (shedItems ?? []).find(i => i.id === fe.helmetInventoryId);
+                                      if (item) returnInventoryItem(enrollment, item, 'helmet');
+                                    }}
+                                    disabled={isSaving}
+                                    className="flex-1"
+                                  />
+                                  {fe.helmetInventoryId
+                                    ? <SizeBadge value={fe.helmetSize} />
+                                    : <SizeSelect value={fe.helmetSize} sizes={HELMET_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.helmetSize', v)} />
+                                  }
+                                </div>
+                              </div>
+
+                              {/* Shoulder Pads */}
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Shoulder Pads</p>
+                                <div className="flex items-center gap-3">
+                                  <Combobox
+                                    options={getOptionsForType('shoulder_pads', fe.padInventoryId)}
+                                    value={fe.padInventoryId}
+                                    onSelect={(itemId) => {
+                                      const item = (shedItems ?? []).find(i => i.id === itemId);
+                                      if (item) assignInventoryItem(enrollment, item, 'shoulder_pads');
+                                    }}
+                                    onClear={() => {
+                                      const item = (shedItems ?? []).find(i => i.id === fe.padInventoryId);
+                                      if (item) returnInventoryItem(enrollment, item, 'shoulder_pads');
+                                    }}
+                                    disabled={isSaving}
+                                    className="flex-1"
+                                  />
+                                  {fe.padInventoryId
+                                    ? <SizeBadge value={fe.shoulderPadSize} />
+                                    : <SizeSelect value={fe.shoulderPadSize} sizes={PAD_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.shoulderPadSize', v)} />
+                                  }
+                                </div>
+                              </div>
+
+                              {/* Jerseys */}
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Jerseys</p>
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs w-28 shrink-0">Game</span>
+                                    <Combobox
+                                      options={getOptionsForType('game_jersey', fe.gameJerseyInventoryId)}
+                                      value={fe.gameJerseyInventoryId}
+                                      onSelect={(itemId) => {
+                                        const item = (shedItems ?? []).find(i => i.id === itemId);
+                                        if (item) assignInventoryItem(enrollment, item, 'game_jersey');
+                                      }}
+                                      onClear={() => {
+                                        const item = (shedItems ?? []).find(i => i.id === fe.gameJerseyInventoryId);
+                                        if (item) returnInventoryItem(enrollment, item, 'game_jersey');
+                                      }}
+                                      disabled={isSaving}
+                                      className="flex-1"
+                                    />
+                                    {fe.gameJerseyInventoryId
+                                      ? <SizeBadge value={fe.jerseySize} />
+                                      : <SizeSelect value={fe.jerseySize} sizes={JERSEY_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.jerseySize', v)} />
+                                    }
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs w-28 shrink-0">Scrimmage</span>
+                                    <Combobox
+                                      options={getOptionsForType('scrimmage_jersey', fe.scrimmageJerseyInventoryId)}
+                                      value={fe.scrimmageJerseyInventoryId}
+                                      onSelect={(itemId) => {
+                                        const item = (shedItems ?? []).find(i => i.id === itemId);
+                                        if (item) assignInventoryItem(enrollment, item, 'scrimmage_jersey');
+                                      }}
+                                      onClear={() => {
+                                        const item = (shedItems ?? []).find(i => i.id === fe.scrimmageJerseyInventoryId);
+                                        if (item) returnInventoryItem(enrollment, item, 'scrimmage_jersey');
+                                      }}
+                                      disabled={isSaving}
+                                      className="flex-1"
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs w-28 shrink-0">Practice</span>
+                                    <Combobox
+                                      options={getOptionsForType('practice_jersey', fe.practiceJerseyInventoryId)}
+                                      value={fe.practiceJerseyInventoryId}
+                                      onSelect={(itemId) => {
+                                        const item = (shedItems ?? []).find(i => i.id === itemId);
+                                        if (item) assignInventoryItem(enrollment, item, 'practice_jersey');
+                                      }}
+                                      onClear={() => {
+                                        const item = (shedItems ?? []).find(i => i.id === fe.practiceJerseyInventoryId);
+                                        if (item) returnInventoryItem(enrollment, item, 'practice_jersey');
+                                      }}
+                                      disabled={isSaving}
+                                      className="flex-1"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Pants */}
+                              <div className="space-y-1.5">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pants</p>
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs w-28 shrink-0">Game</span>
+                                    <Combobox
+                                      options={getOptionsForType('game_pants', fe.gamePantsInventoryId)}
+                                      value={fe.gamePantsInventoryId}
+                                      onSelect={(itemId) => {
+                                        const item = (shedItems ?? []).find(i => i.id === itemId);
+                                        if (item) assignInventoryItem(enrollment, item, 'game_pants');
+                                      }}
+                                      onClear={() => {
+                                        const item = (shedItems ?? []).find(i => i.id === fe.gamePantsInventoryId);
+                                        if (item) returnInventoryItem(enrollment, item, 'game_pants');
+                                      }}
+                                      disabled={isSaving}
+                                      className="flex-1"
+                                    />
+                                    {fe.gamePantsInventoryId
+                                      ? <SizeBadge value={fe.gamePantsSize} />
+                                      : <SizeSelect value={fe.gamePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.gamePantsSize', v)} />
+                                    }
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs w-28 shrink-0">Practice</span>
+                                    <Combobox
+                                      options={getOptionsForType('practice_pants', fe.practicePantsInventoryId)}
+                                      value={fe.practicePantsInventoryId}
+                                      onSelect={(itemId) => {
+                                        const item = (shedItems ?? []).find(i => i.id === itemId);
+                                        if (item) assignInventoryItem(enrollment, item, 'practice_pants');
+                                      }}
+                                      onClear={() => {
+                                        const item = (shedItems ?? []).find(i => i.id === fe.practicePantsInventoryId);
+                                        if (item) returnInventoryItem(enrollment, item, 'practice_pants');
+                                      }}
+                                      disabled={isSaving}
+                                      className="flex-1"
+                                    />
+                                    {fe.practicePantsInventoryId
+                                      ? <SizeBadge value={fe.practicePantsSize} />
+                                      : <SizeSelect value={fe.practicePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.practicePantsSize', v)} />
+                                    }
+                                  </div>
+                                </div>
+                              </div>
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={isSaving}
+                                onClick={() => returnAll(enrollment)}
+                                className="rounded-full h-8 gap-1.5 text-xs w-full mt-2"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                Return All Equipment
+                              </Button>
+                            </CardContent>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      </Card>
+                    );
+                  })}
+                </div>
+
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — select a tag to assign gear; changes sync automatically.
+                </p>
+              </>
+            )}
           </TabsContent>
 
+          {/* ── Shed Inventory Tab ──────────────────────────────────── */}
           <TabsContent value="shed" className="space-y-4">
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end justify-between">
               <div className="relative">

@@ -456,23 +456,30 @@ export interface Enrollment {
     // Helmet
     helmetSize?: string;
     helmetStatus?: 'not_issued' | 'issued' | 'returned';
+    helmetInventoryId?: string;          // equipmentInventory doc ID of assigned item
     // Shoulder pads
     shoulderPadSize?: string;
     padStatus?: 'not_issued' | 'issued' | 'returned';
+    padInventoryId?: string;             // equipmentInventory doc ID of assigned item
     // Game jersey
     jerseySize?: string;
     jerseyNumber?: string;
     gameJerseyStatus?: 'not_issued' | 'issued' | 'returned';
+    gameJerseyInventoryId?: string;      // equipmentInventory doc ID of assigned item
     // Scrimmage jersey
     scrimmageJerseyStatus?: 'not_issued' | 'issued' | 'returned';
+    scrimmageJerseyInventoryId?: string; // equipmentInventory doc ID of assigned item
     // Practice jersey
     practiceJerseyStatus?: 'not_issued' | 'issued' | 'returned';
+    practiceJerseyInventoryId?: string;  // equipmentInventory doc ID of assigned item
     // Game pants
     gamePantsSize?: string;
     gamePantsStatus?: 'not_issued' | 'issued' | 'returned';
+    gamePantsInventoryId?: string;       // equipmentInventory doc ID of assigned item
     // Practice pants
     practicePantsSize?: string;
     practicePantsStatus?: 'not_issued' | 'issued' | 'returned';
+    practicePantsInventoryId?: string;   // equipmentInventory doc ID of assigned item
     issuedAt?: string;
   };
   // Admin-assigned jersey number (both sports) — distinct from parent-entered uniformNumberPreference
