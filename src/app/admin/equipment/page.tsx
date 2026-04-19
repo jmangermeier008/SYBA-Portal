@@ -1206,7 +1206,7 @@ export default function EquipmentPage() {
 
                   {/* ── Equipment detail Sheet ─────────────────── */}
                   <Sheet open={!!drawerEnrollment} onOpenChange={(open) => { if (!open) setDrawerEnrollment(null); }}>
-                    <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+                    <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
                       {drawerEnrollment && (() => {
                         const liveEnrollment = filteredEnrollments.find(e => e.id === drawerEnrollment.id) ?? drawerEnrollment;
                         const isSaving = savingIds.has(liveEnrollment.id);
