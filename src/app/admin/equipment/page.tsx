@@ -233,6 +233,7 @@ export default function EquipmentPage() {
 
   // Shed Inventory state
   const [shedSearchQuery, setShedSearchQuery] = useState('');
+  const [shedTypeFilter, setShedTypeFilter] = useState<'all' | ShedItemType>('all');
   const [addItemDialog, setAddItemDialog] = useState(false);
   const [addItemForm, setAddItemForm] = useState({ tagNumber: '', type: 'helmet' as ShedItemType, size: '', notes: '' });
   const [addItemSaving, setAddItemSaving] = useState(false);
@@ -618,14 +619,17 @@ export default function EquipmentPage() {
   const filteredShedItems = useMemo(() => {
     if (!shedItems) return [];
     const q = shedSearchQuery.toLowerCase();
-    if (!q) return shedItems;
-    return shedItems.filter(item =>
-      item.tagNumber.toLowerCase().includes(q) ||
-      SHED_ITEM_TYPES[item.type].toLowerCase().includes(q) ||
-      item.size.toLowerCase().includes(q) ||
-      (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
-    );
-  }, [shedItems, shedSearchQuery, playerNameMap]);
+    return shedItems.filter(item => {
+      if (shedTypeFilter !== 'all' && item.type !== shedTypeFilter) return false;
+      if (!q) return true;
+      return (
+        item.tagNumber.toLowerCase().includes(q) ||
+        SHED_ITEM_TYPES[item.type].toLowerCase().includes(q) ||
+        item.size.toLowerCase().includes(q) ||
+        (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
+      );
+    });
+  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap]);
 
   async function handleAddShedItem() {
     if (!db || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()) return;
@@ -1445,14 +1449,27 @@ export default function EquipmentPage() {
           {/* ── Shed Inventory Tab ──────────────────────────────────── */}
           <TabsContent value="shed" className="space-y-4">
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end justify-between">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search tag, type, size, player…"
-                  value={shedSearchQuery}
-                  onChange={(e) => setShedSearchQuery(e.target.value)}
-                  className="pl-9 w-72"
-                />
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search tag, size, player…"
+                    value={shedSearchQuery}
+                    onChange={(e) => setShedSearchQuery(e.target.value)}
+                    className="pl-9 w-64"
+                  />
+                </div>
+                <Select value={shedTypeFilter} onValueChange={(v) => setShedTypeFilter(v as 'all' | ShedItemType)}>
+                  <SelectTrigger className="w-48 rounded-xl">
+                    <SelectValue placeholder="All Types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {(Object.entries(SHED_ITEM_TYPES) as [ShedItemType, string][]).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex gap-2 flex-wrap">
                 <Button variant="outline" onClick={downloadTemplate} className="rounded-xl gap-1.5">
@@ -1471,7 +1488,7 @@ export default function EquipmentPage() {
               </div>
             </div>
 
-            {(!shedItems || shedItems.length === 0) && !shedSearchQuery && (
+            {(!shedItems || shedItems.length === 0) && !shedSearchQuery && shedTypeFilter === 'all' && (
               <Card className="border-none shadow-md">
                 <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                   <Package className="h-12 w-12 text-muted-foreground/40 mb-4" />
@@ -1481,7 +1498,7 @@ export default function EquipmentPage() {
               </Card>
             )}
 
-            {filteredShedItems.length === 0 && shedSearchQuery && (
+            {filteredShedItems.length === 0 && (shedSearchQuery || shedTypeFilter !== 'all') && (
               <Card className="border-none shadow-md">
                 <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                   <Package className="h-12 w-12 text-muted-foreground/40 mb-4" />
