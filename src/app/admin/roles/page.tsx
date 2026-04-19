@@ -5,6 +5,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { updateDoc, doc, collection, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
@@ -19,20 +20,22 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import Link from 'next/link';
-import { useSport } from '@/firebase/sport-context';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut as firebaseSignOut, sendPasswordResetEmail } from 'firebase/auth';
 import { firebaseConfig } from '@/firebase/config';
 import { OFFICER_TITLES } from '@/data/officers';
+import type { SportRole } from '@/types/scheduling';
 
-const ALL_ROLES = ['Parent', 'Coach', 'Board Member', 'Admin', 'Site Admin'] as const;
-type Role = typeof ALL_ROLES[number];
+// 'Parent' is no longer assignable — all authenticated users are implicit parents.
+// 'Site Admin' is toggled via a dedicated boolean field, not via this array.
+const ALL_SPORT_ROLES: SportRole[] = ['Coach', 'Board Member', 'Admin'];
 
 interface UserData {
   id: string;
   email: string;
   displayName: string;
-  role: string;
+  isSiteAdmin?: boolean;
+  role?: string;
   roles?: string[];
   sportRoles?: Record<string, string[]>;
   officerTitle?: string;
@@ -40,24 +43,38 @@ interface UserData {
   phoneNumber?: string;
 }
 
-function getUserRoles(user: UserData, sport?: string | null): string[] {
-  if (sport && user.sportRoles?.[sport]?.length) return user.sportRoles[sport];
-  if (user.roles && user.roles.length > 0) return user.roles;
-  return [user.role];
+function getUserSportRoles(user: UserData, sport: string): string[] {
+  if (user.sportRoles?.[sport]?.length) return user.sportRoles[sport];
+  return [];
+}
+
+function getRoleBadgeVariant(role: string): 'destructive' | 'default' | 'secondary' | 'outline' {
+  if (role === 'Site Admin') return 'destructive';
+  if (role === 'Admin') return 'default';
+  if (role === 'Coach') return 'secondary';
+  return 'outline';
+}
+
+function getUserDisplayRoles(user: UserData, sport: string | null): string[] {
+  if (user.isSiteAdmin) return ['Site Admin'];
+  if (sport) return getUserSportRoles(user, sport);
+  // "All Sports" view — flatten all sport roles deduplicated
+  const all = Object.values(user.sportRoles ?? {}).flat();
+  return [...new Set(all)];
 }
 
 const EMPTY_NEW_USER = {
   displayName: '',
   email: '',
   password: '',
-  roles: ['Parent'] as string[],
+  roles: [] as string[],
 };
 
 export default function RolesPage() {
   const db = useFirestore();
   const { toast } = useToast();
   const { isSiteAdmin, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { activeSport, isBoardMember } = useSport();
 
   // Create user dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -79,69 +96,64 @@ export default function RolesPage() {
     loading: boolean;
   }>({ open: false, user: null, form: { displayName: '', phoneNumber: '' }, loading: false });
 
+  // Board Members are locked to their active sport; Site Admins can see all sports
+  const [sportFilter, setSportFilter] = useState<string>('all');
+  useEffect(() => {
+    if (activeSport) {
+      // Board members (non-site-admin) are locked to their sport
+      setSportFilter(activeSport);
+    }
+  }, [activeSport]);
+
   const usersQuery = useMemoFirebase(() => {
-    if (!db || !isSiteAdmin) return null;
+    if (!db) return null;
+    if (!isSiteAdmin && !isBoardMember) return null;
     return collection(db, 'userProfiles');
-  }, [db, isSiteAdmin]);
+  }, [db, isSiteAdmin, isBoardMember]);
 
   const { data: users, isLoading } = useCollection<UserData>(usersQuery);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [sportFilter, setSportFilter] = useState<string>('all');
-  // activeSport is null on first render (set via useEffect in SportProvider),
-  // so we sync sportFilter once it resolves rather than relying on the useState initializer.
-  useEffect(() => {
-    if (activeSport) setSportFilter(activeSport);
-  }, [activeSport]);
 
   const filteredUsers = useMemo(() => {
     if (!users) return [];
     const activeSportFilter = sportFilter !== 'all' ? sportFilter : null;
     return users.filter((user) => {
-      const effectiveRoles = getUserRoles(user, activeSportFilter);
+      const displayRoles = getUserDisplayRoles(user, activeSportFilter);
       const matchesSearch =
         !searchQuery ||
         user.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         user.email?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesSport =
-        sportFilter === 'all' || (user.sportRoles?.[sportFilter]?.length ?? 0) > 0;
+        sportFilter === 'all' || (user.sportRoles?.[sportFilter]?.length ?? 0) > 0 || user.isSiteAdmin;
       const matchesRole =
-        roleFilter === 'all' || effectiveRoles.includes(roleFilter);
+        roleFilter === 'all' || displayRoles.includes(roleFilter);
       return matchesSearch && matchesSport && matchesRole;
     });
   }, [users, searchQuery, roleFilter, sportFilter]);
 
-  const handleRoleToggle = async (uid: string, role: Role, currentRoles: string[], checked: boolean) => {
-    const newRoles = checked
-      ? [...new Set([...currentRoles, role])]
-      : currentRoles.filter((r) => r !== role);
-
-    if (newRoles.length === 0) {
-      toast({ title: "Cannot Remove All Roles", description: "A user must have at least one role.", variant: "destructive" });
-      return;
-    }
+  const handleRoleToggle = async (uid: string, role: SportRole, sport: string, checked: boolean) => {
+    const current = getUserSportRoles(users?.find(u => u.id === uid)!, sport);
+    const updated = checked
+      ? [...new Set([...current, role])]
+      : current.filter((r) => r !== role);
 
     const userRef = doc(db, 'userProfiles', uid);
-    const primaryRole = newRoles.includes('Admin') ? 'Admin'
-      : newRoles.includes('Coach') ? 'Coach'
-      : newRoles.includes('Board Member') ? 'Admin'
-      : 'Parent';
-
-    const updateData: Record<string, any> = { role: primaryRole };
-    if (sportFilter !== 'all') {
-      updateData[`sportRoles.${sportFilter}`] = newRoles;
-    } else {
-      updateData.roles = newRoles;
-    }
-
-    updateDoc(userRef, updateData)
+    updateDoc(userRef, { [`sportRoles.${sport}`]: updated })
       .then(() => {
-        toast({ title: "Roles Updated", description: `User roles updated to: ${newRoles.join(', ')}.` });
+        toast({ title: "Roles Updated", description: `Updated ${role} for ${sport}.` });
       })
       .catch((error: any) => {
-        toast({ title: "Update Failed", description: error.message || "Could not update user roles.", variant: "destructive" });
+        toast({ title: "Update Failed", description: error.message || "Could not update roles.", variant: "destructive" });
       });
+  };
+
+  const handleSiteAdminToggle = async (uid: string, enabled: boolean) => {
+    const userRef = doc(db, 'userProfiles', uid);
+    updateDoc(userRef, { isSiteAdmin: enabled })
+      .then(() => toast({ title: enabled ? "Site Admin Granted" : "Site Admin Removed" }))
+      .catch((error: any) => toast({ title: "Update Failed", description: error.message, variant: "destructive" }));
   };
 
   const handleOfficerTitlesChange = async (uid: string, titles: string[]) => {
@@ -154,7 +166,7 @@ export default function RolesPage() {
   const handleSportAccessToggle = async (uid: string, sport: string, enabled: boolean) => {
     const userRef = doc(db, 'userProfiles', uid);
     const updateData: Record<string, any> = enabled
-      ? { [`sportRoles.${sport}`]: ['Parent'] }
+      ? { [`sportRoles.${sport}`]: [] }
       : { [`sportRoles.${sport}`]: deleteField() };
     updateDoc(userRef, updateData)
       .then(() => {
@@ -183,23 +195,15 @@ export default function RolesPage() {
       const secondaryAuth = getAuth(secondaryApp);
       const { user } = await createUserWithEmailAndPassword(secondaryAuth, newUser.email.trim(), newUser.password);
 
-      const primaryRole = newUser.roles.includes('Admin') ? 'Admin'
-        : newUser.roles.includes('Coach') ? 'Coach'
-        : newUser.roles.includes('Board Member') ? 'Admin'
-        : 'Parent';
-
       try {
         await setDoc(doc(db, 'userProfiles', user.uid), {
           id: user.uid,
           displayName: newUser.displayName.trim(),
           email: newUser.email.trim().toLowerCase(),
-          role: primaryRole,
-          roles: newUser.roles,
-          ...(activeSport ? { sportRoles: { [activeSport]: newUser.roles } } : {}),
+          ...(activeSport && newUser.roles.length > 0 ? { sportRoles: { [activeSport]: newUser.roles } } : {}),
           createdAt: new Date().toISOString(),
         });
       } catch (firestoreError: any) {
-        // H10: Firestore write failed — clean up orphaned Auth account
         await secondaryAuth.currentUser?.delete().catch(() => {});
         throw firestoreError;
       }
@@ -266,7 +270,7 @@ export default function RolesPage() {
     );
   }
 
-  if (!isSiteAdmin) {
+  if (!isSiteAdmin && !isBoardMember) {
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar />
@@ -287,6 +291,8 @@ export default function RolesPage() {
       </div>
     );
   }
+
+  const activeSportFilter = sportFilter !== 'all' ? sportFilter : null;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -312,12 +318,17 @@ export default function RolesPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <Select value={sportFilter} onValueChange={setSportFilter}>
+          {/* Board members are locked to their sport; site admins can see all */}
+          <Select
+            value={sportFilter}
+            onValueChange={setSportFilter}
+            disabled={!isSiteAdmin}
+          >
             <SelectTrigger className="w-full sm:w-44">
               <SelectValue placeholder="All Sports" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Sports</SelectItem>
+              {isSiteAdmin && <SelectItem value="all">All Sports</SelectItem>}
               <SelectItem value="baseball">Baseball</SelectItem>
               <SelectItem value="football">Football</SelectItem>
             </SelectContent>
@@ -328,7 +339,8 @@ export default function RolesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Roles</SelectItem>
-              {ALL_ROLES.map((r) => (
+              {isSiteAdmin && <SelectItem value="Site Admin">Site Admin</SelectItem>}
+              {ALL_SPORT_ROLES.map((r) => (
                 <SelectItem key={r} value={r}>{r}</SelectItem>
               ))}
             </SelectContent>
@@ -359,176 +371,255 @@ export default function RolesPage() {
             ) : filteredUsers.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">No users match your filters.</div>
             ) : (
-              <div className="overflow-x-auto w-full">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="pl-6">User</TableHead>
-                      <TableHead className="hidden md:table-cell">Email</TableHead>
-                      {sportFilter !== 'all' && (
-                        <TableHead className="text-center hidden md:table-cell">
-                          <div className="flex items-center justify-center gap-1">
-                            <ToggleLeft className="h-3.5 w-3.5" />
-                            Sport Access
-                          </div>
-                        </TableHead>
-                      )}
-                      {ALL_ROLES.map((role) => (
-                        <TableHead key={role} className="text-center hidden md:table-cell">{role}</TableHead>
-                      ))}
-                      <TableHead className="hidden md:table-cell">Officer Titles</TableHead>
-                      <TableHead className="w-24" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredUsers.map((user) => {
-                      const activeSportFilter = sportFilter !== 'all' ? sportFilter : null;
-                      const userRoles = getUserRoles(user, activeSportFilter);
-                      const isBoardMember = userRoles.includes('Board Member');
-                      const userSports = Object.entries(user.sportRoles ?? {})
-                        .filter(([, roles]) => roles.length > 0)
-                        .map(([sport]) => sport);
-                      return (
-                        <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
-                          <TableCell className="pl-6 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
-                                {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="h-5 w-5" />}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
-                                  {userSports.includes('baseball') && (
-                                    <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">BB</span>
-                                  )}
-                                  {userSports.includes('football') && (
-                                    <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">FB</span>
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap gap-1 mt-0.5">
-                                  {userRoles.map((r) => (
-                                    <Badge
-                                      key={r}
-                                      variant={r === 'Admin' ? 'default' : r === 'Coach' ? 'secondary' : 'outline'}
-                                      className="rounded-full px-2 text-[10px]"
-                                    >
-                                      {r}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </div>
+              <>
+                {/* ── Desktop table ─────────────────────────────────────── */}
+                <div className="hidden md:block overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="pl-6">User</TableHead>
+                        <TableHead>Email</TableHead>
+                        {activeSportFilter && (
+                          <TableHead className="text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <ToggleLeft className="h-3.5 w-3.5" />
+                              Sport Access
                             </div>
-                          </TableCell>
-                          <TableCell className="hidden md:table-cell">{user.email}</TableCell>
-                          {sportFilter !== 'all' && (
-                            <TableCell className="text-center hidden md:table-cell">
-                              <div className="flex justify-center">
-                                <Switch
-                                  checked={(user.sportRoles?.[sportFilter]?.length ?? 0) > 0}
-                                  onCheckedChange={(enabled) =>
-                                    handleSportAccessToggle(user.id, sportFilter, enabled)
+                          </TableHead>
+                        )}
+                        {activeSportFilter && ALL_SPORT_ROLES.map((role) => (
+                          <TableHead key={role} className="text-center">{role}</TableHead>
+                        ))}
+                        {isSiteAdmin && <TableHead className="text-center">Site Admin</TableHead>}
+                        <TableHead>Officer Titles</TableHead>
+                        <TableHead className="w-24" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredUsers.map((user) => {
+                        const sportRoles = activeSportFilter ? getUserSportRoles(user, activeSportFilter) : [];
+                        const isBoardMemberUser = sportRoles.includes('Board Member') || sportRoles.includes('Admin') || user.isSiteAdmin;
+                        const userSports = Object.entries(user.sportRoles ?? {})
+                          .filter(([, roles]) => roles.length > 0)
+                          .map(([sport]) => sport);
+                        const displayRoles = getUserDisplayRoles(user, activeSportFilter);
+                        return (
+                          <TableRow key={user.id} className="group hover:bg-secondary/20 transition-colors">
+                            <TableCell className="pl-6 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
+                                  {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="h-5 w-5" />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-semibold">{user.displayName || 'Unnamed User'}</span>
+                                    {userSports.includes('baseball') && (
+                                      <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">BB</span>
+                                    )}
+                                    {userSports.includes('football') && (
+                                      <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">FB</span>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-wrap gap-1 mt-0.5">
+                                    {displayRoles.map((r) => (
+                                      <Badge
+                                        key={r}
+                                        variant={getRoleBadgeVariant(r)}
+                                        className="rounded-full px-2 text-[10px]"
+                                      >
+                                        {r}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>{user.email}</TableCell>
+                            {activeSportFilter && (
+                              <TableCell className="text-center">
+                                <div className="flex justify-center">
+                                  <Switch
+                                    checked={(user.sportRoles?.[activeSportFilter] !== undefined)}
+                                    onCheckedChange={(enabled) =>
+                                      handleSportAccessToggle(user.id, activeSportFilter, enabled)
+                                    }
+                                  />
+                                </div>
+                              </TableCell>
+                            )}
+                            {activeSportFilter && ALL_SPORT_ROLES.map((role) => (
+                              <TableCell key={role} className="text-center">
+                                <Checkbox
+                                  checked={sportRoles.includes(role)}
+                                  onCheckedChange={(checked) =>
+                                    handleRoleToggle(user.id, role, activeSportFilter, !!checked)
                                   }
                                 />
+                              </TableCell>
+                            ))}
+                            {isSiteAdmin && (
+                              <TableCell className="text-center">
+                                <div className="flex justify-center">
+                                  <Switch
+                                    checked={user.isSiteAdmin === true}
+                                    onCheckedChange={(enabled) => handleSiteAdminToggle(user.id, enabled)}
+                                  />
+                                </div>
+                              </TableCell>
+                            )}
+                            <TableCell>
+                              {isBoardMemberUser ? (() => {
+                                const currentTitles = user.officerTitles ?? (user.officerTitle ? [user.officerTitle] : []);
+                                return (
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button variant="outline" size="sm" className="rounded-xl w-48 text-xs h-8 justify-start font-normal truncate">
+                                        {currentTitles.length > 0 ? currentTitles.join(', ') : '— No Titles —'}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-64 p-3" align="start">
+                                      <p className="text-xs font-semibold mb-2 text-muted-foreground">Assign Officer Titles</p>
+                                      <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                                        {OFFICER_TITLES.map((t) => (
+                                          <label key={t} className="flex items-center gap-2 text-xs cursor-pointer">
+                                            <Checkbox
+                                              checked={currentTitles.includes(t)}
+                                              onCheckedChange={(checked) => {
+                                                const next = checked
+                                                  ? [...currentTitles, t]
+                                                  : currentTitles.filter((x) => x !== t);
+                                                handleOfficerTitlesChange(user.id, next);
+                                              }}
+                                            />
+                                            {t}
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                );
+                              })() : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="pr-4">
+                              <div className="flex items-center gap-1 opacity-100 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                  title="Edit profile"
+                                  onClick={() => setEditUserDialog({
+                                    open: true,
+                                    user,
+                                    form: { displayName: user.displayName || '', phoneNumber: user.phoneNumber || '' },
+                                    loading: false,
+                                  })}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                  title="Send password reset email"
+                                  onClick={() => handlePasswordReset(user.email, user.displayName || user.email)}
+                                >
+                                  <Mail className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  title="Remove user"
+                                  onClick={() => setRemoveTarget(user)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
                             </TableCell>
-                          )}
-                          {ALL_ROLES.map((role) => (
-                            <TableCell key={role} className="text-center hidden md:table-cell">
-                              <Checkbox
-                                checked={userRoles.includes(role)}
-                                onCheckedChange={(checked) =>
-                                  handleRoleToggle(user.id, role, userRoles, !!checked)
-                                }
-                              />
-                            </TableCell>
-                          ))}
-                          <TableCell className="hidden md:table-cell">
-                            {isBoardMember ? (() => {
-                              const currentTitles = user.officerTitles ?? (user.officerTitle ? [user.officerTitle] : []);
-                              return (
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button variant="outline" size="sm" className="rounded-xl w-48 text-xs h-8 justify-start font-normal truncate">
-                                      {currentTitles.length > 0 ? currentTitles.join(', ') : '— No Titles —'}
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-64 p-3" align="start">
-                                    <p className="text-xs font-semibold mb-2 text-muted-foreground">Assign Officer Titles</p>
-                                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                                      {OFFICER_TITLES.map((t) => (
-                                        <label key={t} className="flex items-center gap-2 text-xs cursor-pointer">
-                                          <Checkbox
-                                            checked={currentTitles.includes(t)}
-                                            onCheckedChange={(checked) => {
-                                              const next = checked
-                                                ? [...currentTitles, t]
-                                                : currentTitles.filter((x) => x !== t);
-                                              handleOfficerTitlesChange(user.id, next);
-                                            }}
-                                          />
-                                          {t}
-                                        </label>
-                                      ))}
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              );
-                            })() : (
-                              <span className="text-xs text-muted-foreground">—</span>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* ── Mobile card list ───────────────────────────────────── */}
+                <div className="md:hidden divide-y">
+                  {filteredUsers.map((user) => {
+                    const displayRoles = getUserDisplayRoles(user, activeSportFilter);
+                    const userSports = Object.entries(user.sportRoles ?? {})
+                      .filter(([, roles]) => roles.length > 0)
+                      .map(([sport]) => sport);
+                    return (
+                      <div key={user.id} className="flex items-center gap-3 p-4">
+                        <div className="w-10 h-10 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                          {user.displayName ? user.displayName[0].toUpperCase() : <UserIcon className="h-5 w-5" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-semibold truncate">{user.displayName || 'Unnamed User'}</p>
+                            {userSports.includes('baseball') && (
+                              <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">BB</span>
                             )}
-                          </TableCell>
-                          <TableCell className="pr-4">
-                            <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                              {/* Mobile-only: open edit roles dialog */}
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="md:hidden h-8 w-8 text-muted-foreground hover:text-primary"
-                                title="Edit roles"
-                                onClick={() => setEditTarget(user)}
-                              >
-                                <ShieldCheck className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-muted-foreground hover:text-primary"
-                                title="Edit profile"
-                                onClick={() => setEditUserDialog({
-                                  open: true,
-                                  user,
-                                  form: { displayName: user.displayName || '', phoneNumber: user.phoneNumber || '' },
-                                  loading: false,
-                                })}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-muted-foreground hover:text-primary"
-                                title="Send password reset email"
-                                onClick={() => handlePasswordReset(user.email, user.displayName || user.email)}
-                              >
-                                <Mail className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                title="Remove user"
-                                onClick={() => setRemoveTarget(user)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                            {userSports.includes('football') && (
+                              <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">FB</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {displayRoles.length > 0
+                              ? displayRoles.map((r) => (
+                                <Badge key={r} variant={getRoleBadgeVariant(r)} className="rounded-full px-2 text-[10px]">
+                                  {r}
+                                </Badge>
+                              ))
+                              : <span className="text-xs text-muted-foreground">No roles</span>
+                            }
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs rounded-full px-3"
+                            onClick={() => setEditTarget(user)}
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                            Roles
+                          </Button>
+                          <div className="flex gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-muted-foreground hover:text-primary"
+                              title="Edit profile"
+                              onClick={() => setEditUserDialog({
+                                open: true,
+                                user,
+                                form: { displayName: user.displayName || '', phoneNumber: user.phoneNumber || '' },
+                                loading: false,
+                              })}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              title="Remove user"
+                              onClick={() => setRemoveTarget(user)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -571,25 +662,27 @@ export default function RolesPage() {
                 onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Roles</Label>
-              <div className="flex flex-wrap gap-3 pt-1">
-                {ALL_ROLES.map((role) => (
-                  <label key={role} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <Checkbox
-                      checked={newUser.roles.includes(role)}
-                      onCheckedChange={(checked) => {
-                        const next = checked
-                          ? [...new Set([...newUser.roles, role])]
-                          : newUser.roles.filter((r) => r !== role);
-                        if (next.length > 0) setNewUser({ ...newUser, roles: next });
-                      }}
-                    />
-                    {role}
-                  </label>
-                ))}
+            {activeSport && (
+              <div className="space-y-1.5">
+                <Label>Initial {activeSport.charAt(0).toUpperCase() + activeSport.slice(1)} Roles</Label>
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {ALL_SPORT_ROLES.map((role) => (
+                    <label key={role} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={newUser.roles.includes(role)}
+                        onCheckedChange={(checked) => {
+                          const next = checked
+                            ? [...new Set([...newUser.roles, role])]
+                            : newUser.roles.filter((r) => r !== role);
+                          setNewUser({ ...newUser, roles: next });
+                        }}
+                      />
+                      {role}
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</Button>
@@ -604,28 +697,45 @@ export default function RolesPage() {
       {/* Mobile Edit Roles Dialog */}
       {(() => {
         const liveEditUser = editTarget ? (users?.find(u => u.id === editTarget.id) ?? editTarget) : null;
-        const editRoles = liveEditUser ? getUserRoles(liveEditUser, sportFilter !== 'all' ? sportFilter : null) : [];
+        const editSport = activeSportFilter ?? activeSport ?? '';
+        const editRoles = liveEditUser && editSport ? getUserSportRoles(liveEditUser, editSport) : [];
         return (
           <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
             <DialogContent className="sm:max-w-sm">
               <DialogHeader>
                 <DialogTitle className="font-headline">Edit Roles</DialogTitle>
-                <DialogDescription>{liveEditUser?.displayName || liveEditUser?.email}</DialogDescription>
+                <DialogDescription>
+                  {liveEditUser?.displayName || liveEditUser?.email}
+                  {editSport && <span className="ml-1 text-muted-foreground">· {editSport}</span>}
+                </DialogDescription>
               </DialogHeader>
-              <div className="space-y-3 py-2">
-                {ALL_ROLES.map((role) => (
-                  <label key={role} className="flex items-center gap-3 text-sm cursor-pointer">
+              <div className="space-y-2 py-2">
+                {editSport ? ALL_SPORT_ROLES.map((role) => (
+                  <div key={role} className="flex items-center gap-3 h-11">
                     <Checkbox
+                      id={`mobile-role-${role}`}
                       checked={editRoles.includes(role)}
                       onCheckedChange={(checked) =>
-                        liveEditUser && handleRoleToggle(liveEditUser.id, role, editRoles, !!checked)
+                        liveEditUser && editSport && handleRoleToggle(liveEditUser.id, role, editSport, !!checked)
                       }
                     />
-                    {role}
-                  </label>
-                ))}
+                    <Label htmlFor={`mobile-role-${role}`} className="flex-1 cursor-pointer text-sm">{role}</Label>
+                  </div>
+                )) : (
+                  <p className="text-sm text-muted-foreground">Select a sport filter to edit roles.</p>
+                )}
+                {isSiteAdmin && liveEditUser && (
+                  <div className="flex items-center gap-3 h-11 border-t pt-2 mt-2">
+                    <Switch
+                      id="mobile-site-admin"
+                      checked={liveEditUser.isSiteAdmin === true}
+                      onCheckedChange={(enabled) => handleSiteAdminToggle(liveEditUser.id, enabled)}
+                    />
+                    <Label htmlFor="mobile-site-admin" className="flex-1 cursor-pointer text-sm text-destructive font-medium">Site Admin</Label>
+                  </div>
+                )}
               </div>
-              {editRoles.includes('Board Member') && liveEditUser && (() => {
+              {liveEditUser && (editRoles.includes('Board Member') || editRoles.includes('Admin') || liveEditUser.isSiteAdmin) && (() => {
                 const currentTitles = liveEditUser.officerTitles ?? (liveEditUser.officerTitle ? [liveEditUser.officerTitle] : []);
                 return (
                   <div className="space-y-1.5 pt-2 border-t">

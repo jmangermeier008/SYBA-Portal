@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth, useFirestore, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { setActiveSport } from '@/hooks/use-active-sport';
 import type { Sport } from '@/types/scheduling';
@@ -46,7 +47,8 @@ function LoginContent() {
   const { toast } = useToast();
   const auth = useAuth();
   const db = useFirestore();
-  const { user, profile, loading: loadingUser, isAdmin, isBoardMember, isCoach } = useUser();
+  const { user, profile, loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember, isCoach } = useSport();
 
   // Redirect already-authenticated users to their dashboard (or redirect param)
   useEffect(() => {

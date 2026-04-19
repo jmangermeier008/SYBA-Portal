@@ -88,7 +88,7 @@ interface FamilyCompliance {
   workedCount: number;
   pendingCount: number;
   required: number;
-  manualOverride: boolean;
+  manualCredits: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -131,9 +131,9 @@ function isPastSlot(gameDate: string): boolean {
 }
 
 function complianceStatus(family: FamilyCompliance) {
-  if (family.manualOverride) return 'met';
-  if (family.workedCount >= family.required) return 'met';
-  if (family.workedCount > 0 || family.pendingCount > 0) return 'partial';
+  const totalCredits = family.workedCount + family.manualCredits;
+  if (totalCredits >= family.required) return 'met';
+  if (totalCredits > 0 || family.pendingCount > 0) return 'partial';
   return 'none';
 }
 
@@ -159,8 +159,8 @@ const ATTENDANCE_CONFIG: Record<
 
 export default function ConcessionsAdminPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   // ── Manage Slots state ────────────────────────────────────────────────────
@@ -172,6 +172,9 @@ export default function ConcessionsAdminPage() {
   const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
   const [overriding, setOverriding] = useState<Set<string>>(new Set());
+  const [creditDialog, setCreditDialog] = useState<{ open: boolean; parentId: string; currentCredits: number }>({ open: false, parentId: '', currentCredits: 0 });
+  const [creditInput, setCreditInput] = useState<number>(1);
+  const [creditSaving, setCreditSaving] = useState(false);
 
   // Attendance toggle saving
   const [attendanceSaving, setAttendanceSaving] = useState<Set<string>>(new Set());
@@ -374,14 +377,15 @@ export default function ConcessionsAdminPage() {
       );
       const parentIds = new Set<string>();
       const enrollmentCountByParent = new Map<string, number>();
-      const manualOverrideParents = new Set<string>();
+      const manualCreditsMap = new Map<string, number>();
       enrollmentsSnap.docs.forEach(d => {
         const data = d.data();
         const pid = data.parentUserId as string;
         if (pid) {
           parentIds.add(pid);
           enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
-          if (data.concessionManualVerify === true) manualOverrideParents.add(pid);
+          const mc = (data.manualConcessionCredits as number) ?? 0;
+          if (mc > 0) manualCreditsMap.set(pid, (manualCreditsMap.get(pid) ?? 0) + mc);
         }
       });
 
@@ -438,7 +442,7 @@ export default function ConcessionsAdminPage() {
         workedCount: workedCountMap.get(pid) ?? 0,
         pendingCount: pendingCountMap.get(pid) ?? 0,
         required: (enrollmentCountByParent.get(pid) ?? 1) * slotsPerPlayer,
-        manualOverride: manualOverrideParents.has(pid),
+        manualCredits: manualCreditsMap.get(pid) ?? 0,
       }));
 
       result.sort((a, b) => {
@@ -458,17 +462,37 @@ export default function ConcessionsAdminPage() {
     if (selectedSeasonId) loadComplianceReport(selectedSeasonId);
   }, [selectedSeasonId, loadComplianceReport]);
 
-  async function handleManualOverride(parentUserId: string) {
+  async function handleAddManualCredits(parentUserId: string, credits: number) {
+    if (!db || !selectedSeasonId) return;
+    setCreditSaving(true);
+    try {
+      const snap = await getDocs(
+        query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', parentUserId), where('seasonId', '==', selectedSeasonId))
+      );
+      if (snap.empty) {
+        toast({ title: 'No enrollments found', variant: 'destructive' });
+        return;
+      }
+      await updateDoc(snap.docs[0].ref, { manualConcessionCredits: credits });
+      toast({ title: 'Credits applied', description: `${credits} manual credit(s) applied.` });
+      setCreditDialog({ open: false, parentId: '', currentCredits: 0 });
+      loadComplianceReport(selectedSeasonId);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setCreditSaving(false);
+    }
+  }
+
+  async function handleResetManualCredits(parentUserId: string) {
     if (!db || !selectedSeasonId) return;
     setOverriding(prev => new Set(prev).add(parentUserId));
     try {
       const snap = await getDocs(
         query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', parentUserId), where('seasonId', '==', selectedSeasonId))
       );
-      const batch = writeBatch(db);
-      snap.forEach(docSnap => batch.update(docSnap.ref, { concessionManualVerify: true }));
-      await batch.commit();
-      toast({ title: 'Compliance verified', description: 'Family marked as compliant.' });
+      await Promise.all(snap.docs.map(d => updateDoc(d.ref, { manualConcessionCredits: 0 })));
+      toast({ title: 'Credits reset', description: 'Manual credits cleared for this family.' });
       loadComplianceReport(selectedSeasonId);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -821,7 +845,7 @@ export default function ConcessionsAdminPage() {
                                 <td className="px-4 py-3 font-medium">{family.displayName}</td>
                                 <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{family.email}</td>
                                 <td className="px-4 py-3 text-center font-medium">
-                                  {family.workedCount} / {family.required}
+                                  {family.workedCount + family.manualCredits} / {family.required}
                                 </td>
                                 <td className="px-4 py-3 text-center text-muted-foreground hidden sm:table-cell">
                                   {family.pendingCount > 0
@@ -831,7 +855,7 @@ export default function ConcessionsAdminPage() {
                                 <td className="px-4 py-3 text-center">
                                   {status === 'met' && (
                                     <Badge className="bg-green-100 text-green-700 border-green-200 gap-1">
-                                      <CheckCircle2 className="h-3 w-3" /> {family.manualOverride ? 'Verified' : 'Met'}
+                                      <CheckCircle2 className="h-3 w-3" /> Met
                                     </Badge>
                                   )}
                                   {status === 'partial' && (
@@ -850,14 +874,24 @@ export default function ConcessionsAdminPage() {
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      disabled={overriding.has(family.parentUserId)}
-                                      onClick={() => handleManualOverride(family.parentUserId)}
+                                      onClick={() => { setCreditDialog({ open: true, parentId: family.parentUserId, currentCredits: family.manualCredits }); setCreditInput(1); }}
                                       className="rounded-full text-xs gap-1.5"
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5" /> Adjust Credits
+                                    </Button>
+                                  )}
+                                  {family.manualCredits > 0 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      disabled={overriding.has(family.parentUserId)}
+                                      onClick={() => handleResetManualCredits(family.parentUserId)}
+                                      className="rounded-full text-xs gap-1.5 text-destructive hover:text-destructive ml-1"
                                     >
                                       {overriding.has(family.parentUserId)
                                         ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                        : <CheckCircle2 className="h-3.5 w-3.5" />}
-                                      Verify Manually
+                                        : <XCircle className="h-3.5 w-3.5" />}
+                                      Reset Credits
                                     </Button>
                                   )}
                                 </td>
@@ -940,6 +974,39 @@ export default function ConcessionsAdminPage() {
             <Button variant="outline" onClick={() => setDeleteDialog({ open: false, slot: null })} disabled={deleting}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteSlot} disabled={deleting}>
               {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Adjust Credits Dialog */}
+      <Dialog open={creditDialog.open} onOpenChange={(open) => !creditSaving && setCreditDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adjust Manual Credits</DialogTitle>
+            <DialogDescription>
+              How many manual concession credits should be applied for this family?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Credits to Apply</Label>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={creditInput}
+                onChange={e => setCreditInput(Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreditDialog({ open: false, parentId: '', currentCredits: 0 })} disabled={creditSaving}>
+              Cancel
+            </Button>
+            <Button onClick={() => handleAddManualCredits(creditDialog.parentId, creditInput)} disabled={creditSaving || creditInput < 1}>
+              {creditSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Apply Credits
             </Button>
           </DialogFooter>
         </DialogContent>

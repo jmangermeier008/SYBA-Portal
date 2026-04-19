@@ -3,6 +3,7 @@
 import { use, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useDoc, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, collectionGroup, query, where, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -84,7 +85,8 @@ interface Team {
 export default function AdminTeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
   const { teamId } = use(params);
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const [addCoachOpen, setAddCoachOpen] = useState(false);
   const [selectedCoachId, setSelectedCoachId] = useState('');

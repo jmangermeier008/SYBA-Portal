@@ -42,8 +42,8 @@ interface Enrollment {
 
 export default function TeamsAdminPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);

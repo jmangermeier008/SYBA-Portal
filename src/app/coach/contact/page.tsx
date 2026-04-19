@@ -3,13 +3,15 @@
 import { useState, useCallback } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { Loader2, Lock, MessageSquare } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InquiryForm } from '@/components/inquiries/inquiry-form';
 import { InquiryHistory } from '@/components/inquiries/inquiry-history';
 
 export default function CoachContactPage() {
-  const { isCoach, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { isCoach } = useSport();
   const [replyCount, setReplyCount] = useState(0);
   const handleReplyCount = useCallback((count: number) => setReplyCount(count), []);
 

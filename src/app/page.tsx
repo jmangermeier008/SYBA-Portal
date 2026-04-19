@@ -51,8 +51,8 @@ function formatTime(timeStr: string) {
 }
 
 export default function Home() {
-  const { user, profile, loading, isAdmin, isBoardMember, isCoach } = useUser();
-  const { activeSport: contextSport } = useSport();
+  const { user, profile, loading } = useUser();
+  const { activeSport: contextSport, isAdmin, isBoardMember, isCoach } = useSport();
   const router = useRouter();
   const db = useFirestore();
 

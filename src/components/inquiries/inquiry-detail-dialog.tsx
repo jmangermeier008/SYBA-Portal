@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useUser, useFirestore } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { doc, updateDoc, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Send, Clock, User, Trash2, Mail } from 'lucide-react';
@@ -22,7 +23,8 @@ interface InquiryDetailDialogProps {
 }
 
 export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDetailDialogProps) {
-  const { profile, isBoardMember } = useUser();
+  const { profile } = useUser();
+  const { isBoardMember } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
 

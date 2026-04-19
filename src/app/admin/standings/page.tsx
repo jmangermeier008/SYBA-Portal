@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, query, where } from 'firebase/firestore';
 import { Loader2, Lock, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -38,7 +39,8 @@ interface TeamStanding {
 
 export default function StandingsPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember } = useSport();
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
   const [selectedDivisionId, setSelectedDivisionId] = useState('');
 

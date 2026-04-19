@@ -103,8 +103,8 @@ function getPaymentStatus(e: Enrollment) {
 export default function MasterRosterPage() {
   const db = useFirestore();
   const router = useRouter();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const urlFilter = searchParams.get('filter') as 'action_required' | 'pending' | null;

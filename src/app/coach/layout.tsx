@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { Loader2, ShieldAlert, LayoutDashboard, Calendar, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -14,7 +15,8 @@ const BOTTOM_TABS = [
 ];
 
 export default function CoachLayout({ children }: { children: React.ReactNode }) {
-  const { loading, isCoach, isApproved, hasCoachAccess } = useUser();
+  const { loading } = useUser();
+  const { isCoach, isApproved, hasCoachAccess } = useSport();
   const pathname = usePathname();
 
   if (loading) {

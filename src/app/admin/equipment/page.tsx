@@ -216,8 +216,8 @@ function getEquippedStatus(enrollment: EnrollmentRow) {
 export default function EquipmentPage() {
   const db = useFirestore();
   const isMobile = useIsMobile();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'assignments' | 'shed'>('assignments');

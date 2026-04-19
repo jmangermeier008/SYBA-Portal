@@ -5,23 +5,27 @@ import { Loader2 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser } from './auth/use-user';
 import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
-import type { Sport } from '@/types/scheduling';
+import type { Sport, SportRole } from '@/types/scheduling';
 
 interface SportContextState {
-  // null before auth/profile loads or before localStorage is read on mount
   activeSport: Sport | null;
-  // Sport is locked for the session — switching requires logging out and reselecting on home page.
-  // Sport-aware role flags — derived from profile.sportRoles[activeSport] with Site Admin bypass
   isAdmin: boolean;
   isSiteAdmin: boolean;
   isBoardMember: boolean;
   isCoach: boolean;
   isParent: boolean;
+  // PA Act 153 compliance — true when clearances approved or admin force-approved
+  isApproved: boolean;
+  // Board members, admins, site admins bypass the compliance lockout
+  hasCoachAccess: boolean;
   // Football coaches — divisions they are assigned to (empty for baseball / non-coaches)
   coachDivisionIds: string[];
   // Branding — derived from SPORT_CONFIG; safe to destructure in any component
-  logoUrl: string;      // resolves to SPORT_CONFIG[activeSport].logoUrl, falls back to HUB_LOGO_URL
-  leagueName: string;   // full org name, e.g. "Sharpsville Youth Baseball Association"
+  logoUrl: string;
+  leagueName: string;
+  // Sandbox / view-as mode — Site Admin only; overrides role booleans for testing
+  sandboxRole: SportRole | 'Site Admin' | null;
+  setSandboxRole: (role: SportRole | 'Site Admin' | null) => void;
 }
 
 const SportContext = createContext<SportContextState>({
@@ -31,9 +35,13 @@ const SportContext = createContext<SportContextState>({
   isBoardMember: false,
   isCoach: false,
   isParent: false,
+  isApproved: false,
+  hasCoachAccess: false,
   coachDivisionIds: [],
   logoUrl: HUB_LOGO_URL,
   leagueName: 'Athletics Hub',
+  sandboxRole: null,
+  setSandboxRole: () => {},
 });
 
 export function useSport(): SportContextState {
@@ -54,8 +62,9 @@ function RedirectToHome() {
 }
 
 export function SportProvider({ children }: { children: ReactNode }) {
-  const { user, profile, loading, roles } = useUser();
+  const { user, profile, loading, isSiteAdmin: userIsSiteAdmin } = useUser();
   const pathname = usePathname();
+  const [sandboxRole, setSandboxRole] = useState<SportRole | 'Site Admin' | null>(null);
   const [activeSport, setActiveSportState] = useState<Sport | null>(null);
   // Tracks whether the localStorage read has completed (always synchronous, but effect is async).
   // We must not show the gate until we've checked — otherwise a brief null activeSport
@@ -106,17 +115,25 @@ export function SportProvider({ children }: { children: ReactNode }) {
   }, [user?.uid]);
 
   // ── Sport-aware role derivation ───────────────────────────────────────────
-  // Site Admin / Admin in legacy roles[] = cross-sport superuser bypass
-  const isSiteAdmin = roles.includes('Site Admin') || roles.includes('Admin');
+  const sportRoleList: SportRole[] = (activeSport ? profile?.sportRoles?.[activeSport] : undefined) ?? [];
 
-  // For all other roles, check sportRoles[activeSport] if available
-  const sportRoleList: string[] = (activeSport && profile?.sportRoles?.[activeSport]) ?? [];
+  // True base roles (before sandbox override)
+  const baseIsSiteAdmin = userIsSiteAdmin;
+  const baseIsAdmin     = baseIsSiteAdmin || sportRoleList.includes('Admin');
+  const baseIsBoardMember = baseIsAdmin   || sportRoleList.includes('Board Member');
+  const baseIsCoach     = baseIsSiteAdmin || sportRoleList.includes('Coach');
 
-  const isAdmin = isSiteAdmin || sportRoleList.includes('Admin');
-  const isBoardMember = isSiteAdmin || sportRoleList.includes('Board Member') || sportRoleList.includes('Admin');
-  const isCoach = isSiteAdmin || sportRoleList.includes('Coach');
-  // Parents are not sport-specific — fall back to legacy roles for parent check
-  const isParent = sportRoleList.includes('Parent') || roles.includes('Parent');
+  // Sandbox override — Site Admin can view the portal as another role
+  const isSiteAdmin   = sandboxRole ? false : baseIsSiteAdmin;
+  const isAdmin       = sandboxRole ? sandboxRole === 'Admin' : baseIsAdmin;
+  const isBoardMember = sandboxRole ? (sandboxRole === 'Admin' || sandboxRole === 'Board Member') : baseIsBoardMember;
+  const isCoach       = sandboxRole ? sandboxRole === 'Coach' : baseIsCoach;
+  const isParent      = true; // All authenticated users are baseline parents
+
+  // PA Act 153 compliance — true when clearances approved or admin has force-approved
+  const isApproved =
+    profile?.complianceStatus === 'approved' || profile?.manualComplianceOverride === true;
+  const hasCoachAccess = baseIsBoardMember || isApproved;
 
   const coachDivisionIds: string[] = (activeSport === 'football' ? profile?.divisionIds : undefined) ?? [];
 
@@ -125,9 +142,14 @@ export function SportProvider({ children }: { children: ReactNode }) {
   const leagueName = activeSport ? SPORT_CONFIG[activeSport].leagueName : 'Athletics Hub';
 
   const contextValue = useMemo(
-    () => ({ activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, coachDivisionIds, logoUrl, leagueName }),
+    () => ({
+      activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent,
+      isApproved, hasCoachAccess, coachDivisionIds, logoUrl, leagueName,
+      sandboxRole, setSandboxRole,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, coachDivisionIds, logoUrl, leagueName]
+    [activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent,
+     isApproved, hasCoachAccess, coachDivisionIds, logoUrl, leagueName, sandboxRole]
   );
 
   // Always render the provider so useSport() never throws regardless of tree position.

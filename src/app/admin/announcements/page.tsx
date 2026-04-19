@@ -19,8 +19,8 @@ import { useToast } from '@/hooks/use-toast';
 import type { Announcement } from '@/types/scheduling';
 
 export default function AdminAnnouncementsPage() {
-  const { isAdmin, isBoardMember, profile, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { profile, loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
 

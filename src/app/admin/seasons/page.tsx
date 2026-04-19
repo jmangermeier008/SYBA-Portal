@@ -34,8 +34,8 @@ interface Season {
 export default function SeasonsAdminPage() {
   const db = useFirestore();
   const { toast } = useToast();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [editingSeason, setEditingSeason] = useState<Season | null>(null);

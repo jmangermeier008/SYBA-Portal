@@ -87,8 +87,8 @@ const emptyForm = {
 
 export default function SponsorshipsPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);

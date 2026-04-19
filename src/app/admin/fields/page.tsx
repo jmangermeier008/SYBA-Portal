@@ -82,8 +82,8 @@ const fieldTypeLabels: Record<FieldType, string> = {
 
 export default function FieldManagementPage() {
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   // ── Add field dialog ──────────────────────────────────────────────────────

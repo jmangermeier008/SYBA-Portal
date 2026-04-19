@@ -51,8 +51,8 @@ function getFieldColorClass(fieldName: string, allFieldNames: string[]): string 
 
 export default function CoachPracticeSlotsPage() {
   const db = useFirestore();
-  const { user, profile, isCoach, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { user, profile, loading: loadingUser } = useUser();
+  const { activeSport, isCoach } = useSport();
   const { toast } = useToast();
 
   const [claimingId, setClaimingId] = useState<string | null>(null);

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { doc, collection, query, where, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   CalendarDays,
@@ -55,7 +56,8 @@ export default function GameDetailPage({
 }) {
   const { id } = use(params);
   const db = useFirestore();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [game, setGame] = useState<Game | null>(null);

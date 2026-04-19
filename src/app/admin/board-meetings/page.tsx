@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { collection, query, orderBy, doc, addDoc, updateDoc, deleteDoc, arrayUnion } from 'firebase/firestore';
 import {
   Users, Plus, Trash2, Loader2, Lock, Calendar, MapPin,
@@ -290,7 +291,8 @@ function MeetingCard({ meeting, db, toast }: { meeting: BoardMeeting; db: any; t
 }
 
 export default function BoardMeetingsPage() {
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
+  const { loading: loadingUser } = useUser();
+  const { isAdmin, isBoardMember } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
 

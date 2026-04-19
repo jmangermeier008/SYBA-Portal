@@ -278,8 +278,15 @@ function NavSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { profile, roles } = useUser();
+  const { profile } = useUser();
   const { activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl } = useSport();
+
+  // Derive a roles array from sport context for sidebar context-switching logic
+  const roles: string[] = [
+    ...(isSiteAdmin ? ['Site Admin'] : isAdmin ? ['Admin'] : isBoardMember ? ['Board Member'] : []),
+    ...(isCoach ? ['Coach'] : []),
+    ...(!isAdmin && !isBoardMember && !isCoach ? ['Parent'] : []),
+  ];
   const auth = useAuth();
   const db = useFirestore();
   const router = useRouter();
@@ -450,7 +457,7 @@ export function Sidebar() {
     return () => document.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
 
-  const roleLabel = roles.join(' · ') || profile?.role || '';
+  const roleLabel = roles.join(' · ');
   const roleContexts = getRoleContexts(roles);
 
   const isDashboardActive = pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/');

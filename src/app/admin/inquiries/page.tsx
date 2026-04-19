@@ -17,9 +17,9 @@ import { getTopicConfig, INQUIRY_STATUS_CONFIG } from '@/data/inquiry-topics';
 import type { Inquiry, InquiryTopic, InquiryStatus } from '@/data/inquiry-topics';
 
 function AdminInquiriesContent() {
-  const { user, isBoardMember, loading: loadingUser } = useUser();
+  const { user, loading: loadingUser } = useUser();
   const db = useFirestore();
-  const { activeSport } = useSport();
+  const { activeSport, isBoardMember } = useSport();
   const searchParams = useSearchParams();
   const router = useRouter();
 

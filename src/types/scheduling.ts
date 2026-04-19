@@ -17,6 +17,9 @@ export type UserRole =
   | 'Admin'
   | 'Site Admin';
 
+/** Roles that can be assigned per-sport in sportRoles. Excludes 'Parent' (implicit) and 'Site Admin' (cross-sport). */
+export type SportRole = 'Coach' | 'Board Member' | 'Admin';
+
 // ---------------------------------------------------------------------------
 // Sports
 // ---------------------------------------------------------------------------
@@ -325,10 +328,11 @@ export interface UserProfile {
   id: string;
   email: string | null;
   displayName: string | null;
-  role?: UserRole;    // Legacy single-role field (backward compat)
-  roles?: UserRole[]; // Current multi-role field (kept for Site Admin bypass)
+  isSiteAdmin?: boolean;   // Authoritative cross-sport superuser flag
+  role?: UserRole;         // Legacy single-role field (backward compat, read-only)
+  roles?: UserRole[];      // Legacy multi-role field (backward compat, read-only)
   // Sport-specific roles: e.g. { baseball: ['Board Member'], football: ['Coach'] }
-  sportRoles?: Record<string, UserRole[]>;
+  sportRoles?: Record<string, SportRole[]>;
   phoneNumber?: string | null;
   shareContactInfo?: boolean;
   // Parents — drives the combined family calendar query:

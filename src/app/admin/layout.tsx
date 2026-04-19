@@ -1,10 +1,12 @@
 'use client';
 
 import { useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { Loader2 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { loading, isAdmin, isBoardMember } = useUser();
+  const { loading } = useUser();
+  const { isAdmin, isBoardMember } = useSport();
 
   if (loading) {
     return (

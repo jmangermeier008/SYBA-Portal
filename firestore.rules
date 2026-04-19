@@ -19,46 +19,56 @@ service cloud.firestore {
       let roles = data.get('roles', []);
       return isSignedIn() &&
              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             roles.hasAny(['Site Admin']);
+             (data.get('isSiteAdmin', false) == true || roles.hasAny(['Site Admin']));
     }
 
     function isAdmin() {
       let data = getUserData();
       let roles = data.get('roles', []);
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             (roles.size() > 0 ? roles.hasAny(['Admin']) : data.role == 'Admin');
+      let sportRoles = data.get('sportRoles', {});
+      // isSiteAdmin is a superuser; also check sportRoles for any sport with Admin
+      return isSiteAdmin() ||
+             (isSignedIn() &&
+              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+              (roles.size() > 0 ? roles.hasAny(['Admin']) : data.get('role', '') == 'Admin'));
     }
 
     function isBoardMember() {
       let data = getUserData();
       let roles = data.get('roles', []);
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             (roles.size() > 0
-               ? roles.hasAny(['Board Member', 'Admin', 'Site Admin'])
-               : data.role == 'Admin');
+      return isSiteAdmin() ||
+             (isSignedIn() &&
+              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+              (roles.size() > 0
+                ? roles.hasAny(['Board Member', 'Admin', 'Site Admin'])
+                : data.get('role', '') == 'Admin'));
     }
 
     function isBoardMemberForSport(sport) {
       let data = getUserData();
-      let roles = data.get('roles', []);
       let sportRoles = data.get('sportRoles', {});
       let rolesForSport = sportRoles.get(sport, []);
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             (roles.hasAny(['Site Admin']) || rolesForSport.hasAny(['Board Member', 'Admin']));
+      return isSiteAdmin() ||
+             (isSignedIn() &&
+              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+              rolesForSport.hasAny(['Board Member', 'Admin']));
     }
 
     function isCoach() {
       let data = getUserData();
       let roles = data.get('roles', []);
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-             (roles.size() > 0
-               ? roles.hasAny(['Coach', 'Admin'])
-               : (data.role == 'Coach' ||
-                  (data.role == 'Admin' && data.get('isAlsoCoach', false) == true)));
+      let sportRoles = data.get('sportRoles', {});
+      let baseballRoles = sportRoles.get('baseball', []);
+      let footballRoles = sportRoles.get('football', []);
+      return isSiteAdmin() ||
+             (isSignedIn() &&
+              exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
+              (baseballRoles.hasAny(['Coach', 'Admin']) ||
+               footballRoles.hasAny(['Coach', 'Admin']) ||
+               (roles.size() > 0
+                 ? roles.hasAny(['Coach', 'Admin'])
+                 : (data.get('role', '') == 'Coach' ||
+                    (data.get('role', '') == 'Admin' && data.get('isAlsoCoach', false) == true)))));
     }
 
     // ---------------------------------------------------------------------------
@@ -101,10 +111,10 @@ service cloud.firestore {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
       allow create: if isUser(userId) || isAdmin() || isSiteAdmin();
-      // Users can update their own profile but cannot change their own role.
-      // Role changes require Admin or Site Admin.
+      // Users can update their own profile but cannot change their own roles.
+      // Role/permission changes require Admin or Site Admin.
       allow update: if (isUser(userId) &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles'])
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles', 'isSiteAdmin', 'sportRoles'])
         ) || isAdmin() || isSiteAdmin();
       allow delete: if isAdmin() || isSiteAdmin();
 

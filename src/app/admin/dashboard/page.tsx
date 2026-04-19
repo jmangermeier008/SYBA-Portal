@@ -193,8 +193,8 @@ export default function AdminDashboard({
 
   const db = useFirestore();
   const router = useRouter();
-  const { isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('calendar');

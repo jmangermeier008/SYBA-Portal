@@ -118,8 +118,8 @@ const EMPTY_FORM = {
 
 export default function PracticeSlotsAdminPage() {
   const db = useFirestore();
-  const { profile, isAdmin, isBoardMember, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { profile, loading: loadingUser } = useUser();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);

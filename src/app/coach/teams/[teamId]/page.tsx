@@ -4,6 +4,7 @@
 import { use, useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useSport } from '@/firebase/sport-context';
 import { useDoc } from '@/firebase/firestore/use-doc';
 import { collection, collectionGroup, query, where, doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
@@ -85,7 +86,8 @@ interface Team {
 export default function TeamRosterPage({ params }: { params: Promise<{ teamId: string }> }) {
   const { teamId } = use(params);
   const db = useFirestore();
-  const { user, isAdmin, isSiteAdmin } = useUser();
+  const { user, isSiteAdmin } = useUser();
+  const { isAdmin } = useSport();
   const router = useRouter();
   const isMobile = useIsMobile();
   const { toast } = useToast();

@@ -121,8 +121,8 @@ function OfficerRow({ officer, holderName, onSave }: {
 }
 
 export default function AdminSettingsPage() {
-  const { isAdmin, isSiteAdmin } = useUser();
-  const { activeSport } = useSport();
+  const { isSiteAdmin } = useUser();
+  const { activeSport, isAdmin } = useSport();
   const db = useFirestore();
   const auth = useAuth();
   const { toast } = useToast();

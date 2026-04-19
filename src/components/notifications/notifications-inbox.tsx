@@ -2,6 +2,7 @@
 
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
+
 import { collection, doc, query, orderBy, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,8 +44,8 @@ function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, i
 
 export function NotificationsInbox() {
   const db = useFirestore();
-  const { user, isCoach } = useUser();
-  const { activeSport } = useSport();
+  const { user } = useUser();
+  const { activeSport, isCoach } = useSport();
   const router = useRouter();
 
   const notifQuery = useMemoFirebase(() => {
