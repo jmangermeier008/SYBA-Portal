@@ -285,7 +285,11 @@ export function Sidebar() {
   const roles: string[] = [
     ...(isSiteAdmin ? ['Site Admin'] : isAdmin ? ['Admin'] : isBoardMember ? ['Board Member'] : []),
     ...(isCoach ? ['Coach'] : []),
-    ...(!isAdmin && !isBoardMember && !isCoach ? ['Parent'] : []),
+    ...(
+      (activeSport && profile?.sportRoles?.[activeSport]?.includes('Parent')) ||
+      profile?.roles?.includes('Parent')
+        ? ['Parent'] : []
+    ),
   ];
   const auth = useAuth();
   const db = useFirestore();
