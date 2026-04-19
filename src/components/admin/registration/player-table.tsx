@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { format } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -130,6 +131,7 @@ export function PlayerTable({
   onAuditSubmit,
   onDeletePlayer,
 }: PlayerTableProps) {
+  const isMobile = useIsMobile();
   const [statusFilter, setStatusFilter] = useState<'pending' | 'verified' | 'all'>('pending');
   const [divisionFilter, setDivisionFilter] = useState('all');
 
@@ -250,7 +252,7 @@ export function PlayerTable({
               ))}
             </div>
             <Select value={divisionFilter} onValueChange={setDivisionFilter}>
-              <SelectTrigger className="w-44 rounded-xl h-9 bg-white shadow-sm border">
+              <SelectTrigger className="w-full sm:w-44 rounded-xl h-9 bg-white shadow-sm border">
                 <SelectValue placeholder="All Divisions" />
               </SelectTrigger>
               <SelectContent>
@@ -269,13 +271,76 @@ export function PlayerTable({
             </Button>
           </div>
 
-          {/* Table */}
+          {/* Table / Cards */}
           {filteredPlayers.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-green-400" />
               <p className="font-medium">No players match this filter.</p>
             </div>
+          ) : isMobile ? (
+            /* ── Mobile card layout ── */
+            <div className="space-y-3">
+              {filteredPlayers.map(player => {
+                const enrollment = playerEnrollmentMap.get(player.id);
+                const divisionId = enrollment?.divisionId ?? player.divisionId;
+                const divisionName = divisionId ? (divisionNameMap.get(divisionId) ?? '—') : '—';
+                const birthCertStatus = player.ageVerified ? 'verified' : player.birthCertificateUrl ? 'pending' : 'none';
+                const physicalStatus = player.compliance?.physicalVerified ? 'verified' : player.physicalFormUrl ? 'pending' : 'none';
+                return (
+                  <Card key={player.id} className="border shadow-sm">
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-sm">{player.firstName} {player.lastName}</p>
+                          <p className="text-xs text-muted-foreground">{divisionName} · DOB {player.dateOfBirth}</p>
+                        </div>
+                        <PaymentBadge enrollment={enrollment} />
+                      </div>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Birth Cert:</span>
+                        {birthCertStatus === 'verified'
+                          ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
+                          : birthCertStatus === 'pending'
+                          ? <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
+                          : <Badge variant="outline">No Document</Badge>
+                        }
+                        <span className="text-xs text-muted-foreground ml-2">Physical:</span>
+                        {physicalStatus === 'verified'
+                          ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
+                          : physicalStatus === 'pending'
+                          ? <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
+                          : <Badge variant="outline">No Document</Badge>
+                        }
+                      </div>
+                      {isSiteAdmin && (
+                        <div className="flex gap-2 pt-1">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="rounded-full h-9 flex-1"
+                            onClick={() => openAudit(player)}
+                            disabled={busy}
+                          >
+                            Audit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full h-9 text-destructive border-destructive/30 hover:bg-destructive/10"
+                            onClick={() => setDeletingPlayer(player)}
+                            disabled={busy}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           ) : (
+            /* ── Desktop table layout ── */
             <div className="overflow-x-auto w-full rounded-xl border">
               <Table>
                 <TableHeader>
@@ -380,10 +445,10 @@ export function PlayerTable({
 
       {/* Audit Dialog */}
       <Dialog open={!!auditingPlayer} onOpenChange={open => !open && setAuditingPlayer(null)}>
-        <DialogContent className="max-w-4xl rounded-2xl p-0 overflow-hidden">
-          <div className="flex h-[82vh]">
+        <DialogContent className="w-[95vw] sm:max-w-4xl rounded-2xl p-0 overflow-hidden">
+          <div className="flex flex-col sm:flex-row max-h-[85vh] sm:h-[82vh]">
             {/* Left: document viewer */}
-            <div className="flex-1 bg-secondary/10 border-r flex flex-col min-w-0">
+            <div className="flex-1 bg-secondary/10 sm:border-r flex flex-col min-w-0 min-h-[40vh] sm:min-h-0">
               <div className="flex border-b bg-white shrink-0 items-center">
                 <button
                   className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${auditDocTab === 'birthCert' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}
@@ -426,7 +491,7 @@ export function PlayerTable({
             </div>
 
             {/* Right: audit form */}
-            <div className="w-80 flex flex-col shrink-0">
+            <div className="w-full sm:w-80 flex flex-col shrink-0 border-t sm:border-t-0">
               <DialogHeader className="p-5 border-b bg-primary/5">
                 <DialogTitle className="font-headline">
                   {auditingPlayer?.firstName} {auditingPlayer?.lastName}

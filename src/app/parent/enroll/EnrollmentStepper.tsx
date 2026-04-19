@@ -1229,7 +1229,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               <div className="space-y-3">
                 <Label>Emergency Contact</Label>
                 {state.emergencyContacts.map((contact, i) => (
-                  <div key={i} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <Input
                       className="rounded-xl"
                       placeholder="Name"
@@ -1297,7 +1297,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       </p>
                     </div>
                   </div>
-                  <Label className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${state.birthCertUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
+                  <Label className={`cursor-pointer text-xs font-medium px-3 py-2.5 rounded-full border transition-colors ${state.birthCertUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
                     {state.birthCertUrl ? 'Replace' : 'Upload'}
                     <input
                       type="file"
@@ -1326,7 +1326,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       </p>
                     </div>
                   </div>
-                  <Label className={`cursor-pointer text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${state.physicalUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
+                  <Label className={`cursor-pointer text-xs font-medium px-3 py-2.5 rounded-full border transition-colors ${state.physicalUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
                     {state.physicalUrl ? 'Replace' : 'Upload'}
                     <input
                       type="file"

@@ -892,7 +892,7 @@ export default function EquipmentPage() {
           {/* ── Player Assignments Tab ─────────────────────────────── */}
           <TabsContent value="assignments" className="space-y-4">
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-              <div className="space-y-1 w-64">
+              <div className="space-y-1 w-full sm:w-64">
                 <Label>Select Season</Label>
                 <Select value={selectedSeasonId} onValueChange={(v) => { setSelectedSeasonId(v); setSelectedIds(new Set()); }}>
                   <SelectTrigger>
@@ -915,7 +915,7 @@ export default function EquipmentPage() {
                     placeholder="Search player, division, team…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 w-64"
+                    className="pl-9 w-full sm:w-64"
                   />
                 </div>
               )}

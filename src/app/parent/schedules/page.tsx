@@ -13,6 +13,7 @@ import {
   where,
   collectionGroup,
   runTransaction,
+  getDocs,
 } from 'firebase/firestore';
 import { Users } from 'lucide-react';
 import { format } from 'date-fns';
@@ -21,7 +22,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, Game, ConcessionSlot } from '@/types/scheduling';
+import type { CalendarEvent, ConcessionSlot } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
 
@@ -64,26 +65,6 @@ function normalizeTeamGame(g: TeamGame, teamId: string): CalendarEvent {
   };
 }
 
-function normalizeGlobalGame(g: Game, allTeamIds: string[]): CalendarEvent {
-  const isHome = allTeamIds.includes(g.homeTeamId ?? '');
-  const myTeam = isHome ? g.homeTeamName : g.awayTeamName;
-  const opp = isHome ? g.awayTeamName : g.homeTeamName;
-  return {
-    id: g.id,
-    eventType: 'game',
-    date: g.date,
-    startTime: g.time,
-    title: `${myTeam ?? ''} vs. ${opp ?? 'TBD'}`,
-    status: g.status,
-    fieldName: g.fieldName,
-    sourceType: 'global-game',
-    sourceId: g.id,
-    homeTeamName: g.homeTeamName,
-    awayTeamName: g.awayTeamName,
-    teamId: isHome ? g.homeTeamId : g.awayTeamId,
-    division: g.division,
-  };
-}
 
 function normalizeConcessionSlot(s: ConcessionSlot, userId: string): CalendarEvent {
   return {
@@ -116,6 +97,8 @@ export default function ParentSchedulesPage() {
   const [activeTeamId, setActiveTeamId] = useState<string>('');
   const [filters, setFilters] = useState({ games: true, practices: false, concessions: true });
   const [rsvpLoading, setRsvpLoading] = useState(false);
+  const [allTeamGames, setAllTeamGames] = useState<(TeamGame & { _teamId: string })[]>([]);
+  const [loadingAllTeams, setLoadingAllTeams] = useState(false);
 
   // ── Fetch players + enrollments ─────────────────────────────────────────────
   const playersQuery = useMemoFirebase(() => {
@@ -162,31 +145,23 @@ export default function ParentSchedulesPage() {
 
   const { data: teamGames, isLoading: loadingTeamGames } = useCollection<TeamGame>(teamGamesQuery);
 
-  // ── Global games (combined "All Players" view) ──────────────────────────────
-  const homeGamesQuery = useMemoFirebase(() => {
-    if (!db || selectedPlayerId !== 'all' || allTeamIds.length === 0) return null;
-    return query(
-      collection(db, 'games'),
-      where('homeTeamId', 'in', allTeamIds),
-      where('date', '>=', todayISO),
-      orderBy('date', 'asc'),
-      orderBy('time', 'asc')
-    );
-  }, [db, selectedPlayerId, allTeamIdsKey, todayISO]);
-
-  const awayGamesQuery = useMemoFirebase(() => {
-    if (!db || selectedPlayerId !== 'all' || allTeamIds.length === 0) return null;
-    return query(
-      collection(db, 'games'),
-      where('awayTeamId', 'in', allTeamIds),
-      where('date', '>=', todayISO),
-      orderBy('date', 'asc'),
-      orderBy('time', 'asc')
-    );
-  }, [db, selectedPlayerId, allTeamIdsKey, todayISO]);
-
-  const { data: homeGames, isLoading: loadingHome } = useCollection<Game>(homeGamesQuery);
-  const { data: awayGames, isLoading: loadingAway } = useCollection<Game>(awayGamesQuery);
+  // ── All Players view — fetch each team's subcollection imperatively ──────────
+  useEffect(() => {
+    if (!db || selectedPlayerId !== 'all' || allTeamIds.length === 0) {
+      setAllTeamGames([]);
+      return;
+    }
+    setLoadingAllTeams(true);
+    Promise.all(
+      allTeamIds.map(teamId =>
+        getDocs(collection(db, 'teams', teamId, 'games'))
+          .then(snap => snap.docs.map(d => ({ ...(d.data() as TeamGame), id: d.id, _teamId: teamId })))
+      )
+    ).then(results => {
+      setAllTeamGames(results.flat());
+      setLoadingAllTeams(false);
+    }).catch(() => setLoadingAllTeams(false));
+  }, [db, selectedPlayerId, allTeamIdsKey]);
 
   // ── Concession slots ────────────────────────────────────────────────────────
   const concessionsQuery = useMemoFirebase(() => {
@@ -212,13 +187,12 @@ export default function ParentSchedulesPage() {
     const events: CalendarEvent[] = [];
 
     if (selectedPlayerId === 'all') {
-      // Combined global games (dedup, exclude cancelled)
-      const all = [...(homeGames ?? []), ...(awayGames ?? [])];
+      // Combined team subcollection games across all enrolled teams (dedup, exclude cancelled)
       const seen = new Set<string>();
-      for (const g of all) {
-        if (!seen.has(g.id) && g.status !== 'cancelled') {
+      for (const g of allTeamGames) {
+        if (!seen.has(g.id) && !g.cancelled) {
           seen.add(g.id);
-          events.push(normalizeGlobalGame(g, allTeamIds));
+          events.push(normalizeTeamGame(g, g._teamId));
         }
       }
     } else if (activeTeamId && teamGames) {
@@ -241,9 +215,9 @@ export default function ParentSchedulesPage() {
     }
 
     return events;
-  }, [selectedPlayerId, teamGames, homeGames, awayGames, concessionSlots, allTeamIds, activeTeamId, user]);
+  }, [selectedPlayerId, teamGames, allTeamGames, concessionSlots, activeTeamId, user]);
 
-  const isLoading = loadingTeamGames || loadingHome || loadingAway;
+  const isLoading = loadingTeamGames || loadingAllTeams;
 
   // ── RSVP handler ────────────────────────────────────────────────────────────
   const handleRSVP = async (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {

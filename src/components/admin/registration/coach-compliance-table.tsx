@@ -32,6 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export interface CoachProfile {
   id: string;
@@ -82,6 +83,7 @@ export function CoachComplianceTable({
   onUpdateStatus,
   onDeleteCoach,
 }: CoachComplianceTableProps) {
+  const isMobile = useIsMobile();
   const [statusFilter, setStatusFilter] = useState<'incomplete' | 'cleared' | 'all'>('incomplete');
   const [reviewingClearance, setReviewingClearance] = useState<{ userId: string; clearance: ClearanceRecord } | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -177,7 +179,116 @@ export function CoachComplianceTable({
               <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-green-400" />
               <p className="font-medium">No volunteers match this filter.</p>
             </div>
+          ) : isMobile ? (
+            /* ── Mobile card layout ── */
+            <div className="space-y-3">
+              {filteredVolunteers.map(({ user: u, ca, cr, isCleared }) => (
+                <Card key={u.id} className="border shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm">{u.displayName}</p>
+                        <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-xs text-muted-foreground">Child Abuse:</span>
+                          {getStatusIcon(ca?.status)}
+                          <span className="text-xs text-muted-foreground ml-1">Criminal:</span>
+                          {getStatusIcon(cr?.status)}
+                        </div>
+                      </div>
+                      <Badge
+                        variant={isCleared ? 'default' : 'outline'}
+                        className={`shrink-0 ${isCleared ? 'bg-green-100 text-green-700 hover:bg-green-100 border-none' : ''}`}
+                      >
+                        {isCleared ? 'CLEARED' : 'INCOMPLETE'}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button variant="default" size="sm" className="rounded-full h-9 flex-1">Audit</Button>
+                        </DialogTrigger>
+                        <DialogContent className="w-[95vw] sm:max-w-3xl rounded-2xl p-0 overflow-hidden">
+                          <div className="flex flex-col max-h-[85vh]">
+                            <DialogHeader className="p-6 border-b bg-primary/5">
+                              <DialogTitle className="font-headline">{u.displayName}</DialogTitle>
+                              <p className="text-xs text-muted-foreground mt-0.5">{u.email}</p>
+                            </DialogHeader>
+                            <ScrollArea className="flex-1 p-6">
+                              <div className="space-y-4">
+                                {[ca, cr].filter(Boolean).map((c) => (
+                                  <Card key={c!.id} className="border bg-secondary/10">
+                                    <CardContent className="p-4 space-y-4">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                          <FileText className="h-5 w-5 text-primary" />
+                                          <div>
+                                            <p className="font-bold text-sm">{c!.type}</p>
+                                            <p className="text-[10px] text-muted-foreground">Expires: {c!.expirationDate}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          {getStatusIcon(c!.status)}
+                                          <Badge variant="outline" className="text-[10px]">{c!.status}</Badge>
+                                        </div>
+                                      </div>
+                                      {c!.verifiedBy && c!.verifiedAt && (
+                                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-white/50 p-2 rounded">
+                                          <History className="h-3 w-3" />
+                                          <span>
+                                            Verified by {c!.verifiedByName} on {format(new Date(c!.verifiedAt), 'MMM d, h:mm a')}
+                                          </span>
+                                        </div>
+                                      )}
+                                      <div className="flex gap-2">
+                                        <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
+                                          <a href={c!.fileUrl} target="_blank" rel="noreferrer">
+                                            <Eye className="h-4 w-4 mr-2" /> View
+                                          </a>
+                                        </Button>
+                                        <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
+                                          <a href={c!.fileUrl} download target="_blank" rel="noreferrer">
+                                            <Download className="h-4 w-4 mr-2" /> Download
+                                          </a>
+                                        </Button>
+                                        <Button
+                                          variant="default"
+                                          size="sm"
+                                          className="flex-1 rounded-lg"
+                                          onClick={() => setReviewingClearance({ userId: u.id, clearance: c! })}
+                                        >
+                                          Review Decision
+                                        </Button>
+                                      </div>
+                                    </CardContent>
+                                  </Card>
+                                ))}
+                                {[ca, cr].filter(Boolean).length === 0 && (
+                                  <p className="text-sm text-muted-foreground text-center py-6">No clearance documents on file.</p>
+                                )}
+                              </div>
+                            </ScrollArea>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      {isSiteAdmin && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-full h-9 text-destructive border-destructive/30 hover:bg-destructive/10"
+                          onClick={() => setDeletingCoach(u)}
+                          disabled={isDeleting}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           ) : (
+            /* ── Desktop table layout ── */
             <div className="overflow-x-auto w-full rounded-xl border">
               <Table>
                 <TableHeader>
