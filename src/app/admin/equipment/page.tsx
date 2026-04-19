@@ -79,38 +79,6 @@ const STATUS_LABELS: Record<EquipmentStatus, string> = {
   returned: 'Returned',
 };
 
-function SizeSelect({
-  value,
-  sizes,
-  onChange,
-  disabled,
-}: {
-  value: string | undefined;
-  sizes: readonly string[];
-  onChange: (v: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Select value={value ?? ''} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger className="h-9 text-xs w-24">
-        <SelectValue placeholder="—" />
-      </SelectTrigger>
-      <SelectContent>
-        {sizes.map((s) => (
-          <SelectItem key={s} value={s}>{s}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function SizeBadge({ value }: { value?: string }) {
-  return (
-    <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-mono text-muted-foreground bg-muted/40 h-9 min-w-[4rem] justify-center">
-      {value ?? '—'}
-    </span>
-  );
-}
 
 interface FootballEquipment {
   helmetSize?: string;
@@ -1006,18 +974,13 @@ export default function EquipmentPage() {
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Division</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Team</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Size</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Size</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey #</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey Size</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Jersey</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Scrimmage</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Jersey</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Size</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Size</th>
                           <th className="px-4 py-3" />
                         </tr>
                       </thead>
@@ -1068,14 +1031,6 @@ export default function EquipmentPage() {
                                   disabled={isSaving}
                                 />
                               </td>
-                              {/* Helmet Size */}
-                              <td className="px-4 py-2">
-                                {fe.helmetInventoryId
-                                  ? <SizeBadge value={fe.helmetSize} />
-                                  : <SizeSelect value={fe.helmetSize} sizes={HELMET_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.helmetSize', v)} />
-                                }
-                              </td>
-
                               {/* Pads Tag */}
                               <td className="px-4 py-2">
                                 <Combobox
@@ -1092,14 +1047,6 @@ export default function EquipmentPage() {
                                   disabled={isSaving}
                                 />
                               </td>
-                              {/* Pads Size */}
-                              <td className="px-4 py-2">
-                                {fe.padInventoryId
-                                  ? <SizeBadge value={fe.shoulderPadSize} />
-                                  : <SizeSelect value={fe.shoulderPadSize} sizes={PAD_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.shoulderPadSize', v)} />
-                                }
-                              </td>
-
                               {/* Jersey # */}
                               <td className="px-4 py-2">
                                 <Input
@@ -1113,14 +1060,6 @@ export default function EquipmentPage() {
                                       saveField(enrollment, 'footballEquipment.jerseyNumber', val);
                                   }}
                                 />
-                              </td>
-
-                              {/* Jersey Size */}
-                              <td className="px-4 py-2">
-                                {fe.gameJerseyInventoryId
-                                  ? <SizeBadge value={fe.jerseySize} />
-                                  : <SizeSelect value={fe.jerseySize} sizes={JERSEY_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.jerseySize', v)} />
-                                }
                               </td>
 
                               {/* Game Jersey Tag */}
@@ -1190,14 +1129,6 @@ export default function EquipmentPage() {
                                   disabled={isSaving}
                                 />
                               </td>
-                              {/* Game Pants Size */}
-                              <td className="px-4 py-2">
-                                {fe.gamePantsInventoryId
-                                  ? <SizeBadge value={fe.gamePantsSize} />
-                                  : <SizeSelect value={fe.gamePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.gamePantsSize', v)} />
-                                }
-                              </td>
-
                               {/* Practice Pants Tag */}
                               <td className="px-4 py-2">
                                 <Combobox
@@ -1214,14 +1145,6 @@ export default function EquipmentPage() {
                                   disabled={isSaving}
                                 />
                               </td>
-                              {/* Practice Pants Size */}
-                              <td className="px-4 py-2">
-                                {fe.practicePantsInventoryId
-                                  ? <SizeBadge value={fe.practicePantsSize} />
-                                  : <SizeSelect value={fe.practicePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(enrollment, 'footballEquipment.practicePantsSize', v)} />
-                                }
-                              </td>
-
                               {/* Return All */}
                               <td className="px-4 py-2">
                                 <Button
@@ -1336,10 +1259,6 @@ export default function EquipmentPage() {
                                     disabled={isSaving}
                                     className="flex-1"
                                   />
-                                  {fe.helmetInventoryId
-                                    ? <SizeBadge value={fe.helmetSize} />
-                                    : <SizeSelect value={fe.helmetSize} sizes={HELMET_SIZES} disabled={isSaving} onChange={(v) => saveField(liveEnrollment, 'footballEquipment.helmetSize', v)} />
-                                  }
                                 </div>
                               </div>
 
@@ -1361,10 +1280,6 @@ export default function EquipmentPage() {
                                     disabled={isSaving}
                                     className="flex-1"
                                   />
-                                  {fe.padInventoryId
-                                    ? <SizeBadge value={fe.shoulderPadSize} />
-                                    : <SizeSelect value={fe.shoulderPadSize} sizes={PAD_SIZES} disabled={isSaving} onChange={(v) => saveField(liveEnrollment, 'footballEquipment.shoulderPadSize', v)} />
-                                  }
                                 </div>
                               </div>
 
@@ -1388,10 +1303,6 @@ export default function EquipmentPage() {
                                       disabled={isSaving}
                                       className="flex-1"
                                     />
-                                    {fe.gameJerseyInventoryId
-                                      ? <SizeBadge value={fe.jerseySize} />
-                                      : <SizeSelect value={fe.jerseySize} sizes={JERSEY_SIZES} disabled={isSaving} onChange={(v) => saveField(liveEnrollment, 'footballEquipment.jerseySize', v)} />
-                                    }
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs w-28 shrink-0">Scrimmage</span>
@@ -1450,10 +1361,6 @@ export default function EquipmentPage() {
                                       disabled={isSaving}
                                       className="flex-1"
                                     />
-                                    {fe.gamePantsInventoryId
-                                      ? <SizeBadge value={fe.gamePantsSize} />
-                                      : <SizeSelect value={fe.gamePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(liveEnrollment, 'footballEquipment.gamePantsSize', v)} />
-                                    }
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs w-28 shrink-0">Practice</span>
@@ -1471,10 +1378,6 @@ export default function EquipmentPage() {
                                       disabled={isSaving}
                                       className="flex-1"
                                     />
-                                    {fe.practicePantsInventoryId
-                                      ? <SizeBadge value={fe.practicePantsSize} />
-                                      : <SizeSelect value={fe.practicePantsSize} sizes={PANTS_SIZES} disabled={isSaving} onChange={(v) => saveField(liveEnrollment, 'footballEquipment.practicePantsSize', v)} />
-                                    }
                                   </div>
                                 </div>
                               </div>
