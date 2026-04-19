@@ -972,7 +972,6 @@ export default function EquipmentPage() {
                           </th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky left-10 z-10 bg-muted/30 border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">Player</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Division</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Team</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Tag</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Tag</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey #</th>
@@ -990,7 +989,6 @@ export default function EquipmentPage() {
                           const isSelected = selectedIds.has(enrollment.id);
                           const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
                           const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
-                          const teamName = enrollment.teamId ? (teamMap.get(enrollment.teamId) ?? '—') : '—';
                           const fe = enrollment.footballEquipment ?? {};
 
                           return (
@@ -1013,7 +1011,6 @@ export default function EquipmentPage() {
                                 </div>
                               </td>
                               <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{divisionName}</td>
-                              <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{teamName}</td>
 
                               {/* Helmet Tag */}
                               <td className="px-4 py-2">
