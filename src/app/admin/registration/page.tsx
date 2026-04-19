@@ -329,13 +329,16 @@ export default function RegistrationDashboardPage() {
 
   const exportRegistrationsCSV = () => {
     if (!enrollments.length) return;
+    const divisionNameMap = new Map(
+      (sportFilteredDivisions ?? []).map(d => [d.id, d.name])
+    );
     const headers = ['First Name', 'Last Name', 'Division', 'Season', 'Payment Status', 'Fee Amount', 'Shirt Size', 'Uniform # Preference', 'Registered Date'];
     const rows = enrollments.map(e => {
       const p = allPlayers?.find(p => p.id === e.playerId);
       return [
         p?.firstName ?? 'N/A',
         p?.lastName ?? 'N/A',
-        e.divisionId,
+        divisionNameMap.get(e.divisionId) ?? e.divisionId,
         e.seasonId,
         getEnrollmentStatus(e),
         e.registrationFeeAmount != null ? formatCents(e.registrationFeeAmount) : '',
