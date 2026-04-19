@@ -286,7 +286,7 @@ export function Sidebar() {
     ...(isSiteAdmin ? ['Site Admin'] : isAdmin ? ['Admin'] : isBoardMember ? ['Board Member'] : []),
     ...(isCoach ? ['Coach'] : []),
     ...(
-      (activeSport && profile?.sportRoles?.[activeSport]?.includes('Parent')) ||
+      (activeSport && (profile?.sportRoles?.[activeSport] as string[] | undefined)?.includes('Parent')) ||
       profile?.roles?.includes('Parent')
         ? ['Parent'] : []
     ),
