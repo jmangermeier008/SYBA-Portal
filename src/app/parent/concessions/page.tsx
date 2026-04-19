@@ -1,23 +1,17 @@
 "use client";
 
 import { Sidebar } from '@/components/navigation/sidebar';
+import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, collectionGroup, doc, updateDoc, arrayUnion, arrayRemove, runTransaction, getDoc, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, collectionGroup, doc, updateDoc, arrayRemove, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import type { Season } from '@/types/scheduling';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
-  ShoppingCart,
-  Clock,
-  Users,
-  CalendarDays,
   Loader2,
   CheckCircle2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, parseISO, isAfter, subHours } from 'date-fns';
+import { format, parseISO, isAfter } from 'date-fns';
 import { useMemo, useState } from 'react';
 
 interface ConcessionSignup {
@@ -60,9 +54,7 @@ export default function ParentConcessionsPage() {
   const { profile, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const { toast } = useToast();
-  const [showMySignupsOnly, setShowMySignupsOnly] = useState(false);
-
-  const todayISO = format(new Date(), 'yyyy-MM-dd');
+  const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
 
   const activeSeasonsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
@@ -105,13 +97,6 @@ export default function ParentConcessionsPage() {
       : [],
   [slots]);
 
-  const displayedSlots = useMemo(
-    () => showMySignupsOnly
-      ? upcomingSlots.filter(s => s.signups?.some(su => su.parentUserId === profile?.id))
-      : upcomingSlots,
-    [upcomingSlots, showMySignupsOnly, profile?.id]
-  );
-
   // Count signups across all season slots (past + future) for compliance tracking
   const mySignupCount = useMemo(
     () => (slots ?? []).filter(s => s.signups?.some(su => su.parentUserId === profile?.id)).length,
@@ -124,6 +109,24 @@ export default function ParentConcessionsPage() {
     const perPlayer = activeSeason.volunteerSlotsRequired ?? 1;
     return count * perPlayer;
   }, [enrollments, activeSeason]);
+
+  const concessionEvents = useMemo(
+    () => upcomingSlots.map(slot => ({
+      id: slot.id,
+      eventType: 'concession' as const,
+      date: slot.gameDate,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      title: slot.description || 'Concession Shift',
+      status: slot.status ?? 'active',
+      capacity: slot.capacity,
+      claimedCount: slot.signups?.length ?? 0,
+      isSigned: slot.signups?.some(s => s.parentUserId === profile?.id) ?? false,
+      sourceType: 'concession-slot' as const,
+      sourceId: slot.id,
+    })),
+    [upcomingSlots, profile?.id]
+  );
 
   const handleSignUp = async (slot: ConcessionSlot) => {
     if (!db || !profile) return;
@@ -223,140 +226,32 @@ export default function ParentConcessionsPage() {
                 </div>
               )}
               {mySignupCount > 0 && (
-                <Button
-                  variant={showMySignupsOnly ? 'default' : 'outline'}
-                  size="sm"
-                  className="rounded-full shrink-0"
-                  onClick={() => setShowMySignupsOnly(v => !v)}
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                  My Sign-Ups ({mySignupCount})
-                </Button>
+                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 min-w-[120px] text-center">
+                  <p className="text-xs text-muted-foreground mb-0.5">My Sign-Ups</p>
+                  <p className="text-sm font-semibold flex items-center justify-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> {mySignupCount}
+                  </p>
+                </div>
               )}
             </div>
           </div>
         </header>
 
-        {isLoading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          </div>
-        ) : displayedSlots.length === 0 ? (
-          <Card className="border-none shadow-md">
-            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-              <ShoppingCart className="h-12 w-12 text-muted-foreground/40 mb-4" />
-              <p className="text-muted-foreground font-medium">
-                {showMySignupsOnly ? "You haven't signed up for any upcoming shifts" : 'No upcoming concession slots'}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {showMySignupsOnly ? 'Browse all slots to find a shift that works for you.' : 'Check back soon — slots are added by the admin.'}
-              </p>
-              {showMySignupsOnly && (
-                <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowMySignupsOnly(false)}>
-                  View All Slots
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {displayedSlots.map(slot => {
-              const signupCount = slot.signups?.length ?? 0;
-              const isFull = signupCount >= slot.capacity;
-              const mySignup = slot.signups?.find(s => s.parentUserId === profile?.id);
-              const isSignedUp = !!mySignup;
-
-              const slotStart = getSlotStartDateTime(slot);
-              const cutoffTime = subHours(slotStart, slot.cancelCutoffHours);
-              const pastCutoff = isAfter(new Date(), cutoffTime);
-
-              return (
-                <Card key={slot.id} className={`border-none shadow-md ${isSignedUp ? 'ring-2 ring-primary' : ''}`}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <CalendarDays className="h-4 w-4 text-primary" />
-                          <CardTitle className="text-base font-headline">
-                            {format(parseISO(slot.gameDate), 'EEE, MMM d, yyyy')}
-                          </CardTitle>
-                        </div>
-                        {slot.description && (
-                          <p className="text-xs text-muted-foreground">{slot.description}</p>
-                        )}
-                      </div>
-                      {isSignedUp && (
-                        <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span>{formatTime(slot.startTime)} – {formatTime(slot.endTime)}</span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-sm">
-                          <Users className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">{signupCount} / {slot.capacity} filled</span>
-                        </div>
-                        <Badge variant={isFull ? 'destructive' : isSignedUp ? 'default' : 'secondary'} className="text-xs">
-                          {isFull && !isSignedUp ? 'Full' : isSignedUp ? "You're in!" : `${slot.capacity - signupCount} left`}
-                        </Badge>
-                      </div>
-                      {/* Capacity progress bar */}
-                      <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            isFull ? 'bg-destructive' :
-                            signupCount / slot.capacity >= 0.75 ? 'bg-amber-500' :
-                            'bg-green-500'
-                          }`}
-                          style={{ width: `${Math.min((signupCount / slot.capacity) * 100, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {slot.locationType === 'away' ? (
-                      <p className="text-sm text-muted-foreground italic py-2 text-center">
-                        Away Game — No volunteer shifts required for Sharpsville parents.
-                      </p>
-                    ) : isSignedUp ? (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full rounded-xl"
-                          onClick={() => handleCancel(slot)}
-                          disabled={pastCutoff}
-                          title={pastCutoff ? `Cancellation closed ${slot.cancelCutoffHours}h before start` : undefined}
-                        >
-                          {pastCutoff ? `Cancellation Closed` : 'Cancel Sign-Up'}
-                        </Button>
-                        {pastCutoff && (
-                          <p className="text-[10px] text-muted-foreground text-center">
-                            Cancellation window closed. Contact admin to cancel.
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <Button
-                        size="sm"
-                        className="w-full rounded-xl"
-                        onClick={() => handleSignUp(slot)}
-                        disabled={isFull}
-                      >
-                        {isFull ? 'Slot Full' : 'Sign Up to Volunteer'}
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+        <LeagueCalendar
+          events={concessionEvents}
+          isLoading={isLoading || loadingUser}
+          filters={calFilters}
+          onFilterChange={(key, val) => setCalFilters(prev => ({ ...prev, [key]: val }))}
+          visibleFilters={['concessions']}
+          onConcessionSignup={(slotId) => {
+            const slot = upcomingSlots.find(s => s.id === slotId);
+            if (slot) handleSignUp(slot);
+          }}
+          onConcessionCancel={(slotId) => {
+            const slot = upcomingSlots.find(s => s.id === slotId);
+            if (slot) handleCancel(slot);
+          }}
+        />
         </div>
       </main>
     </div>

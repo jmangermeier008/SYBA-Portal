@@ -17,7 +17,10 @@ import {
   updateDoc,
   arrayRemove,
   arrayUnion,
+  writeBatch,
 } from 'firebase/firestore';
+import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import type { CalendarEvent } from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,7 +48,6 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
-import { DayPicker } from 'react-day-picker';
 import { cn } from '@/lib/utils';
 
 // ── Local types ────────────────────────────────────────────────────────────────
@@ -86,9 +88,26 @@ interface FamilyCompliance {
   workedCount: number;
   pendingCount: number;
   required: number;
+  manualOverride: boolean;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function normalizeConcessionSlot(slot: ConcessionSlot): CalendarEvent {
+  return {
+    id: slot.id,
+    eventType: 'concession',
+    date: slot.gameDate,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    title: slot.description || 'Concession Shift',
+    status: 'active',
+    capacity: slot.capacity,
+    claimedCount: slot.signups?.length ?? 0,
+    sourceType: 'concession-slot',
+    sourceId: slot.id,
+  };
+}
 
 const emptySlot = {
   gameDate: '',
@@ -112,6 +131,7 @@ function isPastSlot(gameDate: string): boolean {
 }
 
 function complianceStatus(family: FamilyCompliance) {
+  if (family.manualOverride) return 'met';
   if (family.workedCount >= family.required) return 'met';
   if (family.workedCount > 0 || family.pendingCount > 0) return 'partial';
   return 'none';
@@ -150,7 +170,8 @@ export default function ConcessionsAdminPage() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
   const [deleting, setDeleting] = useState(false);
   const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
-  const [calMonth, setCalMonth] = useState<Date>(new Date());
+  const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
+  const [overriding, setOverriding] = useState<Set<string>>(new Set());
 
   // Attendance toggle saving
   const [attendanceSaving, setAttendanceSaving] = useState<Set<string>>(new Set());
@@ -185,52 +206,15 @@ export default function ConcessionsAdminPage() {
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
 
-  const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
-    return query(collection(db, 'games'), where('sport', '==', activeSport));
-  }, [db, isAdmin, isBoardMember, activeSport]);
-
-  interface GameDate { id: string; date: string; }
-  const { data: allGames } = useCollection<GameDate>(allGamesQuery);
-
   const sortedSlots = slots
     ? [...slots].sort((a, b) => a.gameDate.localeCompare(b.gameDate))
     : [];
 
-  // ── Calendar coverage memos ───────────────────────────────────────────────
-  const gameDateSet = useMemo(() => {
-    return new Set((allGames ?? []).map(g => g.date).filter(Boolean));
-  }, [allGames]);
-
-  const coverageByDate = useMemo(() => {
-    const map = new Map<string, { totalCap: number; filled: number }>();
-    for (const slot of sortedSlots) {
-      const cur = map.get(slot.gameDate) ?? { totalCap: 0, filled: 0 };
-      map.set(slot.gameDate, {
-        totalCap: cur.totalCap + slot.capacity,
-        filled: cur.filled + (slot.signups?.length ?? 0),
-      });
-    }
-    return map;
-  }, [sortedSlots]);
-
-  const redDates = useMemo(() =>
-    [...gameDateSet].filter(d => !coverageByDate.has(d)).map(d => parseISO(d)),
-  [gameDateSet, coverageByDate]);
-
-  const yellowDates = useMemo(() => {
-    return [...gameDateSet].filter(d => {
-      const cov = coverageByDate.get(d);
-      return cov && cov.filled < cov.totalCap;
-    }).map(d => parseISO(d));
-  }, [gameDateSet, coverageByDate]);
-
-  const greenDates = useMemo(() => {
-    return [...gameDateSet].filter(d => {
-      const cov = coverageByDate.get(d);
-      return cov && cov.filled >= cov.totalCap;
-    }).map(d => parseISO(d));
-  }, [gameDateSet, coverageByDate]);
+  // ── Calendar events ───────────────────────────────────────────────────────
+  const concessionEvents = useMemo(
+    () => sortedSlots.map(s => normalizeConcessionSlot(s)),
+    [sortedSlots]
+  );
 
   // ── Slot CRUD ─────────────────────────────────────────────────────────────
   const handleAddSlot = async () => {
@@ -390,11 +374,14 @@ export default function ConcessionsAdminPage() {
       );
       const parentIds = new Set<string>();
       const enrollmentCountByParent = new Map<string, number>();
+      const manualOverrideParents = new Set<string>();
       enrollmentsSnap.docs.forEach(d => {
-        const pid = d.data().parentUserId as string;
+        const data = d.data();
+        const pid = data.parentUserId as string;
         if (pid) {
           parentIds.add(pid);
           enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
+          if (data.concessionManualVerify === true) manualOverrideParents.add(pid);
         }
       });
 
@@ -451,6 +438,7 @@ export default function ConcessionsAdminPage() {
         workedCount: workedCountMap.get(pid) ?? 0,
         pendingCount: pendingCountMap.get(pid) ?? 0,
         required: (enrollmentCountByParent.get(pid) ?? 1) * slotsPerPlayer,
+        manualOverride: manualOverrideParents.has(pid),
       }));
 
       result.sort((a, b) => {
@@ -469,6 +457,25 @@ export default function ConcessionsAdminPage() {
   useEffect(() => {
     if (selectedSeasonId) loadComplianceReport(selectedSeasonId);
   }, [selectedSeasonId, loadComplianceReport]);
+
+  async function handleManualOverride(parentUserId: string) {
+    if (!db || !selectedSeasonId) return;
+    setOverriding(prev => new Set(prev).add(parentUserId));
+    try {
+      const snap = await getDocs(
+        query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', parentUserId), where('seasonId', '==', selectedSeasonId))
+      );
+      const batch = writeBatch(db);
+      snap.forEach(docSnap => batch.update(docSnap.ref, { concessionManualVerify: true }));
+      await batch.commit();
+      toast({ title: 'Compliance verified', description: 'Family marked as compliant.' });
+      loadComplianceReport(selectedSeasonId);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setOverriding(prev => { const s = new Set(prev); s.delete(parentUserId); return s; });
+    }
+  }
 
   const filteredFamilies = families.filter(f =>
     f.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -564,44 +571,13 @@ export default function ConcessionsAdminPage() {
             </div>
 
             {slotView === 'calendar' ? (
-              <Card className="border-none shadow-md">
-                <CardContent className="p-4">
-                  <div className="w-full">
-                  <DayPicker
-                    month={calMonth}
-                    onMonthChange={setCalMonth}
-                    modifiers={{ gameRed: redDates, gameYellow: yellowDates, gameGreen: greenDates }}
-                    modifiersStyles={{
-                      gameRed: { backgroundColor: '#fecaca', color: '#991b1b', borderRadius: '50%', fontWeight: 600 },
-                      gameYellow: { backgroundColor: '#fef08a', color: '#92400e', borderRadius: '50%', fontWeight: 600 },
-                      gameGreen: { backgroundColor: '#bbf7d0', color: '#14532d', borderRadius: '50%', fontWeight: 600 },
-                    }}
-                    onDayClick={(day) => {
-                      const iso = format(day, 'yyyy-MM-dd');
-                      if (gameDateSet.has(iso)) {
-                        setFormData(prev => ({ ...prev, gameDate: iso }));
-                        setAddDialog(true);
-                      }
-                    }}
-                    styles={{
-                      root: { width: '100%' },
-                      months: { width: '100%' },
-                      month: { width: '100%' },
-                      table: { width: '100%' },
-                    }}
-                    classNames={{
-                      day: 'h-20 text-sm',
-                      cell: 'h-20 text-center',
-                    }}
-                  />
-                  </div>
-                  <div className="flex items-center gap-4 justify-center mt-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-200 inline-block" /> No slots</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-200 inline-block" /> Partial</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-200 inline-block" /> Covered</span>
-                  </div>
-                </CardContent>
-              </Card>
+              <LeagueCalendar
+                events={concessionEvents}
+                isLoading={isLoading}
+                filters={calFilters}
+                onFilterChange={(key, val) => setCalFilters(prev => ({ ...prev, [key]: val }))}
+                visibleFilters={['concessions']}
+              />
             ) : (
               isLoading ? (
                 <div className="flex justify-center py-12">
@@ -834,6 +810,7 @@ export default function ConcessionsAdminPage() {
                             <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Worked</th>
                             <th className="text-center px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Pending</th>
                             <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Status</th>
+                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -854,7 +831,7 @@ export default function ConcessionsAdminPage() {
                                 <td className="px-4 py-3 text-center">
                                   {status === 'met' && (
                                     <Badge className="bg-green-100 text-green-700 border-green-200 gap-1">
-                                      <CheckCircle2 className="h-3 w-3" /> Met
+                                      <CheckCircle2 className="h-3 w-3" /> {family.manualOverride ? 'Verified' : 'Met'}
                                     </Badge>
                                   )}
                                   {status === 'partial' && (
@@ -866,6 +843,22 @@ export default function ConcessionsAdminPage() {
                                     <Badge variant="destructive" className="gap-1">
                                       <XCircle className="h-3 w-3" /> Not Signed Up
                                     </Badge>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-center hidden sm:table-cell">
+                                  {status !== 'met' && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={overriding.has(family.parentUserId)}
+                                      onClick={() => handleManualOverride(family.parentUserId)}
+                                      className="rounded-full text-xs gap-1.5"
+                                    >
+                                      {overriding.has(family.parentUserId)
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                      Verify Manually
+                                    </Button>
                                   )}
                                 </td>
                               </tr>
