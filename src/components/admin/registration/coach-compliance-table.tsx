@@ -20,6 +20,7 @@ import {
   History,
   ShieldCheck,
   Trash2,
+  Download,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -250,7 +251,12 @@ export function CoachComplianceTable({
                                         <div className="flex gap-2">
                                           <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
                                             <a href={c!.fileUrl} target="_blank" rel="noreferrer">
-                                              <Eye className="h-4 w-4 mr-2" /> View Document
+                                              <Eye className="h-4 w-4 mr-2" /> View
+                                            </a>
+                                          </Button>
+                                          <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
+                                            <a href={c!.fileUrl} download target="_blank" rel="noreferrer">
+                                              <Download className="h-4 w-4 mr-2" /> Download
                                             </a>
                                           </Button>
                                           <Button
