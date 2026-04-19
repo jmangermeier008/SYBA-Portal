@@ -1714,7 +1714,7 @@ export default function EquipmentPage() {
 
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                Upload a <strong>.xlsx</strong> or <strong>.csv</strong> file with columns: <code className="bg-muted px-1 rounded text-xs">Tag Number</code>, <code className="bg-muted px-1 rounded text-xs">Type</code>, <code className="bg-muted px-1 rounded text-xs">Size</code>, <code className="bg-muted px-1 rounded text-xs">Notes</code>.
+                Upload a <strong>.xlsx</strong> or <strong>.csv</strong> file with columns: <code className="bg-muted px-1 rounded text-xs">Tag Number</code>, <code className="bg-muted px-1 rounded text-xs">Type</code>, <code className="bg-muted px-1 rounded text-xs">Size</code>, and optionally <code className="bg-muted px-1 rounded text-xs">Notes</code>.
                 Use the Download Template button to get a pre-formatted file.
               </p>
 
