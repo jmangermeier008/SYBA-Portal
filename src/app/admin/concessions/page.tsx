@@ -566,6 +566,7 @@ export default function ConcessionsAdminPage() {
             {slotView === 'calendar' ? (
               <Card className="border-none shadow-md">
                 <CardContent className="p-4">
+                  <div className="w-full">
                   <DayPicker
                     month={calMonth}
                     onMonthChange={setCalMonth}
@@ -582,8 +583,18 @@ export default function ConcessionsAdminPage() {
                         setAddDialog(true);
                       }
                     }}
-                    className="mx-auto"
+                    styles={{
+                      root: { width: '100%' },
+                      months: { width: '100%' },
+                      month: { width: '100%' },
+                      table: { width: '100%' },
+                    }}
+                    classNames={{
+                      day: 'h-20 text-sm',
+                      cell: 'h-20 text-center',
+                    }}
                   />
+                  </div>
                   <div className="flex items-center gap-4 justify-center mt-4 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-200 inline-block" /> No slots</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-200 inline-block" /> Partial</span>
@@ -799,7 +810,7 @@ export default function ConcessionsAdminPage() {
 
                   {selectedSeason && (
                     <p className="text-sm text-muted-foreground">
-                      Requirement: <strong>{selectedSeason.volunteerSlotsRequired ?? 1} shift{(selectedSeason.volunteerSlotsRequired ?? 1) !== 1 ? 's' : ''} worked</strong> per family for the {selectedSeason.name} season.
+                      Requirement: <strong>{selectedSeason.volunteerSlotsRequired ?? 1} shift{(selectedSeason.volunteerSlotsRequired ?? 1) !== 1 ? 's' : ''} per enrolled player</strong> for the {selectedSeason.name} season. Families with multiple players have a higher total requirement.
                       <span className="ml-2 text-xs italic">Pending (future) shifts do not count until marked Worked.</span>
                     </p>
                   )}

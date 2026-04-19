@@ -312,7 +312,7 @@ export default function SeasonsAdminPage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="volunteerSlotsRequired">Volunteer Slots Required per Family</Label>
+                    <Label htmlFor="volunteerSlotsRequired">Volunteer Slots Required per Enrolled Player</Label>
                     <Input
                       id="volunteerSlotsRequired"
                       type="number"
@@ -467,7 +467,7 @@ export default function SeasonsAdminPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="editVolunteerSlots">Volunteer Slots Required per Family</Label>
+                <Label htmlFor="editVolunteerSlots">Volunteer Slots Required per Enrolled Player</Label>
                 <Input
                   id="editVolunteerSlots"
                   type="number"
