@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
@@ -55,7 +56,9 @@ import {
   Download,
   AlertCircle,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -226,6 +229,7 @@ export default function EquipmentPage() {
   const [playerNameMap, setPlayerNameMap] = useState<Map<string, string>>(new Map());
   const [playersLoading, setPlayersLoading] = useState(false);
   const [drawerEnrollment, setDrawerEnrollment] = useState<EnrollmentRow | null>(null);
+  const [playerComplianceMap, setPlayerComplianceMap] = useState<Map<string, boolean>>(new Map());
 
   // Shed Inventory state
   const [shedSearchQuery, setShedSearchQuery] = useState('');
@@ -241,6 +245,15 @@ export default function EquipmentPage() {
   const [importErrors, setImportErrors] = useState<ImportError[]>([]);
   const [importSaving, setImportSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const sid = searchParams.get('seasonId');
+    const s = searchParams.get('search');
+    if (sid) setSelectedSeasonId(sid);
+    if (s) setSearchQuery(s);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -291,12 +304,15 @@ export default function EquipmentPage() {
       try {
         const snap = await getDocs(collectionGroup(db, 'players'));
         const map = new Map(playerNameMap);
+        const compMap = new Map(playerComplianceMap);
         snap.docs.forEach((d) => {
           const data = d.data();
           const name = [data.firstName, data.lastName].filter(Boolean).join(' ');
           if (name) map.set(d.id, name);
+          compMap.set(d.id, data.compliance?.physicalVerified === true);
         });
         setPlayerNameMap(map);
+        setPlayerComplianceMap(compMap);
       } catch {
         // non-fatal
       } finally {
@@ -1008,6 +1024,16 @@ export default function EquipmentPage() {
                                 <div className="flex items-center gap-2">
                                   {playerName}
                                   {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                                  {!(playerComplianceMap.get(enrollment.playerId) ?? false) && (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
+                                        </TooltipTrigger>
+                                        <TooltipContent>Physical not verified</TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{divisionName}</td>
@@ -1188,7 +1214,19 @@ export default function EquipmentPage() {
                                 className="shrink-0"
                               />
                               <div className="min-w-0">
-                                <p className="font-semibold text-sm">{playerName}</p>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-semibold text-sm">{playerName}</p>
+                                  {!(playerComplianceMap.get(enrollment.playerId) ?? false) && (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
+                                        </TooltipTrigger>
+                                        <TooltipContent>Physical not verified</TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  )}
+                                </div>
                                 {divisionName && <p className="text-xs text-muted-foreground">{divisionName}</p>}
                               </div>
                             </div>

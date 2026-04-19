@@ -147,21 +147,6 @@ export default function MasterRosterPage() {
     loading: boolean;
   }>({ open: false, enrollment: null, player: null, loading: false });
 
-  // Football equipment dialog state
-  const [equipmentDialog, setEquipmentDialog] = useState<{
-    open: boolean;
-    enrollment: Enrollment | null;
-    player: Player | null;
-    form: FootballEquipment;
-    loading: boolean;
-  }>({
-    open: false,
-    enrollment: null,
-    player: null,
-    form: { verifiedWeight: undefined, helmetSize: '', shoulderPadSize: '', pantSize: '', jerseySize: '', jerseyNumber: '', issuedAt: undefined },
-    loading: false,
-  });
-
   // Guarded queries
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || !activeSport || (!isAdmin && !isBoardMember)) return null;
@@ -574,30 +559,6 @@ export default function MasterRosterPage() {
       });
     } catch (error: any) {
       toast({ title: 'Verification failed', description: error.message, variant: 'destructive' });
-    }
-  };
-
-  const handleSaveEquipment = async () => {
-    if (!db || !equipmentDialog.enrollment) return;
-    const { enrollment, form } = equipmentDialog;
-    setEquipmentDialog(prev => ({ ...prev, loading: true }));
-    try {
-      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
-      const equipmentData: FootballEquipment = {
-        ...(form.verifiedWeight !== undefined && form.verifiedWeight !== null ? { verifiedWeight: Number(form.verifiedWeight) } : {}),
-        ...(form.helmetSize ? { helmetSize: form.helmetSize } : {}),
-        ...(form.shoulderPadSize ? { shoulderPadSize: form.shoulderPadSize } : {}),
-        ...(form.pantSize ? { pantSize: form.pantSize } : {}),
-        ...(form.jerseySize ? { jerseySize: form.jerseySize } : {}),
-        ...(form.jerseyNumber ? { jerseyNumber: form.jerseyNumber } : {}),
-        ...(form.issuedAt ? { issuedAt: form.issuedAt } : {}),
-      };
-      await updateDoc(enrollmentRef, { footballEquipment: equipmentData });
-      toast({ title: 'Equipment saved' });
-      setEquipmentDialog({ open: false, enrollment: null, player: null, form: { verifiedWeight: undefined, helmetSize: '', shoulderPadSize: '', pantSize: '', jerseySize: '', jerseyNumber: '', issuedAt: undefined }, loading: false });
-    } catch (error: any) {
-      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
-      setEquipmentDialog(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -1088,21 +1049,10 @@ export default function MasterRosterPage() {
                               )}
                               {activeSport === 'football' && (
                                 <DropdownMenuItem
-                                  onClick={() => setTimeout(() => setEquipmentDialog({
-                                    open: true,
-                                    enrollment: e,
-                                    player: p ?? null,
-                                    form: {
-                                      verifiedWeight: e.footballEquipment?.verifiedWeight,
-                                      helmetSize: e.footballEquipment?.helmetSize ?? '',
-                                      shoulderPadSize: e.footballEquipment?.shoulderPadSize ?? '',
-                                      pantSize: e.footballEquipment?.pantSize ?? '',
-                                      jerseySize: e.footballEquipment?.jerseySize ?? '',
-                                      jerseyNumber: e.footballEquipment?.jerseyNumber ?? '',
-                                      issuedAt: e.footballEquipment?.issuedAt,
-                                    },
-                                    loading: false,
-                                  }), 0)}
+                                  onClick={() => {
+                                    const playerName = p ? `${p.firstName} ${p.lastName}` : '';
+                                    router.push(`/admin/equipment?seasonId=${e.seasonId}&search=${encodeURIComponent(playerName)}`);
+                                  }}
                                 >
                                   <CheckCircle2 className="mr-2 h-4 w-4 text-primary" />
                                   Equipment & Sizes
@@ -1276,137 +1226,6 @@ export default function MasterRosterPage() {
             <Button onClick={handleSavePlayerEdit} disabled={editPlayerDialog.loading || !editPlayerDialog.form.firstName.trim() || !editPlayerDialog.form.lastName.trim()}>
               {editPlayerDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Pencil className="h-4 w-4 mr-2" />}
               Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Football Equipment Dialog */}
-      <Dialog open={equipmentDialog.open} onOpenChange={(open) => { if (!open && !equipmentDialog.loading) setEquipmentDialog({ open: false, enrollment: null, player: null, form: { verifiedWeight: undefined, helmetSize: '', shoulderPadSize: '', pantSize: '', jerseySize: '', jerseyNumber: '', issuedAt: undefined }, loading: false }); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Equipment & Sizes</DialogTitle>
-            <DialogDescription>
-              {equipmentDialog.player
-                ? `Record equipment sizes and weigh-in result for ${equipmentDialog.player.firstName} ${equipmentDialog.player.lastName}.`
-                : 'Record equipment sizes and weigh-in result.'}
-              {equipmentDialog.enrollment?.parentWeightEstimate && (
-                <span className="block mt-1 text-xs">Parent estimate: <strong>{equipmentDialog.enrollment.parentWeightEstimate} lbs</strong></span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="eq-verified-weight">Verified Weight (lbs)</Label>
-                <Input
-                  id="eq-verified-weight"
-                  type="number"
-                  min={40}
-                  max={350}
-                  className="rounded-xl"
-                  placeholder="e.g. 98"
-                  value={equipmentDialog.form.verifiedWeight ?? ''}
-                  onChange={e => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, verifiedWeight: e.target.value ? Number(e.target.value) : undefined } }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="eq-jersey-number">Jersey Number</Label>
-                <Input
-                  id="eq-jersey-number"
-                  className="rounded-xl"
-                  placeholder="e.g. 12"
-                  value={equipmentDialog.form.jerseyNumber ?? ''}
-                  onChange={e => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, jerseyNumber: e.target.value } }))}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="eq-helmet">Helmet Size</Label>
-                <Input
-                  id="eq-helmet"
-                  className="rounded-xl"
-                  placeholder="e.g. M, L, XL"
-                  value={equipmentDialog.form.helmetSize ?? ''}
-                  onChange={e => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, helmetSize: e.target.value } }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="eq-shoulder-pad">Shoulder Pad Size</Label>
-                <Input
-                  id="eq-shoulder-pad"
-                  className="rounded-xl"
-                  placeholder="e.g. Youth S, Adult M"
-                  value={equipmentDialog.form.shoulderPadSize ?? ''}
-                  onChange={e => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, shoulderPadSize: e.target.value } }))}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="eq-pant">Pant Size</Label>
-                <Input
-                  id="eq-pant"
-                  className="rounded-xl"
-                  placeholder="e.g. Youth S, Adult M"
-                  value={equipmentDialog.form.pantSize ?? ''}
-                  onChange={e => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, pantSize: e.target.value } }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="eq-jersey-size">Jersey Size</Label>
-                <Input
-                  id="eq-jersey-size"
-                  className="rounded-xl"
-                  placeholder="e.g. Youth M, Adult S"
-                  value={equipmentDialog.form.jerseySize ?? ''}
-                  onChange={e => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, jerseySize: e.target.value } }))}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/20 border">
-              <div className="flex-1">
-                <p className="text-sm font-medium">Equipment Kit Issued</p>
-                {equipmentDialog.form.issuedAt ? (
-                  <p className="text-xs text-green-700">Issued {new Date(equipmentDialog.form.issuedAt).toLocaleDateString()}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Not yet issued</p>
-                )}
-              </div>
-              {equipmentDialog.form.issuedAt ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl text-xs"
-                  onClick={() => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, issuedAt: undefined } }))}
-                >
-                  Mark Unissued
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="rounded-xl text-xs"
-                  onClick={() => setEquipmentDialog(prev => ({ ...prev, form: { ...prev.form, issuedAt: new Date().toISOString() } }))}
-                >
-                  Mark Issued
-                </Button>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEquipmentDialog({ open: false, enrollment: null, player: null, form: { verifiedWeight: undefined, helmetSize: '', shoulderPadSize: '', pantSize: '', jerseySize: '', jerseyNumber: '', issuedAt: undefined }, loading: false })}
-              disabled={equipmentDialog.loading}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleSaveEquipment} disabled={equipmentDialog.loading}>
-              {equipmentDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-              Save Equipment
             </Button>
           </DialogFooter>
         </DialogContent>
