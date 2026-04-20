@@ -267,13 +267,6 @@
       ]
     },
     {
-      "collectionGroup": "players",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "secondaryParentId", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "linkRequests",
       "queryScope": "COLLECTION",
       "fields": [
