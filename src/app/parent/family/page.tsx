@@ -100,7 +100,6 @@ export default function FamilyPage() {
     return query(
       collection(db, 'linkRequests'),
       where('requestingParentUid', '==', user.uid),
-      where('status', '==', 'pending'),
     );
   }, [db, user]);
 
@@ -346,14 +345,14 @@ export default function FamilyPage() {
         )}
 
         {/* Pending Link Requests */}
-        {outgoingRequests && outgoingRequests.length > 0 && (
+        {outgoingRequests && outgoingRequests.filter(r => r.status === 'pending').length > 0 && (
           <div className="mt-10">
             <h2 className="text-xl font-bold font-headline mb-1">Pending Access Requests</h2>
             <p className="text-muted-foreground text-sm mb-5">
               These players are waiting for the primary parent to approve your access.
             </p>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {outgoingRequests.map((req) => (
+              {outgoingRequests.filter(r => r.status === 'pending').map((req) => (
                 <Card key={req.id} className="border-none shadow-md overflow-hidden opacity-75">
                   <CardHeader className="bg-amber-50 pb-4">
                     <div className="flex items-center gap-4">

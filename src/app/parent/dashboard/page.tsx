@@ -262,10 +262,10 @@ export default function ParentDashboard() {
     return query(
       collection(db, 'linkRequests'),
       where('targetParentUids', 'array-contains', user.uid),
-      where('status', '==', 'pending'),
     );
   }, [db, user?.uid]);
-  const { data: incomingLinkRequests } = useCollection<LinkRequest>(incomingLinkRequestsQuery);
+  const { data: incomingLinkRequestsRaw } = useCollection<LinkRequest>(incomingLinkRequestsQuery);
+  const incomingLinkRequests = incomingLinkRequestsRaw?.filter(r => r.status === 'pending') ?? null;
 
   const playersNeedingAction = useMemo(() => {
     return players?.filter(p =>
