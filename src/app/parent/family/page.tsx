@@ -101,10 +101,23 @@ export default function FamilyPage() {
   }, [db, user]);
 
   const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
-  const { data: sharedPlayers } = useCollection<Player>(sharedPlayersQuery);
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: activeSeasons } = useCollection<Season>(activeSeasonsQuery);
   const { data: outgoingRequests } = useCollection<LinkRequest>(outgoingRequestsQuery);
+
+  // Fetch shared players via direct doc lookups from approved link requests.
+  // Avoids a collectionGroup query that requires a deployed collection-group index.
+  useEffect(() => {
+    if (!db || !outgoingRequests) return;
+    const approved = outgoingRequests.filter(r => r.status === 'approved');
+    if (approved.length === 0) { setSharedPlayers([]); return; }
+    Promise.all(
+      approved.map(r =>
+        getDoc(doc(db, 'userProfiles', r.primaryParentUid, 'players', r.playerId))
+          .then(snap => snap.exists() ? { ...(snap.data() as Player), id: snap.id } : null)
+      )
+    ).then(results => setSharedPlayers(results.filter(Boolean) as Player[]));
+  }, [outgoingRequests, db]);
 
   const registeredPlayerIds = useMemo(() => {
     const activeSeasonIds = new Set((activeSeasons ?? []).map(s => s.id));
