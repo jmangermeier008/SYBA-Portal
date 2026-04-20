@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
@@ -305,7 +305,7 @@ export default function ParentDashboard() {
         doc(db, 'userProfiles', req.primaryParentUid, 'players', req.playerId),
         {
           secondaryParentId: req.requestingParentUid,
-          parentIds: arrayUnion(req.requestingParentUid),
+          parentIds: [req.primaryParentUid, req.requestingParentUid],
         }
       );
       await updateDoc(doc(db, 'linkRequests', req.id), { status: 'approved' });
