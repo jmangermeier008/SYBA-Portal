@@ -265,6 +265,29 @@
         { "fieldPath": "read", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "players",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "secondaryParentId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "linkRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requestingParentUid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "linkRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetParentUids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
