@@ -11,11 +11,10 @@ export type LinkRequestResult =
   | { status: 'error'; message: string };
 
 /**
- * Searches for a player by exact name + DOB, then creates a LinkRequest document
- * if a match is found and the caller is not already linked.
- * Runs server-side via firebase-admin to prevent exposing player searches to clients.
- * Queries use single where() clauses (automatic indexes) and filter the rest in code
- * to avoid requiring composite index deployments.
+ * Searches for a player by exact name + DOB, then creates a LinkRequest document.
+ * Uses per-profile subcollection queries (COLLECTION scope, automatic indexes) instead
+ * of collectionGroup (requires a deployed COLLECTION_GROUP index). For a small league
+ * this is fast enough — profiles are fetched once, player lookups run in parallel.
  */
 export async function searchAndRequestLink(
   idToken: string,
@@ -29,25 +28,37 @@ export async function searchAndRequestLink(
 
     const db = getAdminFirestore();
 
-    // Single-field query — automatic index covers this. Filter firstName + DOB in code.
-    const playersSnap = await db
-      .collectionGroup('players')
-      .where('lastName', '==', lastName.trim())
-      .get();
+    // Fetch all user profiles (Admin SDK, no security rules applied).
+    // Run a lastName-filtered players query under each profile in parallel.
+    const profilesSnap = await db.collection('userProfiles').get();
 
-    const matchingDocs = playersSnap.docs.filter(d => {
-      const data = d.data();
-      return (
-        data.firstName === firstName.trim() &&
-        data.dateOfBirth === dateOfBirth
-      );
-    });
+    const matchResults = await Promise.all(
+      profilesSnap.docs.map(async (profileDoc) => {
+        const playersSnap = await db
+          .collection('userProfiles')
+          .doc(profileDoc.id)
+          .collection('players')
+          .where('lastName', '==', lastName.trim())
+          .get();
 
-    if (matchingDocs.length === 0) {
+        const match = playersSnap.docs.find(d => {
+          const data = d.data();
+          return (
+            data.firstName === firstName.trim() &&
+            data.dateOfBirth === dateOfBirth
+          );
+        });
+
+        return match ?? null;
+      })
+    );
+
+    const playerDoc = matchResults.find(Boolean) ?? null;
+
+    if (!playerDoc) {
       return { status: 'not_found' };
     }
 
-    const playerDoc = matchingDocs[0];
     const playerData = playerDoc.data();
     const playerId = playerDoc.id;
     const primaryParentUid = (playerData.primaryParentId as string) ?? '';
