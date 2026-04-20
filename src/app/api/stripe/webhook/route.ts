@@ -43,6 +43,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true });
     }
 
+    const rawAmounts = session.metadata?.enrollmentAmounts ?? '';
+    const enrollmentAmounts = rawAmounts
+      .split(',')
+      .map((a: string) => parseInt(a.trim(), 10))
+      .filter((n: number) => !isNaN(n));
+
     try {
       const db = getAdminFirestore();
       const playerNames: string[] = [];
@@ -82,12 +88,15 @@ export async function POST(req: Request) {
           continue;
         }
 
+        const enrollmentIndex = enrollmentIds.indexOf(enrollmentId);
+        const amountPaid = enrollmentAmounts[enrollmentIndex] ?? (session.amount_total ?? 0);
+
         await enrollmentRef.update({
           payment_status: 'paid',
           paymentStatus: 'paid',
           stripe_payment_id: session.payment_intent ?? session.id,
-          // Stripe amount_total is in cents — store as-is for consistency with registrationFeeAmount
-          gross_amount_paid: session.amount_total ?? 0,
+          registrationFeeAmount: amountPaid,
+          gross_amount_paid: amountPaid,
           updatedAt: new Date().toISOString(),
         });
 

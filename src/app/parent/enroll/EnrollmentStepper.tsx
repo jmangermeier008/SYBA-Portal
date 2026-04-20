@@ -15,8 +15,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
-import type { Player, Season, Division, EmergencyContact } from '@/types/scheduling';
-import { getLeagueAge, getSuggestedDivisions } from '@/lib/registration-logic';
+import type { Player, Season, Division, EmergencyContact, Enrollment } from '@/types/scheduling';
+import { getLeagueAge, getSuggestedDivisions, calculateCartPricing } from '@/lib/registration-logic';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,9 +167,15 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     return collection(db, 'seasons', state.seasonId, 'divisions');
   }, [db, state.seasonId]);
 
+  const pastEnrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles', user.uid, 'enrollments');
+  }, [db, user]);
+
   const { data: players } = useCollection<Player>(playersQuery);
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: rawDivisions } = useCollection<Division>(divisionsQuery);
+  const { data: allEnrollments } = useCollection<Enrollment>(pastEnrollmentsQuery);
 
   // Warn if no seasons surfaced — most likely cause is a missing Firestore composite index
   // on (sport, status, hasDivisions, name). The browser console error from Firestore will
@@ -571,6 +577,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           );
           if (!teamsSnap.empty) {
             resolvedTeamId = teamsSnap.docs[0].id;
+          } else {
+            throw new Error(
+              'Unable to complete registration: the team for this division could not be found. Please contact your league administrator.'
+            );
           }
         }
 
@@ -797,7 +807,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
   // ── Cart Review Screen ────────────────────────────────────────────────────
   if (cartView) {
-    const cartTotal = cart.filter(i => !i.isWaitlisted).reduce((sum, i) => sum + i.divisionFee, 0);
+    const selectedSeasonId = cart[0]?.seasonId ?? state.seasonId;
+    const pastPaidCount = (allEnrollments ?? []).filter(
+      e => e.seasonId === selectedSeasonId &&
+           (e.paymentStatus === 'paid' || (e as any).payment_status === 'paid' || e.paymentStatus === 'fee_waived'),
+    ).length;
+    const payableCartItems = cart.filter(i => !i.isWaitlisted);
+    const cartPrices = calculateCartPricing(pastPaidCount, payableCartItems.length);
+    const cartTotal = cartPrices.reduce((sum, p) => sum + p, 0);
 
     return (
       <div className="max-w-2xl mx-auto space-y-4">
@@ -817,9 +834,19 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 <div className="text-right">
                   {item.isWaitlisted ? (
                     <Badge variant="secondary">Waitlist</Badge>
-                  ) : (
-                    <span className="font-semibold text-primary">${(item.divisionFee / 100).toFixed(2)}</span>
-                  )}
+                  ) : (() => {
+                    const idx = payableCartItems.indexOf(item);
+                    const price = idx >= 0 ? cartPrices[idx] : item.divisionFee;
+                    const isDiscount = idx > 0 || pastPaidCount > 0;
+                    return (
+                      <div className="text-right">
+                        <span className="font-semibold text-primary">${(price / 100).toFixed(2)}</span>
+                        {isDiscount && (
+                          <p className="text-xs text-green-600 font-medium">Sibling Discount Applied</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <Button
                     variant="ghost"
                     size="icon"

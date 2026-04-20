@@ -75,3 +75,23 @@ export function getSuggestedDivisions(
 
   return matched.sort((a, b) => (a.minAge ?? 0) - (b.minAge ?? 0));
 }
+
+/**
+ * Returns an array of per-player registration fees (in cents) applying sibling pricing.
+ * $125 base for the first unregistered player in the season, $50 for each subsequent sibling.
+ *
+ * @param pastPaidEnrollmentsCount  Number of already-paid enrollments for this family in the same season.
+ * @param currentCartSize           Number of players in the current checkout batch.
+ * @returns                         Array of fees in cents, one per player in currentCartSize order.
+ */
+export function calculateCartPricing(
+  pastPaidEnrollmentsCount: number,
+  currentCartSize: number,
+): number[] {
+  const prices: number[] = [];
+  for (let i = 0; i < currentCartSize; i++) {
+    const totalPrior = pastPaidEnrollmentsCount + i;
+    prices.push(totalPrior === 0 ? 12500 : 5000);
+  }
+  return prices;
+}

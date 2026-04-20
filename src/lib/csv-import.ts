@@ -8,6 +8,8 @@ export interface ParsedGame {
   homeTeam?: string;
   awayTeam?: string;
   teamName?: string;
+  opponentName?: string;
+  locationType?: string;
   field: string;
   notes?: string;
   _row: number;
@@ -73,7 +75,7 @@ export function parseCSV(text: string): string[][] {
  * @param text - Raw CSV file content as a string
  * @returns Array of parsed game rows (unvalidated)
  */
-export function parseGameScheduleCSV(text: string): ParsedGame[] {
+export function parseGameScheduleCSV(text: string, sport?: string): ParsedGame[] {
   // C6: Strip UTF-8 BOM if present
   const cleanText = text.replace(/^\uFEFF/, '');
   const rows = parseCSV(cleanText);
@@ -83,10 +85,11 @@ export function parseGameScheduleCSV(text: string): ParsedGame[] {
   const col = (name: string) => headers.indexOf(name);
 
   // C7: Guard against missing required columns
-  const requiredCols = ['date', 'time', 'type', 'field'];
+  // Field is optional for football (away games have no stored field)
+  const requiredCols = sport === 'football' ? ['date', 'time', 'type'] : ['date', 'time', 'type', 'field'];
   for (const colName of requiredCols) {
     if (col(colName) === -1) {
-      throw new Error(`Missing required column: "${colName}". Check that your CSV header row includes Date, Time, Type, and Field.`);
+      throw new Error(`Missing required column: "${colName}". Check that your CSV header row includes Date, Time, Type${sport === 'football' ? '' : ', and Field'}.`);
     }
   }
 
@@ -94,11 +97,13 @@ export function parseGameScheduleCSV(text: string): ParsedGame[] {
     date: row[col('date')] ?? '',
     time: row[col('time')] ?? '',
     type: row[col('type')] ?? '',
-    homeTeam: row[col('hometeam')] ?? '',
-    awayTeam: row[col('awayteam')] ?? '',
-    teamName: row[col('teamname')] ?? '',
-    field: row[col('field')] ?? '',
-    notes: row[col('notes')] ?? '',
+    homeTeam: col('hometeam') !== -1 ? (row[col('hometeam')] ?? '') : '',
+    awayTeam: col('awayteam') !== -1 ? (row[col('awayteam')] ?? '') : '',
+    teamName: col('teamname') !== -1 ? (row[col('teamname')] ?? '') : '',
+    opponentName: col('opponentname') !== -1 ? (row[col('opponentname')] ?? '') : '',
+    locationType: col('locationtype') !== -1 ? (row[col('locationtype')] ?? '') : '',
+    field: col('field') !== -1 ? (row[col('field')] ?? '') : '',
+    notes: col('notes') !== -1 ? (row[col('notes')] ?? '') : '',
     _row: i + 2,
   }));
 }
@@ -115,11 +120,13 @@ export function parseGameScheduleCSV(text: string): ParsedGame[] {
 export function validateGameRows(
   rows: ParsedGame[],
   teamNames: string[],
-  fieldNames: string[]
+  fieldNames: string[],
+  sport?: string
 ): GameValidationResult {
   const errors: ValidationError[] = [];
   const teamSet = new Set(teamNames.map(t => t.toLowerCase()));
   const fieldSet = new Set(fieldNames.map(f => f.toLowerCase()));
+  const isFootball = sport === 'football';
 
   const valid = rows.filter(row => {
     let rowErrors = false;
@@ -136,31 +143,54 @@ export function validateGameRows(
       errors.push({ row: row._row, column: 'Type', message: 'Must be "Game" or "Practice"' });
       rowErrors = true;
     }
-    if (!row.field) {
-      errors.push({ row: row._row, column: 'Field', message: 'Field is required' });
-      rowErrors = true;
-    } else if (!fieldSet.has(row.field.toLowerCase())) {
-      errors.push({ row: row._row, column: 'Field', message: `"${row.field}" does not match any known field` });
-      rowErrors = true;
-    }
 
     const isGame = row.type?.toLowerCase() === 'game';
     const isPractice = row.type?.toLowerCase() === 'practice';
+    const isAwayGame = isFootball && isGame && row.locationType?.toLowerCase() === 'away';
 
-    if (isGame) {
-      if (!row.homeTeam) {
-        errors.push({ row: row._row, column: 'HomeTeam', message: 'Required for games' });
+    // Field: required for all rows except football away games (which use a free-text location)
+    if (!isAwayGame) {
+      if (!row.field) {
+        errors.push({ row: row._row, column: 'Field', message: 'Field is required' });
         rowErrors = true;
-      } else if (!teamSet.has(row.homeTeam.toLowerCase())) {
-        errors.push({ row: row._row, column: 'HomeTeam', message: `"${row.homeTeam}" does not match any known team` });
+      } else if (!fieldSet.has(row.field.toLowerCase())) {
+        errors.push({ row: row._row, column: 'Field', message: `"${row.field}" does not match any known field` });
         rowErrors = true;
       }
-      if (!row.awayTeam) {
-        errors.push({ row: row._row, column: 'AwayTeam', message: 'Required for games' });
-        rowErrors = true;
-      } else if (!teamSet.has(row.awayTeam.toLowerCase())) {
-        errors.push({ row: row._row, column: 'AwayTeam', message: `"${row.awayTeam}" does not match any known team` });
-        rowErrors = true;
+    }
+
+    if (isGame) {
+      if (isFootball) {
+        if (!row.teamName) {
+          errors.push({ row: row._row, column: 'TeamName', message: 'Required for football games' });
+          rowErrors = true;
+        } else if (!teamSet.has(row.teamName.toLowerCase())) {
+          errors.push({ row: row._row, column: 'TeamName', message: `"${row.teamName}" does not match any known team` });
+          rowErrors = true;
+        }
+        if (!row.opponentName) {
+          errors.push({ row: row._row, column: 'OpponentName', message: 'Required for football games' });
+          rowErrors = true;
+        }
+        if (row.locationType && !['home', 'away'].includes(row.locationType.toLowerCase())) {
+          errors.push({ row: row._row, column: 'LocationType', message: 'Must be "home" or "away"' });
+          rowErrors = true;
+        }
+      } else {
+        if (!row.homeTeam) {
+          errors.push({ row: row._row, column: 'HomeTeam', message: 'Required for games' });
+          rowErrors = true;
+        } else if (!teamSet.has(row.homeTeam.toLowerCase())) {
+          errors.push({ row: row._row, column: 'HomeTeam', message: `"${row.homeTeam}" does not match any known team` });
+          rowErrors = true;
+        }
+        if (!row.awayTeam) {
+          errors.push({ row: row._row, column: 'AwayTeam', message: 'Required for games' });
+          rowErrors = true;
+        } else if (!teamSet.has(row.awayTeam.toLowerCase())) {
+          errors.push({ row: row._row, column: 'AwayTeam', message: `"${row.awayTeam}" does not match any known team` });
+          rowErrors = true;
+        }
       }
     }
 
@@ -222,12 +252,19 @@ export function parseRosterCSV(text: string): ParsedRosterRow[] {
  * Triggers a browser download of the game schedule CSV template
  * with example rows showing the required column format.
  */
-export function downloadGameTemplate() {
-  const headers = 'Date,Time,Type,HomeTeam,AwayTeam,TeamName,Field,Notes';
-  const example1 = '2026-05-01,18:00,Game,Tigers,Bears,,Field 1,';
-  const example2 = '2026-05-02,17:30,Practice,,,Tigers,Field 2,Rain makeup';
-  const csv = [headers, example1, example2].join('\n');
-  downloadCSV(csv, 'game_schedule_template.csv');
+export function downloadGameTemplate(sport?: string) {
+  if (sport === 'football') {
+    const headers = 'Date,Time,Type,TeamName,OpponentName,LocationType,Field,Notes';
+    const example1 = '2026-09-05,18:00,Game,Sharpsville Pee Wees,Farrell Steelers,home,Veterans Field,';
+    const example2 = '2026-09-12,18:00,Game,Sharpsville Pee Wees,Sharon Panthers,away,Sharon High School,';
+    const example3 = '2026-09-07,16:00,Practice,Sharpsville Pee Wees,,,,';
+    downloadCSV([headers, example1, example2, example3].join('\n'), 'football_schedule_template.csv');
+  } else {
+    const headers = 'Date,Time,Type,HomeTeam,AwayTeam,TeamName,Field,Notes';
+    const example1 = '2026-05-01,18:00,Game,Tigers,Bears,,Field 1,';
+    const example2 = '2026-05-02,17:30,Practice,,,Tigers,Field 2,Rain makeup';
+    downloadCSV([headers, example1, example2].join('\n'), 'game_schedule_template.csv');
+  }
 }
 
 /**

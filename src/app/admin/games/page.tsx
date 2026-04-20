@@ -856,8 +856,8 @@ export default function AdminGamesPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    const parsed = parseGameScheduleCSV(text);
-    const result = validateGameRows(parsed, (teams ?? []).map(t => t.name), (fields ?? []).map(f => f.name));
+    const parsed = parseGameScheduleCSV(text, activeSport ?? undefined);
+    const result = validateGameRows(parsed, (teams ?? []).map(t => t.name), (fields ?? []).map(f => f.name), activeSport ?? undefined);
     setImportRows(result.valid);
     setImportErrors(result.errors);
     e.target.value = '';
@@ -871,17 +871,30 @@ export default function AdminGamesPage() {
       for (const row of importRows) {
         const id = crypto.randomUUID();
         const isGame = row.type.toLowerCase() === 'game';
-        const matchedField = (fields ?? []).find(f => f.name.toLowerCase() === row.field.toLowerCase());
+        const isFootballGame = activeSport === 'football' && isGame;
+        const isAwayGame = isFootballGame && row.locationType?.toLowerCase() === 'away';
+        // For away football games, field is a free-text location — no DB match expected
+        const matchedField = row.field ? (fields ?? []).find(f => f.name.toLowerCase() === row.field.toLowerCase()) : undefined;
         const payload: Record<string, any> = {
           type: isGame ? 'game' : 'practice', date: row.date, time: row.time,
-          fieldId: matchedField?.id ?? '', fieldName: matchedField?.name ?? row.field,
+          fieldId: isAwayGame ? '' : (matchedField?.id ?? ''),
+          fieldName: isAwayGame ? (row.field ?? '') : (matchedField?.name ?? row.field),
           notes: row.notes ?? '', status: 'scheduled', createdAt: Timestamp.now(),
+          sport: activeSport ?? undefined,
         };
         if (isGame) {
-          const home = (teams ?? []).find(t => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
-          const away = (teams ?? []).find(t => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
-          payload.homeTeamId = home?.id ?? ''; payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
-          payload.awayTeamId = away?.id ?? ''; payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
+          if (isFootballGame) {
+            const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
+            payload.teamId = team?.id ?? '';
+            payload.teamName = team?.name ?? row.teamName ?? '';
+            payload.opponentName = row.opponentName ?? '';
+            payload.locationType = (row.locationType ?? 'home').toLowerCase();
+          } else {
+            const home = (teams ?? []).find(t => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
+            const away = (teams ?? []).find(t => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
+            payload.homeTeamId = home?.id ?? ''; payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
+            payload.awayTeamId = away?.id ?? ''; payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
+          }
         } else {
           const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
           payload.teamId = team?.id ?? ''; payload.teamName = team?.name ?? row.teamName ?? '';
@@ -1530,7 +1543,7 @@ export default function AdminGamesPage() {
           <div className="space-y-4 py-2">
             <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
               <p className="text-sm text-muted-foreground">Download the CSV template to see the required format.</p>
-              <Button variant="outline" size="sm" className="rounded-xl" onClick={downloadGameTemplate}><Download className="mr-2 h-3 w-3" /> Template</Button>
+              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => downloadGameTemplate(activeSport ?? undefined)}><Download className="mr-2 h-3 w-3" /> Template</Button>
             </div>
             <div>
               <Label className="text-sm font-medium">Upload CSV File</Label>

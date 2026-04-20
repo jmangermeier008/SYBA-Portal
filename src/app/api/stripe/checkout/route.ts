@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
+import { calculateCartPricing } from '@/lib/registration-logic';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -54,6 +55,24 @@ export async function POST(req: Request) {
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
       let enrollmentSport = ''; // captured from first enrollment for success URL
 
+      // Determine sibling pricing — count paid enrollments for this family in the same season.
+      let pastPaidCount = 0;
+      try {
+        const firstSnap = await db.doc(`userProfiles/${userId}/enrollments/${enrollmentIds[0]}`).get();
+        const resolvedSeasonId: string = (firstSnap.data() as any)?.seasonId ?? '';
+        if (resolvedSeasonId) {
+          const paidSnap = await db
+            .collection(`userProfiles/${userId}/enrollments`)
+            .where('seasonId', '==', resolvedSeasonId)
+            .where('paymentStatus', 'in', ['paid', 'fee_waived'])
+            .get();
+          pastPaidCount = paidSnap.size;
+        }
+      } catch (e) {
+        console.warn('[stripe/checkout] Could not fetch past paid enrollments, defaulting to 0', e);
+      }
+      const prices = calculateCartPricing(pastPaidCount, enrollmentIds.length);
+
       for (const enrollmentId of enrollmentIds) {
         const enrollmentSnap = await db
           .doc(`userProfiles/${userId}/enrollments/${enrollmentId}`)
@@ -71,12 +90,6 @@ export async function POST(req: Request) {
         if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
           console.error(`[stripe/checkout] Enrollment ${enrollmentId} does not belong to user ${userId}`);
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
-
-        const fee = enrollment.registrationFeeAmount as number;
-
-        if (typeof fee !== 'number' || fee <= 0 || !isFinite(fee)) {
-          return NextResponse.json({ error: `Invalid fee on enrollment ${enrollmentId}` }, { status: 400 });
         }
 
         // Resolve player name for the line item description
@@ -109,7 +122,7 @@ export async function POST(req: Request) {
         lineItems.push({
           price_data: {
             currency: 'usd',
-            unit_amount: fee,
+            unit_amount: prices[enrollmentIds.indexOf(enrollmentId)],
             product_data: {
               name: `League Registration — ${divisionName || 'Division'}`,
               description: playerName ? `Player: ${playerName}` : undefined,
@@ -126,7 +139,7 @@ export async function POST(req: Request) {
         mode: 'payment',
         payment_method_types: ['card'],
         line_items: lineItems,
-        metadata: { enrollmentIds: enrollmentIdsStr, userId },
+        metadata: { enrollmentIds: enrollmentIdsStr, enrollmentAmounts: prices.join(','), userId },
         success_url: `${baseUrl}/parent/enroll/success?session_id={CHECKOUT_SESSION_ID}&enrollment_ids=${encodeURIComponent(enrollmentIdsStr)}${sportParam}`,
         cancel_url: `${baseUrl}/parent/enroll`,
       });
