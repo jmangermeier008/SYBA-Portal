@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
@@ -301,14 +301,14 @@ export default function ParentDashboard() {
   const handleApproveLinkRequest = async (req: LinkRequest) => {
     if (!db || !user) return;
     try {
-      const batch = writeBatch(db);
-      const playerRef = doc(db, 'userProfiles', req.primaryParentUid, 'players', req.playerId);
-      batch.update(playerRef, {
-        secondaryParentId: req.requestingParentUid,
-        parentIds: arrayUnion(req.requestingParentUid),
-      });
-      batch.update(doc(db, 'linkRequests', req.id), { status: 'approved' });
-      await batch.commit();
+      await updateDoc(
+        doc(db, 'userProfiles', req.primaryParentUid, 'players', req.playerId),
+        {
+          secondaryParentId: req.requestingParentUid,
+          parentIds: arrayUnion(req.requestingParentUid),
+        }
+      );
+      await updateDoc(doc(db, 'linkRequests', req.id), { status: 'approved' });
       toast({ title: "Access Approved", description: `${req.playerSnapshot.firstName} is now shared with the co-parent.` });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
