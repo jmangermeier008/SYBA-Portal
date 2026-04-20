@@ -25,8 +25,6 @@ service cloud.firestore {
     function isAdmin() {
       let data = getUserData();
       let roles = data.get('roles', []);
-      let sportRoles = data.get('sportRoles', {});
-      // isSiteAdmin is a superuser; also check sportRoles for any sport with Admin
       return isSiteAdmin() ||
              (isSignedIn() &&
               exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
