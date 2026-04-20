@@ -367,7 +367,8 @@ export interface Player {
   teamId?: string;
   division?: string;
   seasonId?: string;
-  parentIds?: string[]; // Supports two parents per child
+  parentIds?: string[]; // Supports two parents per child (legacy — use parentUids going forward)
+  parentUids?: string[]; // All parent/guardian UIDs who have access to this player
   primaryParentId?: string;   // UID of the parent whose subcollection this player lives under
   secondaryParentId?: string; // UID of linked second parent
   dateOfBirth: string;
@@ -387,6 +388,26 @@ export interface Player {
     verificationStatus?: 'pending' | 'approved' | 'rejected';
     rejectionReason?: string;    // Set when admin rejects; cleared on re-upload
   };
+}
+
+// ---------------------------------------------------------------------------
+// Link Requests  (top-level collection: linkRequests/{id})
+// ---------------------------------------------------------------------------
+
+/** A co-parent link request. Parent B creates one; Parent A approves or denies. */
+export interface LinkRequest {
+  id: string;
+  playerId: string;
+  primaryParentUid: string; // UID of the parent whose subcollection stores the player
+  requestingParentUid: string;
+  targetParentUids: string[]; // Current parentUids on the player — used for Firestore rules
+  status: 'pending' | 'approved' | 'denied';
+  playerSnapshot: {
+    firstName: string;
+    lastName: string;
+    dateOfBirth: string;
+  };
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

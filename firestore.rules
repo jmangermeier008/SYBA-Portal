@@ -361,6 +361,28 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
+    // Link Requests — co-parent access requests (no admin involvement)
+    //
+    // Create: the requesting parent creates the document (server action verifies).
+    // Read:   the requesting parent sees their own request; target parents see requests
+    //         addressed to them.
+    // Update: only target parents (the existing parent) can approve or deny.
+    // ---------------------------------------------------------------------------
+
+    match /linkRequests/{requestId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.requestingParentUid == request.auth.uid;
+      allow read: if isSignedIn() && (
+        resource.data.requestingParentUid == request.auth.uid ||
+        request.auth.uid in resource.data.targetParentUids
+      );
+      allow update: if isSignedIn() &&
+        request.auth.uid in resource.data.targetParentUids &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------------------
     // Audit Logs — immutable records written on every admin game mutation.
     // Board members can read and create; no one can update or delete.
     // ---------------------------------------------------------------------------

@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload } from 'lucide-react';
+import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -18,7 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent } from '@/types/scheduling';
+import type { CalendarEvent, LinkRequest } from '@/types/scheduling';
 
 function useCountdown(targetDate: string | undefined) {
   const [label, setLabel] = useState('');
@@ -256,6 +256,17 @@ export default function ParentDashboard() {
   }, [db, activeSport]);
   const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string }>(announcementsQuery);
 
+  // Incoming link requests — another parent requesting access to a player this parent owns
+  const incomingLinkRequestsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(
+      collection(db, 'linkRequests'),
+      where('targetParentUids', 'array-contains', user.uid),
+      where('status', '==', 'pending'),
+    );
+  }, [db, user?.uid]);
+  const { data: incomingLinkRequests } = useCollection<LinkRequest>(incomingLinkRequestsQuery);
+
   const playersNeedingAction = useMemo(() => {
     return players?.filter(p =>
       p.compliance?.verificationStatus === 'rejected' ||
@@ -286,6 +297,33 @@ export default function ParentDashboard() {
     if (hasRejected) return { label: 'Re-upload Document', href: '/parent/family', isPayment: false };
     return { label: 'Add Player', href: '/parent/enroll', isPayment: false };
   }, [hasPendingPayment, playersNeedingAction]);
+
+  const handleApproveLinkRequest = async (req: LinkRequest) => {
+    if (!db || !user) return;
+    try {
+      const batch = writeBatch(db);
+      const playerRef = doc(db, 'userProfiles', req.primaryParentUid, 'players', req.playerId);
+      batch.update(playerRef, {
+        secondaryParentId: req.requestingParentUid,
+        parentIds: arrayUnion(req.requestingParentUid),
+      });
+      batch.update(doc(db, 'linkRequests', req.id), { status: 'approved' });
+      await batch.commit();
+      toast({ title: "Access Approved", description: `${req.playerSnapshot.firstName} is now shared with the co-parent.` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    }
+  };
+
+  const handleDenyLinkRequest = async (req: LinkRequest) => {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'linkRequests', req.id), { status: 'denied' });
+      toast({ title: "Request Denied" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    }
+  };
 
   if (loadingUser) {
     return (
@@ -337,6 +375,44 @@ export default function ParentDashboard() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+          )}
+
+          {/* Incoming Co-Parent Link Requests */}
+          {incomingLinkRequests && incomingLinkRequests.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {incomingLinkRequests.map(req => (
+                <div key={req.id} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <UserCheck className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-blue-900">
+                        Co-Parent Access Request for {req.playerSnapshot.firstName} {req.playerSnapshot.lastName}
+                      </p>
+                      <p className="text-xs text-blue-700 mt-0.5">
+                        Another parent is requesting shared access to manage this player.
+                      </p>
+                      <div className="flex gap-2 mt-2">
+                        <Button
+                          size="sm"
+                          className="h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => handleApproveLinkRequest(req)}
+                        >
+                          <Check className="h-3 w-3 mr-1.5" /> Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-full border-blue-300 text-blue-700 hover:bg-blue-100"
+                          onClick={() => handleDenyLinkRequest(req)}
+                        >
+                          <X className="h-3 w-3 mr-1.5" /> Deny
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 

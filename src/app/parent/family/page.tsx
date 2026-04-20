@@ -11,10 +11,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2, User as UserIcon, Calendar, ChevronRight, Trophy, CheckCircle2, AlertTriangle, Pencil } from 'lucide-react';
+import { Loader2, User as UserIcon, Calendar, ChevronRight, Trophy, CheckCircle2, AlertTriangle, Pencil, UserPlus, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+import type { LinkRequest } from '@/types/scheduling';
+import { searchAndRequestLink } from './actions';
 
 interface Enrollment {
   id: string;
@@ -63,10 +65,14 @@ export default function FamilyPage() {
     dateOfBirth: '',
     medicalNotes: '',
   });
-
   const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([
     { name: '', phone: '', relationship: '' }
   ]);
+
+  // Link co-parent dialog state
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkForm, setLinkForm] = useState({ firstName: '', lastName: '', dateOfBirth: '' });
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
 
   const playersQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -88,12 +94,22 @@ export default function FamilyPage() {
     return query(collection(db, 'seasons'), where('status', '==', 'active'));
   }, [db]);
 
+  // Outgoing link requests — requests this parent submitted that are still pending
+  const outgoingRequestsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(
+      collection(db, 'linkRequests'),
+      where('requestingParentUid', '==', user.uid),
+      where('status', '==', 'pending'),
+    );
+  }, [db, user]);
+
   const { data: players, isLoading: loading } = useCollection<Player>(playersQuery);
   const { data: sharedPlayers } = useCollection<Player>(sharedPlayersQuery);
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: activeSeasons } = useCollection<Season>(activeSeasonsQuery);
+  const { data: outgoingRequests } = useCollection<LinkRequest>(outgoingRequestsQuery);
 
-  // Set of player IDs that have a paid enrollment in any currently active season
   const registeredPlayerIds = useMemo(() => {
     const activeSeasonIds = new Set((activeSeasons ?? []).map(s => s.id));
     const ids = new Set<string>();
@@ -152,13 +168,54 @@ export default function FamilyPage() {
     setEmergencyContacts([...emergencyContacts, { name: '', phone: '', relationship: '' }]);
   };
 
+  const handleLinkRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setLinkSubmitting(true);
+    try {
+      const idToken = await user.getIdToken();
+      const result = await searchAndRequestLink(
+        idToken,
+        linkForm.firstName,
+        linkForm.lastName,
+        linkForm.dateOfBirth,
+      );
+      if (result.status === 'created') {
+        toast({ title: "Request Sent", description: "The primary parent will be notified to approve your access." });
+        setLinkDialogOpen(false);
+        setLinkForm({ firstName: '', lastName: '', dateOfBirth: '' });
+      } else if (result.status === 'not_found') {
+        toast({ variant: "destructive", title: "Player Not Found", description: "No player matched that name and date of birth. Double-check the details." });
+      } else if (result.status === 'already_linked') {
+        toast({ title: "Already Linked", description: "You already have access to this player." });
+        setLinkDialogOpen(false);
+      } else if (result.status === 'already_pending') {
+        toast({ title: "Request Already Sent", description: "You already have a pending request for this player." });
+        setLinkDialogOpen(false);
+      } else {
+        toast({ variant: "destructive", title: "Error", description: result.message });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toast({ variant: "destructive", title: "Error", description: message });
+    } finally {
+      setLinkSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
-        <header className="mb-4 md:mb-6">
-          <h1 className="text-xl md:text-2xl font-bold font-headline">My Players</h1>
-          <p className="text-sm text-muted-foreground">View and edit player information.</p>
+        <header className="mb-4 md:mb-6 flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">My Players</h1>
+            <p className="text-sm text-muted-foreground">View and edit player information.</p>
+          </div>
+          <Button variant="outline" size="sm" className="rounded-full shrink-0" onClick={() => setLinkDialogOpen(true)}>
+            <UserPlus className="h-4 w-4 mr-2" />
+            I&apos;m a Co-Parent
+          </Button>
         </header>
 
         {loading ? (
@@ -287,6 +344,45 @@ export default function FamilyPage() {
             </div>
           </div>
         )}
+
+        {/* Pending Link Requests */}
+        {outgoingRequests && outgoingRequests.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-xl font-bold font-headline mb-1">Pending Access Requests</h2>
+            <p className="text-muted-foreground text-sm mb-5">
+              These players are waiting for the primary parent to approve your access.
+            </p>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {outgoingRequests.map((req) => (
+                <Card key={req.id} className="border-none shadow-md overflow-hidden opacity-75">
+                  <CardHeader className="bg-amber-50 pb-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-amber-200 flex items-center justify-center text-amber-800 font-bold text-xl">
+                        {req.playerSnapshot.firstName[0]}{req.playerSnapshot.lastName[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="font-headline">
+                          {req.playerSnapshot.firstName} {req.playerSnapshot.lastName}
+                        </CardTitle>
+                        <CardDescription className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> Born: {req.playerSnapshot.dateOfBirth}
+                        </CardDescription>
+                      </div>
+                      <Badge className="bg-amber-100 text-amber-700 border-amber-200 shrink-0">
+                        <Clock className="h-3 w-3 mr-1" /> Pending
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">
+                      Waiting for the primary parent to approve. You&apos;ll have full access once approved.
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Edit Player Dialog */}
@@ -398,6 +494,63 @@ export default function FamilyPage() {
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={saving}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Link Co-Parent Dialog */}
+      <Dialog open={linkDialogOpen} onOpenChange={(v) => {
+        setLinkDialogOpen(v);
+        if (!v) setLinkForm({ firstName: '', lastName: '', dateOfBirth: '' });
+      }}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-headline text-xl">Link a Shared Player</DialogTitle>
+            <DialogDescription>
+              Enter your child&apos;s exact name and date of birth as registered in the league. The primary parent will receive a request to approve your access.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleLinkRequest}>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="link-first">First Name</Label>
+                  <Input
+                    id="link-first"
+                    placeholder="Tommy"
+                    value={linkForm.firstName}
+                    onChange={(e) => setLinkForm({ ...linkForm, firstName: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="link-last">Last Name</Label>
+                  <Input
+                    id="link-last"
+                    placeholder="Jones"
+                    value={linkForm.lastName}
+                    onChange={(e) => setLinkForm({ ...linkForm, lastName: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="link-dob">Date of Birth</Label>
+                <Input
+                  id="link-dob"
+                  type="date"
+                  value={linkForm.dateOfBirth}
+                  onChange={(e) => setLinkForm({ ...linkForm, dateOfBirth: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setLinkDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={linkSubmitting}>
+                {linkSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Send Request'}
               </Button>
             </DialogFooter>
           </form>
