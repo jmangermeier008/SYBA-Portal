@@ -204,7 +204,9 @@ export default function GameDetailPage({
   if (!game) return null;
 
   const title =
-    game.type === 'game' && game.homeTeamName && game.awayTeamName
+    game.type === 'game' && game.opponentName && game.teamName
+      ? `${game.teamName} vs. ${game.opponentName}`
+      : game.type === 'game' && game.homeTeamName && game.awayTeamName
       ? `${game.homeTeamName} vs. ${game.awayTeamName}`
       : game.teamName
       ? `${game.teamName} Practice`
@@ -325,7 +327,7 @@ export default function GameDetailPage({
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">{game.homeTeamName || 'Home Team'}</Label>
+                      <Label className="text-xs text-muted-foreground">{game.homeTeamName || game.teamName || 'Home Team'}</Label>
                       <Input
                         type="number"
                         min="0"
@@ -336,7 +338,7 @@ export default function GameDetailPage({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">{game.awayTeamName || 'Away Team'}</Label>
+                      <Label className="text-xs text-muted-foreground">{game.awayTeamName || game.opponentName || 'Away Team'}</Label>
                       <Input
                         type="number"
                         min="0"
@@ -367,7 +369,7 @@ export default function GameDetailPage({
               ) : hasScore ? (
                 <div className="flex items-center gap-6">
                   <div className="text-center">
-                    <p className="text-xs text-muted-foreground mb-1">{game.homeTeamName || 'Home'}</p>
+                    <p className="text-xs text-muted-foreground mb-1">{game.homeTeamName || game.teamName || 'Home'}</p>
                     <p className={cn(
                       'text-4xl font-bold',
                       game.homeScore! > game.awayScore! ? 'text-green-600' : game.homeScore! < game.awayScore! ? 'text-red-500' : 'text-foreground'
@@ -377,7 +379,7 @@ export default function GameDetailPage({
                   </div>
                   <p className="text-xl text-muted-foreground font-bold">–</p>
                   <div className="text-center">
-                    <p className="text-xs text-muted-foreground mb-1">{game.awayTeamName || 'Away'}</p>
+                    <p className="text-xs text-muted-foreground mb-1">{game.awayTeamName || game.opponentName || 'Away'}</p>
                     <p className={cn(
                       'text-4xl font-bold',
                       game.awayScore! > game.homeScore! ? 'text-green-600' : game.awayScore! < game.homeScore! ? 'text-red-500' : 'text-foreground'
