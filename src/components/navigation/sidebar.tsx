@@ -737,7 +737,7 @@ export function Sidebar() {
   // Bottom tab bar tabs for parent and coach roles
   const parentTabs = [
     { href: '/parent/dashboard', icon: LayoutDashboard, label: 'Home', badge: false },
-    { href: '/parent/schedule', icon: Calendar, label: 'Schedule', badge: false },
+    { href: '/parent/schedules', icon: Calendar, label: 'Schedule', badge: false },
     { href: '/parent/family', icon: Users, label: 'Family', badge: false },
     { href: '/parent/notifications', icon: Bell, label: 'Inbox', badge: hasUnreadNotifs },
   ];
