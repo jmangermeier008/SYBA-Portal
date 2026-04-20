@@ -1,9 +1,9 @@
 
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { collection, collectionGroup, doc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, doc, updateDoc, query, where, getDoc } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -79,10 +79,7 @@ export default function FamilyPage() {
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user]);
 
-  const sharedPlayersQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collectionGroup(db, 'players'), where('secondaryParentId', '==', user.uid));
-  }, [db, user]);
+  const [sharedPlayers, setSharedPlayers] = useState<Player[]>([]);
 
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
