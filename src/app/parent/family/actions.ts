@@ -13,8 +13,9 @@ export type LinkRequestResult =
 /**
  * Searches for a player by exact name + DOB, then creates a LinkRequest document
  * if a match is found and the caller is not already linked.
- * Runs server-side via firebase-admin to prevent exposing multi-field player searches
- * to unauthenticated or unauthorized clients.
+ * Runs server-side via firebase-admin to prevent exposing player searches to clients.
+ * Queries use single where() clauses (automatic indexes) and filter the rest in code
+ * to avoid requiring composite index deployments.
  */
 export async function searchAndRequestLink(
   idToken: string,
@@ -28,19 +29,25 @@ export async function searchAndRequestLink(
 
     const db = getAdminFirestore();
 
+    // Single-field query — automatic index covers this. Filter firstName + DOB in code.
     const playersSnap = await db
       .collectionGroup('players')
-      .where('firstName', '==', firstName.trim())
       .where('lastName', '==', lastName.trim())
-      .where('dateOfBirth', '==', dateOfBirth)
-      .limit(1)
       .get();
 
-    if (playersSnap.empty) {
+    const matchingDocs = playersSnap.docs.filter(d => {
+      const data = d.data();
+      return (
+        data.firstName === firstName.trim() &&
+        data.dateOfBirth === dateOfBirth
+      );
+    });
+
+    if (matchingDocs.length === 0) {
       return { status: 'not_found' };
     }
 
-    const playerDoc = playersSnap.docs[0];
+    const playerDoc = matchingDocs[0];
     const playerData = playerDoc.data();
     const playerId = playerDoc.id;
     const primaryParentUid = (playerData.primaryParentId as string) ?? '';
@@ -58,16 +65,18 @@ export async function searchAndRequestLink(
       return { status: 'already_linked' };
     }
 
-    // Prevent duplicate pending requests
+    // Single-field query — filter playerId + status in code to avoid composite index
     const existingSnap = await db
       .collection('linkRequests')
-      .where('playerId', '==', playerId)
       .where('requestingParentUid', '==', requestingParentUid)
-      .where('status', '==', 'pending')
-      .limit(1)
       .get();
 
-    if (!existingSnap.empty) {
+    const alreadyPending = existingSnap.docs.some(d => {
+      const data = d.data();
+      return data.playerId === playerId && data.status === 'pending';
+    });
+
+    if (alreadyPending) {
       return { status: 'already_pending' };
     }
 
