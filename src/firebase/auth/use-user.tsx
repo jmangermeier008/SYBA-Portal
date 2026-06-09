@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, User, getAuth } from 'firebase/auth';
-import { doc, onSnapshot, updateDoc, Firestore } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, Firestore } from 'firebase/firestore';
 import { useAuth, useFirestore } from '../provider';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -39,6 +39,7 @@ export function useUser() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const healedProfileFor = useRef<string | null>(null);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (authUser) => {
@@ -62,6 +63,27 @@ export function useUser() {
         const data = snapshot.data();
         setProfile({ ...data, id: snapshot.id } as UserProfile);
       } else {
+        // Self-heal: a signup that created the Auth user but failed to write the
+        // profile doc would otherwise lock the account out forever (can't log in,
+        // can't re-sign up). Recreate a minimal Parent profile once per session.
+        // Accounts created in the last minute are skipped — their signup flow is
+        // still writing the real profile and must not be raced.
+        const createdAt = new Date(user.metadata.creationTime ?? 0).getTime();
+        const isFreshAccount = Date.now() - createdAt < 60_000;
+        if (!user.isAnonymous && !isFreshAccount && healedProfileFor.current !== user.uid) {
+          healedProfileFor.current = user.uid;
+          setDoc(userRef, {
+            id: user.uid,
+            email: user.email,
+            displayName: user.displayName ?? user.email ?? '',
+            role: 'Parent',
+            roles: ['Parent'],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }).catch((err) =>
+            console.error('[useUser] Failed to self-heal missing profile:', err)
+          );
+        }
         setProfile(null);
       }
       setLoading(false);

@@ -108,14 +108,8 @@ export default function ParentDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
         body: JSON.stringify({
-          enrollmentId: pendingEnrollment.id,
+          enrollmentIds: [pendingEnrollment.id],
           userId: user.uid,
-          fee: pendingEnrollment.registrationFeeAmount ?? 0,
-          divisionName: pendingEnrollment.divisionId ?? '',
-          playerName: (() => {
-            const p = players?.find(pl => pl.id === pendingEnrollment.playerId);
-            return p ? `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() : 'Player';
-          })(),
         }),
       });
       const data = await resp.json();

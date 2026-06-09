@@ -50,6 +50,13 @@ export async function POST(req: Request) {
       if (enrollmentIds.length === 0) {
         return NextResponse.json({ error: 'No enrollments provided' }, { status: 400 });
       }
+      // Stripe metadata values cap at 500 chars (~13 UUIDs); reject oversized carts
+      if (enrollmentIds.length > 10) {
+        return NextResponse.json(
+          { error: 'Too many registrations in one checkout. Please complete them in batches of 10 or fewer.' },
+          { status: 400 }
+        );
+      }
 
       const db = getAdminFirestore();
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
@@ -147,39 +154,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ url: session.url, sessionId: session.id });
     }
 
-    // ── Single-enrollment backward-compat path ───────────────────────────────
-    // Accepts enrollmentId, fee, divisionName, playerName directly (legacy stepper calls).
-    const { enrollmentId, fee, divisionName, playerName } = body;
-
-    if (!enrollmentId || !fee) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
-    }
-    if (typeof fee !== 'number' || fee <= 0 || !isFinite(fee)) {
-      return NextResponse.json({ error: 'Invalid fee amount' }, { status: 400 });
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            unit_amount: fee,
-            product_data: {
-              name: `SYBA Registration — ${divisionName ?? 'Division'}`,
-              description: playerName ? `Player: ${playerName}` : undefined,
-            },
-          },
-          quantity: 1,
-        },
-      ],
-      metadata: { enrollmentId, userId },
-      success_url: `${baseUrl}/parent/enroll/success?session_id={CHECKOUT_SESSION_ID}&enrollment_id=${enrollmentId}`,
-      cancel_url: `${baseUrl}/parent/enroll`,
-    });
-
-    return NextResponse.json({ url: session.url, sessionId: session.id });
+    // Legacy single-enrollment path (client-supplied fee) removed — all callers
+    // must send enrollmentIds so pricing is always resolved server-side.
+    return NextResponse.json({ error: 'Missing enrollmentIds' }, { status: 400 });
   } catch (error: any) {
     console.error('[stripe/checkout] Error:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });

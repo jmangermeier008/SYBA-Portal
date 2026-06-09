@@ -5,6 +5,9 @@ import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
+// Client-triggered fallback for when the Stripe webhook is delayed. The session
+// metadata — not the request body — is the source of truth for which
+// enrollments a payment covers and who it belongs to.
 export async function POST(req: Request) {
   try {
     const authHeader = req.headers.get('Authorization');
@@ -15,17 +18,10 @@ export async function POST(req: Request) {
     const tokenUid = decoded.uid;
 
     const body = await req.json();
-    const { sessionId, enrollmentIds, userId } = body as {
-      sessionId: string;
-      enrollmentIds: string[];
-      userId: string;
-    };
+    const { sessionId } = body as { sessionId: string };
 
-    if (!sessionId || !enrollmentIds?.length || !userId) {
+    if (!sessionId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
-    if (tokenUid !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Retrieve the session from Stripe to verify payment status
@@ -34,41 +30,56 @@ export async function POST(req: Request) {
       return NextResponse.json({ confirmed: false, payment_status: session.payment_status });
     }
 
+    // The session must belong to the caller
+    const userId = session.metadata?.userId;
+    if (!userId || userId !== tokenUid) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Enrollment IDs come from the session metadata set at checkout creation
+    const rawIds = session.metadata?.enrollmentIds ?? session.metadata?.enrollmentId ?? '';
+    const enrollmentIds = rawIds
+      .split(',')
+      .map((id: string) => id.trim())
+      .filter(Boolean);
+
+    if (enrollmentIds.length === 0) {
+      return NextResponse.json({ error: 'No enrollments on session' }, { status: 400 });
+    }
+
     const db = getAdminFirestore();
 
     for (const enrollmentId of enrollmentIds) {
       const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
-      const enrollmentSnap = await enrollmentRef.get();
 
-      if (!enrollmentSnap.exists) continue;
+      // Atomic mark-paid + registeredCount increment; the in-transaction read of
+      // stripe_payment_id prevents double-processing when the webhook lands
+      // concurrently.
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(enrollmentRef);
+        if (!snap.exists) return;
 
-      const enrollment = enrollmentSnap.data() as any;
+        const enrollment = snap.data() as any;
 
-      // Defense-in-depth: enrollment must belong to the requesting user
-      if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
-        console.error(`[stripe/confirm] Enrollment ${enrollmentId} does not belong to user ${userId}`);
-        continue;
-      }
+        if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
+          console.error(`[stripe/confirm] Enrollment ${enrollmentId} does not belong to user ${userId}`);
+          return;
+        }
+        if (enrollment.stripe_payment_id) return; // already processed
 
-      // Already paid — skip to avoid double side-effects
-      if (enrollment.stripe_payment_id) continue;
+        tx.update(enrollmentRef, {
+          payment_status: 'paid',
+          paymentStatus: 'paid',
+          stripe_payment_id: session.payment_intent ?? session.id,
+          gross_amount_paid: session.amount_total ?? 0,
+          updatedAt: new Date().toISOString(),
+        });
 
-      await enrollmentRef.update({
-        payment_status: 'paid',
-        paymentStatus: 'paid',
-        stripe_payment_id: session.payment_intent ?? session.id,
-        gross_amount_paid: session.amount_total ?? 0,
-        updatedAt: new Date().toISOString(),
+        if (enrollment.seasonId && enrollment.divisionId) {
+          const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
+          tx.set(divRef, { registeredCount: FieldValue.increment(1) }, { merge: true });
+        }
       });
-
-      // Increment registeredCount on the division (non-fatal)
-      if (enrollment.seasonId && enrollment.divisionId) {
-        db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`)
-          .update({ registeredCount: FieldValue.increment(1) })
-          .catch((err: any) =>
-            console.error('[stripe/confirm] registeredCount increment error:', err.message)
-          );
-      }
     }
 
     return NextResponse.json({ confirmed: true });

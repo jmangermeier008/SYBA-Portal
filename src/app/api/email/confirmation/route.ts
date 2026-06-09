@@ -1,10 +1,5 @@
 import { NextResponse } from 'next/server';
-
-function sportPrefix(sport?: string): string {
-  if (sport === 'baseball') return '[SYBA Baseball] ';
-  if (sport === 'football') return '[SYFA Football] ';
-  return '';
-}
+import { sendConfirmationEmail } from '@/lib/email';
 
 export async function POST(req: Request) {
   try {
@@ -14,35 +9,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing toEmail' }, { status: 400 });
     }
 
-    const prefix = sportPrefix(sport);
-    const subject = isWaitlisted
-      ? `${prefix}Waitlist Confirmation — ${seasonName} ${divisionName}`
-      : `${prefix}Registration Confirmed — ${seasonName} ${divisionName}`;
-
-    const body = isWaitlisted
-      ? `Hi! You've been added to the waitlist for ${divisionName} in ${seasonName} for ${playerName}. We'll reach out when a spot opens up.`
-      : feeWaived
-      ? `Hi! ${playerName}'s registration for ${divisionName} in ${seasonName} is complete. Your registration fee has been waived.`
-      : `Hi! ${playerName}'s registration for ${divisionName} in ${seasonName} is complete. Thank you for your payment!`;
-
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <onboarding@resend.dev>',
-        to: [toEmail],
-        subject,
-        text: body,
-      }),
+    const result = await sendConfirmationEmail({
+      toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, sport,
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      console.error('[email] Resend error:', err);
-      return NextResponse.json({ ok: false, error: err }, { status: 500 });
+    if (!result.ok) {
+      return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true });

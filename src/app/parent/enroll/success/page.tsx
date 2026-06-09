@@ -4,7 +4,7 @@ import { Suspense, use, useState, useEffect } from 'react';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 import { setActiveSport } from '@/hooks/use-active-sport';
 import type { Sport } from '@/types/scheduling';
-import { doc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 // access to the paid enrollment.
 // ---------------------------------------------------------------------------
 
-function ClaimAccountForm() {
+function ClaimAccountForm({ enrollmentIds }: { enrollmentIds: string[] }) {
   const auth = useAuth();
   const db = useFirestore();
   const { user } = useUser();
@@ -32,6 +32,7 @@ function ClaimAccountForm() {
   const [confirm, setConfirm] = useState('');
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
+  const [emailInUse, setEmailInUse] = useState(false);
 
   const handleClaim = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,9 +65,24 @@ function ClaimAccountForm() {
       setClaimed(true);
       toast({ title: 'Account created!', description: 'Your registration is now linked to your new account.' });
     } catch (error: any) {
+      if (error.code === 'auth/email-already-in-use') {
+        // The paid enrollment is stranded on this anonymous account — record it
+        // so an admin can reassign it to the user's existing account.
+        setEmailInUse(true);
+        if (db) {
+          addDoc(collection(db, 'claimFailures'), {
+            userId: user.uid,
+            attemptedEmail: email,
+            enrollmentIds,
+            reason: 'email-already-in-use',
+            resolved: false,
+            createdAt: new Date().toISOString(),
+          }).catch((err) => console.error('[claim] Failed to log claim failure:', err));
+        }
+      }
       const msg =
         error.code === 'auth/email-already-in-use'
-          ? 'That email is already in use. Try signing in instead.'
+          ? 'That email already has an account. See the note below — your registration is safe.'
           : error.code === 'auth/invalid-email'
           ? 'Please enter a valid email address.'
           : error.message;
@@ -103,6 +119,19 @@ function ClaimAccountForm() {
           if you close this page.
         </p>
       </div>
+
+      {emailInUse && (
+        <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-800">
+          <Mail className="h-4 w-4 mt-0.5 shrink-0" />
+          <p>
+            <strong>Your payment went through and your registration is safe.</strong> That email
+            already has an account, so we couldn&apos;t link this registration to it automatically.
+            We&apos;ve notified the league — they&apos;ll move this registration to your existing
+            account. You can also try a different email above, or contact the league and mention
+            enrollment ID{enrollmentIds.length > 1 ? 's' : ''}: <strong>{enrollmentIds.join(', ') || 'shown on this page'}</strong>.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="claimEmail">Email Address</Label>
@@ -208,6 +237,9 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
 
   // Anonymous user — prompt them to claim their account
   if (user?.isAnonymous) {
+    const claimIds = enrollmentIds
+      ? enrollmentIds.split(',').map(s => s.trim()).filter(Boolean)
+      : enrollmentId ? [enrollmentId] : [];
     return (
       <div className="max-w-lg mx-auto">
         <Card className="border-none shadow-xl">
@@ -221,7 +253,7 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
             </CardDescription>
           </CardHeader>
           <CardContent className="pb-8">
-            <ClaimAccountForm />
+            <ClaimAccountForm enrollmentIds={claimIds} />
           </CardContent>
         </Card>
       </div>

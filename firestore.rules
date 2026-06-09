@@ -108,7 +108,16 @@ service cloud.firestore {
     match /userProfiles/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
-      allow create: if isUser(userId) || isAdmin() || isSiteAdmin();
+      // Self-created profiles can only be plain Parents — elevated roles are
+      // granted by Admins after the fact. Prevents a new user creating their
+      // own profile pre-set with Admin privileges.
+      allow create: if isAdmin() || isSiteAdmin() || (
+        isUser(userId) &&
+        request.resource.data.get('roles', []).hasOnly(['Parent']) &&
+        request.resource.data.get('role', 'Parent') == 'Parent' &&
+        request.resource.data.get('isSiteAdmin', false) == false &&
+        !('sportRoles' in request.resource.data)
+      );
       // Users can update their own profile but cannot change their own roles.
       // Role/permission changes require Admin or Site Admin.
       allow update: if (isUser(userId) &&
@@ -137,7 +146,14 @@ service cloud.firestore {
 
       match /enrollments/{enrollmentId} {
         allow read: if isUser(userId) || isBoardMember();
-        allow create: if isUser(userId) || isAdmin();
+        // Parents may only create enrollments that are not yet paid — payment
+        // fields are set exclusively by the server (Stripe webhook/confirm).
+        allow create: if isAdmin() || (
+          isUser(userId) &&
+          request.resource.data.get('paymentStatus', 'pending_payment') in ['pending_payment', 'waitlisted'] &&
+          request.resource.data.get('payment_status', 'pending_payment') in ['pending_payment', 'waitlisted'] &&
+          request.resource.data.get('stripe_payment_id', '') == ''
+        );
         allow update: if (
           // Parent can update their own enrollment but not payment status, sport, or admin-only equipment fields
           (isUser(userId) &&
@@ -150,7 +166,13 @@ service cloud.firestore {
           (isBoardMemberForSport(resource.data.sport) &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['footballEquipment']));
-        allow delete: if isUser(userId) || isBoardMember();
+        // Parents may not delete paid/waived enrollments — that would destroy
+        // the payment record. Admins and board members handle refunds.
+        allow delete: if isAdmin() || isBoardMember() || (
+          isUser(userId) &&
+          !(resource.data.get('paymentStatus', '') in ['paid', 'fee_waived']) &&
+          !(resource.data.get('payment_status', '') in ['paid', 'fee_waived'])
+        );
       }
     }
 
@@ -389,6 +411,17 @@ service cloud.firestore {
       allow read: if isBoardMember();
       allow create: if isBoardMember();
       allow update, delete: if false;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Claim Failures — written when a paid anonymous user fails to claim their
+    // account (e.g. email already in use) so an admin can reassign the enrollment.
+    // ---------------------------------------------------------------------------
+
+    match /claimFailures/{failureId} {
+      allow create: if isSignedIn() && request.resource.data.get('userId', '') == request.auth.uid;
+      allow read: if isAdmin() || isBoardMember();
+      allow update, delete: if isAdmin();
     }
   }
 }

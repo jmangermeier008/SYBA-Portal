@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/lib/firebase-admin';
+import { sendConfirmationEmail } from '@/lib/email';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -49,60 +50,77 @@ export async function POST(req: Request) {
       .map((a: string) => parseInt(a.trim(), 10))
       .filter((n: number) => !isNaN(n));
 
-    try {
-      const db = getAdminFirestore();
-      const playerNames: string[] = [];
+    const db = getAdminFirestore();
+    const playerNames: string[] = [];
+    // Enrollments that could not be marked paid. Any entry here means money was
+    // taken without a complete registration record — return 500 so Stripe
+    // retries; already-processed enrollments are skipped by the idempotency guard.
+    const failures: string[] = [];
+    let newlyPaidCount = 0;
 
-      for (const enrollmentId of enrollmentIds) {
-        console.log(`[stripe/webhook] Processing for User: ${userId} | Enrollment: ${enrollmentId}`);
-        const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
-        const enrollmentSnap = await enrollmentRef.get();
+    for (let i = 0; i < enrollmentIds.length; i++) {
+      const enrollmentId = enrollmentIds[i];
+      console.log(`[stripe/webhook] Processing for User: ${userId} | Enrollment: ${enrollmentId}`);
+      const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
+      const amountPaid = enrollmentAmounts[i] ?? (session.amount_total ?? 0);
 
-        if (!enrollmentSnap.exists) {
-          console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId}`);
-          continue; // Skip missing enrollments rather than failing the whole webhook
-        }
+      let outcome: { status: string; enrollment?: any };
+      try {
+        // Mark paid + increment registeredCount atomically. The in-transaction
+        // read of stripe_payment_id makes the idempotency guard race-safe
+        // against /api/stripe/confirm and Stripe redeliveries.
+        outcome = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(enrollmentRef);
+          if (!snap.exists) return { status: 'missing' };
 
-        const enrollment = enrollmentSnap.data() as any;
+          const enrollment = snap.data() as any;
 
-        // Fix #2: Verify enrollment belongs to the user in the session metadata
-        if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
-          console.error(`[stripe/webhook] Enrollment ${enrollmentId} does not belong to user ${userId}`);
-          continue;
-        }
-
-        // Fix #1: Idempotency guard — if stripe_payment_id is already set this is a Stripe retry.
-        // Skip all writes to prevent double-incrementing registeredCount or re-marking as paid.
-        if (enrollment.stripe_payment_id) {
-          console.info(`[stripe/webhook] Duplicate event — enrollment ${enrollmentId} already paid, skipping`);
-          // Still collect player name for the email summary
-          if (enrollment.playerId) {
-            try {
-              const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
-              if (playerSnap.exists) {
-                const p = playerSnap.data() as any;
-                playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
-              }
-            } catch { /* non-fatal */ }
+          if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
+            return { status: 'forbidden', enrollment };
           }
-          continue;
-        }
+          if (enrollment.stripe_payment_id) {
+            return { status: 'already-paid', enrollment };
+          }
 
-        const enrollmentIndex = enrollmentIds.indexOf(enrollmentId);
-        const amountPaid = enrollmentAmounts[enrollmentIndex] ?? (session.amount_total ?? 0);
+          tx.update(enrollmentRef, {
+            payment_status: 'paid',
+            paymentStatus: 'paid',
+            stripe_payment_id: session.payment_intent ?? session.id,
+            registrationFeeAmount: amountPaid,
+            gross_amount_paid: amountPaid,
+            updatedAt: new Date().toISOString(),
+          });
 
-        await enrollmentRef.update({
-          payment_status: 'paid',
-          paymentStatus: 'paid',
-          stripe_payment_id: session.payment_intent ?? session.id,
-          registrationFeeAmount: amountPaid,
-          gross_amount_paid: amountPaid,
-          updatedAt: new Date().toISOString(),
+          if (enrollment.seasonId && enrollment.divisionId) {
+            const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
+            // set+merge so a missing division doc can't block the payment record
+            tx.set(divRef, { registeredCount: FieldValue.increment(1) }, { merge: true });
+          }
+
+          return { status: 'paid', enrollment };
         });
+      } catch (err: any) {
+        console.error(`[stripe/webhook] Transaction failed for enrollment ${enrollmentId}:`, err.message);
+        failures.push(enrollmentId);
+        continue;
+      }
 
+      if (outcome.status === 'missing') {
+        console.error(`[stripe/webhook] Enrollment ${enrollmentId} not found for user ${userId} — payment taken without record`);
+        failures.push(enrollmentId);
+        continue;
+      }
+      if (outcome.status === 'forbidden') {
+        console.error(`[stripe/webhook] Enrollment ${enrollmentId} does not belong to user ${userId}`);
+        continue;
+      }
+      if (outcome.status === 'already-paid') {
+        console.info(`[stripe/webhook] Duplicate event — enrollment ${enrollmentId} already paid, skipping`);
+      } else {
+        newlyPaidCount++;
         console.info(`[stripe/webhook] Payment confirmed for enrollment ${enrollmentId}`);
 
-        // Write in-app payment confirmation notification (fire-and-forget)
+        // Write in-app payment confirmation notification (fire-and-forget, cosmetic)
         db.collection('notifications').doc().set({
           userId,
           type: 'paymentConfirmed',
@@ -115,48 +133,36 @@ export async function POST(req: Request) {
         }).catch((err: any) =>
           console.error('[stripe/webhook] notification write error:', err.message)
         );
-
-        // Increment registeredCount on the division
-        if (enrollment.seasonId && enrollment.divisionId) {
-          const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
-          divRef.update({ registeredCount: FieldValue.increment(1) })
-            .catch((err: any) => console.error('[stripe/webhook] registeredCount increment error:', err.message));
-        }
-
-        // Collect player names for the confirmation email
-        if (enrollment.playerId) {
-          try {
-            const playerSnap = await db.doc(`userProfiles/${userId}/players/${enrollment.playerId}`).get();
-            if (playerSnap.exists) {
-              const p = playerSnap.data() as any;
-              playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
-            }
-          } catch {
-            // Non-fatal
-          }
-        }
       }
 
-      // Send a single confirmation email listing all registered players
-      try {
-        const [userSnap, firstEnrollmentSnap] = await Promise.all([
-          db.doc(`userProfiles/${userId}`).get(),
-          db.doc(`userProfiles/${userId}/enrollments/${enrollmentIds[0]}`).get(),
-        ]);
-
-        if (!userSnap.exists || !firstEnrollmentSnap.exists) {
-          console.error('[stripe/webhook] Missing user or enrollment snapshot for email, skipping');
-          return NextResponse.json({ received: true });
+      // Collect player names for the confirmation email (paid + already-paid alike,
+      // so a retried webhook still sends a complete email)
+      const playerId = outcome.enrollment?.playerId;
+      if (playerId) {
+        try {
+          const playerSnap = await db.doc(`userProfiles/${userId}/players/${playerId}`).get();
+          if (playerSnap.exists) {
+            const p = playerSnap.data() as any;
+            playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+          }
+        } catch {
+          // Non-fatal
         }
+      }
+    }
 
-        const firstEnrollment = firstEnrollmentSnap.data() as any;
-        const user = userSnap.data() as any;
+    // Send a single confirmation email listing all registered players (cosmetic —
+    // never fails the webhook). Skipped on pure redeliveries so parents aren't re-emailed.
+    if (newlyPaidCount > 0) try {
+      const [userSnap, firstEnrollmentSnap] = await Promise.all([
+        db.doc(`userProfiles/${userId}`).get(),
+        db.doc(`userProfiles/${userId}/enrollments/${enrollmentIds[0]}`).get(),
+      ]);
 
-        if (!firstEnrollment?.seasonId || !firstEnrollment?.divisionId) {
-          console.error('[stripe/webhook] Missing seasonId or divisionId on enrollment, skipping email');
-          return NextResponse.json({ received: true });
-        }
+      const firstEnrollment = firstEnrollmentSnap.exists ? (firstEnrollmentSnap.data() as any) : null;
+      const user = userSnap.exists ? (userSnap.data() as any) : null;
 
+      if (firstEnrollment?.seasonId && firstEnrollment?.divisionId) {
         const [seasonSnap, divisionSnap] = await Promise.all([
           db.doc(`seasons/${firstEnrollment.seasonId}`).get(),
           db.doc(`seasons/${firstEnrollment.seasonId}/divisions/${firstEnrollment.divisionId}`).get(),
@@ -165,24 +171,29 @@ export async function POST(req: Request) {
         const toEmail = session.customer_details?.email ?? user?.email ?? '';
         const playerName = playerNames.join(', ') || 'Your player';
 
-        fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/email/confirmation`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        if (toEmail) {
+          await sendConfirmationEmail({
             toEmail,
             playerName,
             seasonName: seasonSnap.data()?.name ?? '',
             divisionName: divisionSnap.data()?.name ?? '',
             isWaitlisted: false,
             feeWaived: firstEnrollment?.fee_waived ?? false,
-          }),
-        }).catch(err => console.error('[stripe/webhook] Email send error:', err));
-      } catch (emailFetchErr: any) {
-        console.error('[stripe/webhook] Failed to fetch data for email:', emailFetchErr.message);
+            sport: firstEnrollment?.sport,
+          });
+        }
+      } else {
+        console.error('[stripe/webhook] Missing seasonId or divisionId on enrollment, skipping email');
       }
-    } catch (err: any) {
-      console.error('[stripe/webhook] Firestore update error:', err.message);
-      return NextResponse.json({ error: err.message }, { status: 500 });
+    } catch (emailErr: any) {
+      console.error('[stripe/webhook] Email send error:', emailErr.message);
+    }
+
+    if (failures.length > 0) {
+      return NextResponse.json(
+        { error: `Failed to record payment for enrollments: ${failures.join(', ')}` },
+        { status: 500 }
+      );
     }
   }
 

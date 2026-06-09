@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup, writeBatch } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -539,13 +539,16 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       }
 
       // ── Write all Firestore documents ──────────────────────────────────
+      // All player + enrollment docs are committed in a single batch so a
+      // failure mid-cart can't leave an orphaned player without an enrollment.
+      const batch = writeBatch(db);
       for (const item of items) {
         // 1. Create player document if this is a new player
         // Use preGeneratedPlayerId so the storage path (set during upload) matches the doc path.
         let playerId = item.playerId ?? '';
         if (item.isNewPlayer) {
           playerId = item.preGeneratedPlayerId || crypto.randomUUID();
-          await setDoc(doc(db, 'userProfiles', user.uid, 'players', playerId), {
+          batch.set(doc(db, 'userProfiles', user.uid, 'players', playerId), {
             id: playerId,
             firstName: item.newPlayerFirst ?? '',
             lastName: item.newPlayerLast ?? '',
@@ -562,7 +565,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           });
         } else if (item.playerId && (item.birthCertUrl || item.physicalUrl)) {
           // Existing player — attach document URLs
-          await updateDoc(doc(db, 'userProfiles', user.uid, 'players', item.playerId), {
+          batch.update(doc(db, 'userProfiles', user.uid, 'players', item.playerId), {
             ...(item.birthCertUrl ? { birthCertificateUrl: item.birthCertUrl } : {}),
             ...(item.physicalUrl ? { physicalFormUrl: item.physicalUrl } : {}),
             'compliance.verificationStatus': 'pending',
@@ -628,11 +631,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             : {}),
         };
 
-        await setDoc(
+        batch.set(
           doc(db, 'userProfiles', user.uid, 'enrollments', enrollmentId),
           enrollmentData,
         );
       }
+
+      // Commit every player + enrollment write atomically
+      await batch.commit();
 
       // ── Handle waitlisted players ──────────────────────────────────────
       if (waitlistedItems.length > 0) {
