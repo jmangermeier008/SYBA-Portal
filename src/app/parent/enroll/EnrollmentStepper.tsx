@@ -612,7 +612,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           registrationFeeAmount: item.divisionFee,
           registered_at: now,
           enrollmentDate: now,
-          sport: activeSport ?? undefined,
+          // Firestore rejects undefined values — omit the field entirely or use ''
+          ...(activeSport ? { sport: activeSport } : {}),
           profileStatus: 'complete',
           weightHistory: [],
           ...(item.isWaitlisted ? { waitlisted_at: now } : {}),
@@ -623,9 +624,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             ? {
                 footballEquipment: {
                   helmetSize: item.helmetSize,
-                  shoulderPadSize: item.shoulderPadSize,
-                  pantSize: item.pantSize,
-                  jerseySize: item.equipmentJerseySize,
+                  shoulderPadSize: item.shoulderPadSize ?? '',
+                  pantSize: item.pantSize ?? '',
+                  jerseySize: item.equipmentJerseySize ?? '',
                 },
               }
             : {}),
