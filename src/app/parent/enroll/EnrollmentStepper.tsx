@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, collectionGroup, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, writeBatch } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -332,15 +332,42 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     return selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : 'Player';
   };
 
+  const playerFirstName = state.isNewPlayer
+    ? (state.newPlayerFirst.trim() || 'your player')
+    : (selectedPlayer?.firstName ?? 'your player');
+
+  // Mirrors the Next button's disabled conditions so a grayed-out button is
+  // never unexplained — returns the first missing requirement, in page order.
+  const nextBlockedReason = (): string | null => {
+    if (state.step === 1) {
+      if (!state.isNewPlayer && !state.playerId) return 'Select which child you are registering.';
+      if (state.isNewPlayer && (!state.newPlayerFirst || !state.newPlayerLast || !state.newPlayerDOB)) {
+        return "Enter your player's name and date of birth.";
+      }
+      if (!state.seasonId) return 'Choose a season.';
+      if (!state.divisionId) return 'Choose a division.';
+      if (isDivisionClosed()) return 'That division is closed — please choose a different one.';
+    }
+    if (state.step === 2) {
+      if (!emergencyContactsValid()) return 'Add at least one emergency contact (name, phone, and relationship).';
+      if (activeSport === 'football' && !state.parentWeightEstimate) return `Enter ${playerFirstName}'s estimated weight.`;
+      if (!state.birthCertUrl) return `Upload ${playerFirstName}'s birth certificate in the Documents section.`;
+    }
+    return null;
+  };
+
   // ── Duplicate check ───────────────────────────────────────────────────────
-  const checkDuplicate = async (): Promise<'none' | 'paid' | 'resumable'> => {
+  // Queries the parent's OWN enrollments subcollection — a collectionGroup
+  // query here is always permission-denied (rules require a parentUserId
+  // filter), which used to fail silently and let families pay twice.
+  const checkDuplicate = async (): Promise<'none' | 'paid' | 'resumable' | 'error'> => {
     // Skip duplicate check for new players (they don't have a playerId yet)
     if (state.isNewPlayer) return 'none';
-    if (!db || !state.playerId || !state.seasonId) return 'none';
+    if (!db || !user || !state.playerId || !state.seasonId) return 'none';
     setCheckingDuplicate(true);
     try {
       const q = query(
-        collectionGroup(db, 'enrollments'),
+        collection(db, 'userProfiles', user.uid, 'enrollments'),
         where('playerId', '==', state.playerId),
         where('seasonId', '==', state.seasonId)
       );
@@ -357,7 +384,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       return 'paid';
     } catch (err) {
       console.error('[enroll] Duplicate check error:', err);
-      return 'none';
+      toast({
+        variant: 'destructive',
+        title: "Couldn't verify this registration",
+        description: 'Something went wrong while checking for an existing registration. Please try again.',
+      });
+      return 'error';
     } finally {
       setCheckingDuplicate(false);
     }
@@ -368,7 +400,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     if (state.step === 1) {
       const result = await checkDuplicate();
       if (result === 'paid') { setIsDuplicate(true); return; }
-      if (result === 'resumable') return;
+      if (result === 'resumable' || result === 'error') return;
       setIsDuplicate(false);
       setResumableEnrollmentId(null);
       setState(prev => ({ ...prev, step: 2 }));
@@ -856,7 +888,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-destructive hover:bg-destructive/10 ml-1 h-7 w-7"
+                    className="text-destructive hover:bg-destructive/10 ml-1 h-9 w-9"
                     onClick={() => handleRemoveFromCart(i)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -918,7 +950,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       <Button
         variant="ghost"
         size="sm"
-        className="ml-auto rounded-full h-7 text-xs"
+        className="ml-auto rounded-full min-h-[44px] px-4 text-xs"
         onClick={() => setCartView(true)}
       >
         Review Cart
@@ -932,7 +964,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       {cartBanner}
 
       {/* Step Indicator */}
-      <div className="flex items-center mb-8 gap-2">
+      <div className="flex items-center mb-2 sm:mb-8 gap-2">
         {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => (
           <div key={s} className="flex items-center gap-2">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
@@ -952,8 +984,17 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         ))}
       </div>
 
-      <Card className="border-none shadow-xl flex flex-col max-h-[calc(100dvh-280px)] md:max-h-none">
-        <CardHeader className="bg-primary text-primary-foreground shrink-0">
+      {/* Mobile-only: name the current step — the per-step labels above are
+          hidden below the sm breakpoint, leaving bare numbered circles. */}
+      <p className="text-sm font-medium text-muted-foreground mb-6 sm:hidden">
+        Step {state.step} of {totalSteps} · {getStepLabel(state.step)}
+      </p>
+
+      {/* No internal max-height/scroll: on phones a nested scroll area slid form
+          fields underneath this blue header. The page is the only scroll container;
+          the footer is sticky instead so Back/Next stay reachable. */}
+      <Card className="border-none shadow-xl">
+        <CardHeader className="bg-primary text-primary-foreground">
           <CardTitle className="text-2xl font-headline">
             {getStepLabel(state.step)}
           </CardTitle>
@@ -962,7 +1003,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-6 pt-6 overflow-y-auto flex-1 min-h-0">
+        <CardContent className="space-y-6 pt-6">
 
           {/* ── STEP 1 ── */}
           {state.step === 1 && (
@@ -976,7 +1017,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="text-xs rounded-full h-7"
+                      className="text-xs rounded-full min-h-[44px] px-4"
                       onClick={() => setState(prev => ({ ...prev, isNewPlayer: !prev.isNewPlayer, playerId: '' }))}
                     >
                       {state.isNewPlayer ? 'Select existing player' : <><UserPlus className="mr-1 h-3 w-3" />Add new child</>}
@@ -1061,10 +1102,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
               {/* League age hint */}
               {leagueAge !== null && leagueAge !== 'N/A' && state.seasonId && (
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-                  League age for {selectedSeason?.ageCutoffDate ?? 'this season'}: <strong>{leagueAge}</strong>
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm">
+                  For this season, {playerFirstName} plays as {[8, 11, 18].includes(leagueAge as number) ? 'an' : 'a'}{' '}
+                  <strong>{leagueAge}-year-old</strong>
+                  {selectedSeason?.ageCutoffDate
+                    ? ` (their age on ${new Date(selectedSeason.ageCutoffDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })})`
+                    : ''}.
                   {divisions && rawDivisions && divisions.length < rawDivisions.length && (
-                    <span className="text-xs ml-1">(divisions filtered to best match)</span>
+                    <> We&apos;re showing the divisions that fit.</>
                   )}
                 </div>
               )}
@@ -1139,7 +1184,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   <Button
                     type="button"
                     size="sm"
-                    className="rounded-full w-full"
+                    className="rounded-full w-full min-h-[44px]"
                     onClick={handleResumePayment}
                     disabled={submitting}
                   >
@@ -1152,58 +1197,187 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           )}
 
           {/* ── STEP 2 ── */}
+          {/* Required items first (emergency contact, football weight, documents),
+              optional extras below — keeps the gating fields above the fold on phones. */}
           {state.step === 2 && (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Uniform # Preference <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Input
-                    className="rounded-xl"
-                    placeholder="e.g. 7"
-                    value={state.uniformNumberPreference}
-                    onChange={(e) => setState(prev => ({ ...prev, uniformNumberPreference: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Shirt Size <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Select value={state.shirtSize} onValueChange={(v) => setState(prev => ({ ...prev, shirtSize: v }))}>
-                    <SelectTrigger className="rounded-xl">
-                      <SelectValue placeholder="Select size" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {['YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL', 'A2XL'].map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-3">
+                <Label>Emergency Contact <span className="text-destructive">*</span></Label>
+                {state.emergencyContacts.map((contact, i) => (
+                  <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input
+                      className="rounded-xl"
+                      placeholder="Name"
+                      value={contact.name}
+                      onChange={(e) => updateEmergencyContact(i, 'name', e.target.value)}
+                    />
+                    <Input
+                      className="rounded-xl"
+                      placeholder="Phone"
+                      value={contact.phone}
+                      onChange={(e) => updateEmergencyContact(i, 'phone', e.target.value)}
+                    />
+                    <Input
+                      className="rounded-xl"
+                      placeholder="Relationship"
+                      value={contact.relationship}
+                      onChange={(e) => updateEmergencyContact(i, 'relationship', e.target.value)}
+                    />
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full min-h-[44px] px-4"
+                  onClick={() => setState(prev => ({
+                    ...prev,
+                    emergencyContacts: [...prev.emergencyContacts, { name: '', phone: '', relationship: '' }]
+                  }))}
+                >
+                  + Add Another Contact
+                </Button>
+                {!emergencyContactsValid() && state.emergencyContacts.some(c => c.name || c.phone || c.relationship) && (
+                  <p className="text-xs text-destructive">
+                    Please fill in all three fields (name, phone, relationship) for each contact.
+                  </p>
+                )}
               </div>
 
               {activeSport === 'football' && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="weightEstimate">
-                      Weight Estimate <span className="text-destructive">*</span>
-                    </Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="weightEstimate"
-                        className="rounded-xl"
-                        type="number"
-                        min={40}
-                        max={350}
-                        placeholder="e.g. 95"
-                        value={state.parentWeightEstimate}
-                        onChange={(e) => setState(prev => ({ ...prev, parentWeightEstimate: e.target.value }))}
-                      />
-                      <span className="text-sm text-muted-foreground whitespace-nowrap">lbs</span>
+                <div className="space-y-2">
+                  <Label htmlFor="weightEstimate">
+                    Weight Estimate <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="weightEstimate"
+                      className="rounded-xl"
+                      type="number"
+                      min={40}
+                      max={350}
+                      placeholder="e.g. 95"
+                      value={state.parentWeightEstimate}
+                      onChange={(e) => setState(prev => ({ ...prev, parentWeightEstimate: e.target.value }))}
+                    />
+                    <span className="text-sm text-muted-foreground whitespace-nowrap">lbs</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Parent estimate — will be verified by league staff at equipment distribution.
+                  </p>
+                </div>
+              )}
+
+              {/* ── Documents ── */}
+              <div className="space-y-3 border-t pt-4">
+                <div>
+                  <Label className="text-sm font-bold uppercase tracking-wider">
+                    Documents
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Birth certificate is required. Physical form can be uploaded after enrollment.
+                  </p>
+                </div>
+
+                {/* Birth Certificate */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
+                  <div className="flex items-center gap-3">
+                    {state.birthCertUrl ? (
+                      <FileCheck2 className="h-5 w-5 text-green-600 shrink-0" />
+                    ) : birthCertUploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+                    ) : (
+                      <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium">
+                        Birth Certificate
+                        <span className="ml-1.5 rounded-full bg-destructive/10 text-destructive text-[10px] font-semibold px-1.5 py-0.5 align-middle">Required</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {state.birthCertUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Parent estimate — will be verified by league staff at equipment distribution.
-                    </p>
+                  </div>
+                  <Label className={`cursor-pointer text-xs font-medium px-4 min-h-[44px] inline-flex items-center rounded-full border transition-colors ${state.birthCertUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
+                    {state.birthCertUrl ? 'Replace' : 'Upload'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      disabled={birthCertUploading || physicalUploading}
+                      onChange={(e) => handleDocUpload('birth_cert', e)}
+                    />
+                  </Label>
+                </div>
+
+                {/* Physical Form */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
+                  <div className="flex items-center gap-3">
+                    {state.physicalUrl ? (
+                      <FileCheck2 className="h-5 w-5 text-green-600 shrink-0" />
+                    ) : physicalUploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+                    ) : (
+                      <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium">Physical Form <span className="text-xs font-normal text-muted-foreground">(Optional)</span></p>
+                      <p className="text-xs text-muted-foreground">
+                        {state.physicalUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
+                      </p>
+                    </div>
+                  </div>
+                  <Label className={`cursor-pointer text-xs font-medium px-4 min-h-[44px] inline-flex items-center rounded-full border transition-colors ${state.physicalUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
+                    {state.physicalUrl ? 'Replace' : 'Upload'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      disabled={birthCertUploading || physicalUploading}
+                      onChange={(e) => handleDocUpload('physical', e)}
+                    />
+                  </Label>
+                </div>
+              </div>
+
+              {/* ── Optional extras ── */}
+              <div className="space-y-6 border-t pt-4">
+                <div>
+                  <Label className="text-sm font-bold uppercase tracking-wider">Optional</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Helps us prepare uniforms and gear — you can skip these.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Uniform # Preference</Label>
+                    <Input
+                      className="rounded-xl"
+                      placeholder="e.g. 7"
+                      value={state.uniformNumberPreference}
+                      onChange={(e) => setState(prev => ({ ...prev, uniformNumberPreference: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-bold uppercase tracking-wider">Equipment Sizing <span className="text-muted-foreground text-xs font-normal normal-case">(optional — helps us prepare gear)</span></Label>
+                    <Label>Shirt Size</Label>
+                    <Select value={state.shirtSize} onValueChange={(v) => setState(prev => ({ ...prev, shirtSize: v }))}>
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue placeholder="Select size" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {['YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL', 'A2XL'].map(s => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {activeSport === 'football' && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-bold uppercase tracking-wider">Equipment Sizing</Label>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Helmet</Label>
@@ -1246,129 +1420,16 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       </div>
                     </div>
                   </div>
-                </>
-              )}
-
-              <div className="space-y-2">
-                <Label>Medical Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                <Input
-                  className="rounded-xl"
-                  placeholder="Allergies, conditions, etc."
-                  value={state.medicalNotes}
-                  onChange={(e) => setState(prev => ({ ...prev, medicalNotes: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-3">
-                <Label>Emergency Contact <span className="text-destructive">*</span></Label>
-                {state.emergencyContacts.map((contact, i) => (
-                  <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Input
-                      className="rounded-xl"
-                      placeholder="Name"
-                      value={contact.name}
-                      onChange={(e) => updateEmergencyContact(i, 'name', e.target.value)}
-                    />
-                    <Input
-                      className="rounded-xl"
-                      placeholder="Phone"
-                      value={contact.phone}
-                      onChange={(e) => updateEmergencyContact(i, 'phone', e.target.value)}
-                    />
-                    <Input
-                      className="rounded-xl"
-                      placeholder="Relationship"
-                      value={contact.relationship}
-                      onChange={(e) => updateEmergencyContact(i, 'relationship', e.target.value)}
-                    />
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-full"
-                  onClick={() => setState(prev => ({
-                    ...prev,
-                    emergencyContacts: [...prev.emergencyContacts, { name: '', phone: '', relationship: '' }]
-                  }))}
-                >
-                  + Add Another Contact
-                </Button>
-                {!emergencyContactsValid() && state.emergencyContacts.some(c => c.name || c.phone || c.relationship) && (
-                  <p className="text-xs text-destructive">
-                    Please fill in all three fields (name, phone, relationship) for each contact.
-                  </p>
                 )}
-              </div>
 
-              {/* ── Documents ── */}
-              <div className="space-y-3 border-t pt-4">
-                <div>
-                  <Label className="text-sm font-bold uppercase tracking-wider">
-                    Documents
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Birth certificate is required. Physical form can be uploaded after enrollment.
-                  </p>
-                </div>
-
-                {/* Birth Certificate */}
-                <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
-                  <div className="flex items-center gap-3">
-                    {state.birthCertUrl ? (
-                      <FileCheck2 className="h-5 w-5 text-green-600 shrink-0" />
-                    ) : birthCertUploading ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-                    ) : (
-                      <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
-                    )}
-                    <div>
-                      <p className="text-sm font-medium">Birth Certificate</p>
-                      <p className="text-xs text-muted-foreground">
-                        {state.birthCertUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
-                      </p>
-                    </div>
-                  </div>
-                  <Label className={`cursor-pointer text-xs font-medium px-3 py-2.5 rounded-full border transition-colors ${state.birthCertUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
-                    {state.birthCertUrl ? 'Replace' : 'Upload'}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      disabled={birthCertUploading || physicalUploading}
-                      onChange={(e) => handleDocUpload('birth_cert', e)}
-                    />
-                  </Label>
-                </div>
-
-                {/* Physical Form */}
-                <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/20 border">
-                  <div className="flex items-center gap-3">
-                    {state.physicalUrl ? (
-                      <FileCheck2 className="h-5 w-5 text-green-600 shrink-0" />
-                    ) : physicalUploading ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-                    ) : (
-                      <Upload className="h-5 w-5 text-muted-foreground shrink-0" />
-                    )}
-                    <div>
-                      <p className="text-sm font-medium">Physical Form <span className="text-xs font-normal text-muted-foreground">(Optional)</span></p>
-                      <p className="text-xs text-muted-foreground">
-                        {state.physicalUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
-                      </p>
-                    </div>
-                  </div>
-                  <Label className={`cursor-pointer text-xs font-medium px-3 py-2.5 rounded-full border transition-colors ${state.physicalUrl ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'}`}>
-                    {state.physicalUrl ? 'Replace' : 'Upload'}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      disabled={birthCertUploading || physicalUploading}
-                      onChange={(e) => handleDocUpload('physical', e)}
-                    />
-                  </Label>
+                <div className="space-y-2">
+                  <Label>Medical Notes</Label>
+                  <Input
+                    className="rounded-xl"
+                    placeholder="Allergies, conditions, etc."
+                    value={state.medicalNotes}
+                    onChange={(e) => setState(prev => ({ ...prev, medicalNotes: e.target.value }))}
+                  />
                 </div>
               </div>
             </>
@@ -1440,6 +1501,13 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   </div>
                 )}
 
+                {!state.isWaitlisted && (
+                  <p className="text-xs text-muted-foreground px-1">
+                    Registering brothers &amp; sisters? Each additional player this season is $50 —
+                    use &ldquo;Register Another Child&rdquo; below before paying.
+                  </p>
+                )}
+
                 <div className="flex items-start gap-3 p-4 bg-muted/30 rounded-xl">
                   <ShieldCheck className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
                   <p className="text-xs text-muted-foreground">
@@ -1451,7 +1519,15 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           )}
         </CardContent>
 
-        <CardFooter className="flex gap-3 justify-between shrink-0 bg-card border-t shadow-sm rounded-b-xl">
+        {/* Sticky above the mobile bottom tab bar (h-14); explains a disabled
+            Next instead of leaving the parent staring at a gray button. */}
+        <CardFooter className="flex flex-col gap-3 bg-card border-t shadow-sm rounded-b-xl pt-4 sticky bottom-14 md:bottom-0 z-10">
+          {state.step < totalSteps && !checkingDuplicate && nextBlockedReason() && (
+            <p className="w-full text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {nextBlockedReason()}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3 justify-between w-full">
           {state.step > 1 ? (
             <Button type="button" variant="outline" className="rounded-xl min-h-[44px] px-5" onClick={handleBack} disabled={submitting}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back
@@ -1494,7 +1570,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 onClick={handleAddAnotherPlayer}
                 disabled={submitting}
               >
-                <UserPlus className="mr-1 h-4 w-4" /> Add Player
+                <UserPlus className="mr-1 h-4 w-4" /> Register Another Child
               </Button>
               <Button
                 type="button"
@@ -1514,6 +1590,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               </Button>
             </div>
           )}
+          </div>
         </CardFooter>
       </Card>
     </div>

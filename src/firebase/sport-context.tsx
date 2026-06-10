@@ -164,10 +164,13 @@ export function SportProvider({ children }: { children: ReactNode }) {
       ) : !user ? (
         // Not logged in — pass through; auth pages and home page handle their own flow
         children
-      ) : !activeSport && pathname !== '/' && !pathname.startsWith('/parent/enroll') ? (
+      ) : !activeSport && pathname !== '/' && !pathname.startsWith('/parent/enroll') && !pathname.startsWith('/signup') && !pathname.startsWith('/login') ? (
         // Logged in, no sport, not on home page — redirect to home page to select sport.
-        // Guard excludes '/' (infinite-loop prevention) and '/parent/enroll' (guest
-        // registration: anonymous sign-in is in flight and sport is still being resolved).
+        // Guard excludes '/' (infinite-loop prevention), '/parent/enroll' (guest
+        // registration: anonymous sign-in is in flight and sport is still being resolved),
+        // and '/signup' + '/login' — those pages write the sport from their URL param and
+        // push their own redirect; gating them fires mid-signup, before the sport is
+        // written, and swallows ?redirect=/parent/enroll.
         <RedirectToHome />
       ) : (
         children

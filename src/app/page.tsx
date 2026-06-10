@@ -235,11 +235,6 @@ export default function Home() {
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
         <div className="space-y-1">
-          {publicSport && registrationBanner && !registrationBanner.closed && (
-            <p className="text-xs font-semibold text-primary uppercase tracking-widest mb-1">
-              {registrationBanner.text}
-            </p>
-          )}
           <h1 className="text-2xl font-bold font-headline tracking-tight text-primary">
             {publicSport ? SPORT_CONFIG[publicSport].label : 'The League'}
           </h1>
@@ -248,20 +243,28 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Sign In / Register — only after sport selection */}
+        {/* Register / Sign In — only after sport selection. Register Player is
+            the primary action: on day one nearly every visitor is here to register. */}
         {publicSport && (
-          <div className="flex gap-3 justify-center">
-            <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
-              <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
-            </Button>
-            <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
-              <Link href={user
-                ? `/parent/enroll?sport=${publicSport}`
-                : `/login?redirect=/parent/enroll&sport=${publicSport}`
-              }>
-                Register Player
-              </Link>
-            </Button>
+          <div className="w-full space-y-4">
+            <div className="flex gap-3 justify-center">
+              <Button size="lg" className="rounded-full px-8 shadow-md shadow-primary/20" asChild>
+                <Link href={user
+                  ? `/parent/enroll?sport=${publicSport}`
+                  : `/login?redirect=/parent/enroll&sport=${publicSport}`
+                }>
+                  Register Player
+                </Link>
+              </Button>
+              <Button variant="outline" size="lg" className="rounded-full px-8" asChild>
+                <Link href={`/login?sport=${publicSport}`}>Sign In</Link>
+              </Button>
+            </div>
+            {registrationBanner && !registrationBanner.closed && (
+              <div className="w-full rounded-xl bg-primary/10 border border-primary/20 px-4 py-2.5 text-sm font-medium text-primary text-balance">
+                {registrationBanner.text}
+              </div>
+            )}
           </div>
         )}
       </div>

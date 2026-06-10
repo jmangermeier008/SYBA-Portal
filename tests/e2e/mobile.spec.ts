@@ -101,15 +101,7 @@ for (const vp of VIEWPORTS) {
       expect(cta).not.toBeNull();
     });
 
-    /**
-     * KNOWN FINDINGS (audit run 2026-06-09): this audit currently fails on
-     * every viewport — text inputs and select triggers are 40px tall
-     * (shadcn h-10 default), the sidebar "Collapse" button is 32px, and
-     * several small pill buttons (e.g. "Add new child", h-7 = 28px) are well
-     * under the 44px minimum. Documented as Phase 2 UX proposals; re-enable
-     * this test once tap-target sizes are addressed.
-     */
-    test.fixme('touch-target audit: interactive elements meet 44×44px on key screens', async ({ page }) => {
+    test('touch-target audit: interactive elements meet 44×44px on key screens', async ({ page }) => {
       const failures: string[] = [];
 
       await page.goto('/login?sport=baseball');

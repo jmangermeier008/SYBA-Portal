@@ -154,8 +154,8 @@ function LoginContent() {
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-headline">Portal Login</CardTitle>
-            <CardDescription>Enter your credentials to access your dashboard</CardDescription>
+            <CardTitle className="text-2xl font-headline">Welcome back</CardTitle>
+            <CardDescription>Sign in to manage your player&apos;s season</CardDescription>
           </CardHeader>
           <form onSubmit={handleLogin}>
             <CardContent className="space-y-4">

@@ -63,23 +63,20 @@ scroll on home/login/signup/forgot-password/enroll steps 1–2/dashboard/
 confirmation; sign-in CTA above the fold; focused inputs not clipped;
 44×44px touch-target audit (currently `fixme`, see below).
 
-## Known app bugs found by this suite (kept as `test.fixme`)
+## Bugs found by this suite — fixed 2026-06-09, now regression-guarded
 
-1. **Signup loses `?redirect=/parent/enroll`** (`registration.spec.ts`).
-   The SportProvider gate fires on `/signup` the moment auth resolves —
-   before the sport is written and the redirect pushed — bouncing new parents
-   to the dashboard instead of the registration form.
-2. **Duplicate-enrollment guard never fires** (`registration.spec.ts`).
-   `checkDuplicate()` queries `collectionGroup('enrollments')` by
-   playerId+seasonId, but Firestore rules only allow reads filtered by
-   `parentUserId == auth.uid`. The permission error is swallowed → parents
-   can register and **pay twice** for the same child; the in-stepper
-   "Resume Payment" banner can also never appear.
-3. **Touch targets below 44×44px** (`mobile.spec.ts` audit). All text inputs
-   and select triggers are 40px tall; several pill buttons are 28–32px.
-
-Un-`fixme` each test when the corresponding fix lands — they are written to
-pass against the corrected behavior.
+1. **Signup lost `?redirect=/parent/enroll`** — the SportProvider gate fired
+   on `/signup` mid-account-creation. Fixed by excluding `/signup` and
+   `/login` from the gate. Guard: `registration.spec.ts › signup with
+   redirect lands directly on the enrollment form`.
+2. **Duplicate-enrollment guard never fired** (families could pay twice) —
+   the check used a collectionGroup query the security rules reject, and
+   swallowed the error. Fixed by querying the parent's own enrollments
+   subcollection and surfacing failures. Guard: `registration.spec.ts ›
+   duplicate registration … is blocked`.
+3. **Touch targets below 44×44px** — inputs/selects raised to `h-11`,
+   small pills and sidebar controls to `min-h-[44px]`. Guard:
+   `mobile.spec.ts › touch-target audit` (3 viewports).
 
 ## Explicitly not covered
 

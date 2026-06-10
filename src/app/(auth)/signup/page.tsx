@@ -25,7 +25,7 @@ function getAuthErrorMessage(code: string): string {
     case 'auth/invalid-email':
       return 'Please enter a valid email address.';
     case 'auth/weak-password':
-      return 'Password must be at least 6 characters long.';
+      return 'Password must be at least 8 characters long.';
     case 'auth/network-request-failed':
       return 'Network error. Check your connection and try again.';
     case 'auth/too-many-requests':
@@ -50,6 +50,18 @@ function SignupContent() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Match the 8-character rule used by the post-payment claim-account form
+    // (Firebase's own minimum is only 6).
+    if (password.length < 8) {
+      toast({
+        variant: 'destructive',
+        title: 'Password too short',
+        description: 'Use at least 8 characters.',
+      });
+      return;
+    }
+
     setLoading(true);
 
     let createdUser: import('firebase/auth').User | null = null;
@@ -138,8 +150,8 @@ function SignupContent() {
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-headline">Create SYBA Account</CardTitle>
-            <CardDescription>Sign up to join the association</CardDescription>
+            <CardTitle className="text-2xl font-headline">Create your account</CardTitle>
+            <CardDescription>Register your kids, pay online, and get schedules — all in one place</CardDescription>
           </CardHeader>
           <form onSubmit={handleSignup}>
             <CardContent className="space-y-4">
@@ -154,7 +166,7 @@ function SignupContent() {
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                <p className="text-xs text-muted-foreground">Must be at least 6 characters.</p>
+                <p className="text-xs text-muted-foreground">Must be at least 8 characters.</p>
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">

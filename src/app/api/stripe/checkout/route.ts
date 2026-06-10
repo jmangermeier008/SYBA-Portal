@@ -159,7 +159,10 @@ export async function POST(req: Request) {
         // enrollments in the charge.refunded webhook handler.
         payment_intent_data: { metadata: { enrollmentIds: enrollmentIdsStr, userId } },
         success_url: `${baseUrl}/parent/enroll/success?session_id={CHECKOUT_SESSION_ID}&enrollment_ids=${encodeURIComponent(enrollmentIdsStr)}${sportParam}`,
-        cancel_url: `${baseUrl}/parent/enroll`,
+        // Dashboard, not the (now-empty) enrollment form: it shows the
+        // "Payment Due — Pay $X" card for the pending enrollment, so backing
+        // out of Stripe doesn't look like the registration was lost.
+        cancel_url: `${baseUrl}/parent/dashboard`,
       }, { idempotencyKey });
 
       return NextResponse.json({ url: session.url, sessionId: session.id });

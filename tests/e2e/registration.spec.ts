@@ -32,16 +32,9 @@ import {
 // Registration tests drive Stripe's hosted page — give them extra headroom.
 test.describe.configure({ timeout: 240_000 });
 
-/**
- * KNOWN BUG (found by this suite, 2026-06-09): signing up with
- * ?redirect=/parent/enroll loses the redirect. The SportProvider gate fires on
- * /signup the moment auth resolves — before the signup page writes the sport to
- * localStorage and pushes the redirect — bouncing the parent to / and then
- * /parent/dashboard. Real-world impact: "Register Player" → create account
- * drops new parents on the dashboard instead of the registration form.
- * Un-fixme once the gate excludes /signup and /login (Phase 2 proposal).
- */
-test.fixme('signup with redirect lands directly on the enrollment form', async ({ page }) => {
+// Regression guard for a pre-launch bug: the SportProvider gate used to fire
+// on /signup mid-account-creation and swallow ?redirect=/parent/enroll.
+test('signup with redirect lands directly on the enrollment form', async ({ page }) => {
   const email = uniqueEmail('reg.redirect');
   await signUpViaUI(page, { name: 'Redirect Check', email, redirect: '/parent/enroll' });
   await expect(page).toHaveURL(/\/parent\/enroll/);
@@ -164,17 +157,9 @@ test('abandoned checkout: parent can resume payment from the dashboard', async (
   await waitForPaidEnrollments(email, 1);
 });
 
-/**
- * KNOWN BUG (found by this suite, 2026-06-09): the duplicate-enrollment guard
- * never fires for parents. checkDuplicate() queries
- * collectionGroup('enrollments') by playerId+seasonId, but the Firestore rule
- * only allows reads provably filtered by parentUserId == auth.uid — so the
- * query is permission-denied, the error is swallowed, and 'none' is returned.
- * Impact: a parent can register and PAY for the same child twice; the
- * in-stepper "Resume Payment" banner can also never appear.
- * Un-fixme once the query includes where('parentUserId','==',uid).
- */
-test.fixme('duplicate registration for the same season is blocked with a clear message', async ({ page }) => {
+// Regression guard for a pre-launch bug: the duplicate check used a
+// collectionGroup query the rules reject, silently letting families pay twice.
+test('duplicate registration for the same season is blocked with a clear message', async ({ page }) => {
   // Read-only fixture: Casey is already registered + paid for the E2E season
   await logInViaUI(page, RETURNING_PARENT.email);
   await page.goto('/parent/enroll');

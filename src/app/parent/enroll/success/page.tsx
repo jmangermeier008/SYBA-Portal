@@ -304,8 +304,16 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
             <Mail className="h-5 w-5 shrink-0 text-primary" />
             <span>A confirmation email is on its way to your inbox.</span>
           </div>
+          <div className="text-left p-4 bg-muted/30 rounded-xl space-y-2 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">What happens next</p>
+            <ul className="space-y-1.5 list-disc pl-5">
+              <li>We&apos;ll review your player&apos;s documents — you&apos;ll get an email once they&apos;re verified.</li>
+              <li>Team assignments are announced after evaluations — watch League Announcements.</li>
+              <li>Games and practices will appear in your Schedule tab once the league publishes them.</li>
+            </ul>
+          </div>
           {displayId && (
-            <p className="text-xs text-muted-foreground">Enrollment ID: {displayId}</p>
+            <p className="text-[11px] text-muted-foreground">Reference for support: {displayId.slice(0, 8)}</p>
           )}
           <Button asChild className="rounded-full px-8 text-base">
             <Link href="/parent/dashboard">Back to Dashboard</Link>

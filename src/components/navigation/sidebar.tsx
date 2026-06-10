@@ -229,7 +229,7 @@ function NavSection({
         onClick={onToggle}
         aria-expanded={isOpen}
         aria-label={`${label} navigation section`}
-        className="w-full flex items-center justify-between px-3 py-2 mt-4 rounded-lg hover:bg-secondary/50 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 mt-4 min-h-[44px] rounded-lg hover:bg-secondary/50 transition-colors"
       >
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{label}</p>
         <ChevronDown className={cn(
@@ -695,14 +695,14 @@ export function Sidebar() {
           <button
             onClick={handleSignOut}
             title="Sign Out"
-            className="w-full flex items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            className="w-full flex items-center justify-center p-2 min-h-[44px] rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           >
             <LogOut className="h-4 w-4" />
           </button>
         ) : (
           <Button
             variant="ghost"
-            className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            className="w-full justify-start min-h-[44px] text-muted-foreground hover:text-destructive hover:bg-destructive/10"
             onClick={handleSignOut}
           >
             <LogOut className="mr-2 h-4 w-4" />
@@ -716,7 +716,7 @@ export function Sidebar() {
             onClick={toggleCollapsed}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className={cn(
-              "w-full flex items-center p-2 rounded-lg text-muted-foreground hover:bg-secondary hover:text-primary transition-colors text-xs font-medium",
+              "w-full flex items-center p-2 min-h-[44px] rounded-lg text-muted-foreground hover:bg-secondary hover:text-primary transition-colors text-xs font-medium",
               collapsed ? "justify-center" : "justify-start gap-2 px-3"
             )}
           >
