@@ -58,6 +58,11 @@ wrong password), password reset request, session persistence across refresh.
 confirmed" on dashboard, schedules/family pages reachable, helpful empty state
 for brand-new parents with a working "Enroll Now" path.
 
+**Admin cleanup tools (`admin-cleanup.spec.ts`)** — Developer page Family Data
+Cleanup (lookup by email → typed-email confirm → wipe players/enrollments/
+uploads) and Orphan Record Scan (find + delete players with no enrollments),
+both verified against Firestore after the UI actions.
+
 **Mobile (`mobile.spec.ts`)** — at 390×844, 360×800, 768×1024: no horizontal
 scroll on home/login/signup/forgot-password/enroll steps 1–2/dashboard/
 confirmation; sign-in CTA above the fold; focused inputs not clipped;

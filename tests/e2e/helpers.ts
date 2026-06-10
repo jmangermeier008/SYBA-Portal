@@ -33,12 +33,24 @@ export async function signUpViaUI(
   await page.waitForURL(`**${opts.redirect ?? '/parent/dashboard'}**`, { timeout: 30_000 });
 }
 
-export async function logInViaUI(page: Page, email: string, password = E2E_PASSWORD): Promise<void> {
+export async function logInViaUI(
+  page: Page,
+  email: string,
+  password = E2E_PASSWORD,
+  expectUrl: string = '**/parent/dashboard**'
+): Promise<void> {
   await page.goto('/login?sport=baseball');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
-  await page.waitForURL('**/parent/dashboard**', { timeout: 30_000 });
+  await page.waitForURL(expectUrl, { timeout: 30_000 });
+}
+
+export async function playersByEmail(email: string): Promise<any[]> {
+  const { db, auth } = getAdmin();
+  const user = await auth.getUserByEmail(email);
+  const snap = await db.collection(`userProfiles/${user.uid}/players`).get();
+  return snap.docs.map(d => d.data());
 }
 
 // ─── Enrollment stepper ────────────────────────────────────────────────────

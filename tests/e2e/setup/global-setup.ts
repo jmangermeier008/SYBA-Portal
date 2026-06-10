@@ -17,6 +17,7 @@ import {
   E2E_DIVISION_FULL_NAME,
   RETURNING_PARENT,
   SIBLING_PARENT,
+  ADMIN_USER,
 } from './admin';
 
 const STATE_FILE = path.resolve(__dirname, '..', '.e2e-state.json');
@@ -151,6 +152,24 @@ export default async function globalSetup() {
   console.log('[e2e setup] Creating fixture parents…');
   const returning = await createFixtureParent(RETURNING_PARENT);
   const sibling = await createFixtureParent(SIBLING_PARENT);
+
+  console.log('[e2e setup] Creating Site Admin fixture…');
+  const { auth } = getAdmin();
+  const adminUser = await auth.createUser({
+    email: ADMIN_USER.email,
+    password: E2E_PASSWORD,
+    displayName: ADMIN_USER.displayName,
+    emailVerified: true,
+  });
+  await db.doc(`userProfiles/${adminUser.uid}`).set({
+    id: adminUser.uid,
+    email: ADMIN_USER.email,
+    displayName: ADMIN_USER.displayName,
+    roles: ['Site Admin', 'Admin'],
+    createdAt: now,
+    updatedAt: now,
+    e2eTest: true,
+  });
 
   fs.writeFileSync(
     STATE_FILE,

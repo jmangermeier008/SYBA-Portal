@@ -19,9 +19,21 @@ import {
 import { useFirestore, useUser, useAuth, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
-import { Loader2, FlaskConical, Trash2, TriangleAlert, CreditCard } from 'lucide-react';
+import { Loader2, FlaskConical, Trash2, TriangleAlert, CreditCard, UserSearch, Radar, FileCheck2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { seedTestEnrollments, nukeTestSeason, forceDeleteSeasonEnrollments, purgeStripeTestData } from '@/lib/maintenance-actions';
+import {
+  seedTestEnrollments,
+  nukeTestSeason,
+  forceDeleteSeasonEnrollments,
+  purgeStripeTestData,
+  lookupFamilyData,
+  deleteFamilyData,
+  scanOrphanRecords,
+  deletePlayerRecord,
+  deleteEnrollmentRecord,
+  type FamilyLookupResult,
+  type OrphanScanResult,
+} from '@/lib/maintenance-actions';
 import type { Season } from '@/types/scheduling';
 
 export default function DeveloperDashboardPage() {
@@ -36,6 +48,23 @@ export default function DeveloperDashboardPage() {
   const [clearing, setClearing] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [purging, setPurging] = useState(false);
+
+  // Family cleanup state
+  const [familyEmail, setFamilyEmail] = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
+  const [family, setFamily] = useState<FamilyLookupResult | null>(null);
+  const [familyConfirm, setFamilyConfirm] = useState('');
+  const [deletingFamily, setDeletingFamily] = useState(false);
+
+  // Orphan scan state
+  const [scanning, setScanning] = useState(false);
+  const [scan, setScan] = useState<OrphanScanResult | null>(null);
+  const [pendingOrphan, setPendingOrphan] = useState<
+    | { kind: 'player'; uid: string; id: string; label: string }
+    | { kind: 'enrollment'; uid: string; id: string; label: string }
+    | null
+  >(null);
+  const [deletingOrphan, setDeletingOrphan] = useState(false);
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db) return null;
@@ -141,6 +170,80 @@ export default function DeveloperDashboardPage() {
     }
   };
 
+  const getToken = async (): Promise<string> => {
+    const token = await auth?.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated.');
+    return token;
+  };
+
+  const handleFamilyLookup = async () => {
+    if (!familyEmail.trim()) return;
+    setLookingUp(true);
+    setFamily(null);
+    try {
+      setFamily(await lookupFamilyData(familyEmail, await getToken()));
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Lookup failed', description: err.message });
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const handleDeleteFamily = async () => {
+    if (!family) return;
+    setDeletingFamily(true);
+    try {
+      const r = await deleteFamilyData(family.email, await getToken());
+      toast({
+        title: 'Family data deleted',
+        description: `Removed ${r.playersDeleted} player(s), ${r.enrollmentsDeleted} enrollment(s), ${r.filesDeleted} uploaded file(s). Adjusted ${r.divisionsAdjusted} division count(s).`,
+      });
+      setFamily(null);
+      setFamilyConfirm('');
+      setFamilyEmail('');
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Delete failed', description: err.message });
+    } finally {
+      setDeletingFamily(false);
+    }
+  };
+
+  const handleScan = async () => {
+    setScanning(true);
+    try {
+      setScan(await scanOrphanRecords(await getToken()));
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Scan failed', description: err.message });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleDeleteOrphan = async () => {
+    if (!pendingOrphan) return;
+    setDeletingOrphan(true);
+    try {
+      const token = await getToken();
+      if (pendingOrphan.kind === 'player') {
+        const r = await deletePlayerRecord(pendingOrphan.uid, pendingOrphan.id, token);
+        toast({
+          title: 'Player record deleted',
+          description: `Also removed ${r.enrollmentsDeleted} enrollment(s) and ${r.filesDeleted} uploaded file(s).`,
+        });
+      } else {
+        await deleteEnrollmentRecord(pendingOrphan.uid, pendingOrphan.id, token);
+        toast({ title: 'Enrollment deleted' });
+      }
+      setPendingOrphan(null);
+      // Refresh the scan so the list reflects reality
+      setScan(await scanOrphanRecords(token));
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Delete failed', description: err.message });
+    } finally {
+      setDeletingOrphan(false);
+    }
+  };
+
   const selectedSeason = seasons?.find(s => s.id === seasonId);
 
   return (
@@ -157,6 +260,214 @@ export default function DeveloperDashboardPage() {
               <p className="text-sm text-muted-foreground">Site Admin only — test data seeding and cleanup tools.</p>
             </div>
           </div>
+
+          {/* Family Data Cleanup */}
+          <Card className="border-none shadow-md">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <UserSearch className="h-4 w-4 text-primary" />
+                Family Data Cleanup
+              </CardTitle>
+              <CardDescription>
+                Look up any account by email and wipe its registration data — players,
+                enrollments, and uploaded documents — in one step. Division &ldquo;spots filled&rdquo;
+                counts are corrected automatically. The account itself is not deleted, so the
+                family can register again. Built for cleaning up test registrations made
+                through the real registration flow.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  type="email"
+                  placeholder="parent@example.com"
+                  value={familyEmail}
+                  onChange={(e) => setFamilyEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleFamilyLookup(); }}
+                  className="rounded-xl"
+                />
+                <Button className="rounded-xl shrink-0" onClick={handleFamilyLookup} disabled={lookingUp || !familyEmail.trim()}>
+                  {lookingUp ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Look Up
+                </Button>
+              </div>
+
+              {family && (
+                <div className="space-y-3">
+                  <div className="rounded-xl border bg-secondary/20 p-3 text-sm space-y-2">
+                    <p className="font-medium">
+                      {family.displayName || family.email}
+                      <span className="text-xs text-muted-foreground font-normal ml-2">{family.email}</span>
+                    </p>
+                    {family.players.length === 0 && family.enrollments.length === 0 ? (
+                      <p className="text-muted-foreground">No players or enrollments on this account — nothing to clean.</p>
+                    ) : (
+                      <>
+                        {family.players.map(p => (
+                          <p key={p.id} className="flex items-center gap-2 text-muted-foreground">
+                            <span className="font-medium text-foreground">{p.name}</span>
+                            <span className="text-xs">DOB {p.dateOfBirth || '—'}</span>
+                            {p.hasBirthCert && (
+                              <span className="inline-flex items-center gap-1 text-xs text-green-700"><FileCheck2 className="h-3 w-3" />birth cert</span>
+                            )}
+                            {p.hasPhysical && (
+                              <span className="inline-flex items-center gap-1 text-xs text-green-700"><FileCheck2 className="h-3 w-3" />physical</span>
+                            )}
+                          </p>
+                        ))}
+                        {family.enrollments.map(e => (
+                          <p key={e.id} className="text-xs text-muted-foreground">
+                            Enrollment: {e.playerName} · {e.seasonName} · {e.paymentStatus}
+                            {e.amount > 0 ? ` · $${(e.amount / 100).toFixed(2)}` : ''}
+                          </p>
+                        ))}
+                      </>
+                    )}
+                  </div>
+
+                  {(family.players.length > 0 || family.enrollments.length > 0) && (
+                    <AlertDialog onOpenChange={(open) => { if (!open) setFamilyConfirm(''); }}>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" className="rounded-xl" disabled={deletingFamily}>
+                          {deletingFamily ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                          Delete All Family Data
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete all registration data for this family?</AlertDialogTitle>
+                          <AlertDialogDescription asChild>
+                            <div className="space-y-3">
+                              <p>
+                                This permanently deletes <strong>{family.players.length} player(s)</strong>,{' '}
+                                <strong>{family.enrollments.length} enrollment(s)</strong>, and all uploaded
+                                documents for <strong>{family.email}</strong>. The login account itself is kept.
+                                This cannot be undone.
+                              </p>
+                              <p>Type the email to confirm:</p>
+                              <Input
+                                value={familyConfirm}
+                                onChange={(e) => setFamilyConfirm(e.target.value)}
+                                placeholder={family.email}
+                                className="rounded-xl"
+                              />
+                            </div>
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={familyConfirm.trim().toLowerCase() !== family.email.toLowerCase()}
+                            onClick={handleDeleteFamily}
+                          >
+                            Yes, delete family data
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Orphan scan */}
+          <Card className="border-none shadow-md">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Radar className="h-4 w-4 text-primary" />
+                Orphan Record Scan
+              </CardTitle>
+              <CardDescription>
+                Finds leftover records that no admin page displays: players with no enrollment
+                anywhere (e.g. an abandoned registration that uploaded a document) and
+                enrollments whose player record is missing. Review each one — a player without
+                an enrollment can also be legitimate (added via the Family page, not yet registered).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button className="rounded-xl" onClick={handleScan} disabled={scanning}>
+                {scanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Scan for Orphans
+              </Button>
+
+              {scan && (
+                <div className="space-y-3 text-sm">
+                  {scan.orphanPlayers.length === 0 && scan.orphanEnrollments.length === 0 ? (
+                    <p className="text-muted-foreground">No orphan records found. ✓</p>
+                  ) : (
+                    <>
+                      {scan.orphanPlayers.map(p => (
+                        <div key={p.playerId} className="flex items-center justify-between gap-3 rounded-xl border bg-secondary/20 p-3">
+                          <div className="min-w-0">
+                            <p className="font-medium">{p.name} <span className="text-xs text-muted-foreground font-normal">player · no enrollments</span></p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {p.parentEmail} · DOB {p.dateOfBirth || '—'}{p.hasDocuments ? ' · has uploaded documents' : ''}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full shrink-0 min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                            onClick={() => setPendingOrphan({ kind: 'player', uid: p.uid, id: p.playerId, label: `${p.name} (${p.parentEmail})` })}
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+                          </Button>
+                        </div>
+                      ))}
+                      {scan.orphanEnrollments.map(e => (
+                        <div key={e.enrollmentId} className="flex items-center justify-between gap-3 rounded-xl border bg-secondary/20 p-3">
+                          <div className="min-w-0">
+                            <p className="font-medium">Enrollment with missing player <span className="text-xs text-muted-foreground font-normal">{e.paymentStatus}</span></p>
+                            <p className="text-xs text-muted-foreground truncate">{e.parentEmail} · season {e.seasonId}</p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full shrink-0 min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                            onClick={() => setPendingOrphan({ kind: 'enrollment', uid: e.uid, id: e.enrollmentId, label: `enrollment for ${e.parentEmail}` })}
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+                          </Button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Unresolved account-claim failures: {scan.unresolvedClaimFailures}
+                  </p>
+                </div>
+              )}
+
+              {/* Shared confirm dialog for per-row orphan deletes */}
+              <AlertDialog open={!!pendingOrphan} onOpenChange={(open) => { if (!open) setPendingOrphan(null); }}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this record?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Permanently deletes {pendingOrphan?.label}
+                      {pendingOrphan?.kind === 'player'
+                        ? ', including any enrollments and uploaded documents for that player.'
+                        : '. Division capacity counts are corrected if this enrollment was paid.'}{' '}
+                      This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={deletingOrphan}
+                      onClick={handleDeleteOrphan}
+                    >
+                      {deletingOrphan ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Yes, delete it
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </CardContent>
+          </Card>
 
           {/* Season selector */}
           <Card className="border-none shadow-md">

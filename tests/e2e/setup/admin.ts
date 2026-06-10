@@ -32,6 +32,12 @@ export const RETURNING_PARENT = {
   playerDOB: '2016-03-10',
 };
 
+/** Fixture: Site Admin account for admin-tool tests (no players/enrollments). */
+export const ADMIN_USER = {
+  email: `site.admin@${E2E_EMAIL_DOMAIN}`,
+  displayName: 'E2E Site Admin',
+};
+
 /** Fixture: parent with one paid player; used by tests that ADD a second child. */
 export const SIBLING_PARENT = {
   email: `sibling.parent@${E2E_EMAIL_DOMAIN}`,
