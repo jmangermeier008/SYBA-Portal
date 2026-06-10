@@ -219,12 +219,16 @@ export default function RegistrationDashboardPage() {
     });
   }, [coaches, sportTeamIds, sportDivisionIds]);
 
+  // Count from sportFilteredPlayers — the same population the table renders.
+  // Counting allPlayers made the badge include players with no enrollment in
+  // this sport's seasons (e.g. abandoned registrations), which the admin can
+  // see in the count but never find in the list.
   const pendingVerifications = useMemo(() => {
-    return (allPlayers ?? []).filter(p =>
+    return sportFilteredPlayers.filter(p =>
       (p.birthCertificateUrl && !p.ageVerified) ||
       (p.physicalFormUrl && !p.compliance?.physicalVerified)
     ).length;
-  }, [allPlayers]);
+  }, [sportFilteredPlayers]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
