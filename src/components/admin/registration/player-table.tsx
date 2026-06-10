@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { format } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -66,6 +66,7 @@ interface PlayerTableProps {
   playerSportMap: Map<string, string>;
   isSiteAdmin: boolean;
   isProcessing: boolean;
+  initialAuditPlayerId?: string;
   onAuditSubmit: (player: PlayerWithDocs, formData: AuditFormData) => Promise<boolean>;
   onDeletePlayer: (player: PlayerWithDocs) => Promise<boolean>;
 }
@@ -128,6 +129,7 @@ export function PlayerTable({
   playerSportMap,
   isSiteAdmin,
   isProcessing,
+  initialAuditPlayerId,
   onAuditSubmit,
   onDeletePlayer,
 }: PlayerTableProps) {
@@ -178,6 +180,17 @@ export function PlayerTable({
     setAuditDocTab('birthCert');
     setAuditingPlayer(player);
   };
+
+  // Deep link (?auditPlayer=...) from the roster page: open that player's audit once data loads
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current || !initialAuditPlayerId || !isSiteAdmin || players.length === 0) return;
+    const target = players.find(p => p.id === initialAuditPlayerId);
+    if (!target) return;
+    deepLinkHandled.current = true;
+    setStatusFilter('all');
+    openAudit(target);
+  }, [initialAuditPlayerId, isSiteAdmin, players]);
 
   const handleAuditSubmit = async () => {
     if (!auditingPlayer) return;

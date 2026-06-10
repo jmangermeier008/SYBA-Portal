@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
 import { collectionGroup, collection, query, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -67,6 +68,8 @@ export default function RegistrationDashboardPage() {
   const { user, profile, isSiteAdmin, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const auditPlayerId = searchParams.get('auditPlayer');
 
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [globalProcessing, setGlobalProcessing] = useState(false);
@@ -439,6 +442,7 @@ export default function RegistrationDashboardPage() {
                 playerSportMap={playerSportMap}
                 isSiteAdmin={isSiteAdmin}
                 isProcessing={globalProcessing}
+                initialAuditPlayerId={auditPlayerId ?? undefined}
                 onAuditSubmit={handleAuditSubmit}
                 onDeletePlayer={handleDeletePlayer}
               />

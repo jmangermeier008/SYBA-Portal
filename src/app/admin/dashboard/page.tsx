@@ -402,7 +402,7 @@ export default function AdminDashboard({
         items.push({
           severity: 'orange',
           message: `${missingDocs} player${missingDocs > 1 ? 's' : ''} missing verified documents`,
-          href: '/admin/roster?filter=action_required',
+          href: '/admin/registration',
         });
       }
     }

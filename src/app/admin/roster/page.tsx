@@ -71,6 +71,7 @@ interface Player {
   dateOfBirth: string;
   medicalNotes?: string;
   birthCertificateUrl?: string;
+  physicalFormUrl?: string;
   ageVerified?: boolean;
   compliance?: {
     physicalVerified?: boolean;
@@ -533,31 +534,6 @@ export default function MasterRosterPage() {
       });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Update failed', description: err.message });
-    }
-  };
-
-  const handleQuickVerify = async (enrollment: Enrollment, player: Player, field: 'birthCert' | 'physical') => {
-    if (!db) return;
-    try {
-      const playerRef = doc(db, 'userProfiles', enrollment.parentUserId, 'players', player.id);
-      if (field === 'birthCert') {
-        await updateDoc(playerRef, {
-          ageVerified: true,
-          'compliance.birthCertificateVerified': true,
-          updatedAt: new Date().toISOString(),
-        });
-      } else {
-        await updateDoc(playerRef, {
-          'compliance.physicalVerified': true,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-      toast({
-        title: 'Document verified',
-        description: `${field === 'birthCert' ? 'Birth certificate' : 'Physical form'} marked as verified for ${player.firstName} ${player.lastName}.`,
-      });
-    } catch (error: any) {
-      toast({ title: 'Verification failed', description: error.message, variant: 'destructive' });
     }
   };
 
@@ -1034,18 +1010,6 @@ export default function MasterRosterPage() {
                                 <Pencil className="mr-2 h-4 w-4" />
                                 Edit Player
                               </DropdownMenuItem>
-                              {activeSport === 'football' && p && !p.ageVerified && (
-                                <DropdownMenuItem onClick={() => handleQuickVerify(e, p, 'birthCert')}>
-                                  <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
-                                  Verify Birth Certificate
-                                </DropdownMenuItem>
-                              )}
-                              {activeSport === 'football' && p && !p.compliance?.physicalVerified && (
-                                <DropdownMenuItem onClick={() => handleQuickVerify(e, p, 'physical')}>
-                                  <ShieldCheck className="mr-2 h-4 w-4 text-green-500" />
-                                  Verify Physical Form
-                                </DropdownMenuItem>
-                              )}
                               {activeSport === 'football' && (
                                 <DropdownMenuItem
                                   onClick={() => {
@@ -1071,8 +1035,9 @@ export default function MasterRosterPage() {
                                   Mark as Fee Waived
                                 </DropdownMenuItem>
                               )}
-                              {p?.birthCertificateUrl && !p?.ageVerified && (
-                                <DropdownMenuItem onClick={() => router.push('/admin/compliance')}>
+                              {((p?.birthCertificateUrl && !p?.ageVerified) ||
+                                (p?.physicalFormUrl && !p?.compliance?.physicalVerified)) && (
+                                <DropdownMenuItem onClick={() => router.push(`/admin/registration?auditPlayer=${p.id}`)}>
                                   <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
                                   Review Documents
                                 </DropdownMenuItem>
