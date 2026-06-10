@@ -12,9 +12,8 @@ export type LinkRequestResult =
 
 /**
  * Searches for a player by exact name + DOB, then creates a LinkRequest document.
- * Uses per-profile subcollection queries (COLLECTION scope, automatic indexes) instead
- * of collectionGroup (requires a deployed COLLECTION_GROUP index). For a small league
- * this is fast enough — profiles are fetched once, player lookups run in parallel.
+ * Single collectionGroup query on lastName — backed by the COLLECTION_GROUP
+ * field override on players.lastName in firestore.indexes.json.
  */
 export async function searchAndRequestLink(
   idToken: string,
@@ -28,32 +27,19 @@ export async function searchAndRequestLink(
 
     const db = getAdminFirestore();
 
-    // Fetch all user profiles (Admin SDK, no security rules applied).
-    // Run a lastName-filtered players query under each profile in parallel.
-    const profilesSnap = await db.collection('userProfiles').get();
+    // One read set instead of scanning every profile's subcollection
+    const playersSnap = await db
+      .collectionGroup('players')
+      .where('lastName', '==', lastName.trim())
+      .get();
 
-    const matchResults = await Promise.all(
-      profilesSnap.docs.map(async (profileDoc) => {
-        const playersSnap = await db
-          .collection('userProfiles')
-          .doc(profileDoc.id)
-          .collection('players')
-          .where('lastName', '==', lastName.trim())
-          .get();
-
-        const match = playersSnap.docs.find(d => {
-          const data = d.data();
-          return (
-            data.firstName === firstName.trim() &&
-            data.dateOfBirth === dateOfBirth
-          );
-        });
-
-        return match ?? null;
-      })
-    );
-
-    const playerDoc = matchResults.find(Boolean) ?? null;
+    const playerDoc = playersSnap.docs.find(d => {
+      const data = d.data();
+      return (
+        data.firstName === firstName.trim() &&
+        data.dateOfBirth === dateOfBirth
+      );
+    }) ?? null;
 
     if (!playerDoc) {
       return { status: 'not_found' };

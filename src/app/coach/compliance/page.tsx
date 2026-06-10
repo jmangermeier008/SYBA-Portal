@@ -7,9 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { useUser, useFirestore, useStorage, useMemoFirebase, useCollection } from '@/firebase';
+import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, doc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Loader2, Upload, AlertCircle, Clock, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +26,6 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 export default function CoachCompliancePage() {
   const { user } = useUser();
   const db = useFirestore();
-  const storage = useStorage();
   const { toast } = useToast();
   
   const [uploading, setUploading] = useState<string | null>(null);
@@ -40,7 +38,7 @@ export default function CoachCompliancePage() {
   const { data: clearances, isLoading } = useCollection<any>(clearancesQuery);
 
   const handleFileUpload = async (type: string, expirationDate: string, file: File) => {
-    if (!user || !db || !storage || !expirationDate) {
+    if (!user || !db || !expirationDate) {
       toast({ variant: "destructive", title: "Error", description: "Please provide an expiration date." });
       return;
     }
@@ -56,12 +54,22 @@ export default function CoachCompliancePage() {
     }
 
     setUploading(type);
-    const storageRef = ref(storage, `compliance/${user.uid}/${type}_${Date.now()}`);
 
     try {
-      const snapshot = await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(snapshot.ref);
-      
+      // Upload through the server route — client SDK storage access is disabled
+      const idToken = await user.getIdToken();
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', `compliance/${user.uid}/${type}_${Date.now()}`);
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      const url = data.url as string;
+
       const clearanceId = type; 
       const clearanceRef = doc(db, 'userProfiles', user.uid, 'clearances', clearanceId);
       

@@ -25,10 +25,12 @@ service cloud.firestore {
     function isAdmin() {
       let data = getUserData();
       let roles = data.get('roles', []);
+      // Check both the roles array and the legacy role field — an empty roles
+      // array must not mask a legacy Admin grant.
       return isSiteAdmin() ||
              (isSignedIn() &&
               exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-              (roles.size() > 0 ? roles.hasAny(['Admin']) : data.get('role', '') == 'Admin'));
+              (roles.hasAny(['Admin']) || data.get('role', '') == 'Admin'));
     }
 
     function isBoardMember() {
@@ -422,6 +424,16 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.get('userId', '') == request.auth.uid;
       allow read: if isAdmin() || isBoardMember();
       allow update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Payment Events — webhook audit trail written by the server (Admin SDK).
+    // Read-only payment health visibility for admins and board members.
+    // ---------------------------------------------------------------------------
+
+    match /paymentEvents/{eventId} {
+      allow read: if isAdmin() || isBoardMember();
+      allow write: if false;
     }
   }
 }

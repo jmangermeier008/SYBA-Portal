@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
@@ -142,14 +143,24 @@ export async function POST(req: Request) {
       // Stripe metadata value limit is 500 chars. UUIDs are 36 chars each + commas.
       const enrollmentIdsStr = enrollmentIds.join(',');
       const sportParam = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
+      // Identical retried requests (double-click, network retry) reuse the same
+      // Stripe session instead of creating a duplicate. Pricing is part of the
+      // key so a legitimately changed cart gets a fresh session.
+      const idempotencyKey = createHash('sha256')
+        .update(`${userId}|${[...enrollmentIds].sort().join(',')}|${prices.join(',')}`)
+        .digest('hex');
+
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         payment_method_types: ['card'],
         line_items: lineItems,
         metadata: { enrollmentIds: enrollmentIdsStr, enrollmentAmounts: prices.join(','), userId },
+        // Mirrored onto the PaymentIntent so refunds can be traced back to
+        // enrollments in the charge.refunded webhook handler.
+        payment_intent_data: { metadata: { enrollmentIds: enrollmentIdsStr, userId } },
         success_url: `${baseUrl}/parent/enroll/success?session_id={CHECKOUT_SESSION_ID}&enrollment_ids=${encodeURIComponent(enrollmentIdsStr)}${sportParam}`,
         cancel_url: `${baseUrl}/parent/enroll`,
-      });
+      }, { idempotencyKey });
 
       return NextResponse.json({ url: session.url, sessionId: session.id });
     }

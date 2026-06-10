@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const idToken = authHeader.slice(7);
-    await getAdminAuth().verifyIdToken(idToken);
+    const decoded = await getAdminAuth().verifyIdToken(idToken);
 
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
@@ -16,6 +16,15 @@ export async function POST(req: NextRequest) {
 
     if (!file || !path) {
       return NextResponse.json({ error: 'Missing file or path' }, { status: 400 });
+    }
+
+    // Only the two known upload locations are allowed; compliance uploads must
+    // be under the caller's own uid. Blocks path traversal and overwriting
+    // arbitrary bucket objects.
+    const playerDocPath = /^players\/[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/;
+    const compliancePath = new RegExp(`^compliance/${decoded.uid}/[A-Za-z0-9_.-]+$`);
+    if (!playerDocPath.test(path) && !compliancePath.test(path)) {
+      return NextResponse.json({ error: 'Invalid upload path' }, { status: 400 });
     }
 
     const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png'];
@@ -29,7 +38,10 @@ export async function POST(req: NextRequest) {
     const bucket = getAdminStorage().bucket();
     const fileRef = bucket.file(path);
     const buffer = Buffer.from(await file.arrayBuffer());
-    await fileRef.save(buffer, { contentType: file.type });
+    await fileRef.save(buffer, {
+      contentType: file.type,
+      metadata: { metadata: { uploadedBy: decoded.uid } },
+    });
 
     const [url] = await fileRef.getSignedUrl({
       action: 'read',
