@@ -68,7 +68,6 @@ export async function POST(req: Request) {
         if (enrollment.stripe_payment_id) return; // already processed
 
         tx.update(enrollmentRef, {
-          payment_status: 'paid',
           paymentStatus: 'paid',
           stripe_payment_id: session.payment_intent ?? session.id,
           gross_amount_paid: session.amount_total ?? 0,

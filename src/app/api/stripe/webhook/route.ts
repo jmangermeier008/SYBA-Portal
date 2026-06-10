@@ -83,7 +83,6 @@ export async function POST(req: Request) {
           }
 
           tx.update(enrollmentRef, {
-            payment_status: 'paid',
             paymentStatus: 'paid',
             stripe_payment_id: session.payment_intent ?? session.id,
             registrationFeeAmount: amountPaid,
@@ -276,7 +275,6 @@ export async function POST(req: Request) {
           if ((enrollment.paymentStatus ?? enrollment.payment_status) !== 'paid') return;
 
           tx.update(enrollmentRef, {
-            payment_status: 'refunded',
             paymentStatus: 'refunded',
             refunded_at: new Date().toISOString(),
             updatedAt: new Date().toISOString(),

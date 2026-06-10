@@ -76,7 +76,6 @@ export function useUser() {
             id: user.uid,
             email: user.email,
             displayName: user.displayName ?? user.email ?? '',
-            role: 'Parent',
             roles: ['Parent'],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),

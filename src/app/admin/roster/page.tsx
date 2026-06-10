@@ -357,7 +357,6 @@ export default function MasterRosterPage() {
     try {
       const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
       await updateDoc(enrollmentRef, {
-        payment_status: 'fee_waived',
         paymentStatus: 'fee_waived',
         fee_waived: true,
         waiver_reason: waiverDialog.reason.trim(),

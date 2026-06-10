@@ -604,7 +604,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           uniformNumberPreference: item.uniformNumberPreference,
           emergencyContacts: item.emergencyContacts,
           medicalNotes: item.medicalNotes,
-          payment_status: paymentStatus,
           paymentStatus,
           stripe_payment_id: '',
           fee_waived: false,

@@ -89,7 +89,6 @@ export async function seedTestEnrollments(
       emergencyContacts: [],
       medicalNotes: '',
       paymentStatus: 'paid',
-      payment_status: 'paid',
       stripe_payment_id: 'test_seed',
       fee_waived: true,
       waiver_reason: 'Test seed data',

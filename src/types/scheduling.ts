@@ -461,7 +461,9 @@ export interface Enrollment {
   medicalNotes: string;
   // Payment
   paymentStatus: EnrollmentPaymentStatus;
-  payment_status: EnrollmentPaymentStatus; // Backward-compat alias — keep in sync
+  // Legacy alias present on enrollments created before 2026-06; no longer
+  // written. Readers fall back to it: e.paymentStatus ?? e.payment_status
+  payment_status?: EnrollmentPaymentStatus;
   stripe_payment_id: string;   // Empty string until Stripe webhook confirms payment
   stripeSessionId?: string;    // Stripe Checkout Session ID — used for orphan reconciliation
   fee_waived: boolean;

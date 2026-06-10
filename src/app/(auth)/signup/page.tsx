@@ -61,7 +61,6 @@ function SignupContent() {
         id: createdUser.uid,
         email: createdUser.email,
         displayName: displayName,
-        role: role,
         roles: [role],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
