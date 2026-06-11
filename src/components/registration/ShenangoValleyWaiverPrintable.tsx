@@ -12,6 +12,8 @@ export interface WaiverPlayerData {
   city?: string;
   schoolEnrolled?: string;
   grade?: string;
+  waiverSignatureUrl?: string;
+  waiverSignedAt?: string;
 }
 
 interface ShenangoValleyWaiverPrintableProps {
@@ -38,11 +40,32 @@ function Field({ label, value }: { label: string; value?: string | number | null
   );
 }
 
-function SignatureRow() {
+function SignatureRow({
+  signatureUrl,
+  signedDate,
+  onImageReady,
+}: {
+  signatureUrl?: string;
+  signedDate?: string;
+  onImageReady?: () => void;
+}) {
   return (
     <div className="flex gap-6 pt-8">
       <div className="flex-[2]">
-        <div className="border-b border-black">&nbsp;</div>
+        <div className="border-b border-black flex items-end justify-center min-h-[2rem]">
+          {signatureUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={signatureUrl}
+              alt="Parent/guardian signature"
+              className="h-12 object-contain"
+              onLoad={onImageReady}
+              onError={onImageReady}
+            />
+          ) : (
+            <span>&nbsp;</span>
+          )}
+        </div>
         <p className="text-xs uppercase pt-1">Signature</p>
       </div>
       <div className="flex-1">
@@ -50,7 +73,7 @@ function SignatureRow() {
         <p className="text-xs uppercase pt-1">Relationship</p>
       </div>
       <div className="flex-1">
-        <div className="border-b border-black">&nbsp;</div>
+        <div className="border-b border-black">{signedDate ?? ' '}</div>
         <p className="text-xs uppercase pt-1">Date</p>
       </div>
     </div>
@@ -74,18 +97,28 @@ export function ShenangoValleyWaiverPrintable({
   // re-running the mount-only print effect below.
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  const printedRef = useRef(false);
+
+  const triggerPrint = () => {
+    if (printedRef.current) return;
+    printedRef.current = true;
+    window.print();
+  };
 
   useEffect(() => {
-    // Let the DOM paint before opening the print dialog. afterprint is
+    // Let the DOM paint before opening the print dialog. When a signature
+    // image is present, printing is triggered by its onLoad instead and this
+    // timer is only a fallback in case the image never loads. afterprint is
     // unreliable on iOS Safari; if it never fires the node just stays
     // mounted, which is harmless since it is hidden on screen.
     const handleAfterPrint = () => onDoneRef.current();
-    const timer = setTimeout(() => window.print(), 50);
+    const timer = setTimeout(triggerPrint, player.waiverSignatureUrl ? 2000 : 50);
     window.addEventListener('afterprint', handleAfterPrint);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('afterprint', handleAfterPrint);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -153,7 +186,11 @@ export function ShenangoValleyWaiverPrintable({
         </p>
       </div>
 
-      <SignatureRow />
+      <SignatureRow
+        signatureUrl={player.waiverSignatureUrl}
+        signedDate={player.waiverSignedAt ? new Date(player.waiverSignedAt).toLocaleDateString('en-US') : undefined}
+        onImageReady={triggerPrint}
+      />
       <SignatureRow />
 
       <div className="border-t-2 border-black mt-10 pt-3 text-sm space-y-3">

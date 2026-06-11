@@ -17,6 +17,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import type { Player, Season, Division, EmergencyContact, Enrollment } from '@/types/scheduling';
 import { getLeagueAge, getSuggestedDivisions, calculateCartPricing } from '@/lib/registration-logic';
+import { SignaturePadField } from '@/components/registration/SignaturePadField';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +46,7 @@ interface StepperState {
   city: string;
   schoolEnrolled: string;
   grade: string;
+  waiverSignatureDataUrl: string; // PNG data URL drawn in step 2; '' = not signed
   // Football equipment sizing (step 3 for football only)
   helmetSize: string;
   shoulderPadSize: string;
@@ -80,6 +82,7 @@ interface CartItem {
   city?: string;
   schoolEnrolled?: string;
   grade?: string;
+  waiverSignatureDataUrl?: string;
   helmetSize?: string;
   shoulderPadSize?: string;
   pantSize?: string;
@@ -133,6 +136,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     city: '',
     schoolEnrolled: '',
     grade: '',
+    waiverSignatureDataUrl: '',
     helmetSize: '',
     shoulderPadSize: '',
     pantSize: '',
@@ -513,6 +517,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     city: state.city || undefined,
     schoolEnrolled: state.schoolEnrolled || undefined,
     grade: state.grade || undefined,
+    waiverSignatureDataUrl: state.waiverSignatureDataUrl || undefined,
     helmetSize: state.helmetSize || undefined,
     shoulderPadSize: state.shoulderPadSize || undefined,
     pantSize: state.pantSize || undefined,
@@ -547,6 +552,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       city: '',
       schoolEnrolled: '',
       grade: '',
+      waiverSignatureDataUrl: '',
       helmetSize: '',
       shoulderPadSize: '',
       pantSize: '',
@@ -597,6 +603,31 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       // ── Write all Firestore documents ──────────────────────────────────
       // All player + enrollment docs are committed in a single batch so a
       // failure mid-cart can't leave an orphaned player without an enrollment.
+      // Upload a drawn waiver signature (PNG data URL → Storage) and return its
+      // URL. Failures never block the enrollment — the family signs on paper.
+      const uploadWaiverSignature = async (dataUrl: string, playerId: string): Promise<string | null> => {
+        try {
+          const blob = await (await fetch(dataUrl)).blob();
+          const idToken = await user.getIdToken();
+          const formData = new FormData();
+          formData.append('file', new File([blob], 'signature.png', { type: 'image/png' }));
+          formData.append('path', `players/${playerId}/signature_${Date.now()}.png`);
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${idToken}` },
+            body: formData,
+          });
+          if (!res.ok) throw new Error((await res.json()).error || 'Upload failed');
+          return (await res.json()).url as string;
+        } catch (err: any) {
+          toast({
+            title: 'Signature Not Saved',
+            description: 'Your registration will continue — please sign the printed league form instead.',
+          });
+          return null;
+        }
+      };
+
       const batch = writeBatch(db);
       for (const item of items) {
         // 1. Create player document if this is a new player
@@ -604,6 +635,14 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         let playerId = item.playerId ?? '';
         if (item.isNewPlayer) {
           playerId = item.preGeneratedPlayerId || crypto.randomUUID();
+        }
+
+        const signatureUrl =
+          activeSport === 'football' && item.waiverSignatureDataUrl && playerId
+            ? await uploadWaiverSignature(item.waiverSignatureDataUrl, playerId)
+            : null;
+
+        if (item.isNewPlayer) {
           batch.set(doc(db, 'userProfiles', user.uid, 'players', playerId), {
             id: playerId,
             firstName: item.newPlayerFirst ?? '',
@@ -621,10 +660,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   grade: item.grade ?? '',
                 }
               : {}),
+            ...(signatureUrl ? { waiverSignatureUrl: signatureUrl, waiverSignedAt: now } : {}),
             compliance: {
               birthCertificateVerified: false,
               physicalVerified: false,
               verificationStatus: 'pending',
+              ...(activeSport === 'football' ? { leagueFormSigned: !!signatureUrl } : {}),
             },
           });
         } else if (item.playerId && (item.birthCertUrl || item.physicalUrl || activeSport === 'football')) {
@@ -640,6 +681,15 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   city: item.city ?? '',
                   schoolEnrolled: item.schoolEnrolled ?? '',
                   grade: item.grade ?? '',
+                }
+              : {}),
+            // Never write leagueFormSigned: false here — an unsigned
+            // re-enrollment must not un-sign a previously signed player.
+            ...(signatureUrl
+              ? {
+                  waiverSignatureUrl: signatureUrl,
+                  waiverSignedAt: now,
+                  'compliance.leagueFormSigned': true,
                 }
               : {}),
             ...(item.birthCertUrl || item.physicalUrl
@@ -1370,6 +1420,19 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       placeholder="e.g. Sharpsville Elementary"
                       value={state.schoolEnrolled}
                       onChange={(e) => setState(prev => ({ ...prev, schoolEnrolled: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2 pt-2">
+                    <Label>
+                      Parent/Guardian Signature <span className="text-muted-foreground font-normal">(optional)</span>
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Sign with your finger or mouse to complete the league agreement now,
+                      or skip and sign the printed form later.
+                    </p>
+                    <SignaturePadField
+                      value={state.waiverSignatureDataUrl}
+                      onChange={(dataUrl) => setState(prev => ({ ...prev, waiverSignatureDataUrl: dataUrl }))}
                     />
                   </div>
                 </div>

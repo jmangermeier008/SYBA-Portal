@@ -75,6 +75,8 @@ interface Player {
   city?: string;
   schoolEnrolled?: string;
   grade?: string;
+  waiverSignatureUrl?: string;
+  waiverSignedAt?: string;
   medicalNotes?: string;
   birthCertificateUrl?: string;
   physicalFormUrl?: string;

@@ -28,6 +28,8 @@ export interface PlayerWithDocs {
   city?: string;
   schoolEnrolled?: string;
   grade?: string;
+  waiverSignatureUrl?: string;
+  waiverSignedAt?: string;
   parentUserId?: string;
   divisionId?: string;
   birthCertificateUrl?: string;

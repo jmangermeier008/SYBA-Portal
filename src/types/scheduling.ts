@@ -377,6 +377,8 @@ export interface Player {
   city?: string;
   schoolEnrolled?: string;
   grade?: string; // string, not number — supports "K"
+  waiverSignatureUrl?: string; // Digital signature image drawn during enrollment
+  waiverSignedAt?: string;     // ISO timestamp of the digital signature
   clearanceUrl?: string;
   emergencyContacts?: EmergencyContact[];
   medicalNotes?: string;
