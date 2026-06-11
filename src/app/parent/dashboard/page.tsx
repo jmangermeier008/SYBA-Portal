@@ -79,11 +79,11 @@ export default function ParentDashboard() {
     if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user?.uid]);
-  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string }>(enrollmentsQuery);
+  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string; emergencyContacts?: { name: string; phone: string; relationship: string }[] }>(enrollmentsQuery);
 
   // Most recent football enrollment per player — drives the league waiver print action
   const footballEnrollmentByPlayer = useMemo(() => {
-    const map = new Map<string, { parentWeightEstimate?: number }>();
+    const map = new Map<string, { parentWeightEstimate?: number; emergencyContacts?: { name: string; phone: string; relationship: string }[] }>();
     (enrollments ?? [])
       .filter(e => e.sport === 'football')
       .sort((a, b) => (a.registered_at ?? '').localeCompare(b.registered_at ?? ''))
@@ -91,7 +91,7 @@ export default function ParentDashboard() {
     return map;
   }, [enrollments]);
 
-  const [waiverTarget, setWaiverTarget] = useState<{ player: WaiverPlayerData; weightEstimate?: number } | null>(null);
+  const [waiverTarget, setWaiverTarget] = useState<{ player: WaiverPlayerData; weightEstimate?: number; phone?: string } | null>(null);
 
   // Set initial selected player when players load
   useEffect(() => {
@@ -508,6 +508,7 @@ export default function ParentDashboard() {
                         grade: p.grade,
                       },
                       weightEstimate: footballEnrollmentByPlayer.get(p.id)?.parentWeightEstimate,
+                      phone: footballEnrollmentByPlayer.get(p.id)?.emergencyContacts?.[0]?.phone,
                     })}
                   >
                     <Printer className="h-3.5 w-3.5 mr-1.5" />
@@ -766,7 +767,7 @@ export default function ParentDashboard() {
     {waiverTarget && (
       <ShenangoValleyWaiverPrintable
         player={waiverTarget.player}
-        parentPhone={profile?.phoneNumber}
+        parentPhone={waiverTarget.phone ?? profile?.phoneNumber}
         weightEstimate={waiverTarget.weightEstimate}
         onDone={() => setWaiverTarget(null)}
       />

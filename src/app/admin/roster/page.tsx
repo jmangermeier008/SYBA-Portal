@@ -53,6 +53,7 @@ interface Enrollment {
   teamId?: string;
   registrationFeeAmount?: number;
   parentWeightEstimate?: number;
+  emergencyContacts?: { name: string; phone: string; relationship: string }[];
   footballEquipment?: FootballEquipment;
   sport?: string;
   profileStatus?: 'incomplete' | 'complete';
@@ -1297,7 +1298,8 @@ export default function MasterRosterPage() {
     {waiverPrintTarget && (
       <ShenangoValleyWaiverPrintable
         player={waiverPrintTarget.player}
-        parentPhone={profileMap.get(waiverPrintTarget.enrollment.parentUserId)?.phoneNumber}
+        parentPhone={waiverPrintTarget.enrollment.emergencyContacts?.[0]?.phone
+          ?? profileMap.get(waiverPrintTarget.enrollment.parentUserId)?.phoneNumber}
         weightEstimate={waiverPrintTarget.enrollment.parentWeightEstimate}
         onDone={() => setWaiverPrintTarget(null)}
       />

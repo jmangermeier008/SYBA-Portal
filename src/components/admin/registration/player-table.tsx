@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { format } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,8 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, History, Loader2, Download, Maximize2, Trash2 } from 'lucide-react';
+import { CheckCircle2, History, Loader2, Download, Maximize2, Trash2, Printer } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
+import { ShenangoValleyWaiverPrintable } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import type { Division } from '@/types/scheduling';
 
 export interface PlayerWithDocs {
@@ -22,6 +24,10 @@ export interface PlayerWithDocs {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  streetAddress?: string;
+  city?: string;
+  schoolEnrolled?: string;
+  grade?: string;
   parentUserId?: string;
   divisionId?: string;
   birthCertificateUrl?: string;
@@ -51,6 +57,8 @@ export interface EnrollmentRecord {
   payment_status?: string;
   fee_waived?: boolean;
   registrationFeeAmount?: number;
+  parentWeightEstimate?: number;
+  emergencyContacts?: { name: string; phone: string; relationship: string }[];
 }
 
 export interface AuditFormData {
@@ -152,6 +160,8 @@ export function PlayerTable({
   const [leagueFormSigned, setLeagueFormSigned] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
   const [docViewerExpanded, setDocViewerExpanded] = useState(false);
+  // Printable league waiver — available to all admins on this screen, not just site admins
+  const [waiverPrintTarget, setWaiverPrintTarget] = useState<{ player: PlayerWithDocs; enrollment?: EnrollmentRecord } | null>(null);
 
   const playerEnrollmentMap = useMemo(() => {
     const map = new Map<string, EnrollmentRecord>();
@@ -351,26 +361,41 @@ export function PlayerTable({
                           </>
                         )}
                       </div>
-                      {isSiteAdmin && (
+                      {(isSiteAdmin || showLeagueForm) && (
                         <div className="flex gap-2 pt-1">
-                          <Button
-                            variant="default"
-                            size="sm"
-                            className="rounded-full h-9 flex-1"
-                            onClick={() => openAudit(player)}
-                            disabled={busy}
-                          >
-                            Audit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full h-9 text-destructive border-destructive/30 hover:bg-destructive/10"
-                            onClick={() => setDeletingPlayer(player)}
-                            disabled={busy}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          {showLeagueForm && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="rounded-full h-9 flex-1"
+                              onClick={() => setWaiverPrintTarget({ player, enrollment })}
+                            >
+                              <Printer className="h-3.5 w-3.5 mr-1.5" />
+                              Print Waiver
+                            </Button>
+                          )}
+                          {isSiteAdmin && (
+                            <>
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="rounded-full h-9 flex-1"
+                                onClick={() => openAudit(player)}
+                                disabled={busy}
+                              >
+                                Audit
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-full h-9 text-destructive border-destructive/30 hover:bg-destructive/10"
+                                onClick={() => setDeletingPlayer(player)}
+                                disabled={busy}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       )}
                     </CardContent>
@@ -390,7 +415,7 @@ export function PlayerTable({
                     <TableHead>Birth Cert</TableHead>
                     <TableHead>Physical</TableHead>
                     {showLeagueForm && <TableHead>League Form</TableHead>}
-                    {isSiteAdmin && <TableHead className="pr-6 text-right">Actions</TableHead>}
+                    {(isSiteAdmin || showLeagueForm) && <TableHead className="pr-6 text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -459,28 +484,44 @@ export function PlayerTable({
                           </TableCell>
                         )}
 
-                        {/* Actions — Site Admins only */}
-                        {isSiteAdmin && (
+                        {/* Actions — waiver print for all admins; audit/delete remain Site Admin only */}
+                        {(isSiteAdmin || showLeagueForm) && (
                           <TableCell className="pr-6 text-right">
                             <div className="flex justify-end gap-2">
-                              <Button
-                                variant="default"
-                                size="sm"
-                                className="rounded-full h-8"
-                                onClick={() => openAudit(player)}
-                                disabled={busy}
-                              >
-                                Audit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-full h-8 text-destructive border-destructive/30 hover:bg-destructive/10"
-                                onClick={() => setDeletingPlayer(player)}
-                                disabled={busy}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {showLeagueForm && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-full h-8"
+                                  onClick={() => setWaiverPrintTarget({ player, enrollment: playerEnrollmentMap.get(player.id) })}
+                                  title="Print League Waiver"
+                                >
+                                  <Printer className="h-3.5 w-3.5" />
+                                  <span className="sr-only">Print League Waiver</span>
+                                </Button>
+                              )}
+                              {isSiteAdmin && (
+                                <>
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="rounded-full h-8"
+                                    onClick={() => openAudit(player)}
+                                    disabled={busy}
+                                  >
+                                    Audit
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-full h-8 text-destructive border-destructive/30 hover:bg-destructive/10"
+                                    onClick={() => setDeletingPlayer(player)}
+                                    disabled={busy}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </TableCell>
                         )}
@@ -699,6 +740,18 @@ export function PlayerTable({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Portal to body — the host page's root carries print:hidden, which would
+          otherwise hide this nested printable from the print engine too. */}
+      {waiverPrintTarget && createPortal(
+        <ShenangoValleyWaiverPrintable
+          player={waiverPrintTarget.player}
+          parentPhone={waiverPrintTarget.enrollment?.emergencyContacts?.[0]?.phone}
+          weightEstimate={waiverPrintTarget.enrollment?.parentWeightEstimate}
+          onDone={() => setWaiverPrintTarget(null)}
+        />,
+        document.body
+      )}
     </>
   );
 }
