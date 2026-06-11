@@ -48,11 +48,6 @@ interface StepperState {
   grade: string;
   waiverSignatureDataUrl: string; // PNG data URL drawn in step 2; '' = not signed
   waiverRelationship: string;     // Signer's relationship to the player (required when signed)
-  // Football equipment sizing (step 3 for football only)
-  helmetSize: string;
-  shoulderPadSize: string;
-  pantSize: string;
-  equipmentJerseySize: string;
   // Document uploads (step 2)
   birthCertUrl: string;
   physicalUrl: string;
@@ -85,10 +80,6 @@ interface CartItem {
   grade?: string;
   waiverSignatureDataUrl?: string;
   waiverRelationship?: string;
-  helmetSize?: string;
-  shoulderPadSize?: string;
-  pantSize?: string;
-  equipmentJerseySize?: string;
   birthCertUrl?: string;
   physicalUrl?: string;
   // For new players: the ID used for storage upload paths (same ID used when creating the player doc)
@@ -140,10 +131,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     grade: '',
     waiverSignatureDataUrl: '',
     waiverRelationship: '',
-    helmetSize: '',
-    shoulderPadSize: '',
-    pantSize: '',
-    equipmentJerseySize: '',
     birthCertUrl: '',
     physicalUrl: '',
     preGeneratedPlayerId: crypto.randomUUID(),
@@ -525,10 +512,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     grade: state.grade || undefined,
     waiverSignatureDataUrl: state.waiverSignatureDataUrl || undefined,
     waiverRelationship: state.waiverRelationship || undefined,
-    helmetSize: state.helmetSize || undefined,
-    shoulderPadSize: state.shoulderPadSize || undefined,
-    pantSize: state.pantSize || undefined,
-    equipmentJerseySize: state.equipmentJerseySize || undefined,
     birthCertUrl: state.birthCertUrl || undefined,
     physicalUrl: state.physicalUrl || undefined,
     preGeneratedPlayerId: state.isNewPlayer ? state.preGeneratedPlayerId : undefined,
@@ -561,10 +544,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       grade: '',
       waiverSignatureDataUrl: '',
       waiverRelationship: '',
-      helmetSize: '',
-      shoulderPadSize: '',
-      pantSize: '',
-      equipmentJerseySize: '',
       birthCertUrl: '',
       physicalUrl: '',
       preGeneratedPlayerId: crypto.randomUUID(),
@@ -759,16 +738,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           ...(item.isWaitlisted ? { waitlisted_at: now } : {}),
           ...(activeSport === 'football' && item.parentWeightEstimate
             ? { parentWeightEstimate: Number(item.parentWeightEstimate) }
-            : {}),
-          ...(activeSport === 'football' && item.helmetSize
-            ? {
-                footballEquipment: {
-                  helmetSize: item.helmetSize,
-                  shoulderPadSize: item.shoulderPadSize ?? '',
-                  pantSize: item.pantSize ?? '',
-                  jerseySize: item.equipmentJerseySize ?? '',
-                },
-              }
             : {}),
         };
 
@@ -1546,15 +1515,17 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Uniform # Preference</Label>
-                    <Input
-                      className="rounded-xl"
-                      placeholder="e.g. 7"
-                      value={state.uniformNumberPreference}
-                      onChange={(e) => setState(prev => ({ ...prev, uniformNumberPreference: e.target.value }))}
-                    />
-                  </div>
+                  {activeSport !== 'football' && (
+                    <div className="space-y-2">
+                      <Label>Uniform # Preference</Label>
+                      <Input
+                        className="rounded-xl"
+                        placeholder="e.g. 7"
+                        value={state.uniformNumberPreference}
+                        onChange={(e) => setState(prev => ({ ...prev, uniformNumberPreference: e.target.value }))}
+                      />
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>Shirt Size</Label>
                     <Select value={state.shirtSize} onValueChange={(v) => setState(prev => ({ ...prev, shirtSize: v }))}>
@@ -1569,53 +1540,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     </Select>
                   </div>
                 </div>
-
-                {activeSport === 'football' && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold uppercase tracking-wider">Equipment Sizing</Label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Helmet</Label>
-                        <Select value={state.helmetSize} onValueChange={(v) => setState(prev => ({ ...prev, helmetSize: v }))}>
-                          <SelectTrigger className="rounded-xl">
-                            <SelectValue placeholder="Size" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {['XS', 'S', 'M', 'L', 'XL'].map(s => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Shoulder Pads</Label>
-                        <Select value={state.shoulderPadSize} onValueChange={(v) => setState(prev => ({ ...prev, shoulderPadSize: v }))}>
-                          <SelectTrigger className="rounded-xl">
-                            <SelectValue placeholder="Size" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {['XS', 'S', 'M', 'L', 'XL'].map(s => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Pants</Label>
-                        <Select value={state.pantSize} onValueChange={(v) => setState(prev => ({ ...prev, pantSize: v }))}>
-                          <SelectTrigger className="rounded-xl">
-                            <SelectValue placeholder="Size" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {['YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'].map(s => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 <div className="space-y-2">
                   <Label>Medical Notes</Label>
@@ -1647,7 +1571,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <span className="text-muted-foreground">Division</span>
                     <span className="font-medium">{selectedDivision?.name ?? '—'}</span>
                   </div>
-                  {state.uniformNumberPreference && (
+                  {activeSport !== 'football' && state.uniformNumberPreference && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Uniform # Preference</span>
                       <span className="font-medium">#{state.uniformNumberPreference}</span>
@@ -1663,12 +1587,6 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Weight Estimate</span>
                       <span className="font-medium">{state.parentWeightEstimate} lbs</span>
-                    </div>
-                  )}
-                  {activeSport === 'football' && state.helmetSize && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Helmet Size</span>
-                      <span className="font-medium">{state.helmetSize}</span>
                     </div>
                   )}
                 </div>
