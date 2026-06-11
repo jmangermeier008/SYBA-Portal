@@ -77,6 +77,7 @@ interface Player {
   grade?: string;
   waiverSignatureUrl?: string;
   waiverSignedAt?: string;
+  waiverSignedRelationship?: string;
   medicalNotes?: string;
   birthCertificateUrl?: string;
   physicalFormUrl?: string;

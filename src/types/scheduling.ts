@@ -379,6 +379,7 @@ export interface Player {
   grade?: string; // string, not number — supports "K"
   waiverSignatureUrl?: string; // Digital signature image drawn during enrollment
   waiverSignedAt?: string;     // ISO timestamp of the digital signature
+  waiverSignedRelationship?: string; // Signer's relationship to the player (e.g. "Mother")
   clearanceUrl?: string;
   emergencyContacts?: EmergencyContact[];
   medicalNotes?: string;

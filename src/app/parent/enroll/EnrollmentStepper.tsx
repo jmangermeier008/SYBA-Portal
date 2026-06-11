@@ -47,6 +47,7 @@ interface StepperState {
   schoolEnrolled: string;
   grade: string;
   waiverSignatureDataUrl: string; // PNG data URL drawn in step 2; '' = not signed
+  waiverRelationship: string;     // Signer's relationship to the player (required when signed)
   // Football equipment sizing (step 3 for football only)
   helmetSize: string;
   shoulderPadSize: string;
@@ -83,6 +84,7 @@ interface CartItem {
   schoolEnrolled?: string;
   grade?: string;
   waiverSignatureDataUrl?: string;
+  waiverRelationship?: string;
   helmetSize?: string;
   shoulderPadSize?: string;
   pantSize?: string;
@@ -137,6 +139,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     schoolEnrolled: '',
     grade: '',
     waiverSignatureDataUrl: '',
+    waiverRelationship: '',
     helmetSize: '',
     shoulderPadSize: '',
     pantSize: '',
@@ -371,6 +374,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       if (activeSport === 'football' && (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) {
         return `Enter ${playerFirstName}'s address, school, and grade for the league form.`;
       }
+      if (activeSport === 'football' && state.waiverSignatureDataUrl && !state.waiverRelationship) {
+        return 'Enter your relationship to the player to go with your signature.';
+      }
       if (!state.birthCertUrl) return `Upload ${playerFirstName}'s birth certificate in the Documents section.`;
     }
     return null;
@@ -518,6 +524,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     schoolEnrolled: state.schoolEnrolled || undefined,
     grade: state.grade || undefined,
     waiverSignatureDataUrl: state.waiverSignatureDataUrl || undefined,
+    waiverRelationship: state.waiverRelationship || undefined,
     helmetSize: state.helmetSize || undefined,
     shoulderPadSize: state.shoulderPadSize || undefined,
     pantSize: state.pantSize || undefined,
@@ -553,6 +560,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       schoolEnrolled: '',
       grade: '',
       waiverSignatureDataUrl: '',
+      waiverRelationship: '',
       helmetSize: '',
       shoulderPadSize: '',
       pantSize: '',
@@ -660,7 +668,13 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   grade: item.grade ?? '',
                 }
               : {}),
-            ...(signatureUrl ? { waiverSignatureUrl: signatureUrl, waiverSignedAt: now } : {}),
+            ...(signatureUrl
+              ? {
+                  waiverSignatureUrl: signatureUrl,
+                  waiverSignedAt: now,
+                  waiverSignedRelationship: item.waiverRelationship ?? '',
+                }
+              : {}),
             compliance: {
               birthCertificateVerified: false,
               physicalVerified: false,
@@ -689,6 +703,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
               ? {
                   waiverSignatureUrl: signatureUrl,
                   waiverSignedAt: now,
+                  waiverSignedRelationship: item.waiverRelationship ?? '',
                   'compliance.leagueFormSigned': true,
                 }
               : {}),
@@ -1430,6 +1445,16 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       Sign with your finger or mouse to complete the league agreement now,
                       or skip and sign the printed form later.
                     </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="waiverRelationship">Relationship to player</Label>
+                      <Input
+                        id="waiverRelationship"
+                        className="rounded-xl"
+                        placeholder="e.g. Mother, Father, Legal Guardian"
+                        value={state.waiverRelationship}
+                        onChange={(e) => setState(prev => ({ ...prev, waiverRelationship: e.target.value }))}
+                      />
+                    </div>
                     <SignaturePadField
                       value={state.waiverSignatureDataUrl}
                       onChange={(dataUrl) => setState(prev => ({ ...prev, waiverSignatureDataUrl: dataUrl }))}
@@ -1723,6 +1748,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
                 (state.step === 2 && activeSport === 'football' &&
                   (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) ||
+                (state.step === 2 && activeSport === 'football' &&
+                  !!state.waiverSignatureDataUrl && !state.waiverRelationship) ||
                 (state.step === 2 && !state.birthCertUrl)
               }
             >

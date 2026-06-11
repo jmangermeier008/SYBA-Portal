@@ -68,6 +68,7 @@ export default function ParentDashboard() {
     grade?: string;
     waiverSignatureUrl?: string;
     waiverSignedAt?: string;
+    waiverSignedRelationship?: string;
     birthCertificateUrl?: string;
     physicalFormUrl?: string;
     compliance?: {
@@ -510,6 +511,7 @@ export default function ParentDashboard() {
                         grade: p.grade,
                         waiverSignatureUrl: p.waiverSignatureUrl,
                         waiverSignedAt: p.waiverSignedAt,
+                        waiverSignedRelationship: p.waiverSignedRelationship,
                       },
                       weightEstimate: footballEnrollmentByPlayer.get(p.id)?.parentWeightEstimate,
                       phone: footballEnrollmentByPlayer.get(p.id)?.emergencyContacts?.[0]?.phone,

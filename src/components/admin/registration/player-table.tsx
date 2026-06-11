@@ -30,6 +30,7 @@ export interface PlayerWithDocs {
   grade?: string;
   waiverSignatureUrl?: string;
   waiverSignedAt?: string;
+  waiverSignedRelationship?: string;
   parentUserId?: string;
   divisionId?: string;
   birthCertificateUrl?: string;
