@@ -40,6 +40,11 @@ interface StepperState {
   emergencyContacts: EmergencyContact[];
   medicalNotes: string;
   parentWeightEstimate: string; // string in state for input control, parsed to number on save
+  // League form info (football only) — printed on the Shenango Valley player agreement
+  streetAddress: string;
+  city: string;
+  schoolEnrolled: string;
+  grade: string;
   // Football equipment sizing (step 3 for football only)
   helmetSize: string;
   shoulderPadSize: string;
@@ -71,6 +76,10 @@ interface CartItem {
   emergencyContacts: EmergencyContact[];
   medicalNotes: string;
   parentWeightEstimate?: string;
+  streetAddress?: string;
+  city?: string;
+  schoolEnrolled?: string;
+  grade?: string;
   helmetSize?: string;
   shoulderPadSize?: string;
   pantSize?: string;
@@ -120,6 +129,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     emergencyContacts: [{ name: '', phone: '', relationship: '' }],
     medicalNotes: '',
     parentWeightEstimate: '',
+    streetAddress: '',
+    city: '',
+    schoolEnrolled: '',
+    grade: '',
     helmetSize: '',
     shoulderPadSize: '',
     pantSize: '',
@@ -351,6 +364,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     if (state.step === 2) {
       if (!emergencyContactsValid()) return 'Add at least one emergency contact (name, phone, and relationship).';
       if (activeSport === 'football' && !state.parentWeightEstimate) return `Enter ${playerFirstName}'s estimated weight.`;
+      if (activeSport === 'football' && (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) {
+        return `Enter ${playerFirstName}'s address, school, and grade for the league form.`;
+      }
       if (!state.birthCertUrl) return `Upload ${playerFirstName}'s birth certificate in the Documents section.`;
     }
     return null;
@@ -493,6 +509,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     emergencyContacts: state.emergencyContacts.filter(c => c.name && c.phone && c.relationship),
     medicalNotes: state.medicalNotes,
     parentWeightEstimate: state.parentWeightEstimate || undefined,
+    streetAddress: state.streetAddress || undefined,
+    city: state.city || undefined,
+    schoolEnrolled: state.schoolEnrolled || undefined,
+    grade: state.grade || undefined,
     helmetSize: state.helmetSize || undefined,
     shoulderPadSize: state.shoulderPadSize || undefined,
     pantSize: state.pantSize || undefined,
@@ -523,6 +543,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       emergencyContacts: [{ name: '', phone: '', relationship: '' }],
       medicalNotes: '',
       parentWeightEstimate: '',
+      streetAddress: '',
+      city: '',
+      schoolEnrolled: '',
+      grade: '',
       helmetSize: '',
       shoulderPadSize: '',
       pantSize: '',
@@ -589,18 +613,38 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             primaryParentId: user.uid,
             ...(item.birthCertUrl ? { birthCertificateUrl: item.birthCertUrl } : {}),
             ...(item.physicalUrl ? { physicalFormUrl: item.physicalUrl } : {}),
+            ...(activeSport === 'football'
+              ? {
+                  streetAddress: item.streetAddress ?? '',
+                  city: item.city ?? '',
+                  schoolEnrolled: item.schoolEnrolled ?? '',
+                  grade: item.grade ?? '',
+                }
+              : {}),
             compliance: {
               birthCertificateVerified: false,
               physicalVerified: false,
               verificationStatus: 'pending',
             },
           });
-        } else if (item.playerId && (item.birthCertUrl || item.physicalUrl)) {
-          // Existing player — attach document URLs
+        } else if (item.playerId && (item.birthCertUrl || item.physicalUrl || activeSport === 'football')) {
+          // Existing player — attach document URLs and league-form info.
+          // Only reset verification to pending when a new document was actually
+          // uploaded — an address-only write must not un-approve a player.
           batch.update(doc(db, 'userProfiles', user.uid, 'players', item.playerId), {
             ...(item.birthCertUrl ? { birthCertificateUrl: item.birthCertUrl } : {}),
             ...(item.physicalUrl ? { physicalFormUrl: item.physicalUrl } : {}),
-            'compliance.verificationStatus': 'pending',
+            ...(activeSport === 'football'
+              ? {
+                  streetAddress: item.streetAddress ?? '',
+                  city: item.city ?? '',
+                  schoolEnrolled: item.schoolEnrolled ?? '',
+                  grade: item.grade ?? '',
+                }
+              : {}),
+            ...(item.birthCertUrl || item.physicalUrl
+              ? { 'compliance.verificationStatus': 'pending' }
+              : {}),
           });
         }
 
@@ -1268,6 +1312,69 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 </div>
               )}
 
+              {activeSport === 'football' && (
+                <div className="space-y-3 border-t pt-4">
+                  <div>
+                    <Label className="text-sm font-bold uppercase tracking-wider">
+                      League Form Information
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Required for the Shenango Valley league player agreement form.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="streetAddress">
+                      Street Address <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="streetAddress"
+                      className="rounded-xl"
+                      placeholder="e.g. 123 Main St"
+                      value={state.streetAddress}
+                      onChange={(e) => setState(prev => ({ ...prev, streetAddress: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="city">
+                        City <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="city"
+                        className="rounded-xl"
+                        placeholder="e.g. Sharpsville"
+                        value={state.city}
+                        onChange={(e) => setState(prev => ({ ...prev, city: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="grade">
+                        Grade <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="grade"
+                        className="rounded-xl"
+                        placeholder="e.g. 4"
+                        value={state.grade}
+                        onChange={(e) => setState(prev => ({ ...prev, grade: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="schoolEnrolled">
+                      School Enrolled <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="schoolEnrolled"
+                      className="rounded-xl"
+                      placeholder="e.g. Sharpsville Elementary"
+                      value={state.schoolEnrolled}
+                      onChange={(e) => setState(prev => ({ ...prev, schoolEnrolled: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* ── Documents ── */}
               <div className="space-y-3 border-t pt-4">
                 <div>
@@ -1551,6 +1658,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 )) ||
                 (state.step === 2 && !emergencyContactsValid()) ||
                 (state.step === 2 && activeSport === 'football' && !state.parentWeightEstimate) ||
+                (state.step === 2 && activeSport === 'football' &&
+                  (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) ||
                 (state.step === 2 && !state.birthCertUrl)
               }
             >

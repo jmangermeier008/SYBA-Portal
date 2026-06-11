@@ -37,6 +37,7 @@ export interface PlayerWithDocs {
     verifiedAt?: string;
     verificationStatus?: 'pending' | 'approved' | 'rejected';
     rejectionReason?: string;
+    leagueFormSigned?: boolean;
   };
   _refPath?: string;
 }
@@ -57,6 +58,7 @@ export interface AuditFormData {
   auditDivisionId: string;
   approveAge: boolean;
   approvePhysical: boolean;
+  leagueFormSigned?: boolean; // undefined = not applicable (baseball) — don't write
 }
 
 interface PlayerTableProps {
@@ -66,6 +68,8 @@ interface PlayerTableProps {
   playerSportMap: Map<string, string>;
   isSiteAdmin: boolean;
   isProcessing: boolean;
+  /** Football: show the league agreement column + audit toggle */
+  showLeagueForm?: boolean;
   initialAuditPlayerId?: string;
   onAuditSubmit: (player: PlayerWithDocs, formData: AuditFormData) => Promise<boolean>;
   onDeletePlayer: (player: PlayerWithDocs) => Promise<boolean>;
@@ -129,6 +133,7 @@ export function PlayerTable({
   playerSportMap,
   isSiteAdmin,
   isProcessing,
+  showLeagueForm = false,
   initialAuditPlayerId,
   onAuditSubmit,
   onDeletePlayer,
@@ -144,6 +149,7 @@ export function PlayerTable({
   const [auditDivisionId, setAuditDivisionId] = useState('');
   const [approveAge, setApproveAge] = useState(false);
   const [approvePhysical, setApprovePhysical] = useState(false);
+  const [leagueFormSigned, setLeagueFormSigned] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
   const [docViewerExpanded, setDocViewerExpanded] = useState(false);
 
@@ -177,6 +183,7 @@ export function PlayerTable({
     setAuditDivisionId('');
     setApproveAge(false);
     setApprovePhysical(false);
+    setLeagueFormSigned(player.compliance?.leagueFormSigned ?? false);
     setAuditDocTab('birthCert');
     setAuditingPlayer(player);
   };
@@ -195,7 +202,13 @@ export function PlayerTable({
   const handleAuditSubmit = async () => {
     if (!auditingPlayer) return;
     setLocalProcessing(true);
-    const success = await onAuditSubmit(auditingPlayer, { auditDob, auditDivisionId, approveAge, approvePhysical });
+    const success = await onAuditSubmit(auditingPlayer, {
+      auditDob,
+      auditDivisionId,
+      approveAge,
+      approvePhysical,
+      leagueFormSigned: showLeagueForm ? leagueFormSigned : undefined,
+    });
     setLocalProcessing(false);
     if (success) setAuditingPlayer(null);
   };
@@ -210,6 +223,7 @@ export function PlayerTable({
 
   const exportCSV = () => {
     const headers = ['Player Name', 'Division', 'Age', 'DOB', 'Payment Status', 'Birth Cert Status', 'Physical Status'];
+    if (showLeagueForm) headers.push('League Form');
     const rows = filteredPlayers.map(player => {
       const divName = player.divisionId ? (divisionNameMap.get(player.divisionId) ?? '') : '';
       const age = getLeagueAge(player.dateOfBirth) ?? '';
@@ -217,11 +231,13 @@ export function PlayerTable({
       const payStatus = getPaymentStatus(enrollment) ?? '—';
       const birthCertStatus = player.ageVerified ? 'Verified' : player.birthCertificateUrl ? 'Pending' : 'No Document';
       const physicalStatus = player.compliance?.physicalVerified ? 'Verified' : player.physicalFormUrl ? 'Pending' : 'No Document';
-      return [
+      const row = [
         `${player.firstName} ${player.lastName}`,
         divName, String(age), player.dateOfBirth ?? '',
         payStatus, birthCertStatus, physicalStatus,
       ];
+      if (showLeagueForm) row.push(player.compliance?.leagueFormSigned ? 'Signed' : 'Not Signed');
+      return row;
     });
     const csv = [headers, ...rows]
       .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
@@ -325,6 +341,15 @@ export function PlayerTable({
                           ? <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
                           : <Badge variant="outline">No Document</Badge>
                         }
+                        {showLeagueForm && (
+                          <>
+                            <span className="text-xs text-muted-foreground ml-2">League Form:</span>
+                            {player.compliance?.leagueFormSigned
+                              ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Signed</Badge>
+                              : <Badge variant="outline">Not Signed</Badge>
+                            }
+                          </>
+                        )}
                       </div>
                       {isSiteAdmin && (
                         <div className="flex gap-2 pt-1">
@@ -364,6 +389,7 @@ export function PlayerTable({
                     <TableHead>Payment</TableHead>
                     <TableHead>Birth Cert</TableHead>
                     <TableHead>Physical</TableHead>
+                    {showLeagueForm && <TableHead>League Form</TableHead>}
                     {isSiteAdmin && <TableHead className="pr-6 text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -421,6 +447,17 @@ export function PlayerTable({
                             <Badge variant="outline">No Document</Badge>
                           )}
                         </TableCell>
+
+                        {/* League Form — football only */}
+                        {showLeagueForm && (
+                          <TableCell>
+                            {player.compliance?.leagueFormSigned ? (
+                              <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Signed</Badge>
+                            ) : (
+                              <Badge variant="outline">Not Signed</Badge>
+                            )}
+                          </TableCell>
+                        )}
 
                         {/* Actions — Site Admins only */}
                         {isSiteAdmin && (
@@ -585,6 +622,22 @@ export function PlayerTable({
                       </label>
                     )}
                   </div>
+
+                  {/* League Agreement Form — football only; a reversible toggle, unlike the approve-once doc checkboxes */}
+                  {showLeagueForm && (
+                    <div className="space-y-3 p-3 rounded-xl bg-secondary/10 border">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">League Agreement Form</p>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={leagueFormSigned}
+                          onChange={e => setLeagueFormSigned(e.target.checked)}
+                          className="h-4 w-4 accent-green-600"
+                        />
+                        <span className="text-sm font-medium">Signed league waiver received</span>
+                      </label>
+                    </div>
+                  )}
 
                   {/* Division reassignment */}
                   <div className="space-y-2">

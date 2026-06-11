@@ -18,7 +18,8 @@ import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescript
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle, ShieldCheck, ShieldAlert, X } from 'lucide-react';
+import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle, ShieldCheck, ShieldAlert, X, Printer } from 'lucide-react';
+import { ShenangoValleyWaiverPrintable } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -69,6 +70,10 @@ interface Player {
   lastName: string;
   clearanceUrl?: string;
   dateOfBirth: string;
+  streetAddress?: string;
+  city?: string;
+  schoolEnrolled?: string;
+  grade?: string;
   medicalNotes?: string;
   birthCertificateUrl?: string;
   physicalFormUrl?: string;
@@ -186,6 +191,9 @@ export default function MasterRosterPage() {
   const { data: players } = useCollection<Player>(playersQuery);
   const { data: parentProfiles } = useCollection<ParentProfile>(parentProfilesQuery);
   const { data: divisionsForSeason } = useCollection<Division>(divisionsForSeasonQuery);
+
+  // Printable Shenango Valley league waiver — set from the row-actions menu
+  const [waiverPrintTarget, setWaiverPrintTarget] = useState<{ player: Player; enrollment: Enrollment } | null>(null);
 
   const profileMap = useMemo(() => {
     const m = new Map<string, ParentProfile>();
@@ -619,7 +627,8 @@ export default function MasterRosterPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <>
+    <div className="flex min-h-screen bg-background print:hidden">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
         <header className="mb-4 md:mb-6 flex justify-between items-start">
@@ -1021,6 +1030,12 @@ export default function MasterRosterPage() {
                                   Equipment & Sizes
                                 </DropdownMenuItem>
                               )}
+                              {activeSport === 'football' && p && (
+                                <DropdownMenuItem onClick={() => setWaiverPrintTarget({ player: p, enrollment: e })}>
+                                  <Printer className="mr-2 h-4 w-4" />
+                                  Print League Waiver
+                                </DropdownMenuItem>
+                              )}
                               {canWaive && (
                                 <DropdownMenuItem
                                   onClick={() => setTimeout(() => setWaiverDialog({
@@ -1279,5 +1294,14 @@ export default function MasterRosterPage() {
         </DialogContent>
       </Dialog>
     </div>
+    {waiverPrintTarget && (
+      <ShenangoValleyWaiverPrintable
+        player={waiverPrintTarget.player}
+        parentPhone={profileMap.get(waiverPrintTarget.enrollment.parentUserId)?.phoneNumber}
+        weightEstimate={waiverPrintTarget.enrollment.parentWeightEstimate}
+        onDone={() => setWaiverPrintTarget(null)}
+      />
+    )}
+    </>
   );
 }
