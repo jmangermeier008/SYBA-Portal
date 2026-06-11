@@ -372,6 +372,14 @@ export interface Player {
   primaryParentId?: string;   // UID of the parent whose subcollection this player lives under
   secondaryParentId?: string; // UID of linked second parent
   dateOfBirth: string;
+  // League-form fields — collected in the enrollment stepper for football only
+  streetAddress?: string;
+  city?: string;
+  schoolEnrolled?: string;
+  grade?: string; // string, not number — supports "K"
+  waiverSignatureUrl?: string; // Digital signature image drawn during enrollment
+  waiverSignedAt?: string;     // ISO timestamp of the digital signature
+  waiverSignedRelationship?: string; // Signer's relationship to the player (e.g. "Mother")
   clearanceUrl?: string;
   emergencyContacts?: EmergencyContact[];
   medicalNotes?: string;
@@ -387,6 +395,7 @@ export interface Player {
     verifiedAt?: string;         // ISO timestamp of last verification
     verificationStatus?: 'pending' | 'approved' | 'rejected';
     rejectionReason?: string;    // Set when admin rejects; cleared on re-upload
+    leagueFormSigned?: boolean;  // Football: signed Shenango Valley league agreement received
   };
 }
 

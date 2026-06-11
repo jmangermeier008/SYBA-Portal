@@ -5,7 +5,8 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck } from 'lucide-react';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck, Printer } from 'lucide-react';
+import { ShenangoValleyWaiverPrintable, type WaiverPlayerData } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -60,6 +61,14 @@ export default function ParentDashboard() {
     id: string;
     firstName?: string;
     lastName?: string;
+    dateOfBirth?: string;
+    streetAddress?: string;
+    city?: string;
+    schoolEnrolled?: string;
+    grade?: string;
+    waiverSignatureUrl?: string;
+    waiverSignedAt?: string;
+    waiverSignedRelationship?: string;
     birthCertificateUrl?: string;
     physicalFormUrl?: string;
     compliance?: {
@@ -73,7 +82,19 @@ export default function ParentDashboard() {
     if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user?.uid]);
-  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number }>(enrollmentsQuery);
+  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string; emergencyContacts?: { name: string; phone: string; relationship: string }[] }>(enrollmentsQuery);
+
+  // Most recent football enrollment per player — drives the league waiver print action
+  const footballEnrollmentByPlayer = useMemo(() => {
+    const map = new Map<string, { parentWeightEstimate?: number; emergencyContacts?: { name: string; phone: string; relationship: string }[] }>();
+    (enrollments ?? [])
+      .filter(e => e.sport === 'football')
+      .sort((a, b) => (a.registered_at ?? '').localeCompare(b.registered_at ?? ''))
+      .forEach(e => map.set(e.playerId, e)); // last write wins = most recent
+    return map;
+  }, [enrollments]);
+
+  const [waiverTarget, setWaiverTarget] = useState<{ player: WaiverPlayerData; weightEstimate?: number; phone?: string } | null>(null);
 
   // Set initial selected player when players load
   useEffect(() => {
@@ -328,7 +349,8 @@ export default function ParentDashboard() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <>
+    <div className="flex min-h-screen bg-background print:hidden">
       <Sidebar />
       <main className="flex-1 md:ml-64 pb-20 md:pb-6 pt-16 md:pt-6 max-w-[1400px]">
 
@@ -461,6 +483,45 @@ export default function ParentDashboard() {
                   </Label>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* League paperwork — printable Shenango Valley waiver for football players */}
+          {activeSport === 'football' && footballEnrollmentByPlayer.size > 0 && (
+            <div className="rounded-xl border px-4 py-3 mb-4">
+              <p className="text-sm font-semibold">League Paperwork</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Print the Shenango Valley player agreement form, sign it, and hand it to your coach.
+              </p>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {players?.filter(p => footballEnrollmentByPlayer.has(p.id)).map(p => (
+                  <Button
+                    key={p.id}
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full"
+                    onClick={() => setWaiverTarget({
+                      player: {
+                        firstName: p.firstName ?? '',
+                        lastName: p.lastName ?? '',
+                        dateOfBirth: p.dateOfBirth,
+                        streetAddress: p.streetAddress,
+                        city: p.city,
+                        schoolEnrolled: p.schoolEnrolled,
+                        grade: p.grade,
+                        waiverSignatureUrl: p.waiverSignatureUrl,
+                        waiverSignedAt: p.waiverSignedAt,
+                        waiverSignedRelationship: p.waiverSignedRelationship,
+                      },
+                      weightEstimate: footballEnrollmentByPlayer.get(p.id)?.parentWeightEstimate,
+                      phone: footballEnrollmentByPlayer.get(p.id)?.emergencyContacts?.[0]?.phone,
+                    })}
+                  >
+                    <Printer className="h-3.5 w-3.5 mr-1.5" />
+                    Print League Waiver — {p.firstName}
+                  </Button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -709,5 +770,14 @@ export default function ParentDashboard() {
         </div>
       </main>
     </div>
+    {waiverTarget && (
+      <ShenangoValleyWaiverPrintable
+        player={waiverTarget.player}
+        parentPhone={waiverTarget.phone ?? profile?.phoneNumber}
+        weightEstimate={waiverTarget.weightEstimate}
+        onDone={() => setWaiverTarget(null)}
+      />
+    )}
+    </>
   );
 }
