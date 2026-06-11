@@ -16,6 +16,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { BadgeCheck, CheckCircle2, History, Loader2, Download, Maximize2, Trash2, Printer } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
 import { openPrintTab } from '@/lib/print-job';
+import { openDocumentPacket } from '@/lib/document-packet';
+import { DocViewerPane } from '@/components/documents/document-viewer';
+import { useUser } from '@/firebase';
+import { useToast } from '@/hooks/use-toast';
 import type { Division } from '@/types/scheduling';
 
 export interface PlayerWithDocs {
@@ -113,33 +117,6 @@ function PaymentBadge({ enrollment }: { enrollment?: EnrollmentRecord }) {
   }
 }
 
-function renderDocViewer(url: string | undefined, label: string) {
-  if (!url) return <p className="text-muted-foreground text-sm p-4">No {label} uploaded.</p>;
-  const lower = url.toLowerCase();
-  const isPdf = lower.includes('.pdf');
-  const isImage = /\.(jpe?g|png|gif|webp|bmp|heic)/.test(lower);
-  if (isPdf) {
-    return <iframe src={url} className="w-full h-full rounded-lg border" title={label} />;
-  }
-  if (isImage) {
-    return (
-      <ScrollArea className="h-full w-full">
-        <img src={url} className="w-full h-auto object-contain rounded-lg" alt={label} />
-      </ScrollArea>
-    );
-  }
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-      <p className="text-sm text-muted-foreground">Preview not available for this file type.</p>
-      <Button variant="outline" asChild>
-        <a href={url} download target="_blank" rel="noreferrer">
-          <Download className="h-4 w-4 mr-2" /> Download File
-        </a>
-      </Button>
-    </div>
-  );
-}
-
 export function PlayerTable({
   players,
   enrollments,
@@ -154,6 +131,8 @@ export function PlayerTable({
   onWaiveFee,
 }: PlayerTableProps) {
   const isMobile = useIsMobile();
+  const { user } = useUser();
+  const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<'pending' | 'verified' | 'all'>('pending');
   const [divisionFilter, setDivisionFilter] = useState('all');
 
@@ -167,6 +146,24 @@ export function PlayerTable({
   const [leagueFormSigned, setLeagueFormSigned] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
   const [docViewerExpanded, setDocViewerExpanded] = useState(false);
+  const [docPrinting, setDocPrinting] = useState(false);
+
+  const handleDocPrint = () => {
+    if (!user || !auditingPlayer) return;
+    const refPath = auditingPlayer._refPath
+      ?? (auditingPlayer.parentUserId ? `userProfiles/${auditingPlayer.parentUserId}/players/${auditingPlayer.id}` : null);
+    if (!refPath) return;
+    setDocPrinting(true);
+    openDocumentPacket({
+      user,
+      docType: auditDocTab === 'birthCert' ? 'birthCertificate' : 'physicalForm',
+      refPaths: [refPath],
+    })
+      .then(r => {
+        if (!r.ok) toast({ variant: 'destructive', title: 'Print failed', description: r.error });
+      })
+      .finally(() => setDocPrinting(false));
+  };
 
   // League waiver printing — available to all admins on this screen, not just
   // site admins. Opens the dedicated /print tab (mobile browsers can't print
@@ -614,10 +611,10 @@ export function PlayerTable({
                     <Maximize2 className="h-3.5 w-3.5" />
                   </button>
                 )}
-                {renderDocViewer(
-                  auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl,
-                  auditDocTab === 'birthCert' ? 'birth certificate' : 'physical form'
-                )}
+                <DocViewerPane
+                  url={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
+                  label={auditDocTab === 'birthCert' ? 'birth certificate' : 'physical form'}
+                />
               </div>
             </div>
 
@@ -635,17 +632,25 @@ export function PlayerTable({
                     </p>
                   </div>
                   {(auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl) && (
-                    <Button variant="outline" size="sm" asChild className="shrink-0 text-xs h-8">
-                      <a
-                        href={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
-                        download
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <Download className="h-3.5 w-3.5 mr-1" />
-                        {auditDocTab === 'birthCert' ? 'Download Birth Cert' : 'Download Physical'}
-                      </a>
-                    </Button>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleDocPrint} disabled={docPrinting} className="text-xs h-8">
+                        {docPrinting
+                          ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          : <Printer className="h-3.5 w-3.5 mr-1" />}
+                        {auditDocTab === 'birthCert' ? 'Print Birth Cert' : 'Print Physical'}
+                      </Button>
+                      <Button variant="outline" size="sm" asChild className="text-xs h-8">
+                        <a
+                          href={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
+                          download
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Download className="h-3.5 w-3.5 mr-1" />
+                          {auditDocTab === 'birthCert' ? 'Download Birth Cert' : 'Download Physical'}
+                        </a>
+                      </Button>
+                    </div>
                   )}
                 </div>
               </DialogHeader>
