@@ -4,9 +4,12 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -26,7 +29,7 @@ import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { MetricsCards } from '@/components/admin/registration/metrics-cards';
-import { PlayerTable, type PlayerWithDocs, type AuditFormData } from '@/components/admin/registration/player-table';
+import { PlayerTable, type PlayerWithDocs, type AuditFormData, type EnrollmentRecord } from '@/components/admin/registration/player-table';
 import { CoachComplianceTable } from '@/components/admin/registration/coach-compliance-table';
 import type { Division } from '@/types/scheduling';
 
@@ -75,6 +78,15 @@ export default function RegistrationDashboardPage() {
 
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [globalProcessing, setGlobalProcessing] = useState(false);
+
+  // Fee waiver dialog state — opened from the PlayerTable waive action
+  const [feeWaiverDialog, setFeeWaiverDialog] = useState<{
+    open: boolean;
+    player: PlayerWithDocs | null;
+    enrollment: EnrollmentRecord | null;
+    reason: string;
+    loading: boolean;
+  }>({ open: false, player: null, enrollment: null, reason: '', loading: false });
 
   // ── Queries — ALL before any early returns ─────────────────────────────────
 
@@ -341,6 +353,57 @@ export default function RegistrationDashboardPage() {
     }
   };
 
+  const handleConfirmFeeWaiver = async () => {
+    const { enrollment, player } = feeWaiverDialog;
+    if (!enrollment?.parentUserId || !db) return;
+    setFeeWaiverDialog(prev => ({ ...prev, loading: true }));
+
+    try {
+      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
+      await updateDoc(enrollmentRef, {
+        paymentStatus: 'fee_waived',
+        fee_waived: true,
+        waiver_reason: feeWaiverDialog.reason.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Look up parent email from userProfiles
+      let parentEmail = '';
+      try {
+        const profileSnap = await getDoc(doc(db, 'userProfiles', enrollment.parentUserId));
+        parentEmail = profileSnap.data()?.email || '';
+      } catch {}
+
+      // Send confirmation email
+      try {
+        const emailRes = await fetch('/api/email/confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toEmail: parentEmail,
+            playerName: player ? `${player.firstName} ${player.lastName}` : '',
+            seasonName: enrollment.seasonId,
+            divisionName: enrollment.divisionId,
+            isWaitlisted: false,
+            feeWaived: true,
+          }),
+        });
+        if (!emailRes.ok) {
+          toast({ title: "Fee Waiver Applied", description: "Marked as fee waived, but confirmation email failed to send.", variant: "destructive" });
+        } else {
+          toast({ title: "Fee Waiver Applied", description: `Registration marked as fee waived.` });
+        }
+      } catch {
+        toast({ title: "Fee Waiver Applied", description: "Marked as fee waived, but confirmation email failed to send.", variant: "destructive" });
+      }
+      setFeeWaiverDialog({ open: false, player: null, enrollment: null, reason: '', loading: false });
+    } catch (error: any) {
+      console.error('[registration] Fee waiver error:', error);
+      toast({ title: "Error", description: error.message, variant: 'destructive' });
+      setFeeWaiverDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
   const exportRegistrationsCSV = () => {
     if (!enrollments.length) return;
     const divisionNameMap = new Map(
@@ -457,6 +520,7 @@ export default function RegistrationDashboardPage() {
                 initialAuditPlayerId={auditPlayerId ?? undefined}
                 onAuditSubmit={handleAuditSubmit}
                 onDeletePlayer={handleDeletePlayer}
+                onWaiveFee={(player, enrollment) => setFeeWaiverDialog({ open: true, player, enrollment, reason: '', loading: false })}
               />
             )}
           </TabsContent>
@@ -601,6 +665,44 @@ export default function RegistrationDashboardPage() {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Fee Waiver Dialog */}
+      <Dialog open={feeWaiverDialog.open} onOpenChange={(open) => { if (!open && !feeWaiverDialog.loading) setFeeWaiverDialog({ open: false, player: null, enrollment: null, reason: '', loading: false }); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Apply Fee Waiver</DialogTitle>
+            <DialogDescription>
+              {feeWaiverDialog.player
+                ? `Mark ${feeWaiverDialog.player.firstName} ${feeWaiverDialog.player.lastName}'s registration as fee waived. A confirmation email will be sent to the parent.`
+                : 'Mark this registration as fee waived.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="waiver-reason">Reason (optional)</Label>
+              <Input
+                id="waiver-reason"
+                placeholder="e.g. Financial hardship, scholarship, board vote"
+                value={feeWaiverDialog.reason}
+                onChange={e => setFeeWaiverDialog(prev => ({ ...prev, reason: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setFeeWaiverDialog({ open: false, player: null, enrollment: null, reason: '', loading: false })}
+              disabled={feeWaiverDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmFeeWaiver} disabled={feeWaiverDialog.loading} className="bg-emerald-600 hover:bg-emerald-700">
+              {feeWaiverDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
+              Confirm Waiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
