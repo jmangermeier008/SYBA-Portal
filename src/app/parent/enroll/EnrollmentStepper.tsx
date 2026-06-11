@@ -17,6 +17,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import type { Player, Season, Division, EmergencyContact, Enrollment } from '@/types/scheduling';
 import { getLeagueAge, getSuggestedDivisions, calculateCartPricing } from '@/lib/registration-logic';
+import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { SignaturePadField } from '@/components/registration/SignaturePadField';
 
 // ---------------------------------------------------------------------------
@@ -437,24 +438,18 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     docType: 'birth_cert' | 'physical',
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-
-    const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png'];
-    if (!ALLOWED.includes(file.type)) {
-      toast({ variant: 'destructive', title: 'Invalid File', description: 'Upload a PDF, JPG, or PNG.' });
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ variant: 'destructive', title: 'File Too Large', description: 'Maximum 5 MB.' });
-      return;
-    }
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0 || !user) return;
 
     const setSetter = docType === 'birth_cert' ? setBirthCertUploading : setPhysicalUploading;
     setSetter(true);
     try {
+      // Validates type/size, compresses oversized photos, and merges multiple
+      // photos into one PDF; throws user-friendly messages.
+      const file = await prepareDocumentForUpload(files, docType);
+
       const playerId = state.isNewPlayer ? state.preGeneratedPlayerId : state.playerId;
-      const path = `players/${playerId}/${docType}_${Date.now()}`;
+      const path = `players/${playerId}/${docType}_${Date.now()}.${uploadExtensionFor(file)}`;
 
       const idToken = await user.getIdToken();
       const formData = new FormData();
@@ -1459,7 +1454,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                         <span className="ml-1.5 rounded-full bg-destructive/10 text-destructive text-[10px] font-semibold px-1.5 py-0.5 align-middle">Required</span>
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {state.birthCertUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
+                        {birthCertUploading ? 'Processing…' : state.birthCertUrl ? 'Uploaded ✓' : 'PDF or photos · large photos are compressed automatically'}
                       </p>
                     </div>
                   </div>
@@ -1469,6 +1464,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       type="file"
                       className="hidden"
                       accept=".pdf,.jpg,.jpeg,.png"
+                      multiple
                       disabled={birthCertUploading || physicalUploading}
                       onChange={(e) => handleDocUpload('birth_cert', e)}
                     />
@@ -1488,7 +1484,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     <div>
                       <p className="text-sm font-medium">Physical Form <span className="text-xs font-normal text-muted-foreground">(Optional)</span></p>
                       <p className="text-xs text-muted-foreground">
-                        {state.physicalUrl ? 'Uploaded ✓' : 'PDF, JPG, or PNG · Max 5 MB'}
+                        {physicalUploading ? 'Processing…' : state.physicalUrl ? 'Uploaded ✓' : 'PDF or photos · large photos are compressed automatically'}
                       </p>
                     </div>
                   </div>
@@ -1498,6 +1494,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       type="file"
                       className="hidden"
                       accept=".pdf,.jpg,.jpeg,.png"
+                      multiple
                       disabled={birthCertUploading || physicalUploading}
                       onChange={(e) => handleDocUpload('physical', e)}
                     />

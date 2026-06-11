@@ -94,12 +94,12 @@ export function DocumentViewerDialog({
     docType === 'birthCertificate' ? player?.birthCertificateUrl : player?.physicalFormUrl;
 
   const handleUpload = async (docType: PlayerDocType, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!file || !user || !db || !player?._refPath) return;
+    if (files.length === 0 || !user || !db || !player?._refPath) return;
     setUploading(docType);
     try {
-      await uploadPlayerDocument({ user, db, refPath: player._refPath, docType, file });
+      await uploadPlayerDocument({ user, db, refPath: player._refPath, docType, files });
       toast({ title: 'Document uploaded', description: 'Verification status was reset to pending.' });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Upload failed', description: err?.message ?? 'Something went wrong.' });
@@ -167,6 +167,7 @@ export function DocumentViewerDialog({
                   <input
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.png"
+                    multiple
                     className="hidden"
                     ref={el => { fileInputs.current[t.value] = el; }}
                     onChange={(e) => handleUpload(t.value, e)}

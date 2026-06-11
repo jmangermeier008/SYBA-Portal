@@ -157,9 +157,9 @@ export function PlayerTable({
     p._refPath ?? (p.parentUserId ? `userProfiles/${p.parentUserId}/players/${p.id}` : null);
 
   const handleDocUploadReplace = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!file || !user || !db || !auditingPlayer) return;
+    if (files.length === 0 || !user || !db || !auditingPlayer) return;
     const refPath = auditRefPath(auditingPlayer);
     if (!refPath) return;
     setDocUploading(true);
@@ -169,7 +169,7 @@ export function PlayerTable({
         db,
         refPath,
         docType: auditDocTab === 'birthCert' ? 'birthCertificate' : 'physicalForm',
-        file,
+        files,
       });
       toast({ title: 'Document uploaded', description: 'Verification status was reset to pending.' });
     } catch (err: any) {
@@ -667,6 +667,7 @@ export function PlayerTable({
                     <input
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png"
+                      multiple
                       className="hidden"
                       ref={docFileInput}
                       onChange={handleDocUploadReplace}
