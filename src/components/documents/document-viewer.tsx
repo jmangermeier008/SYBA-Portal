@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Download, ExternalLink, Loader2, Printer } from 'lucide-react';
-import { useUser } from '@/firebase';
+import { Download, ExternalLink, Loader2, Printer, Upload } from 'lucide-react';
+import { useFirestore, useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { openDocumentPacket, type PlayerDocType } from '@/lib/document-packet';
+import { uploadPlayerDocument } from '@/lib/player-documents';
 
 export interface DocumentPlayer {
   id: string;
@@ -83,11 +84,29 @@ export function DocumentViewerDialog({
   player: DocumentPlayer | null;
 }) {
   const { user } = useUser();
+  const db = useFirestore();
   const { toast } = useToast();
   const [printing, setPrinting] = useState(false);
+  const [uploading, setUploading] = useState<PlayerDocType | null>(null);
+  const fileInputs = useRef<Partial<Record<PlayerDocType, HTMLInputElement | null>>>({});
 
   const urlFor = (docType: PlayerDocType) =>
     docType === 'birthCertificate' ? player?.birthCertificateUrl : player?.physicalFormUrl;
+
+  const handleUpload = async (docType: PlayerDocType, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !user || !db || !player?._refPath) return;
+    setUploading(docType);
+    try {
+      await uploadPlayerDocument({ user, db, refPath: player._refPath, docType, file });
+      toast({ title: 'Document uploaded', description: 'Verification status was reset to pending.' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Upload failed', description: err?.message ?? 'Something went wrong.' });
+    } finally {
+      setUploading(null);
+    }
+  };
 
   const handlePrint = (docType: PlayerDocType) => {
     if (!user || !player?._refPath) return;
@@ -125,25 +144,44 @@ export function DocumentViewerDialog({
             const url = urlFor(t.value);
             return (
               <TabsContent key={t.value} value={t.value} className="flex-1 flex flex-col min-h-0 mt-3 gap-3">
-                {url && (
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs rounded-full"
-                      onClick={() => handlePrint(t.value)}
-                      disabled={printing || !player?._refPath}
-                    >
-                      {printing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Printer className="h-3.5 w-3.5 mr-1" />}
-                      Print
-                    </Button>
-                    <Button variant="outline" size="sm" asChild className="h-8 text-xs rounded-full">
-                      <a href={url} download target="_blank" rel="noreferrer">
-                        <Download className="h-3.5 w-3.5 mr-1" /> Download
-                      </a>
-                    </Button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  {url && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs rounded-full"
+                        onClick={() => handlePrint(t.value)}
+                        disabled={printing || !player?._refPath}
+                      >
+                        {printing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Printer className="h-3.5 w-3.5 mr-1" />}
+                        Print
+                      </Button>
+                      <Button variant="outline" size="sm" asChild className="h-8 text-xs rounded-full">
+                        <a href={url} download target="_blank" rel="noreferrer">
+                          <Download className="h-3.5 w-3.5 mr-1" /> Download
+                        </a>
+                      </Button>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                    ref={el => { fileInputs.current[t.value] = el; }}
+                    onChange={(e) => handleUpload(t.value, e)}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs rounded-full"
+                    onClick={() => fileInputs.current[t.value]?.click()}
+                    disabled={uploading !== null || !player?._refPath}
+                  >
+                    {uploading === t.value ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                    {url ? 'Replace…' : 'Upload…'}
+                  </Button>
+                </div>
                 <div className="flex-1 min-h-0 bg-secondary/10 rounded-lg overflow-hidden">
                   <DocViewerPane url={url} label={t.label} />
                 </div>

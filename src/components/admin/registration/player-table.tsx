@@ -13,12 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BadgeCheck, CheckCircle2, History, Loader2, Download, Maximize2, Trash2, Printer } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { BadgeCheck, CheckCircle2, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
 import { openPrintTab } from '@/lib/print-job';
 import { openDocumentPacket } from '@/lib/document-packet';
+import { uploadPlayerDocument } from '@/lib/player-documents';
 import { DocViewerPane } from '@/components/documents/document-viewer';
-import { useUser } from '@/firebase';
+import { useFirestore, useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { Division } from '@/types/scheduling';
 
@@ -132,6 +134,7 @@ export function PlayerTable({
 }: PlayerTableProps) {
   const isMobile = useIsMobile();
   const { user } = useUser();
+  const db = useFirestore();
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<'pending' | 'verified' | 'all'>('pending');
   const [divisionFilter, setDivisionFilter] = useState('all');
@@ -147,11 +150,38 @@ export function PlayerTable({
   const [localProcessing, setLocalProcessing] = useState(false);
   const [docViewerExpanded, setDocViewerExpanded] = useState(false);
   const [docPrinting, setDocPrinting] = useState(false);
+  const [docUploading, setDocUploading] = useState(false);
+  const docFileInput = useRef<HTMLInputElement | null>(null);
+
+  const auditRefPath = (p: PlayerWithDocs) =>
+    p._refPath ?? (p.parentUserId ? `userProfiles/${p.parentUserId}/players/${p.id}` : null);
+
+  const handleDocUploadReplace = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !user || !db || !auditingPlayer) return;
+    const refPath = auditRefPath(auditingPlayer);
+    if (!refPath) return;
+    setDocUploading(true);
+    try {
+      await uploadPlayerDocument({
+        user,
+        db,
+        refPath,
+        docType: auditDocTab === 'birthCert' ? 'birthCertificate' : 'physicalForm',
+        file,
+      });
+      toast({ title: 'Document uploaded', description: 'Verification status was reset to pending.' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Upload failed', description: err?.message ?? 'Something went wrong.' });
+    } finally {
+      setDocUploading(false);
+    }
+  };
 
   const handleDocPrint = () => {
     if (!user || !auditingPlayer) return;
-    const refPath = auditingPlayer._refPath
-      ?? (auditingPlayer.parentUserId ? `userProfiles/${auditingPlayer.parentUserId}/players/${auditingPlayer.id}` : null);
+    const refPath = auditRefPath(auditingPlayer);
     if (!refPath) return;
     setDocPrinting(true);
     openDocumentPacket({
@@ -211,6 +241,55 @@ export function PlayerTable({
     setLeagueFormSigned(player.compliance?.leagueFormSigned ?? false);
     setAuditDocTab('birthCert');
     setAuditingPlayer(player);
+  };
+
+  // The audit dialog must reflect live data (e.g. after an admin replaces a
+  // document) — auditingPlayer is a snapshot, the players prop is real-time.
+  const liveAuditingPlayer = auditingPlayer
+    ? (players.find(p => p.id === auditingPlayer.id) ?? auditingPlayer)
+    : null;
+
+  // One labeled menu per row, shared by the desktop table and mobile cards.
+  const renderRowMenu = (player: PlayerWithDocs, enrollment: EnrollmentRecord | undefined) => {
+    const canWaive = !!onWaiveFee && !!enrollment && !['paid', 'fee_waived'].includes(getPaymentStatus(enrollment) ?? '');
+    if (!showLeagueForm && !canWaive && !isSiteAdmin) return null;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+            <MoreHorizontal className="h-4 w-4" />
+            <span className="sr-only">More actions</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {showLeagueForm && (
+            <DropdownMenuItem onClick={() => printWaiver(player, enrollment)}>
+              <Printer className="mr-2 h-4 w-4" /> Print League Waiver
+            </DropdownMenuItem>
+          )}
+          {canWaive && (
+            <DropdownMenuItem
+              disabled={busy}
+              onClick={() => setTimeout(() => onWaiveFee!(player, enrollment!), 0)}
+            >
+              <BadgeCheck className="mr-2 h-4 w-4 text-emerald-500" /> Mark as Fee Waived
+            </DropdownMenuItem>
+          )}
+          {isSiteAdmin && (
+            <>
+              {(showLeagueForm || canWaive) && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                disabled={busy}
+                onClick={() => setTimeout(() => setDeletingPlayer(player), 0)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Delete Player
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
   };
 
   // Deep link (?auditPlayer=...) from the roster page: open that player's audit once data loads
@@ -378,51 +457,18 @@ export function PlayerTable({
                       </div>
                       {(isSiteAdmin || showLeagueForm || !!onWaiveFee) && (
                         <div className="flex gap-2 pt-1">
-                          {showLeagueForm && (
+                          {isSiteAdmin && (
                             <Button
-                              variant="outline"
+                              variant="default"
                               size="sm"
                               className="rounded-full h-9 flex-1"
-                              onClick={() => printWaiver(player, enrollment)}
-                            >
-                              <Printer className="h-3.5 w-3.5 mr-1.5" />
-                              Print Waiver
-                            </Button>
-                          )}
-                          {onWaiveFee && enrollment && !['paid', 'fee_waived'].includes(getPaymentStatus(enrollment) ?? '') && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="rounded-full h-9 flex-1"
-                              onClick={() => onWaiveFee(player, enrollment)}
+                              onClick={() => openAudit(player)}
                               disabled={busy}
                             >
-                              <BadgeCheck className="h-3.5 w-3.5 mr-1.5 text-emerald-500" />
-                              Waive Fee
+                              Audit
                             </Button>
                           )}
-                          {isSiteAdmin && (
-                            <>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                className="rounded-full h-9 flex-1"
-                                onClick={() => openAudit(player)}
-                                disabled={busy}
-                              >
-                                Audit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-full h-9 text-destructive border-destructive/30 hover:bg-destructive/10"
-                                onClick={() => setDeletingPlayer(player)}
-                                disabled={busy}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </>
-                          )}
+                          {renderRowMenu(player, enrollment)}
                         </div>
                       )}
                     </CardContent>
@@ -511,57 +557,22 @@ export function PlayerTable({
                           </TableCell>
                         )}
 
-                        {/* Actions — waiver print + fee waive for all admins; audit/delete remain Site Admin only */}
+                        {/* Actions — Audit stays a visible button (the page's main job); everything else lives in one labeled menu */}
                         {(isSiteAdmin || showLeagueForm || !!onWaiveFee) && (
                           <TableCell className="pr-6 text-right">
                             <div className="flex justify-end gap-2">
-                              {showLeagueForm && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="rounded-full h-8"
-                                  onClick={() => printWaiver(player, playerEnrollmentMap.get(player.id))}
-                                  title="Print League Waiver"
-                                >
-                                  <Printer className="h-3.5 w-3.5" />
-                                  <span className="sr-only">Print League Waiver</span>
-                                </Button>
-                              )}
-                              {onWaiveFee && enrollment && !['paid', 'fee_waived'].includes(getPaymentStatus(enrollment) ?? '') && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="rounded-full h-8"
-                                  onClick={() => onWaiveFee(player, enrollment)}
-                                  disabled={busy}
-                                  title="Mark as Fee Waived"
-                                >
-                                  <BadgeCheck className="h-3.5 w-3.5 text-emerald-500" />
-                                  <span className="sr-only">Mark as Fee Waived</span>
-                                </Button>
-                              )}
                               {isSiteAdmin && (
-                                <>
-                                  <Button
-                                    variant="default"
-                                    size="sm"
-                                    className="rounded-full h-8"
-                                    onClick={() => openAudit(player)}
-                                    disabled={busy}
-                                  >
-                                    Audit
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="rounded-full h-8 text-destructive border-destructive/30 hover:bg-destructive/10"
-                                    onClick={() => setDeletingPlayer(player)}
-                                    disabled={busy}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </Button>
-                                </>
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  className="rounded-full h-8"
+                                  onClick={() => openAudit(player)}
+                                  disabled={busy}
+                                >
+                                  Audit
+                                </Button>
                               )}
+                              {renderRowMenu(player, enrollment)}
                             </div>
                           </TableCell>
                         )}
@@ -587,7 +598,7 @@ export function PlayerTable({
                   onClick={() => setAuditDocTab('birthCert')}
                 >
                   Birth Certificate
-                  {auditingPlayer?.birthCertificateUrl && !auditingPlayer.ageVerified && (
+                  {liveAuditingPlayer?.birthCertificateUrl && !liveAuditingPlayer.ageVerified && (
                     <span className="ml-1.5 text-yellow-500">●</span>
                   )}
                 </button>
@@ -596,7 +607,7 @@ export function PlayerTable({
                   onClick={() => setAuditDocTab('physical')}
                 >
                   Physical Form
-                  {auditingPlayer?.physicalFormUrl && !auditingPlayer.compliance?.physicalVerified && (
+                  {liveAuditingPlayer?.physicalFormUrl && !liveAuditingPlayer.compliance?.physicalVerified && (
                     <span className="ml-1.5 text-yellow-500">●</span>
                   )}
                 </button>
@@ -612,7 +623,7 @@ export function PlayerTable({
                   </button>
                 )}
                 <DocViewerPane
-                  url={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
+                  url={auditDocTab === 'birthCert' ? liveAuditingPlayer?.birthCertificateUrl : liveAuditingPlayer?.physicalFormUrl}
                   label={auditDocTab === 'birthCert' ? 'birth certificate' : 'physical form'}
                 />
               </div>
@@ -631,27 +642,50 @@ export function PlayerTable({
                       {' · '}Age {getLeagueAge(auditingPlayer?.dateOfBirth ?? '')}
                     </p>
                   </div>
-                  {(auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl) && (
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      <Button variant="outline" size="sm" onClick={handleDocPrint} disabled={docPrinting} className="text-xs h-8">
-                        {docPrinting
-                          ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                          : <Printer className="h-3.5 w-3.5 mr-1" />}
-                        {auditDocTab === 'birthCert' ? 'Print Birth Cert' : 'Print Physical'}
-                      </Button>
-                      <Button variant="outline" size="sm" asChild className="text-xs h-8">
-                        <a
-                          href={auditDocTab === 'birthCert' ? auditingPlayer?.birthCertificateUrl : auditingPlayer?.physicalFormUrl}
-                          download
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <Download className="h-3.5 w-3.5 mr-1" />
-                          {auditDocTab === 'birthCert' ? 'Download Birth Cert' : 'Download Physical'}
-                        </a>
-                      </Button>
-                    </div>
-                  )}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    {(auditDocTab === 'birthCert' ? liveAuditingPlayer?.birthCertificateUrl : liveAuditingPlayer?.physicalFormUrl) && (
+                      <>
+                        <Button variant="outline" size="sm" onClick={handleDocPrint} disabled={docPrinting} className="text-xs h-8">
+                          {docPrinting
+                            ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                            : <Printer className="h-3.5 w-3.5 mr-1" />}
+                          {auditDocTab === 'birthCert' ? 'Print Birth Cert' : 'Print Physical'}
+                        </Button>
+                        <Button variant="outline" size="sm" asChild className="text-xs h-8">
+                          <a
+                            href={auditDocTab === 'birthCert' ? liveAuditingPlayer?.birthCertificateUrl : liveAuditingPlayer?.physicalFormUrl}
+                            download
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <Download className="h-3.5 w-3.5 mr-1" />
+                            {auditDocTab === 'birthCert' ? 'Download Birth Cert' : 'Download Physical'}
+                          </a>
+                        </Button>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      className="hidden"
+                      ref={docFileInput}
+                      onChange={handleDocUploadReplace}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => docFileInput.current?.click()}
+                      disabled={docUploading}
+                      className="text-xs h-8"
+                    >
+                      {docUploading
+                        ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        : <Upload className="h-3.5 w-3.5 mr-1" />}
+                      {(auditDocTab === 'birthCert' ? liveAuditingPlayer?.birthCertificateUrl : liveAuditingPlayer?.physicalFormUrl)
+                        ? 'Replace…'
+                        : 'Upload…'}
+                    </Button>
+                  </div>
                 </div>
               </DialogHeader>
 
@@ -675,7 +709,7 @@ export function PlayerTable({
                         </p>
                       )}
                     </div>
-                    {auditingPlayer?.ageVerified ? (
+                    {liveAuditingPlayer?.ageVerified ? (
                       <p className="text-xs text-green-600 flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" /> Already approved
                       </p>
@@ -695,7 +729,7 @@ export function PlayerTable({
                   {/* Physical Form */}
                   <div className="space-y-3 p-3 rounded-xl bg-secondary/10 border">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Physical Form</p>
-                    {auditingPlayer?.compliance?.physicalVerified ? (
+                    {liveAuditingPlayer?.compliance?.physicalVerified ? (
                       <p className="text-xs text-green-600 flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" /> Already approved
                       </p>

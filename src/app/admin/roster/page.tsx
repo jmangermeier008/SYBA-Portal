@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer, FileText } from 'lucide-react';
 import { type WaiverPrintEntry } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import { openPrintTab, type RosterPrintRow } from '@/lib/print-job';
@@ -132,8 +132,10 @@ export default function MasterRosterPage() {
     loading: boolean;
   }>({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
 
-  // Document viewer dialog state (admin-only — birth certs & physicals)
-  const [docViewer, setDocViewer] = useState<{ open: boolean; player: Player | null }>({ open: false, player: null });
+  // Document viewer dialog state (admin-only — birth certs & physicals).
+  // Stores the id, not a player snapshot, so the open dialog picks up the new
+  // URL from the real-time players subscription after an admin replaces a doc.
+  const [docViewer, setDocViewer] = useState<{ open: boolean; playerId: string | null }>({ open: false, playerId: null });
 
   // Delete enrollment dialog state
   const [deleteDialog, setDeleteDialog] = useState<{
@@ -187,6 +189,11 @@ export default function MasterRosterPage() {
     parentProfiles?.forEach(p => m.set(p.id, p));
     return m;
   }, [parentProfiles]);
+
+  const docViewerPlayer = useMemo(
+    () => players?.find(pl => pl.id === docViewer.playerId) ?? null,
+    [players, docViewer.playerId]
+  );
 
   const activeSeason = useMemo(() =>
     seasons?.find((s: any) => s.status === 'active' || s.isActive) ?? seasons?.[0] ?? null,
@@ -577,25 +584,6 @@ export default function MasterRosterPage() {
   // stay fully visible on mobile.
   const renderRowActions = (e: Enrollment, p: Player | undefined) => (
     <div className="flex items-center justify-end gap-1">
-      {activeSport === 'football' && p && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', !isMobile && 'opacity-40 group-hover:opacity-100 transition-opacity')}
-          title="Print League Waiver"
-          onClick={() => openPrintTab({
-            kind: 'waivers',
-            entries: [{
-              player: p,
-              parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
-              weightEstimate: e.parentWeightEstimate,
-            }],
-          })}
-        >
-          <Printer className="h-4 w-4" />
-          <span className="sr-only">Print League Waiver</span>
-        </Button>
-      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className={cn('h-8 w-8', !isMobile && 'opacity-40 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity')}>
@@ -622,10 +610,25 @@ export default function MasterRosterPage() {
           </DropdownMenuItem>
           {isAdmin && (
             <DropdownMenuItem
-              onClick={() => setTimeout(() => setDocViewer({ open: true, player: p ?? null }), 0)}
+              onClick={() => setTimeout(() => setDocViewer({ open: true, playerId: p?.id ?? null }), 0)}
             >
               <FileText className="mr-2 h-4 w-4" />
               View Documents
+            </DropdownMenuItem>
+          )}
+          {activeSport === 'football' && p && (
+            <DropdownMenuItem
+              onClick={() => openPrintTab({
+                kind: 'waivers',
+                entries: [{
+                  player: p,
+                  parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
+                  weightEstimate: e.parentWeightEstimate,
+                }],
+              })}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print League Waiver
             </DropdownMenuItem>
           )}
           {activeSport === 'football' && (
@@ -639,6 +642,7 @@ export default function MasterRosterPage() {
               Equipment & Sizes
             </DropdownMenuItem>
           )}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"
             onClick={() => setTimeout(() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false }), 0)}
@@ -701,14 +705,15 @@ export default function MasterRosterPage() {
                 <DropdownMenuItem onClick={() => setImportOpen(true)}>
                   <Upload className="mr-2 h-4 w-4" /> Import Assignments
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+                  <Printer className="mr-2 h-4 w-4" /> Print Roster
+                </DropdownMenuItem>
                 {activeSport === 'football' && (
                   <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
                     <Printer className="mr-2 h-4 w-4" /> Print League Waivers
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
-                  <Printer className="mr-2 h-4 w-4" /> Print Roster
-                </DropdownMenuItem>
                 {isAdmin && (
                   <>
                     <DropdownMenuItem onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
@@ -719,6 +724,7 @@ export default function MasterRosterPage() {
                     </DropdownMenuItem>
                   </>
                 )}
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={exportRosterCSV} disabled={!displayEnrollments?.length}>
                   <Download className="mr-2 h-4 w-4" /> Export for Uniforms
                 </DropdownMenuItem>
@@ -729,24 +735,34 @@ export default function MasterRosterPage() {
               <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" /> Import Assignments
               </Button>
-              {activeSport === 'football' && (
-                <Button variant="outline" className="rounded-full" onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
-                  <Printer className="mr-2 h-4 w-4" /> Print League Waivers
-                </Button>
-              )}
-              <Button variant="outline" className="rounded-full" onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
-                <Printer className="mr-2 h-4 w-4" /> Print Roster
-              </Button>
-              {isAdmin && (
-                <>
-                  <Button variant="outline" className="rounded-full" onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
-                    <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="rounded-full">
+                    <Printer className="mr-2 h-4 w-4" /> Print
                   </Button>
-                  <Button variant="outline" className="rounded-full" onClick={() => handleBulkDocPrint('physicalForm')} disabled={!displayEnrollments?.length}>
-                    <FileText className="mr-2 h-4 w-4" /> Print Physical Forms
-                  </Button>
-                </>
-              )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+                    <Printer className="mr-2 h-4 w-4" /> Print Roster
+                  </DropdownMenuItem>
+                  {activeSport === 'football' && (
+                    <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
+                      <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+                    </DropdownMenuItem>
+                  )}
+                  {isAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
+                        <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleBulkDocPrint('physicalForm')} disabled={!displayEnrollments?.length}>
+                        <FileText className="mr-2 h-4 w-4" /> Print Physical Forms
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
                 <Download className="mr-2 h-4 w-4" /> Export for Uniforms
               </Button>
@@ -1058,8 +1074,8 @@ export default function MasterRosterPage() {
       {/* Player document viewer (admin-only entry points) */}
       <DocumentViewerDialog
         open={docViewer.open}
-        onOpenChange={(o) => { if (!o) setDocViewer({ open: false, player: null }); }}
-        player={docViewer.player}
+        onOpenChange={(o) => { if (!o) setDocViewer({ open: false, playerId: null }); }}
+        player={docViewerPlayer}
       />
 
       {/* Delete Enrollment Dialog */}

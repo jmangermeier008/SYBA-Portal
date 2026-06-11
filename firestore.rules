@@ -25,23 +25,30 @@ service cloud.firestore {
     function isAdmin() {
       let data = getUserData();
       let roles = data.get('roles', []);
-      // Check both the roles array and the legacy role field — an empty roles
-      // array must not mask a legacy Admin grant.
+      let sportRoles = data.get('sportRoles', {});
+      // Check the sportRoles map (current grant path — the roles admin page
+      // writes per-sport grants only), the roles array, and the legacy role
+      // field — an empty roles array must not mask a legacy Admin grant.
       return isSiteAdmin() ||
              (isSignedIn() &&
               exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-              (roles.hasAny(['Admin']) || data.get('role', '') == 'Admin'));
+              (roles.hasAny(['Admin']) || data.get('role', '') == 'Admin' ||
+               sportRoles.get('baseball', []).hasAny(['Admin']) ||
+               sportRoles.get('football', []).hasAny(['Admin'])));
     }
 
     function isBoardMember() {
       let data = getUserData();
       let roles = data.get('roles', []);
+      let sportRoles = data.get('sportRoles', {});
       return isSiteAdmin() ||
              (isSignedIn() &&
               exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) &&
-              (roles.size() > 0
-                ? roles.hasAny(['Board Member', 'Admin', 'Site Admin'])
-                : data.get('role', '') == 'Admin'));
+              (sportRoles.get('baseball', []).hasAny(['Board Member', 'Admin']) ||
+               sportRoles.get('football', []).hasAny(['Board Member', 'Admin']) ||
+               (roles.size() > 0
+                 ? roles.hasAny(['Board Member', 'Admin', 'Site Admin'])
+                 : data.get('role', '') == 'Admin')));
     }
 
     function isBoardMemberForSport(sport) {
