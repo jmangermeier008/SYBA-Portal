@@ -2,11 +2,11 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, getDoc, writeBatch, deleteDoc, query, where, increment } from 'firebase/firestore';
+import { collection, doc, updateDoc, collectionGroup, arrayUnion, arrayRemove, writeBatch, deleteDoc, query, where, increment } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,10 +16,9 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Switch } from '@/components/ui/switch';
-import { Download, Loader2, CheckCircle2, XCircle, AlertCircle, Users, Lock, Clock, ListOrdered, MoreHorizontal, BadgeCheck, Upload, Pencil, Trash2, AlertTriangle, ShieldCheck, ShieldAlert, X, Printer } from 'lucide-react';
-import { ShenangoValleyWaiverPrintable } from '@/components/registration/ShenangoValleyWaiverPrintable';
+import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer } from 'lucide-react';
+import { ShenangoValleyWaiverPrintable, WaiverBatchPrintable, type WaiverPrintEntry } from '@/components/registration/ShenangoValleyWaiverPrintable';
+import { RosterPrintable, type RosterPrintRow } from '@/components/admin/roster/RosterPrintable';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -79,13 +78,6 @@ interface Player {
   waiverSignedAt?: string;
   waiverSignedRelationship?: string;
   medicalNotes?: string;
-  birthCertificateUrl?: string;
-  physicalFormUrl?: string;
-  ageVerified?: boolean;
-  compliance?: {
-    physicalVerified?: boolean;
-    birthCertificateVerified?: boolean;
-  };
 }
 
 interface Team {
@@ -101,9 +93,6 @@ interface ParentProfile {
   displayName: string | null;
   email: string | null;
   phoneNumber?: string | null;
-  roles?: string[];
-  complianceStatus?: 'pending' | 'approved' | 'action_required';
-  manualComplianceOverride?: boolean;
 }
 
 function getPaymentStatus(e: Enrollment) {
@@ -116,29 +105,16 @@ export default function MasterRosterPage() {
   const { loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
-  const searchParams = useSearchParams();
-  const urlFilter = searchParams.get('filter') as 'action_required' | 'pending' | null;
-  const [activeFilter, setActiveFilter] = useState<'action_required' | 'pending' | 'all'>(urlFilter ?? 'all');
   const [activeTab, setActiveTab] = useState<string>('all');
 
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showNeedsAttention, setShowNeedsAttention] = useState(false);
 
   // Import roster state
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<ParsedRosterRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
-
-  // Waiver dialog state
-  const [waiverDialog, setWaiverDialog] = useState<{
-    open: boolean;
-    enrollment: Enrollment | null;
-    player: Player | null;
-    reason: string;
-    loading: boolean;
-  }>({ open: false, enrollment: null, player: null, reason: '', loading: false });
 
   // Edit player dialog state
   const [editPlayerDialog, setEditPlayerDialog] = useState<{
@@ -196,8 +172,12 @@ export default function MasterRosterPage() {
   const { data: parentProfiles } = useCollection<ParentProfile>(parentProfilesQuery);
   const { data: divisionsForSeason } = useCollection<Division>(divisionsForSeasonQuery);
 
-  // Printable Shenango Valley league waiver — set from the row-actions menu
+  // Printable Shenango Valley league waiver — set from the per-row print button
   const [waiverPrintTarget, setWaiverPrintTarget] = useState<{ player: Player; enrollment: Enrollment } | null>(null);
+
+  // Bulk print targets — set from the header buttons, cleared after printing
+  const [bulkWaiverEntries, setBulkWaiverEntries] = useState<WaiverPrintEntry[] | null>(null);
+  const [rosterPrint, setRosterPrint] = useState<{ title: string; subtitle: string; rows: RosterPrintRow[] } | null>(null);
 
   const profileMap = useMemo(() => {
     const m = new Map<string, ParentProfile>();
@@ -235,28 +215,13 @@ export default function MasterRosterPage() {
         if (!name.includes(searchQuery.toLowerCase())) return false;
       }
       if (activeTab !== 'all' && e.divisionId !== activeTab) return false;
-      if (activeFilter === 'pending') {
-        const status = getPaymentStatus(e);
-        if (status === 'paid' || status === 'fee_waived') return false;
-      }
-      if (activeFilter === 'action_required') {
-        const p = players?.find(p => p.id === e.playerId);
-        const birthCertOk = p?.ageVerified || p?.compliance?.birthCertificateVerified;
-        if (birthCertOk && p?.compliance?.physicalVerified) return false;
-      }
       return true;
     });
-  }, [enrollments, activeSport, selectedSeason, searchQuery, activeTab, activeFilter, players]);
-
-  const needsAttentionCount = enrollments?.filter(e =>
-    e.profileStatus === 'incomplete' &&
-    (e.paymentStatus === 'paid' || e.payment_status === 'paid')
-  ).length ?? 0;
+  }, [enrollments, activeSport, selectedSeason, searchQuery, activeTab, players]);
 
   const filteredEnrollments = enrollments?.filter(e => {
     if (selectedSeason && selectedSeason !== 'all-seasons' && e.seasonId !== selectedSeason) return false;
     if (selectedDivision && selectedDivision !== 'all-divisions' && e.divisionId !== selectedDivision) return false;
-    if (showNeedsAttention && !(e.profileStatus === 'incomplete' && (e.paymentStatus === 'paid' || e.payment_status === 'paid'))) return false;
     if (searchQuery.trim()) {
       const p = players?.find(p => p.id === e.playerId);
       const name = p ? `${p.firstName} ${p.lastName}`.toLowerCase() : '';
@@ -359,57 +324,6 @@ export default function MasterRosterPage() {
       } else {
         toast({ variant: 'destructive', title: 'Update Failed', description: error.message });
       }
-    }
-  };
-
-  const handleConfirmWaiver = async () => {
-    const { enrollment, player } = waiverDialog;
-    if (!enrollment || !db) return;
-    setWaiverDialog(prev => ({ ...prev, loading: true }));
-
-    try {
-      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
-      await updateDoc(enrollmentRef, {
-        paymentStatus: 'fee_waived',
-        fee_waived: true,
-        waiver_reason: waiverDialog.reason.trim(),
-        updatedAt: new Date().toISOString(),
-      });
-
-      // Look up parent email from userProfiles
-      let parentEmail = '';
-      try {
-        const profileSnap = await getDoc(doc(db, 'userProfiles', enrollment.parentUserId));
-        parentEmail = profileSnap.data()?.email || '';
-      } catch {}
-
-      // Send confirmation email
-      try {
-        const emailRes = await fetch('/api/email/confirmation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            toEmail: parentEmail,
-            playerName: player ? `${player.firstName} ${player.lastName}` : '',
-            seasonName: enrollment.seasonId,
-            divisionName: enrollment.divisionId,
-            isWaitlisted: false,
-            feeWaived: true,
-          }),
-        });
-        if (!emailRes.ok) {
-          toast({ title: "Fee Waiver Applied", description: "Marked as fee waived, but confirmation email failed to send.", variant: "destructive" });
-        } else {
-          toast({ title: "Fee Waiver Applied", description: `Registration marked as fee waived.` });
-        }
-      } catch {
-        toast({ title: "Fee Waiver Applied", description: "Marked as fee waived, but confirmation email failed to send.", variant: "destructive" });
-      }
-      setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false });
-    } catch (error: any) {
-      console.error('[roster] Waiver error:', error);
-      toast({ title: "Error", description: error.message, variant: 'destructive' });
-      setWaiverDialog(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -533,20 +447,50 @@ export default function MasterRosterPage() {
     }
   };
 
-  const handleToggleForceApprove = async (userId: string, currentOverride: boolean) => {
-    try {
-      await updateDoc(doc(db, 'userProfiles', userId), {
-        manualComplianceOverride: !currentOverride,
-      });
-      toast({
-        title: !currentOverride ? 'Compliance override enabled' : 'Compliance override removed',
-        description: !currentOverride
-          ? 'Coach can now access the portal. Clearance review still required.'
-          : 'Override removed. Coach must complete clearances to regain access.',
-      });
-    } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Update failed', description: err.message });
-    }
+  const handleBulkWaiverPrint = () => {
+    const entries: WaiverPrintEntry[] = (displayEnrollments ?? []).flatMap(e => {
+      const p = players?.find(pl => pl.id === e.playerId);
+      if (!p) return [];
+      return [{
+        player: p,
+        parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
+        weightEstimate: e.parentWeightEstimate,
+      }];
+    });
+    if (entries.length === 0) return;
+    setBulkWaiverEntries(entries);
+  };
+
+  const handleRosterPrint = () => {
+    if (!displayEnrollments || displayEnrollments.length === 0) return;
+    const isFootball = activeSport === 'football';
+
+    const rows: RosterPrintRow[] = displayEnrollments.map(e => {
+      const p = players?.find(pl => pl.id === e.playerId);
+      const parent = profileMap.get(e.parentUserId);
+      const weight = e.footballEquipment?.verifiedWeight ?? e.parentWeightEstimate;
+      return {
+        playerName: p ? `${p.firstName} ${p.lastName}` : '—',
+        dateOfBirth: p?.dateOfBirth ?? '',
+        parentName: parent?.displayName || parent?.email || '',
+        parentPhone: parent?.phoneNumber ?? '',
+        weight: isFootball && weight ? `${weight} lbs` : '',
+        assignment: isFootball
+          ? (divisionsForSeason?.find(d => d.id === e.divisionId)?.name ?? e.divisionId)
+          : (teams?.find(t => t.id === e.teamId)?.name ?? 'Unassigned'),
+      };
+    });
+
+    const seasonName = seasons?.find((s: any) => s.id === selectedSeason)?.name ?? 'All Seasons';
+    const divisionLabel = isFootball
+      ? (activeTab === 'all' ? 'All Divisions' : divisionsForSeason?.find(d => d.id === activeTab)?.name ?? activeTab)
+      : (selectedDivision && selectedDivision !== 'all-divisions' ? selectedDivision : 'All Divisions');
+
+    setRosterPrint({
+      title: `Sharpsville ${isFootball ? 'Football' : 'Baseball'} Roster`,
+      subtitle: `${seasonName} • ${divisionLabel} • Printed ${new Date().toLocaleDateString()}`,
+      rows,
+    });
   };
 
   const exportRosterCSV = () => {
@@ -638,11 +582,19 @@ export default function MasterRosterPage() {
         <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
             <h1 className="text-xl md:text-2xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-sm text-muted-foreground">Manage league assignments and track registration compliance.</p>
+            <p className="text-sm text-muted-foreground">Build and print your league roster — team assignments, league waivers, and uniform exports.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
               <Upload className="mr-2 h-4 w-4" /> Import Assignments
+            </Button>
+            {activeSport === 'football' && (
+              <Button variant="outline" className="rounded-full" onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
+                <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+              </Button>
+            )}
+            <Button variant="outline" className="rounded-full" onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+              <Printer className="mr-2 h-4 w-4" /> Print Roster
             </Button>
             <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
               <Download className="mr-2 h-4 w-4" /> Export for Uniforms
@@ -701,55 +653,18 @@ export default function MasterRosterPage() {
               </div>
             </div>
 
-            {/* Needs Attention toggle */}
-            {needsAttentionCount > 0 && (
-              <div className="mt-4 flex items-center gap-3">
-                <Button
-                  variant={showNeedsAttention ? 'default' : 'outline'}
-                  size="sm"
-                  className="rounded-full gap-2"
-                  onClick={() => setShowNeedsAttention(v => !v)}
-                >
-                  <AlertCircle className="h-4 w-4" />
-                  Needs Attention ({needsAttentionCount})
-                </Button>
-                {showNeedsAttention && (
-                  <span className="text-xs text-muted-foreground">
-                    Showing registrations with incomplete account setup
-                  </span>
-                )}
-              </div>
-            )}
           </CardContent>
         </Card>
-
-        {/* Football URL filter banner */}
-        {activeSport === 'football' && activeFilter !== 'all' && (
-          <div className="mb-4 flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 text-sm text-amber-800">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span className="flex-1">
-              {activeFilter === 'action_required'
-                ? 'Showing players with missing or unverified documents'
-                : 'Showing players with pending payment'}
-            </span>
-            <button
-              onClick={() => setActiveFilter('all')}
-              className="flex items-center gap-1 text-xs font-medium hover:text-amber-900 transition-colors"
-            >
-              <X className="h-3.5 w-3.5" /> Clear filter
-            </button>
-          </div>
-        )}
 
         <Card className="border-none shadow-xl overflow-hidden">
           <CardHeader className="bg-primary text-primary-foreground">
             <CardTitle className="text-xl font-headline">
-              {activeSport === 'football' ? 'Football Roster' : 'Registration Queue'}
+              {activeSport === 'football' ? 'Football Roster' : 'Team Assignments'}
             </CardTitle>
             <CardDescription className="text-primary-foreground/80">
               {activeSport === 'football'
-                ? 'Players grouped by division — verify documents and track payments.'
-                : 'Monitor compliance and assign teams.'}
+                ? 'Players grouped by division.'
+                : 'Assign each registered player to a team.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -778,11 +693,7 @@ export default function MasterRosterPage() {
               </div>
             ) : !displayEnrollments || displayEnrollments.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
-                {activeFilter !== 'all'
-                  ? activeFilter === 'action_required'
-                    ? 'No players with missing documents in this view.'
-                    : 'No players with pending payments in this view.'
-                  : 'No matching registrations found.'}
+                No matching registrations found.
               </div>
             ) : (
               <>
@@ -792,17 +703,9 @@ export default function MasterRosterPage() {
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-6">Player</TableHead>
                     <TableHead className="hidden md:table-cell">Parent</TableHead>
-                    <TableHead>Paid</TableHead>
-                    {activeSport === 'football' && (
-                      <TableHead className="hidden sm:table-cell">Eligibility</TableHead>
-                    )}
                     {activeSport === 'football' && (
                       <TableHead className="hidden sm:table-cell">Weight</TableHead>
                     )}
-                    {activeSport !== 'football' && (
-                      <TableHead className="hidden sm:table-cell">Clearance</TableHead>
-                    )}
-                    <TableHead className="hidden lg:table-cell">Compliance</TableHead>
                     <TableHead>{activeSport === 'football' ? 'Division' : 'Assignment'}</TableHead>
                     <TableHead className="w-12" />
                   </TableRow>
@@ -810,23 +713,11 @@ export default function MasterRosterPage() {
                 <TableBody>
                   {displayEnrollments.map((e) => {
                     const p = players?.find(p => p.id === e.playerId);
-                    const status = getPaymentStatus(e);
-                    const canWaive = status !== 'paid' && !e.fee_waived;
                     return (
                       <TableRow key={e.id} className="group hover:bg-secondary/20 transition-colors">
                         <TableCell className="pl-6 py-3">
                           <div className="font-semibold flex items-center gap-1">
                             {p ? `${p.firstName} ${p.lastName}` : 'Loading...'}
-                            {p?.birthCertificateUrl && !p?.ageVerified && (
-                              <span title="Pending birth certificate review">
-                                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-                              </span>
-                            )}
-                            {e.profileStatus === 'incomplete' && (e.paymentStatus === 'paid' || e.payment_status === 'paid') && (
-                              <span title="Account not yet claimed — guest registration">
-                                <AlertCircle className="h-4 w-4 text-orange-400 shrink-0" />
-                              </span>
-                            )}
                           </div>
                           {isAdmin && divisionsForSeason && divisionsForSeason.length > 0 && e.seasonId === selectedSeason ? (
                             <Select
@@ -864,33 +755,7 @@ export default function MasterRosterPage() {
                             );
                           })()}
                         </TableCell>
-                        <TableCell>
-                          {status === 'paid' ? (
-                            <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          ) : status === 'fee_waived' ? (
-                            <BadgeCheck className="h-5 w-5 text-emerald-500" />
-                          ) : status === 'pending_payment' ? (
-                            <Clock className="h-5 w-5 text-yellow-500" />
-                          ) : status === 'waitlisted' ? (
-                            <ListOrdered className="h-5 w-5 text-amber-500" />
-                          ) : (
-                            <XCircle className="h-5 w-5 text-destructive" />
-                          )}
-                        </TableCell>
                         {activeSport === 'football' && (
-                          <TableCell className="hidden sm:table-cell">
-                            {(p?.ageVerified && p?.compliance?.physicalVerified) ? (
-                              <span className="flex items-center gap-1 text-xs font-semibold text-green-700">
-                                <ShieldCheck className="h-3.5 w-3.5 text-green-600" /> Cleared
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-xs font-semibold text-red-700">
-                                <ShieldAlert className="h-3.5 w-3.5 text-red-600" /> Not Cleared
-                              </span>
-                            )}
-                          </TableCell>
-                        )}
-                        {activeSport === 'football' ? (
                           <TableCell className="hidden sm:table-cell">
                             <div className="text-sm">
                               {e.footballEquipment?.verifiedWeight ? (
@@ -902,77 +767,7 @@ export default function MasterRosterPage() {
                               )}
                             </div>
                           </TableCell>
-                        ) : (
-                          <TableCell className="hidden sm:table-cell">
-                            {p?.clearanceUrl ? (
-                              <CheckCircle2 className="h-5 w-5 text-green-500" />
-                            ) : (
-                              <AlertCircle className="h-5 w-5 text-yellow-500" />
-                            )}
-                          </TableCell>
                         )}
-                        <TableCell className="hidden lg:table-cell">
-                          {(() => {
-                            const parent = profileMap.get(e.parentUserId);
-                            if (parent?.roles?.includes('Coach')) {
-                              // Act 153 compliance — coaches only
-                              const isOverride = parent.manualComplianceOverride === true;
-                              const status = parent.complianceStatus;
-                              const isApproved = status === 'approved' || isOverride;
-                              return (
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <button className="flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 border transition-colors hover:bg-muted/50">
-                                      {isApproved ? (
-                                        <><ShieldCheck className="h-3.5 w-3.5 text-green-600" /><span className="text-green-700">{isOverride ? 'Override' : 'Approved'}</span></>
-                                      ) : (
-                                        <><ShieldAlert className="h-3.5 w-3.5 text-yellow-600" /><span className="text-yellow-700">Pending</span></>
-                                      )}
-                                    </button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-64 p-4" align="start">
-                                    <p className="text-sm font-semibold mb-1">PA Act 153 Compliance</p>
-                                    <p className="text-xs text-muted-foreground mb-3">
-                                      {isOverride
-                                        ? 'Admin override is active. Coach bypasses clearance check.'
-                                        : status === 'approved'
-                                        ? 'All clearances reviewed and approved.'
-                                        : 'Clearances not yet approved. Enable override to grant access.'}
-                                    </p>
-                                    <div className="flex items-center justify-between">
-                                      <label className="text-xs font-medium" htmlFor={`force-approve-${e.parentUserId}`}>
-                                        Force Approve
-                                      </label>
-                                      <Switch
-                                        id={`force-approve-${e.parentUserId}`}
-                                        checked={isOverride}
-                                        onCheckedChange={() => handleToggleForceApprove(e.parentUserId, isOverride)}
-                                      />
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              );
-                            }
-                            // Birth certificate status — player rows
-                            if (p?.ageVerified) {
-                              return (
-                                <span className="flex items-center gap-1 text-xs text-green-700">
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" /> Verified
-                                </span>
-                              );
-                            }
-                            if (p?.birthCertificateUrl) {
-                              return (
-                                <span className="flex items-center gap-1 text-xs text-yellow-700">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-yellow-600" /> Pending Review
-                                </span>
-                              );
-                            }
-                            return (
-                              <span className="text-xs text-muted-foreground">Not uploaded</span>
-                            );
-                          })()}
-                        </TableCell>
                         <TableCell>
                           {activeSport === 'football' ? (
                             <span className="text-xs text-muted-foreground uppercase">
@@ -999,6 +794,19 @@ export default function MasterRosterPage() {
                           )}
                         </TableCell>
                         <TableCell className="pr-4">
+                          <div className="flex items-center justify-end gap-1">
+                          {activeSport === 'football' && p && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-40 group-hover:opacity-100 transition-opacity"
+                              title="Print League Waiver"
+                              onClick={() => setWaiverPrintTarget({ player: p, enrollment: e })}
+                            >
+                              <Printer className="h-4 w-4" />
+                              <span className="sr-only">Print League Waiver</span>
+                            </Button>
+                          )}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-8 w-8 opacity-40 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity">
@@ -1034,33 +842,6 @@ export default function MasterRosterPage() {
                                   Equipment & Sizes
                                 </DropdownMenuItem>
                               )}
-                              {activeSport === 'football' && p && (
-                                <DropdownMenuItem onClick={() => setWaiverPrintTarget({ player: p, enrollment: e })}>
-                                  <Printer className="mr-2 h-4 w-4" />
-                                  Print League Waiver
-                                </DropdownMenuItem>
-                              )}
-                              {canWaive && (
-                                <DropdownMenuItem
-                                  onClick={() => setTimeout(() => setWaiverDialog({
-                                    open: true,
-                                    enrollment: e,
-                                    player: p ?? null,
-                                    reason: '',
-                                    loading: false,
-                                  }), 0)}
-                                >
-                                  <BadgeCheck className="mr-2 h-4 w-4 text-emerald-500" />
-                                  Mark as Fee Waived
-                                </DropdownMenuItem>
-                              )}
-                              {((p?.birthCertificateUrl && !p?.ageVerified) ||
-                                (p?.physicalFormUrl && !p?.compliance?.physicalVerified)) && (
-                                <DropdownMenuItem onClick={() => router.push(`/admin/registration?auditPlayer=${p.id}`)}>
-                                  <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
-                                  Review Documents
-                                </DropdownMenuItem>
-                              )}
                               <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
                                 onClick={() => setTimeout(() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false }), 0)}
@@ -1070,6 +851,7 @@ export default function MasterRosterPage() {
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -1107,44 +889,6 @@ export default function MasterRosterPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Fee Waiver Dialog */}
-      <Dialog open={waiverDialog.open} onOpenChange={(open) => { if (!open && !waiverDialog.loading) setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false }); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Apply Fee Waiver</DialogTitle>
-            <DialogDescription>
-              {waiverDialog.player
-                ? `Mark ${waiverDialog.player.firstName} ${waiverDialog.player.lastName}'s registration as fee waived. A confirmation email will be sent to the parent.`
-                : 'Mark this registration as fee waived.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1">
-              <Label htmlFor="waiver-reason">Reason (optional)</Label>
-              <Input
-                id="waiver-reason"
-                placeholder="e.g. Financial hardship, scholarship, board vote"
-                value={waiverDialog.reason}
-                onChange={e => setWaiverDialog(prev => ({ ...prev, reason: e.target.value }))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setWaiverDialog({ open: false, enrollment: null, player: null, reason: '', loading: false })}
-              disabled={waiverDialog.loading}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleConfirmWaiver} disabled={waiverDialog.loading} className="bg-emerald-600 hover:bg-emerald-700">
-              {waiverDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
-              Confirm Waiver
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Edit Player Dialog */}
       <Dialog open={editPlayerDialog.open} onOpenChange={(open) => { if (!open && !editPlayerDialog.loading) setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false }); }}>
@@ -1305,6 +1049,18 @@ export default function MasterRosterPage() {
           ?? profileMap.get(waiverPrintTarget.enrollment.parentUserId)?.phoneNumber}
         weightEstimate={waiverPrintTarget.enrollment.parentWeightEstimate}
         onDone={() => setWaiverPrintTarget(null)}
+      />
+    )}
+    {bulkWaiverEntries && (
+      <WaiverBatchPrintable entries={bulkWaiverEntries} onDone={() => setBulkWaiverEntries(null)} />
+    )}
+    {rosterPrint && (
+      <RosterPrintable
+        title={rosterPrint.title}
+        subtitle={rosterPrint.subtitle}
+        rows={rosterPrint.rows}
+        showWeight={activeSport === 'football'}
+        onDone={() => setRosterPrint(null)}
       />
     )}
     </>

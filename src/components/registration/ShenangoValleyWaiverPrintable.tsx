@@ -17,6 +17,12 @@ export interface WaiverPlayerData {
   waiverSignedRelationship?: string;
 }
 
+export interface WaiverPrintEntry {
+  player: WaiverPlayerData;
+  parentPhone?: string | null;
+  weightEstimate?: number;
+}
+
 interface ShenangoValleyWaiverPrintableProps {
   player: WaiverPlayerData;
   parentPhone?: string | null;
@@ -70,60 +76,24 @@ function SignatureRow({
         )}
       </div>
       <span className="font-semibold whitespace-nowrap">RELATIONSHIP:</span>
-      <div className="flex-1 border-b border-black text-center">{relationship || ' '}</div>
+      <div className="flex-1 border-b border-black text-center">{relationship || ' '}</div>
       <span className="font-semibold whitespace-nowrap">DATE:</span>
-      <div className="flex-1 border-b border-black text-center">{signedDate || ' '}</div>
+      <div className="flex-1 border-b border-black text-center">{signedDate || ' '}</div>
     </div>
   );
 }
 
-/**
- * Printable Shenango Valley league player agreement form, laid out to match
- * the official "2026 Football Player Agreement" document. Hidden on screen;
- * mounting it opens the browser print dialog, and it unmounts itself via
- * onDone after printing. Missing data prints as a blank line to fill in by
- * hand. Host pages must carry print:hidden on their root wrapper so only
- * this form reaches the printer.
- */
-export function ShenangoValleyWaiverPrintable({
+function WaiverSheet({
   player,
   parentPhone,
   weightEstimate,
-  onDone,
-}: ShenangoValleyWaiverPrintableProps) {
-  // Hosts pass onDone as an inline arrow; a ref keeps their re-renders from
-  // re-running the mount-only print effect below.
-  const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
-  const printedRef = useRef(false);
-
-  const triggerPrint = () => {
-    if (printedRef.current) return;
-    printedRef.current = true;
-    window.print();
-  };
-
-  useEffect(() => {
-    // Let the DOM paint before opening the print dialog. When a signature
-    // image is present, printing is triggered by its onLoad instead and this
-    // timer is only a fallback in case the image never loads. afterprint is
-    // unreliable on iOS Safari; if it never fires the node just stays
-    // mounted, which is harmless since it is hidden on screen.
-    const handleAfterPrint = () => onDoneRef.current();
-    const timer = setTimeout(triggerPrint, player.waiverSignatureUrl ? 2000 : 50);
-    window.addEventListener('afterprint', handleAfterPrint);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  onImageReady,
+}: WaiverPrintEntry & { onImageReady?: () => void }) {
   const seasonYear = new Date().getFullYear();
   const td = 'border border-black px-2 py-1 align-top';
 
   return (
-    <div id="waiver-print" className="hidden print:block bg-white text-black">
+    <div>
       <div className="text-center space-y-1 pb-4">
         <h1 className="text-xl font-bold tracking-wide">SHENANGO VALLEY MIDGET FOOTBALL LEAGUE</h1>
         <h2 className="text-lg font-semibold underline">FOOTBALL PLAYER AGREEMENT FORM</h2>
@@ -233,7 +203,7 @@ export function ShenangoValleyWaiverPrintable({
             ? new Date(player.waiverSignedAt).toLocaleDateString('en-US')
             : undefined
         }
-        onImageReady={triggerPrint}
+        onImageReady={onImageReady}
       />
       <SignatureRow />
 
@@ -246,5 +216,88 @@ export function ShenangoValleyWaiverPrintable({
         Birth Certificate:&nbsp;&nbsp;&nbsp;&nbsp;Midget&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Pee-Wee&apos;s&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Not Eligible
       </p>
     </div>
+  );
+}
+
+/**
+ * Prints one league agreement form per entry, each on its own page. Hidden on
+ * screen; mounting it opens the browser print dialog, and it unmounts itself
+ * via onDone after printing. Missing data prints as a blank line to fill in
+ * by hand. Host pages must carry print:hidden on their root wrapper so only
+ * these forms reach the printer.
+ */
+export function WaiverBatchPrintable({
+  entries,
+  onDone,
+}: {
+  entries: WaiverPrintEntry[];
+  onDone: () => void;
+}) {
+  // Hosts pass onDone as an inline arrow; a ref keeps their re-renders from
+  // re-running the mount-only print effect below.
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const printedRef = useRef(false);
+  const loadedCountRef = useRef(0);
+
+  const expectedImages = entries.filter(e => e.player.waiverSignatureUrl).length;
+
+  const triggerPrint = () => {
+    if (printedRef.current) return;
+    printedRef.current = true;
+    window.print();
+  };
+
+  const handleImageReady = () => {
+    loadedCountRef.current += 1;
+    if (loadedCountRef.current >= expectedImages) triggerPrint();
+  };
+
+  useEffect(() => {
+    // Let the DOM paint before opening the print dialog. When signature
+    // images are present, printing is triggered once they have all loaded and
+    // this timer is only a fallback in case an image never loads. afterprint
+    // is unreliable on iOS Safari; if it never fires the node just stays
+    // mounted, which is harmless since it is hidden on screen.
+    const handleAfterPrint = () => onDoneRef.current();
+    const timer = setTimeout(triggerPrint, expectedImages > 0 ? 2500 : 50);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div id="waiver-print" className="hidden print:block bg-white text-black">
+      {entries.map((entry, i) => (
+        <div key={i} className={i < entries.length - 1 ? 'break-after-page' : ''}>
+          <WaiverSheet {...entry} onImageReady={handleImageReady} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Printable Shenango Valley league player agreement form, laid out to match
+ * the official "2026 Football Player Agreement" document. Hidden on screen;
+ * mounting it opens the browser print dialog, and it unmounts itself via
+ * onDone after printing. Missing data prints as a blank line to fill in by
+ * hand. Host pages must carry print:hidden on their root wrapper so only
+ * this form reaches the printer.
+ */
+export function ShenangoValleyWaiverPrintable({
+  player,
+  parentPhone,
+  weightEstimate,
+  onDone,
+}: ShenangoValleyWaiverPrintableProps) {
+  return (
+    <WaiverBatchPrintable
+      entries={[{ player, parentPhone, weightEstimate }]}
+      onDone={onDone}
+    />
   );
 }

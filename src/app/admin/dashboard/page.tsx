@@ -380,7 +380,7 @@ export default function AdminDashboard({
       items.push({
         severity: 'blue',
         message: `${pendingPaymentCount} pending payment${pendingPaymentCount > 1 ? 's' : ''}`,
-        href: activeSport === 'football' ? '/admin/roster?filter=pending' : '/admin/registration',
+        href: '/admin/registration',
       });
     }
     if (waitlistedCount > 0) {
