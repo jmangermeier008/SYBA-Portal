@@ -22,6 +22,7 @@ import { RosterPrintable, type RosterPrintRow } from '@/components/admin/roster/
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -113,6 +114,7 @@ export default function MasterRosterPage() {
   const { loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
+  const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState<string>('all');
 
   const [selectedSeason, setSelectedSeason] = useState<string>('');
@@ -550,6 +552,70 @@ export default function MasterRosterPage() {
     document.body.removeChild(a);
   };
 
+  // Shared between the desktop table row and the mobile card. Hover-reveal
+  // styling only applies on desktop — touch has no hover, so the buttons
+  // stay fully visible on mobile.
+  const renderRowActions = (e: Enrollment, p: Player | undefined) => (
+    <div className="flex items-center justify-end gap-1">
+      {activeSport === 'football' && p && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('h-8 w-8', !isMobile && 'opacity-40 group-hover:opacity-100 transition-opacity')}
+          title="Print League Waiver"
+          onClick={() => setPrintJob({ kind: 'single', player: p, enrollment: e, jobId: Date.now() })}
+        >
+          <Printer className="h-4 w-4" />
+          <span className="sr-only">Print League Waiver</span>
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className={cn('h-8 w-8', !isMobile && 'opacity-40 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity')}>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onClick={() => setTimeout(() => setEditPlayerDialog({
+              open: true,
+              enrollment: e,
+              player: p ?? null,
+              form: {
+                firstName: p?.firstName ?? '',
+                lastName: p?.lastName ?? '',
+                dateOfBirth: p?.dateOfBirth ?? '',
+                medicalNotes: p?.medicalNotes ?? '',
+              },
+              loading: false,
+            }), 0)}
+          >
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit Player
+          </DropdownMenuItem>
+          {activeSport === 'football' && (
+            <DropdownMenuItem
+              onClick={() => {
+                const playerName = p ? `${p.firstName} ${p.lastName}` : '';
+                router.push(`/admin/equipment?seasonId=${e.seasonId}&search=${encodeURIComponent(playerName)}`);
+              }}
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4 text-primary" />
+              Equipment & Sizes
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={() => setTimeout(() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false }), 0)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete Registration
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -590,22 +656,48 @@ export default function MasterRosterPage() {
             <h1 className="text-xl md:text-2xl font-bold font-headline">Master Roster Center</h1>
             <p className="text-sm text-muted-foreground">Build and print your league roster — team assignments, league waivers, and uniform exports.</p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
-              <Upload className="mr-2 h-4 w-4" /> Import Assignments
-            </Button>
-            {activeSport === 'football' && (
-              <Button variant="outline" className="rounded-full" onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
-                <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+          {isMobile ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="rounded-full shrink-0">
+                  Actions <MoreHorizontal className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setImportOpen(true)}>
+                  <Upload className="mr-2 h-4 w-4" /> Import Assignments
+                </DropdownMenuItem>
+                {activeSport === 'football' && (
+                  <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
+                    <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+                  <Printer className="mr-2 h-4 w-4" /> Print Roster
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={exportRosterCSV} disabled={!displayEnrollments?.length}>
+                  <Download className="mr-2 h-4 w-4" /> Export for Uniforms
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" /> Import Assignments
               </Button>
-            )}
-            <Button variant="outline" className="rounded-full" onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
-              <Printer className="mr-2 h-4 w-4" /> Print Roster
-            </Button>
-            <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
-              <Download className="mr-2 h-4 w-4" /> Export for Uniforms
-            </Button>
-          </div>
+              {activeSport === 'football' && (
+                <Button variant="outline" className="rounded-full" onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
+                  <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+                </Button>
+              )}
+              <Button variant="outline" className="rounded-full" onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+                <Printer className="mr-2 h-4 w-4" /> Print Roster
+              </Button>
+              <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
+                <Download className="mr-2 h-4 w-4" /> Export for Uniforms
+              </Button>
+            </div>
+          )}
         </header>
 
         <Card className="border-none shadow-md mb-4">
@@ -703,6 +795,7 @@ export default function MasterRosterPage() {
               </div>
             ) : (
               <>
+              {!isMobile && (
               <div className="overflow-x-auto w-full">
               <Table>
                 <TableHeader>
@@ -800,64 +893,7 @@ export default function MasterRosterPage() {
                           )}
                         </TableCell>
                         <TableCell className="pr-4">
-                          <div className="flex items-center justify-end gap-1">
-                          {activeSport === 'football' && p && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 opacity-40 group-hover:opacity-100 transition-opacity"
-                              title="Print League Waiver"
-                              onClick={() => setPrintJob({ kind: 'single', player: p, enrollment: e, jobId: Date.now() })}
-                            >
-                              <Printer className="h-4 w-4" />
-                              <span className="sr-only">Print League Waiver</span>
-                            </Button>
-                          )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-40 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => setTimeout(() => setEditPlayerDialog({
-                                  open: true,
-                                  enrollment: e,
-                                  player: p ?? null,
-                                  form: {
-                                    firstName: p?.firstName ?? '',
-                                    lastName: p?.lastName ?? '',
-                                    dateOfBirth: p?.dateOfBirth ?? '',
-                                    medicalNotes: p?.medicalNotes ?? '',
-                                  },
-                                  loading: false,
-                                }), 0)}
-                              >
-                                <Pencil className="mr-2 h-4 w-4" />
-                                Edit Player
-                              </DropdownMenuItem>
-                              {activeSport === 'football' && (
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    const playerName = p ? `${p.firstName} ${p.lastName}` : '';
-                                    router.push(`/admin/equipment?seasonId=${e.seasonId}&search=${encodeURIComponent(playerName)}`);
-                                  }}
-                                >
-                                  <CheckCircle2 className="mr-2 h-4 w-4 text-primary" />
-                                  Equipment & Sizes
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onClick={() => setTimeout(() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false }), 0)}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete Registration
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          </div>
+                          {renderRowActions(e, p)}
                         </TableCell>
                       </TableRow>
                     );
@@ -865,6 +901,100 @@ export default function MasterRosterPage() {
                 </TableBody>
               </Table>
               </div>
+              )}
+              {isMobile && (
+                <div className="space-y-3 p-3">
+                  {displayEnrollments.map((e) => {
+                    const p = players?.find(pl => pl.id === e.playerId);
+                    const parent = profileMap.get(e.parentUserId);
+                    return (
+                      <Card key={e.id} className="border shadow-sm">
+                        <CardContent className="p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-semibold">{p ? `${p.firstName} ${p.lastName}` : 'Loading...'}</p>
+                              {isAdmin && divisionsForSeason && divisionsForSeason.length > 0 && e.seasonId === selectedSeason ? (
+                                <Select
+                                  value={e.divisionId}
+                                  onValueChange={(newDivId) => handleDivisionOverride(e, newDivId)}
+                                >
+                                  <SelectTrigger className="h-6 text-[10px] rounded px-1.5 mt-0.5 w-auto max-w-[140px] border-dashed bg-transparent">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {divisionsForSeason.map(d => (
+                                      <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <div className="text-[10px] text-muted-foreground uppercase">{e.divisionId} • {e.shirtSize ?? e.jerseySize}</div>
+                              )}
+                            </div>
+                            <div className="shrink-0">{renderRowActions(e, p)}</div>
+                          </div>
+                          <div className="text-xs border-t pt-3">
+                            <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Parent</p>
+                            {parent ? (
+                              <>
+                                <p className="font-medium">{parent.displayName || parent.email}</p>
+                                {parent.phoneNumber && (
+                                  <a href={`tel:${parent.phoneNumber}`} className="text-primary block">{parent.phoneNumber}</a>
+                                )}
+                                {parent.email && (
+                                  <a href={`mailto:${parent.email}`} className="text-primary block truncate">{parent.email}</a>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">No parent on file</span>
+                            )}
+                          </div>
+                          {activeSport === 'football' && (
+                            <div className="text-xs">
+                              <span className="text-[10px] font-bold uppercase text-muted-foreground mr-2">Weight</span>
+                              {e.footballEquipment?.verifiedWeight ? (
+                                <span className="font-medium text-green-700">{e.footballEquipment.verifiedWeight} lbs</span>
+                              ) : e.parentWeightEstimate ? (
+                                <span className="text-muted-foreground">{e.parentWeightEstimate} lbs est.</span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </div>
+                          )}
+                          <div>
+                            {activeSport === 'football' ? (
+                              <div className="text-xs">
+                                <span className="text-[10px] font-bold uppercase text-muted-foreground mr-2">Division</span>
+                                <span className="text-muted-foreground uppercase">
+                                  {divisionsForSeason?.find(d => d.id === e.divisionId)?.name ?? e.divisionId}
+                                </span>
+                              </div>
+                            ) : (
+                              <Select
+                                value={e.teamId || "unassigned"}
+                                onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
+                              >
+                                <SelectTrigger className={cn(
+                                  "w-full rounded-xl",
+                                  !e.teamId ? "border-dashed border-primary" : ""
+                                )}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="unassigned">-- Unassigned --</SelectItem>
+                                  {teams?.filter(t => t.divisionId === e.divisionId && t.seasonId === e.seasonId).map(t => (
+                                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
               </>
             )}
           </CardContent>

@@ -944,7 +944,7 @@ export default function AdminGamesPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-auto">
+      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
 
         {/* Header */}
         <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -952,7 +952,7 @@ export default function AdminGamesPage() {
             <h1 className="text-xl md:text-2xl font-bold font-headline">Game Schedule</h1>
             <p className="text-sm text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             {/* List / Calendar toggle */}
             <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
               <button
@@ -964,16 +964,22 @@ export default function AdminGamesPage() {
                 className={cn('px-3 py-1 rounded-full transition-colors', view === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
               >Calendar</button>
             </div>
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-none min-w-[150px]">
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
-              <Input placeholder="Search games…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 rounded-xl w-48" />
+              <Input placeholder="Search games…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 rounded-xl w-full sm:w-48" />
             </div>
             <Button variant="outline" className="rounded-full px-5" onClick={() => setImportOpen(true)}>
-              <Upload className="mr-2 h-4 w-4" /> Import Schedule
+              <Upload className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Import Schedule</span>
+              <span className="sm:hidden">Import</span>
             </Button>
             <Dialog open={open} onOpenChange={(o) => { if (!o) closeDialog(); else setOpen(true); }}>
               <DialogTrigger asChild>
-                <Button className="rounded-full px-6"><Plus className="mr-2 h-4 w-4" /> Add Game / Practice</Button>
+                <Button className="rounded-full px-6">
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Add Game / Practice</span>
+                  <span className="sm:hidden">Add</span>
+                </Button>
               </DialogTrigger>
               <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
@@ -1622,7 +1628,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
         : isGame ? 'bg-blue-50 border-blue-100'
         : 'bg-green-50 border-green-100'
     )}>
-      <div className="flex items-center justify-between px-4 py-3 gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 gap-2 sm:gap-3">
       <div className="flex items-center gap-3 min-w-0">
         <div className={cn('p-2 rounded-lg shrink-0', isCancelled ? 'bg-gray-100' : isGame ? 'bg-blue-100' : 'bg-green-100')}>
           {isGame
@@ -1659,7 +1665,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
         </div>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">
         {/* Score button — league games only, not cancelled */}
         {isGame && !isCancelled && (
           <Button size="sm" variant="ghost" onClick={onScore}
