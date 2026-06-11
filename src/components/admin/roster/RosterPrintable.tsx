@@ -34,18 +34,26 @@ export function RosterPrintable({ title, subtitle, rows, showWeight, onDone }: R
 
   useEffect(() => {
     // Let the DOM paint before opening the print dialog. afterprint is
-    // unreliable on iOS Safari; if it never fires the node just stays
-    // mounted, which is harmless since it is hidden on screen.
+    // unreliable on mobile (and never fires if the print UI failed to
+    // open); the visibilitychange/focus listeners catch the user returning
+    // to the page and unmount the node then.
     const handleAfterPrint = () => onDoneRef.current();
+    const handleReturnToPage = () => {
+      if (printedRef.current && !document.hidden) onDoneRef.current();
+    };
     const timer = setTimeout(() => {
       if (printedRef.current) return;
       printedRef.current = true;
       window.print();
     }, 50);
     window.addEventListener('afterprint', handleAfterPrint);
+    document.addEventListener('visibilitychange', handleReturnToPage);
+    window.addEventListener('focus', handleReturnToPage);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('afterprint', handleAfterPrint);
+      document.removeEventListener('visibilitychange', handleReturnToPage);
+      window.removeEventListener('focus', handleReturnToPage);
     };
   }, []);
 

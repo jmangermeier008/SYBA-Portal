@@ -99,6 +99,14 @@ function getPaymentStatus(e: Enrollment) {
   return e.payment_status ?? e.paymentStatus ?? 'pending';
 }
 
+// Only one printable may be mounted at a time — a stale one (e.g. when the
+// mobile print UI never opened) would otherwise ride along in the next print
+// job. jobId keys the mount so a retry always remounts and re-triggers print.
+type PrintJob =
+  | { kind: 'single'; player: Player; enrollment: Enrollment }
+  | { kind: 'bulk'; entries: WaiverPrintEntry[] }
+  | { kind: 'roster'; title: string; subtitle: string; rows: RosterPrintRow[] };
+
 export default function MasterRosterPage() {
   const db = useFirestore();
   const router = useRouter();
@@ -172,12 +180,8 @@ export default function MasterRosterPage() {
   const { data: parentProfiles } = useCollection<ParentProfile>(parentProfilesQuery);
   const { data: divisionsForSeason } = useCollection<Division>(divisionsForSeasonQuery);
 
-  // Printable Shenango Valley league waiver — set from the per-row print button
-  const [waiverPrintTarget, setWaiverPrintTarget] = useState<{ player: Player; enrollment: Enrollment } | null>(null);
-
-  // Bulk print targets — set from the header buttons, cleared after printing
-  const [bulkWaiverEntries, setBulkWaiverEntries] = useState<WaiverPrintEntry[] | null>(null);
-  const [rosterPrint, setRosterPrint] = useState<{ title: string; subtitle: string; rows: RosterPrintRow[] } | null>(null);
+  // Current print job — set from the per-row print button or the header buttons
+  const [printJob, setPrintJob] = useState<(PrintJob & { jobId: number }) | null>(null);
 
   const profileMap = useMemo(() => {
     const m = new Map<string, ParentProfile>();
@@ -458,7 +462,7 @@ export default function MasterRosterPage() {
       }];
     });
     if (entries.length === 0) return;
-    setBulkWaiverEntries(entries);
+    setPrintJob({ kind: 'bulk', entries, jobId: Date.now() });
   };
 
   const handleRosterPrint = () => {
@@ -486,10 +490,12 @@ export default function MasterRosterPage() {
       ? (activeTab === 'all' ? 'All Divisions' : divisionsForSeason?.find(d => d.id === activeTab)?.name ?? activeTab)
       : (selectedDivision && selectedDivision !== 'all-divisions' ? selectedDivision : 'All Divisions');
 
-    setRosterPrint({
+    setPrintJob({
+      kind: 'roster',
       title: `Sharpsville ${isFootball ? 'Football' : 'Baseball'} Roster`,
       subtitle: `${seasonName} • ${divisionLabel} • Printed ${new Date().toLocaleDateString()}`,
       rows,
+      jobId: Date.now(),
     });
   };
 
@@ -801,7 +807,7 @@ export default function MasterRosterPage() {
                               size="icon"
                               className="h-8 w-8 opacity-40 group-hover:opacity-100 transition-opacity"
                               title="Print League Waiver"
-                              onClick={() => setWaiverPrintTarget({ player: p, enrollment: e })}
+                              onClick={() => setPrintJob({ kind: 'single', player: p, enrollment: e, jobId: Date.now() })}
                             >
                               <Printer className="h-4 w-4" />
                               <span className="sr-only">Print League Waiver</span>
@@ -1042,25 +1048,27 @@ export default function MasterRosterPage() {
         </DialogContent>
       </Dialog>
     </div>
-    {waiverPrintTarget && (
+    {printJob?.kind === 'single' && (
       <ShenangoValleyWaiverPrintable
-        player={waiverPrintTarget.player}
-        parentPhone={waiverPrintTarget.enrollment.emergencyContacts?.[0]?.phone
-          ?? profileMap.get(waiverPrintTarget.enrollment.parentUserId)?.phoneNumber}
-        weightEstimate={waiverPrintTarget.enrollment.parentWeightEstimate}
-        onDone={() => setWaiverPrintTarget(null)}
+        key={printJob.jobId}
+        player={printJob.player}
+        parentPhone={printJob.enrollment.emergencyContacts?.[0]?.phone
+          ?? profileMap.get(printJob.enrollment.parentUserId)?.phoneNumber}
+        weightEstimate={printJob.enrollment.parentWeightEstimate}
+        onDone={() => setPrintJob(null)}
       />
     )}
-    {bulkWaiverEntries && (
-      <WaiverBatchPrintable entries={bulkWaiverEntries} onDone={() => setBulkWaiverEntries(null)} />
+    {printJob?.kind === 'bulk' && (
+      <WaiverBatchPrintable key={printJob.jobId} entries={printJob.entries} onDone={() => setPrintJob(null)} />
     )}
-    {rosterPrint && (
+    {printJob?.kind === 'roster' && (
       <RosterPrintable
-        title={rosterPrint.title}
-        subtitle={rosterPrint.subtitle}
-        rows={rosterPrint.rows}
+        key={printJob.jobId}
+        title={printJob.title}
+        subtitle={printJob.subtitle}
+        rows={printJob.rows}
         showWeight={activeSport === 'football'}
-        onDone={() => setRosterPrint(null)}
+        onDone={() => setPrintJob(null)}
       />
     )}
     </>

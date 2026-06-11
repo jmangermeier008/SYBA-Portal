@@ -245,7 +245,8 @@ export function WaiverBatchPrintable({
   const triggerPrint = () => {
     if (printedRef.current) return;
     printedRef.current = true;
-    window.print();
+    // One frame so the committed layout is what the print engine snapshots.
+    requestAnimationFrame(() => window.print());
   };
 
   const handleImageReady = () => {
@@ -256,15 +257,28 @@ export function WaiverBatchPrintable({
   useEffect(() => {
     // Let the DOM paint before opening the print dialog. When signature
     // images are present, printing is triggered once they have all loaded and
-    // this timer is only a fallback in case an image never loads. afterprint
-    // is unreliable on iOS Safari; if it never fires the node just stays
-    // mounted, which is harmless since it is hidden on screen.
+    // this timer is only a fallback in case an image never loads. The
+    // fallback must stay short: Android Chrome silently ignores
+    // window.print() once the tap's transient user activation expires.
+    //
+    // afterprint is unreliable on mobile (and never fires at all if the
+    // print UI failed to open), which used to leave this node mounted and
+    // riding along in the next print job. The visibilitychange/focus
+    // listeners catch the user returning from (or never reaching) the
+    // system print UI and unmount it then.
     const handleAfterPrint = () => onDoneRef.current();
-    const timer = setTimeout(triggerPrint, expectedImages > 0 ? 2500 : 50);
+    const handleReturnToPage = () => {
+      if (printedRef.current && !document.hidden) onDoneRef.current();
+    };
+    const timer = setTimeout(triggerPrint, expectedImages > 0 ? 800 : 50);
     window.addEventListener('afterprint', handleAfterPrint);
+    document.addEventListener('visibilitychange', handleReturnToPage);
+    window.addEventListener('focus', handleReturnToPage);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('afterprint', handleAfterPrint);
+      document.removeEventListener('visibilitychange', handleReturnToPage);
+      window.removeEventListener('focus', handleReturnToPage);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
