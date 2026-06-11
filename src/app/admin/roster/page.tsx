@@ -15,10 +15,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer, FileText } from 'lucide-react';
 import { type WaiverPrintEntry } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import { openPrintTab, type RosterPrintRow } from '@/lib/print-job';
+import { openDocumentPacket, type PlayerDocType } from '@/lib/document-packet';
+import { DocumentViewerDialog } from '@/components/documents/document-viewer';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -79,6 +81,9 @@ interface Player {
   waiverSignedAt?: string;
   waiverSignedRelationship?: string;
   medicalNotes?: string;
+  birthCertificateUrl?: string;
+  physicalFormUrl?: string;
+  _refPath?: string;
 }
 
 interface Team {
@@ -103,7 +108,7 @@ function getPaymentStatus(e: Enrollment) {
 export default function MasterRosterPage() {
   const db = useFirestore();
   const router = useRouter();
-  const { loading: loadingUser } = useUser();
+  const { user, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
   const isMobile = useIsMobile();
@@ -126,6 +131,11 @@ export default function MasterRosterPage() {
     form: { firstName: string; lastName: string; dateOfBirth: string; medicalNotes: string };
     loading: boolean;
   }>({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
+
+  // Document viewer dialog state (admin-only — birth certs & physicals).
+  // Stores the id, not a player snapshot, so the open dialog picks up the new
+  // URL from the real-time players subscription after an admin replaces a doc.
+  const [docViewer, setDocViewer] = useState<{ open: boolean; playerId: string | null }>({ open: false, playerId: null });
 
   // Delete enrollment dialog state
   const [deleteDialog, setDeleteDialog] = useState<{
@@ -179,6 +189,11 @@ export default function MasterRosterPage() {
     parentProfiles?.forEach(p => m.set(p.id, p));
     return m;
   }, [parentProfiles]);
+
+  const docViewerPlayer = useMemo(
+    () => players?.find(pl => pl.id === docViewer.playerId) ?? null,
+    [players, docViewer.playerId]
+  );
 
   const activeSeason = useMemo(() =>
     seasons?.find((s: any) => s.status === 'active' || s.isActive) ?? seasons?.[0] ?? null,
@@ -541,30 +556,34 @@ export default function MasterRosterPage() {
     document.body.removeChild(a);
   };
 
+  // Builds one combined, labeled PDF of every displayed player's document via
+  // the server packet endpoint. Must run synchronously in the click handler —
+  // openDocumentPacket opens its tab before awaiting anything.
+  const handleBulkDocPrint = (docType: PlayerDocType) => {
+    if (!user) return;
+    const docLabel = docType === 'birthCertificate' ? 'birth certificate' : 'physical form';
+    const urlField = docType === 'birthCertificate' ? 'birthCertificateUrl' : 'physicalFormUrl';
+    const rows = (displayEnrollments ?? []).map(e => players?.find(pl => pl.id === e.playerId));
+    const withDoc = rows.filter((p): p is Player => !!p && !!p[urlField] && !!p._refPath);
+    const missing = rows.length - withDoc.length;
+    if (withDoc.length === 0) {
+      toast({ variant: 'destructive', title: 'No documents', description: `None of the displayed players have a ${docLabel} uploaded.` });
+      return;
+    }
+    if (missing > 0) {
+      toast({ title: `${missing} player${missing === 1 ? '' : 's'} skipped`, description: `No ${docLabel} uploaded for ${missing} of ${rows.length} displayed players.` });
+    }
+    openDocumentPacket({ user, docType, refPaths: withDoc.map(p => p._refPath!) })
+      .then(r => {
+        if (!r.ok) toast({ variant: 'destructive', title: 'Print failed', description: r.error });
+      });
+  };
+
   // Shared between the desktop table row and the mobile card. Hover-reveal
   // styling only applies on desktop — touch has no hover, so the buttons
   // stay fully visible on mobile.
   const renderRowActions = (e: Enrollment, p: Player | undefined) => (
     <div className="flex items-center justify-end gap-1">
-      {activeSport === 'football' && p && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', !isMobile && 'opacity-40 group-hover:opacity-100 transition-opacity')}
-          title="Print League Waiver"
-          onClick={() => openPrintTab({
-            kind: 'waivers',
-            entries: [{
-              player: p,
-              parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
-              weightEstimate: e.parentWeightEstimate,
-            }],
-          })}
-        >
-          <Printer className="h-4 w-4" />
-          <span className="sr-only">Print League Waiver</span>
-        </Button>
-      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className={cn('h-8 w-8', !isMobile && 'opacity-40 group-hover:opacity-100 data-[state=open]:opacity-100 transition-opacity')}>
@@ -589,6 +608,29 @@ export default function MasterRosterPage() {
             <Pencil className="mr-2 h-4 w-4" />
             Edit Player
           </DropdownMenuItem>
+          {isAdmin && (
+            <DropdownMenuItem
+              onClick={() => setTimeout(() => setDocViewer({ open: true, playerId: p?.id ?? null }), 0)}
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              View Documents
+            </DropdownMenuItem>
+          )}
+          {activeSport === 'football' && p && (
+            <DropdownMenuItem
+              onClick={() => openPrintTab({
+                kind: 'waivers',
+                entries: [{
+                  player: p,
+                  parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
+                  weightEstimate: e.parentWeightEstimate,
+                }],
+              })}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print League Waiver
+            </DropdownMenuItem>
+          )}
           {activeSport === 'football' && (
             <DropdownMenuItem
               onClick={() => {
@@ -600,6 +642,7 @@ export default function MasterRosterPage() {
               Equipment & Sizes
             </DropdownMenuItem>
           )}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"
             onClick={() => setTimeout(() => setDeleteDialog({ open: true, enrollment: e, player: p ?? null, loading: false }), 0)}
@@ -662,14 +705,26 @@ export default function MasterRosterPage() {
                 <DropdownMenuItem onClick={() => setImportOpen(true)}>
                   <Upload className="mr-2 h-4 w-4" /> Import Assignments
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+                  <Printer className="mr-2 h-4 w-4" /> Print Roster
+                </DropdownMenuItem>
                 {activeSport === 'football' && (
                   <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
                     <Printer className="mr-2 h-4 w-4" /> Print League Waivers
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
-                  <Printer className="mr-2 h-4 w-4" /> Print Roster
-                </DropdownMenuItem>
+                {isAdmin && (
+                  <>
+                    <DropdownMenuItem onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
+                      <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleBulkDocPrint('physicalForm')} disabled={!displayEnrollments?.length}>
+                      <FileText className="mr-2 h-4 w-4" /> Print Physical Forms
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={exportRosterCSV} disabled={!displayEnrollments?.length}>
                   <Download className="mr-2 h-4 w-4" /> Export for Uniforms
                 </DropdownMenuItem>
@@ -680,14 +735,34 @@ export default function MasterRosterPage() {
               <Button variant="outline" className="rounded-full" onClick={() => setImportOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" /> Import Assignments
               </Button>
-              {activeSport === 'football' && (
-                <Button variant="outline" className="rounded-full" onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
-                  <Printer className="mr-2 h-4 w-4" /> Print League Waivers
-                </Button>
-              )}
-              <Button variant="outline" className="rounded-full" onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
-                <Printer className="mr-2 h-4 w-4" /> Print Roster
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="rounded-full">
+                    <Printer className="mr-2 h-4 w-4" /> Print
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleRosterPrint} disabled={!displayEnrollments?.length}>
+                    <Printer className="mr-2 h-4 w-4" /> Print Roster
+                  </DropdownMenuItem>
+                  {activeSport === 'football' && (
+                    <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
+                      <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+                    </DropdownMenuItem>
+                  )}
+                  {isAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
+                        <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleBulkDocPrint('physicalForm')} disabled={!displayEnrollments?.length}>
+                        <FileText className="mr-2 h-4 w-4" /> Print Physical Forms
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
                 <Download className="mr-2 h-4 w-4" /> Export for Uniforms
               </Button>
@@ -995,6 +1070,13 @@ export default function MasterRosterPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Player document viewer (admin-only entry points) */}
+      <DocumentViewerDialog
+        open={docViewer.open}
+        onOpenChange={(o) => { if (!o) setDocViewer({ open: false, playerId: null }); }}
+        player={docViewerPlayer}
+      />
 
       {/* Delete Enrollment Dialog */}
       <AlertDialog open={deleteDialog.open} onOpenChange={(open) => { if (!open && !deleteDialog.loading) setDeleteDialog({ open: false, enrollment: null, player: null, loading: false }); }}>
