@@ -209,9 +209,9 @@ export default function ParentConcessionsPage() {
               <h1 className="text-xl md:text-2xl font-bold font-headline">Concessions</h1>
               <p className="text-sm text-muted-foreground">Sign up to volunteer at the concession stand during games.</p>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
               {activeSeason && requiredSlots > 0 && (
-                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 min-w-[180px]">
+                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[180px]">
                   <p className="text-xs text-muted-foreground mb-1">Volunteer Commitment</p>
                   <p className="text-sm font-semibold">{mySignupCount} / {requiredSlots} shifts</p>
                   <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-1.5">
@@ -226,7 +226,7 @@ export default function ParentConcessionsPage() {
                 </div>
               )}
               {mySignupCount > 0 && (
-                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 min-w-[120px] text-center">
+                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[120px] text-center">
                   <p className="text-xs text-muted-foreground mb-0.5">My Sign-Ups</p>
                   <p className="text-sm font-semibold flex items-center justify-center gap-1">
                     <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> {mySignupCount}

@@ -193,7 +193,7 @@ export default function StandingsPage() {
             value={selectedSeasonId}
             onValueChange={v => { setSelectedSeasonId(v); setSelectedDivisionId(''); }}
           >
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Select Season" />
             </SelectTrigger>
             <SelectContent>
@@ -206,7 +206,7 @@ export default function StandingsPage() {
             onValueChange={setSelectedDivisionId}
             disabled={!selectedSeasonId || !divisions?.length}
           >
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Select Division" />
             </SelectTrigger>
             <SelectContent>
@@ -252,11 +252,11 @@ export default function StandingsPage() {
                         <th className="text-center pb-2 px-3 font-semibold">W</th>
                         <th className="text-center pb-2 px-3 font-semibold">L</th>
                         <th className="text-center pb-2 px-3 font-semibold">T</th>
-                        <th className="text-center pb-2 px-3 font-semibold">GP</th>
+                        <th className="hidden md:table-cell text-center pb-2 px-3 font-semibold">GP</th>
                         <th className="text-center pb-2 px-3 font-semibold">PCT</th>
-                        <th className="text-center pb-2 px-3 font-semibold">RS</th>
-                        <th className="text-center pb-2 px-3 font-semibold">RA</th>
-                        <th className="text-center pb-2 px-3 font-semibold">DIFF</th>
+                        <th className="hidden md:table-cell text-center pb-2 px-3 font-semibold">RS</th>
+                        <th className="hidden md:table-cell text-center pb-2 px-3 font-semibold">RA</th>
+                        <th className="hidden md:table-cell text-center pb-2 px-3 font-semibold">DIFF</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -278,16 +278,16 @@ export default function StandingsPage() {
                             <td className="text-center py-3 px-3 font-bold text-green-700">{s.wins}</td>
                             <td className="text-center py-3 px-3 text-red-700">{s.losses}</td>
                             <td className="text-center py-3 px-3 text-muted-foreground">{s.ties}</td>
-                            <td className="text-center py-3 px-3 text-muted-foreground">{s.gamesPlayed}</td>
+                            <td className="hidden md:table-cell text-center py-3 px-3 text-muted-foreground">{s.gamesPlayed}</td>
                             <td className="text-center py-3 px-3 font-semibold">
                               {s.gamesPlayed > 0
                                 ? s.winPct.toFixed(3).replace(/^0/, '')
                                 : '—'}
                             </td>
-                            <td className="text-center py-3 px-3 text-muted-foreground">{s.runsScored}</td>
-                            <td className="text-center py-3 px-3 text-muted-foreground">{s.runsAllowed}</td>
+                            <td className="hidden md:table-cell text-center py-3 px-3 text-muted-foreground">{s.runsScored}</td>
+                            <td className="hidden md:table-cell text-center py-3 px-3 text-muted-foreground">{s.runsAllowed}</td>
                             <td className={cn(
-                              'text-center py-3 px-3 font-medium text-xs',
+                              'hidden md:table-cell text-center py-3 px-3 font-medium text-xs',
                               diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-muted-foreground'
                             )}>
                               {diff > 0 ? `+${diff}` : diff}
@@ -298,7 +298,7 @@ export default function StandingsPage() {
                     </tbody>
                   </table>
                   <p className="text-xs text-muted-foreground mt-4">
-                    W=Wins · L=Losses · T=Ties · GP=Games Played · PCT=Win% · RS=Runs Scored · RA=Runs Allowed · DIFF=Run Differential.
+                    W=Wins · L=Losses · T=Ties · PCT=Win%<span className="hidden md:inline"> · GP=Games Played · RS=Runs Scored · RA=Runs Allowed · DIFF=Run Differential</span>.
                     Only intra-division games with recorded final scores are counted.
                   </p>
                 </div>

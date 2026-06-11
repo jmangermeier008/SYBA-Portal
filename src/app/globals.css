@@ -103,7 +103,8 @@
   }
 }
 
-/* Printable league waiver — host pages hide their chrome with print:hidden */
+/* Print sizing for the dedicated /print tab (league waivers, roster sheets).
+   Sheets there are laid out at 7.5in — letter width minus these margins. */
 @media print {
   @page {
     size: letter;

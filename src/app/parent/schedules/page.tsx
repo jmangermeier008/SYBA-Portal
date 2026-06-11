@@ -311,10 +311,10 @@ export default function ParentSchedulesPage() {
   // ── Child selector ──────────────────────────────────────────────────────────
   const multipleChildren = (players?.length ?? 0) > 1;
   const childSelector = players && players.length > 0 ? (
-    <div className="flex items-center gap-3 bg-white p-2 rounded-xl border shadow-sm">
+    <div className="flex items-center gap-3 bg-white p-2 rounded-xl border shadow-sm min-w-0">
       <Users className="h-4 w-4 text-primary ml-2" />
       <Select value={selectedPlayerId} onValueChange={setSelectedPlayerId}>
-        <SelectTrigger className="w-[200px] border-none shadow-none focus:ring-0">
+        <SelectTrigger className="w-full min-w-0 sm:w-[200px] border-none shadow-none focus:ring-0">
           <SelectValue placeholder="Select Player" />
         </SelectTrigger>
         <SelectContent>
