@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck, Printer } from 'lucide-react';
-import { ShenangoValleyWaiverPrintable, type WaiverPlayerData } from '@/components/registration/ShenangoValleyWaiverPrintable';
+import { openPrintTab } from '@/lib/print-job';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -94,7 +94,6 @@ export default function ParentDashboard() {
     return map;
   }, [enrollments]);
 
-  const [waiverTarget, setWaiverTarget] = useState<{ player: WaiverPlayerData; weightEstimate?: number; phone?: string } | null>(null);
 
   // Set initial selected player when players load
   useEffect(() => {
@@ -349,8 +348,7 @@ export default function ParentDashboard() {
   }
 
   return (
-    <>
-    <div className="flex min-h-screen bg-background print:hidden">
+    <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 pb-20 md:pb-6 pt-16 md:pt-6 max-w-[1400px]">
 
@@ -500,21 +498,25 @@ export default function ParentDashboard() {
                     size="sm"
                     variant="outline"
                     className="h-8 rounded-full"
-                    onClick={() => setWaiverTarget({
-                      player: {
-                        firstName: p.firstName ?? '',
-                        lastName: p.lastName ?? '',
-                        dateOfBirth: p.dateOfBirth,
-                        streetAddress: p.streetAddress,
-                        city: p.city,
-                        schoolEnrolled: p.schoolEnrolled,
-                        grade: p.grade,
-                        waiverSignatureUrl: p.waiverSignatureUrl,
-                        waiverSignedAt: p.waiverSignedAt,
-                        waiverSignedRelationship: p.waiverSignedRelationship,
-                      },
-                      weightEstimate: footballEnrollmentByPlayer.get(p.id)?.parentWeightEstimate,
-                      phone: footballEnrollmentByPlayer.get(p.id)?.emergencyContacts?.[0]?.phone,
+                    onClick={() => openPrintTab({
+                      kind: 'waivers',
+                      entries: [{
+                        player: {
+                          firstName: p.firstName ?? '',
+                          lastName: p.lastName ?? '',
+                          dateOfBirth: p.dateOfBirth,
+                          streetAddress: p.streetAddress,
+                          city: p.city,
+                          schoolEnrolled: p.schoolEnrolled,
+                          grade: p.grade,
+                          waiverSignatureUrl: p.waiverSignatureUrl,
+                          waiverSignedAt: p.waiverSignedAt,
+                          waiverSignedRelationship: p.waiverSignedRelationship,
+                        },
+                        weightEstimate: footballEnrollmentByPlayer.get(p.id)?.parentWeightEstimate,
+                        parentPhone: footballEnrollmentByPlayer.get(p.id)?.emergencyContacts?.[0]?.phone
+                          ?? profile?.phoneNumber,
+                      }],
                     })}
                   >
                     <Printer className="h-3.5 w-3.5 mr-1.5" />
@@ -770,14 +772,5 @@ export default function ParentDashboard() {
         </div>
       </main>
     </div>
-    {waiverTarget && (
-      <ShenangoValleyWaiverPrintable
-        player={waiverTarget.player}
-        parentPhone={waiverTarget.phone ?? profile?.phoneNumber}
-        weightEstimate={waiverTarget.weightEstimate}
-        onDone={() => setWaiverTarget(null)}
-      />
-    )}
-    </>
   );
 }

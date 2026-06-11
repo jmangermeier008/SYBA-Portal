@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { format } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -16,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { BadgeCheck, CheckCircle2, History, Loader2, Download, Maximize2, Trash2, Printer } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
-import { ShenangoValleyWaiverPrintable } from '@/components/registration/ShenangoValleyWaiverPrintable';
+import { openPrintTab } from '@/lib/print-job';
 import type { Division } from '@/types/scheduling';
 
 export interface PlayerWithDocs {
@@ -168,8 +167,19 @@ export function PlayerTable({
   const [leagueFormSigned, setLeagueFormSigned] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
   const [docViewerExpanded, setDocViewerExpanded] = useState(false);
-  // Printable league waiver — available to all admins on this screen, not just site admins
-  const [waiverPrintTarget, setWaiverPrintTarget] = useState<{ player: PlayerWithDocs; enrollment?: EnrollmentRecord } | null>(null);
+
+  // League waiver printing — available to all admins on this screen, not just
+  // site admins. Opens the dedicated /print tab (mobile browsers can't print
+  // hidden-on-page content reliably).
+  const printWaiver = (player: PlayerWithDocs, enrollment?: EnrollmentRecord) =>
+    openPrintTab({
+      kind: 'waivers',
+      entries: [{
+        player,
+        parentPhone: enrollment?.emergencyContacts?.[0]?.phone,
+        weightEstimate: enrollment?.parentWeightEstimate,
+      }],
+    });
 
   const playerEnrollmentMap = useMemo(() => {
     const map = new Map<string, EnrollmentRecord>();
@@ -376,7 +386,7 @@ export function PlayerTable({
                               variant="outline"
                               size="sm"
                               className="rounded-full h-9 flex-1"
-                              onClick={() => setWaiverPrintTarget({ player, enrollment })}
+                              onClick={() => printWaiver(player, enrollment)}
                             >
                               <Printer className="h-3.5 w-3.5 mr-1.5" />
                               Print Waiver
@@ -513,7 +523,7 @@ export function PlayerTable({
                                   variant="outline"
                                   size="sm"
                                   className="rounded-full h-8"
-                                  onClick={() => setWaiverPrintTarget({ player, enrollment: playerEnrollmentMap.get(player.id) })}
+                                  onClick={() => printWaiver(player, playerEnrollmentMap.get(player.id))}
                                   title="Print League Waiver"
                                 >
                                   <Printer className="h-3.5 w-3.5" />
@@ -774,17 +784,6 @@ export function PlayerTable({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Portal to body — the host page's root carries print:hidden, which would
-          otherwise hide this nested printable from the print engine too. */}
-      {waiverPrintTarget && createPortal(
-        <ShenangoValleyWaiverPrintable
-          player={waiverPrintTarget.player}
-          parentPhone={waiverPrintTarget.enrollment?.emergencyContacts?.[0]?.phone}
-          weightEstimate={waiverPrintTarget.enrollment?.parentWeightEstimate}
-          onDone={() => setWaiverPrintTarget(null)}
-        />,
-        document.body
-      )}
     </>
   );
 }
