@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import type { CalendarEvent, LinkRequest } from '@/types/scheduling';
@@ -145,14 +146,17 @@ export default function ParentDashboard() {
     }
   };
 
-  const handlePhysicalUpload = async (playerId: string, file: File) => {
+  const handlePhysicalUpload = async (playerId: string, files: File[]) => {
     if (!user || !db) return;
     setUploadingPhysicalFor(playerId);
     try {
+      // Validates type/size, compresses oversized photos, and merges multiple
+      // photos into one PDF; throws user-friendly messages.
+      const file = await prepareDocumentForUpload(files, 'physical');
       const idToken = await user.getIdToken();
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('path', `players/${playerId}/physical_${Date.now()}`);
+      formData.append('path', `players/${playerId}/physical_${Date.now()}.${uploadExtensionFor(file)}`);
       const resp = await fetch('/api/upload', {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}` },
@@ -475,8 +479,9 @@ export default function ParentDashboard() {
                       type="file"
                       className="hidden"
                       accept=".pdf,.jpg,.jpeg,.png"
+                      multiple
                       disabled={!!uploadingPhysicalFor}
-                      onChange={e => { const f = e.target.files?.[0]; if (f) handlePhysicalUpload(p.id, f); }}
+                      onChange={e => { const fs = Array.from(e.target.files ?? []); if (fs.length) handlePhysicalUpload(p.id, fs); e.target.value = ''; }}
                     />
                   </Label>
                 </div>

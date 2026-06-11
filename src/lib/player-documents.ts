@@ -1,9 +1,7 @@
 import { doc, updateDoc, type Firestore } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import type { PlayerDocType } from '@/lib/document-packet';
-
-const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const MAX_BYTES = 5 * 1024 * 1024;
+import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 
 /**
  * Admin upload/replace of a player's birth certificate or physical form.
@@ -19,22 +17,18 @@ export async function uploadPlayerDocument(opts: {
   db: Firestore;
   refPath: string; // userProfiles/{parentUid}/players/{playerId}
   docType: PlayerDocType;
-  file: File;
+  files: File[];
 }): Promise<{ url: string }> {
-  const { user, db, refPath, docType, file } = opts;
-
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    throw new Error('Invalid file type. Upload a PDF, JPG, or PNG.');
-  }
-  if (file.size > MAX_BYTES) {
-    throw new Error('File too large. Maximum 5 MB.');
-  }
+  const { user, db, refPath, docType, files } = opts;
 
   const playerId = refPath.split('/').pop();
   if (!playerId) throw new Error('Invalid player reference.');
 
+  // Validates type/size, compresses oversized photos, and merges multiple
+  // photos into one PDF; throws user-friendly messages.
   const prefix = docType === 'birthCertificate' ? 'birth_cert' : 'physical';
-  const path = `players/${playerId}/${prefix}_${Date.now()}`;
+  const file = await prepareDocumentForUpload(files, prefix);
+  const path = `players/${playerId}/${prefix}_${Date.now()}.${uploadExtensionFor(file)}`;
 
   const idToken = await user.getIdToken();
   const formData = new FormData();
