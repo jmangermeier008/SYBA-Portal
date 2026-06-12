@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
+import { verifyBearerUid, getCallerProfile, hasAnyRole } from '@/lib/server-auth';
 
 function sportPrefix(sport?: string): string {
   if (sport === 'baseball') return '[SYBA Baseball] ';
@@ -22,6 +23,17 @@ function sportPrefix(sport?: string): string {
  */
 export async function POST(req: Request) {
   try {
+    // Schedule-change emails go to arbitrary user lists with caller-supplied
+    // labels — board members and admins only.
+    const uid = await verifyBearerUid(req);
+    if (!uid) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const caller = await getCallerProfile(uid);
+    if (!hasAnyRole(caller, ['Admin', 'Board Member'])) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { type, userIds, gameLabel, oldDateLabel, newDateLabel, sport } = await req.json();
 
     if (!type || !Array.isArray(userIds) || userIds.length === 0) {

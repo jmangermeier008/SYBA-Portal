@@ -87,10 +87,12 @@ src/
 - `parentIds: string[]` — supports two parents per child
 - `clearanceUrl` — Firebase Storage path (deleted after admin verification)
 
-**`userProfiles/{userId}/players/{playerId}/enrollments/{id}`** (subcollection)
-- `seasonId`, `teamId`, `divisionId`, `parentUserId`
-- `paymentStatus: 'pending' | 'pending_payment' | 'paid'`
-- `registrationFeeAmount: number`
+**`userProfiles/{userId}/enrollments/{id}`** (subcollection — directly under the user, NOT under players)
+- `playerId`, `seasonId`, `teamId`, `divisionId`, `parentUserId`
+- `paymentStatus: 'pending_payment' | 'paid' | 'waitlisted' | 'fee_waived' | 'refunded'`
+- `stripe_payment_id` — truthy once settled; `offline_<id>` for admin manual registrations, `no_charge_<id>` for $0 carts
+- `registrationFeeAmount: number` (cents)
+- `manualRegistration: true` + `registeredByAdminUid` — set by the admin Manually Register dialog
 
 **`seasons/{seasonId}`**
 - `name`, `status: 'active' | 'archived'`
@@ -105,7 +107,7 @@ src/
 
 **`teams/{teamId}/games/{gameId}`** (subcollection — team-specific)
 > **IMPORTANT:** Different shape from top-level `games` collection — see Two Game Data Models below.
-- `dateTime: string` — combined ISO datetime (e.g. `"2026-05-01T18:00:00Z"`)
+- `dateTime: string` — combined **naive local** datetime, NO `Z` suffix (e.g. `"2026-05-01T18:00:00"`). Anything compared against it must also be naive local — never `new Date().toISOString()` (UTC), which is hours off.
 - `type: 'Game' | 'Practice'` (capitalized, unlike top-level)
 - `opponentName`, `location`, `fieldId`
 - `locationType?: 'home' | 'away'` — football only
@@ -166,7 +168,7 @@ This is the most critical architectural distinction in the codebase:
 | | `games/{id}` (top-level) | `teams/{teamId}/games/{id}` (subcollection) |
 |---|---|---|
 | Used by | Admin pages, league-wide calendar | Coach pages, parent pages |
-| Date | `date: "YYYY-MM-DD"` + `time: "HH:MM"` (separate fields) | `dateTime: "2026-05-01T18:00:00Z"` (single ISO string) |
+| Date | `date: "YYYY-MM-DD"` + `time: "HH:MM"` (separate fields) | `dateTime: "2026-05-01T18:00:00"` (single naive-local string, no Z) |
 | Type values | `'game'` / `'practice'` (lowercase) | `'Game'` / `'Practice'` (capitalized) |
 | Normalizer | `normalizeGame(g)` | `normalizeTeamGame(g, teamId)` |
 
@@ -319,12 +321,12 @@ Key props by role:
 | `STRIPE_SECRET_KEY` | Stripe server-side |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe client-side |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature verification |
-| `EMAIL_GENERAL` | General inquiry routing email |
-| `EMAIL_REGISTRATION` | Registration topic email |
-| `EMAIL_SAFETY` | Safety/compliance topic email |
-| `EMAIL_FACILITIES` | Fields/facilities topic email |
-| `EMAIL_UMPIRES` | Umpiring topic email |
-| `EMAIL_SPONSORSHIPS` | Sponsorship topic email |
+| `RESEND_API_KEY` | Resend — all outbound email (confirmations, inquiry notifications, schedule changes) |
+| `RESEND_FROM_EMAIL` | Outbound From address (falls back to `onboarding@resend.dev`) |
+| `INQUIRY_NOTIFICATION_EMAIL` | Fallback recipient when no officer matches an inquiry's assigned role |
+| `INQUIRY_EMAIL_SITE_ADMIN` | Always-CC address for inquiry notifications |
+| `MAILGUN_WEBHOOK_SIGNING_KEY` | Verifies inbound-email webhook signatures — required or all inbound mail is rejected |
+| `FIREBASE_SERVICE_ACCOUNT_KEY` | Firebase Admin SDK credentials (server API routes) |
 
 ---
 

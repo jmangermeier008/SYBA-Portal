@@ -51,7 +51,7 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
-      await addDoc(collection(db, 'inquiries'), {
+      const inquiryRef = await addDoc(collection(db, 'inquiries'), {
         senderId: profile.id,
         senderName: profile.displayName || 'Unknown',
         senderEmail: profile.email || '',
@@ -68,17 +68,12 @@ export function InquiryForm({ senderRole, dashboardHref }: InquiryFormProps) {
         replies: [],
       });
 
-      // Fire-and-forget email notification
+      // Fire-and-forget email notification — the server builds the email from
+      // the inquiry doc itself, so only the ID is sent.
       fetch('/api/email/inquiry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderName: profile.displayName || 'Unknown',
-          topic: topicConfig.label,
-          subject: subject.trim(),
-          message: message.trim(),
-          assignedToRole: topicConfig.assignedToRole,
-        }),
+        body: JSON.stringify({ inquiryId: inquiryRef.id }),
       }).catch((err) => { console.error('[inquiry] Email notification failed:', err); });
 
       setAssignedRole(topicConfig.assignedToRole);

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { verifyBearerUid, getCallerProfile, hasAnyRole } from '@/lib/server-auth';
 
 function getAppUrl(sport?: string): string {
   if (sport === 'football') return process.env.FOOTBALL_BASE_URL || 'https://sharpsvillefootball.com';
@@ -13,6 +14,17 @@ function sportPrefix(sport?: string): string {
 
 export async function POST(req: Request) {
   try {
+    // Inquiry replies impersonate the league to an arbitrary address — only
+    // board members and admins (the people who answer inquiries) may send them.
+    const uid = await verifyBearerUid(req);
+    if (!uid) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const caller = await getCallerProfile(uid);
+    if (!hasAnyRole(caller, ['Admin', 'Board Member'])) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { toEmail, replierName, originalSubject, replyMessage, inquiryId, sport } = await req.json();
 
     if (!toEmail) {

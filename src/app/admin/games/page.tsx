@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, limit } from 'firebase/firestore';
+import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, limit, type WriteBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
@@ -53,6 +53,7 @@ interface Game {
   locationType?: 'home' | 'away';
   notes?: string;
   scrimmageNote?: string;
+  seasonId?: string;
   status?: GameStatus;
   homeScore?: number;
   awayScore?: number;
@@ -294,6 +295,7 @@ export default function AdminGamesPage() {
       notes: form.notes,
       scrimmageNote: form.scrimmageNote.trim() || null,
       sport: activeSport,
+      seasonId: activeSeason?.id ?? '',
       divisionId: form.divisionId || null,
       division: selectedDivision?.name ?? '',
     };
@@ -314,6 +316,48 @@ export default function AdminGamesPage() {
       payload.teamName = teamMap[form.teamId] ?? '';
     }
     return payload;
+  };
+
+  // Dual Game Model: write the edited form values to every team subcollection
+  // mirror. setDoc+merge (not update) so a game whose mirror doc is missing —
+  // e.g. one bulk-imported before mirrors were written — self-heals instead of
+  // failing the whole batch. Football games live on form.homeTeamId with a
+  // free-text opponent; baseball games mirror to both teams with the opposing
+  // name; practices mirror to form.teamId.
+  const writeMirrorUpdates = (batch: WriteBatch, game: Game) => {
+    if (!db) return;
+    const isFootballGame = activeSport === 'football' && form.type === 'game';
+    const isFootballAway = isFootballGame && form.locationType === 'away';
+    const base: Record<string, any> = {
+      id: game.id,
+      seasonId: game.seasonId ?? activeSeason?.id ?? '',
+      type: form.type === 'game' ? 'Game' : 'Practice',
+      dateTime: `${form.date}T${form.time}:00`,
+      location: isFootballAway ? form.awayLocation : fieldMap[form.fieldId] ?? '',
+      fieldId: isFootballAway ? '' : form.fieldId,
+      cancelled: game.status === 'cancelled',
+      updatedAt: Timestamp.now(),
+    };
+    const mirroredTeamIds: string[] = [];
+    const setMirror = (teamId: string, extra: Record<string, any> = {}) => {
+      batch.set(doc(db, 'teams', teamId, 'games', game.id), { ...base, teamId, ...extra }, { merge: true });
+      mirroredTeamIds.push(teamId);
+    };
+    if (isFootballGame && form.homeTeamId) {
+      setMirror(form.homeTeamId, { opponentName: form.opponentName, locationType: form.locationType });
+    } else if (form.type === 'game' && form.homeTeamId && form.awayTeamId) {
+      setMirror(form.homeTeamId, { opponentName: teamMap[form.awayTeamId] ?? '' });
+      setMirror(form.awayTeamId, { opponentName: teamMap[form.homeTeamId] ?? '' });
+    } else if (form.type === 'practice' && form.teamId) {
+      setMirror(form.teamId);
+    }
+    // If the edit moved the game to a different team, remove the old team's
+    // mirror so the game doesn't appear on both schedules.
+    for (const oldId of [game.homeTeamId, game.awayTeamId, game.teamId]) {
+      if (oldId && !mirroredTeamIds.includes(oldId)) {
+        batch.delete(doc(db, 'teams', oldId, 'games', game.id));
+      }
+    }
   };
 
   const closeDialog = () => {
@@ -493,19 +537,7 @@ export default function AdminGamesPage() {
         // No cascade needed — batch update the game and its team subcollection mirrors atomically.
         const editBatch = writeBatch(db);
         editBatch.update(doc(db, 'games', editingGame.id), payload);
-
-        const teamUpdatePayload = {
-          dateTime: `${form.date}T${form.time}:00`,
-          location: fieldMap[form.fieldId] ?? '',
-          fieldId: form.fieldId,
-          updatedAt: Timestamp.now(),
-        };
-        if (editingGame.type === 'game') {
-          if (editingGame.homeTeamId) editBatch.update(doc(db, 'teams', editingGame.homeTeamId, 'games', editingGame.id), teamUpdatePayload);
-          if (editingGame.awayTeamId) editBatch.update(doc(db, 'teams', editingGame.awayTeamId, 'games', editingGame.id), teamUpdatePayload);
-        } else if (editingGame.teamId) {
-          editBatch.update(doc(db, 'teams', editingGame.teamId, 'games', editingGame.id), teamUpdatePayload);
-        }
+        writeMirrorUpdates(editBatch, editingGame);
         await editBatch.commit();
 
         if (user) {
@@ -609,17 +641,8 @@ export default function AdminGamesPage() {
       const batch = writeBatch(db);
       batch.update(doc(db, 'games', editingGame.id), payload);
 
-      // Dual Game Model: sync date/time/field changes to team subcollections.
-      const isReschedulingAwayFootball = activeSport === 'football' && form.type === 'game' && form.locationType === 'away';
-      const rescheduledTeamPayload = {
-        dateTime: `${form.date}T${form.time}:00`,
-        location: isReschedulingAwayFootball ? form.awayLocation : fieldMap[form.fieldId] ?? '',
-        fieldId: isReschedulingAwayFootball ? '' : form.fieldId,
-        updatedAt: Timestamp.now(),
-      };
-      if (editingGame.homeTeamId) batch.update(doc(db, 'teams', editingGame.homeTeamId, 'games', editingGame.id), rescheduledTeamPayload);
-      if (editingGame.awayTeamId) batch.update(doc(db, 'teams', editingGame.awayTeamId, 'games', editingGame.id), rescheduledTeamPayload);
-      if (editingGame.teamId) batch.update(doc(db, 'teams', editingGame.teamId, 'games', editingGame.id), rescheduledTeamPayload);
+      // Dual Game Model: sync the edit (date/time/field/opponent) to team subcollections.
+      writeMirrorUpdates(batch, editingGame);
 
       const affectedParentIds = new Set<string>();
       pendingShiftsRef.current.forEach(shiftDoc => {
@@ -648,18 +671,20 @@ export default function AdminGamesPage() {
       await batch.commit();
 
       // Fire-and-forget email notifications
-      if (affectedParentIds.size > 0) {
-        fetch('/api/email/schedule-change', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'shiftMoved',
-            userIds: [...affectedParentIds],
-            gameLabel: label,
-            oldDateLabel,
-            newDateLabel,
-          }),
-        }).catch(err => console.error('[schedule-change email]', err));
+      if (affectedParentIds.size > 0 && user) {
+        user.getIdToken().then(idToken =>
+          fetch('/api/email/schedule-change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({
+              type: 'shiftMoved',
+              userIds: [...affectedParentIds],
+              gameLabel: label,
+              oldDateLabel,
+              newDateLabel,
+            }),
+          })
+        ).catch(err => console.error('[schedule-change email]', err));
       }
 
       toast({
@@ -731,12 +756,14 @@ export default function AdminGamesPage() {
         });
       }
 
-      if (affectedParentIds.size > 0) {
-        fetch('/api/email/schedule-change', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'shiftCancelled', userIds: [...affectedParentIds], gameLabel: label, oldDateLabel: dateLabel }),
-        }).catch(err => console.error('[schedule-change email]', err));
+      if (affectedParentIds.size > 0 && user) {
+        user.getIdToken().then(idToken =>
+          fetch('/api/email/schedule-change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({ type: 'shiftCancelled', userIds: [...affectedParentIds], gameLabel: label, oldDateLabel: dateLabel }),
+          })
+        ).catch(err => console.error('[schedule-change email]', err));
       }
 
       toast({ title: 'Game Cancelled', description: shiftsSnap.size > 0 ? `${shiftsSnap.size} shift${shiftsSnap.size !== 1 ? 's' : ''} cancelled.${affectedParentIds.size > 0 ? ` ${affectedParentIds.size} volunteer${affectedParentIds.size !== 1 ? 's' : ''} notified.` : ''}` : undefined });
@@ -762,9 +789,14 @@ export default function AdminGamesPage() {
       batch.delete(doc(db, 'games', game.id));
 
       // Dual Game Model: remove from team subcollections so coaches/parents no longer see the game.
-      if (game.homeTeamId) batch.delete(doc(db, 'teams', game.homeTeamId, 'games', game.id));
-      if (game.awayTeamId) batch.delete(doc(db, 'teams', game.awayTeamId, 'games', game.id));
-      if (game.teamId) batch.delete(doc(db, 'teams', game.teamId, 'games', game.id));
+      // RSVP docs under each mirror must be deleted explicitly — Firestore does
+      // not cascade-delete subcollections, and orphaned RSVPs accumulate forever.
+      const mirrorTeamIds = [game.homeTeamId, game.awayTeamId, game.teamId].filter((t): t is string => !!t);
+      for (const teamId of mirrorTeamIds) {
+        const rsvpsSnap = await getDocs(collection(db, 'teams', teamId, 'games', game.id, 'rsvps'));
+        rsvpsSnap.forEach(rsvpDoc => batch.delete(rsvpDoc.ref));
+        batch.delete(doc(db, 'teams', teamId, 'games', game.id));
+      }
 
       const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       shiftsSnap.forEach(shiftDoc => batch.delete(shiftDoc.ref));
@@ -867,42 +899,96 @@ export default function AdminGamesPage() {
     if (!db || importRows.length === 0) return;
     setIsImporting(true);
     try {
-      const batch = writeBatch(db);
-      for (const row of importRows) {
-        const id = crypto.randomUUID();
-        const isGame = row.type.toLowerCase() === 'game';
-        const isFootballGame = activeSport === 'football' && isGame;
-        const isAwayGame = isFootballGame && row.locationType?.toLowerCase() === 'away';
-        // For away football games, field is a free-text location — no DB match expected
-        const matchedField = row.field ? (fields ?? []).find(f => f.name.toLowerCase() === row.field.toLowerCase()) : undefined;
-        const payload: Record<string, any> = {
-          type: isGame ? 'game' : 'practice', date: row.date, time: row.time,
-          fieldId: isAwayGame ? '' : (matchedField?.id ?? ''),
-          fieldName: isAwayGame ? (row.field ?? '') : (matchedField?.name ?? row.field),
-          notes: row.notes ?? '', status: 'scheduled', createdAt: Timestamp.now(),
-          sport: activeSport ?? undefined,
-        };
-        if (isGame) {
-          if (isFootballGame) {
-            const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
-            payload.teamId = team?.id ?? '';
-            payload.teamName = team?.name ?? row.teamName ?? '';
-            payload.opponentName = row.opponentName ?? '';
-            payload.locationType = (row.locationType ?? 'home').toLowerCase();
+      // Each row generates up to 3 writes (games/ + up to 2 team mirrors), so
+      // chunk at 160 rows to stay under Firestore's 500-write-per-batch limit.
+      const CHUNK = 160;
+      let unmirroredCount = 0;
+      for (let i = 0; i < importRows.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        for (const row of importRows.slice(i, i + CHUNK)) {
+          const id = crypto.randomUUID();
+          const isGame = row.type.toLowerCase() === 'game';
+          const isFootballGame = activeSport === 'football' && isGame;
+          const isAwayGame = isFootballGame && row.locationType?.toLowerCase() === 'away';
+          // For away football games, field is a free-text location — no DB match expected
+          const matchedField = row.field ? (fields ?? []).find(f => f.name.toLowerCase() === row.field.toLowerCase()) : undefined;
+          const payload: Record<string, any> = {
+            type: isGame ? 'game' : 'practice', date: row.date, time: row.time,
+            fieldId: isAwayGame ? '' : (matchedField?.id ?? ''),
+            fieldName: isAwayGame ? (row.field ?? '') : (matchedField?.name ?? row.field),
+            notes: row.notes ?? '', status: 'scheduled', createdAt: Timestamp.now(),
+            sport: activeSport ?? undefined,
+            seasonId: activeSeason?.id ?? '',
+          };
+
+          // Dual Game Model: mirror each row to its team subcollection(s) so
+          // coaches and parents can see imported games — same shapes as create mode.
+          const mirrorBase = {
+            id, seasonId: activeSeason?.id ?? '',
+            dateTime: `${row.date}T${row.time}:00`,
+            location: isAwayGame ? (row.field ?? '') : (matchedField?.name ?? row.field ?? ''),
+            fieldId: isAwayGame ? '' : (matchedField?.id ?? ''),
+            cancelled: false, createdAt: Timestamp.now(),
+          };
+          let mirrored = false;
+
+          if (isGame) {
+            if (isFootballGame) {
+              const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
+              payload.teamId = team?.id ?? '';
+              payload.teamName = team?.name ?? row.teamName ?? '';
+              payload.opponentName = row.opponentName ?? '';
+              payload.locationType = (row.locationType ?? 'home').toLowerCase();
+              if (team) {
+                batch.set(doc(db, 'teams', team.id, 'games', id), {
+                  ...mirrorBase, teamId: team.id, type: 'Game',
+                  opponentName: row.opponentName ?? '',
+                  locationType: (row.locationType ?? 'home').toLowerCase(),
+                });
+                mirrored = true;
+              }
+            } else {
+              const home = (teams ?? []).find(t => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
+              const away = (teams ?? []).find(t => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
+              payload.homeTeamId = home?.id ?? ''; payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
+              payload.awayTeamId = away?.id ?? ''; payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
+              if (home) {
+                batch.set(doc(db, 'teams', home.id, 'games', id), {
+                  ...mirrorBase, teamId: home.id, type: 'Game',
+                  opponentName: away?.name ?? row.awayTeam ?? '',
+                });
+              }
+              if (away) {
+                batch.set(doc(db, 'teams', away.id, 'games', id), {
+                  ...mirrorBase, teamId: away.id, type: 'Game',
+                  opponentName: home?.name ?? row.homeTeam ?? '',
+                });
+              }
+              mirrored = !!home && !!away;
+            }
           } else {
-            const home = (teams ?? []).find(t => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
-            const away = (teams ?? []).find(t => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
-            payload.homeTeamId = home?.id ?? ''; payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
-            payload.awayTeamId = away?.id ?? ''; payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
+            const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
+            payload.teamId = team?.id ?? ''; payload.teamName = team?.name ?? row.teamName ?? '';
+            if (team) {
+              batch.set(doc(db, 'teams', team.id, 'games', id), {
+                ...mirrorBase, teamId: team.id, type: 'Practice',
+              });
+              mirrored = true;
+            }
           }
-        } else {
-          const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
-          payload.teamId = team?.id ?? ''; payload.teamName = team?.name ?? row.teamName ?? '';
+          if (!mirrored) unmirroredCount++;
+
+          batch.set(doc(db, 'games', id), payload);
         }
-        batch.set(doc(db, 'games', id), payload);
+        await batch.commit();
       }
-      await batch.commit();
-      toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}` });
+      toast({
+        title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}`,
+        ...(unmirroredCount > 0 ? {
+          description: `${unmirroredCount} row${unmirroredCount !== 1 ? 's' : ''} had a team name that didn't match an existing team — those events won't appear on coach or parent schedules until the team name is corrected.`,
+          variant: 'destructive' as const,
+        } : {}),
+      });
       setImportOpen(false); setImportRows([]); setImportErrors([]);
     } catch (err: any) {
       toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });
