@@ -9,16 +9,31 @@
 ### 1a. Mailgun webhook signing key (REQUIRED — inbound email stops working without it)
 
 The inbound-email webhook now rejects any request that isn't cryptographically
-signed by Mailgun. You must give the app the signing key:
+signed by Mailgun. The app needs the signing key as an environment variable.
+**The app is hosted on Vercel** (not Firebase App Hosting), so the variable is
+set in the Vercel dashboard.
 
-1. Log in to **Mailgun** → **Sending** → **Webhooks**.
-2. Copy the **HTTP webhook signing key** (this is *not* the same as your API key).
-3. In the **Firebase console** → App Hosting → your backend → **Settings → Environment**,
-   add a variable named `MAILGUN_WEBHOOK_SIGNING_KEY` with that value, then redeploy.
+**Do this BEFORE deploying the new code** — the variable is harmless to the old
+code, and having it in place first means inbound email never has an outage.
 
-Until this is set, emails sent to your @syba.blue inbound addresses will be
-rejected (you'll see "Webhook not configured" in the logs) — by design, so the
-endpoint is never open.
+**Get the key from Mailgun:**
+1. Log in at https://app.mailgun.com
+2. Click your profile icon (top right) → **API Security** (or **Settings → API Keys**).
+3. Copy the **HTTP webhook signing key** — it's a separate entry from the
+   Private API key. (Alternate location: **Sending → Webhooks** shows the same
+   key at the top of the page.)
+
+**Add it in Vercel:**
+1. Log in at https://vercel.com → open the SYBA Portal project.
+2. **Settings → Environment Variables → Add New**.
+3. Key: `MAILGUN_WEBHOOK_SIGNING_KEY` · Value: paste the key · check **Production**.
+4. Save. The next deployment picks it up automatically.
+
+**Verify after the next deploy:** an unsigned POST to
+`https://syba.blue/api/webhook/inbound-email` should return **401**. If it
+returns **503 "Webhook not configured"**, the variable didn't reach the
+deployment — re-check the Vercel setting and redeploy. Then send a real email
+to an @syba.blue address and confirm it appears in Admin → Inquiries.
 
 ### 1b. Stripe checkout branding
 Still assigned to you from the June 9 UX review: upload the league logo and
