@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Printer, X } from 'lucide-react';
 import { WaiverSheet } from '@/components/registration/ShenangoValleyWaiverPrintable';
+import {
+  ChildParentContractSheet,
+  AdultCodeOfEthicsSheet,
+} from '@/components/registration/SvmflParentalAgreementPrintable';
 import { readPrintJob, type PrintJobPayload } from '@/lib/print-job';
 
 /**
@@ -43,10 +47,20 @@ export default function PrintPage() {
       return;
     }
     document.title =
-      payload.kind === 'roster' ? payload.title : 'Shenango Valley League Waivers';
+      payload.kind === 'roster' ? payload.title : 'Shenango Valley League Forms';
+    // One signature image on the Player Agreement per signed player, plus one
+    // on each of the two Parental Agreement pages only when the combined flag
+    // is set — this count must mirror exactly what the sheets render below,
+    // or the auto-print waits on images that never load.
     expectedImagesRef.current =
       payload.kind === 'waivers'
-        ? payload.entries.filter(e => e.player.waiverSignatureUrl).length
+        ? payload.entries.reduce(
+            (n, e) =>
+              n +
+              (e.player.waiverSignatureUrl ? 1 : 0) +
+              (e.player.waiverSignatureUrl && e.parentalAgreementSigned ? 2 : 0),
+            0
+          )
         : 0;
     setJob(payload);
   }, []);
@@ -84,11 +98,11 @@ export default function PrintPage() {
         <div className="flex items-center justify-between gap-3 px-4 py-3 max-w-[8in] mx-auto">
           <div className="min-w-0">
             <p className="font-semibold text-sm truncate">
-              {job.kind === 'roster' ? job.title : 'League Waiver Forms'}
+              {job.kind === 'roster' ? job.title : 'League Forms'}
             </p>
             <p className="text-xs text-muted-foreground">
               {job.kind === 'waivers'
-                ? `${sheetCount} form${sheetCount === 1 ? '' : 's'} — one page per player`
+                ? `${sheetCount} packet${sheetCount === 1 ? '' : 's'} — three pages per player`
                 : `${job.rows.length} player${job.rows.length === 1 ? '' : 's'}`}
             </p>
           </div>
@@ -107,16 +121,23 @@ export default function PrintPage() {
       {/* Sheets — fixed paper width so phone and desktop print identically */}
       <div className="overflow-x-auto py-4 print:overflow-visible print:py-0">
         {job.kind === 'waivers' ? (
-          job.entries.map((entry, i) => (
-            <div
-              key={i}
-              className={`w-[7.5in] mx-auto bg-white text-black p-8 mb-4 shadow-lg print:shadow-none print:p-0 print:mb-0 ${
-                i < job.entries.length - 1 ? 'break-after-page' : ''
-              }`}
-            >
-              <WaiverSheet {...entry} onImageReady={handleImageReady} />
-            </div>
-          ))
+          job.entries.flatMap((entry, i) => {
+            const pages = [
+              <WaiverSheet key="waiver" {...entry} onImageReady={handleImageReady} />,
+              <ChildParentContractSheet key="contract" {...entry} onImageReady={handleImageReady} />,
+              <AdultCodeOfEthicsSheet key="ethics" {...entry} onImageReady={handleImageReady} />,
+            ];
+            return pages.map((sheet, p) => (
+              <div
+                key={`${i}-${p}`}
+                className={`w-[7.5in] mx-auto bg-white text-black p-8 mb-4 shadow-lg print:shadow-none print:p-0 print:mb-0 ${
+                  i < job.entries.length - 1 || p < pages.length - 1 ? 'break-after-page' : ''
+                }`}
+              >
+                {sheet}
+              </div>
+            ));
+          })
         ) : (
           <div className="w-[7.5in] mx-auto bg-white text-black p-8 shadow-lg print:shadow-none print:p-0">
             <div className="text-center space-y-1 pb-4">

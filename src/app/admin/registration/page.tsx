@@ -273,6 +273,9 @@ export default function RegistrationDashboardPage() {
     if (typeof formData.leagueFormSigned === 'boolean') {
       updateData['compliance.leagueFormSigned'] = formData.leagueFormSigned;
     }
+    if (typeof formData.parentalAgreementSigned === 'boolean') {
+      updateData['compliance.parentalAgreementSigned'] = formData.parentalAgreementSigned;
+    }
     const bothVerified =
       (formData.approveAge || player.ageVerified === true) &&
       (formData.approvePhysical || player.compliance?.physicalVerified === true);

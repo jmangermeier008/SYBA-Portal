@@ -80,6 +80,8 @@ interface Player {
   waiverSignatureUrl?: string;
   waiverSignedAt?: string;
   waiverSignedRelationship?: string;
+  waiverSignedName?: string;
+  compliance?: { parentalAgreementSigned?: boolean };
   medicalNotes?: string;
   birthCertificateUrl?: string;
   physicalFormUrl?: string;
@@ -461,10 +463,17 @@ export default function MasterRosterPage() {
     const entries: WaiverPrintEntry[] = (displayEnrollments ?? []).flatMap(e => {
       const p = players?.find(pl => pl.id === e.playerId);
       if (!p) return [];
+      const parent = profileMap.get(e.parentUserId);
       return [{
         player: p,
-        parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
+        parentPhone: e.emergencyContacts?.[0]?.phone ?? parent?.phoneNumber,
         weightEstimate: e.parentWeightEstimate,
+        parentName: parent?.displayName ?? undefined,
+        // Football team name == division name (teams are auto-created per division)
+        teamName:
+          teams?.find(t => t.id === e.teamId)?.name ??
+          divisionsForSeason?.find(d => d.id === e.divisionId)?.name,
+        parentalAgreementSigned: p.compliance?.parentalAgreementSigned === true,
       }];
     });
     if (entries.length === 0) return;
@@ -624,11 +633,17 @@ export default function MasterRosterPage() {
                   player: p,
                   parentPhone: e.emergencyContacts?.[0]?.phone ?? profileMap.get(e.parentUserId)?.phoneNumber,
                   weightEstimate: e.parentWeightEstimate,
+                  parentName: profileMap.get(e.parentUserId)?.displayName ?? undefined,
+                  // Football team name == division name (teams are auto-created per division)
+                  teamName:
+                    teams?.find(t => t.id === e.teamId)?.name ??
+                    divisionsForSeason?.find(d => d.id === e.divisionId)?.name,
+                  parentalAgreementSigned: p.compliance?.parentalAgreementSigned === true,
                 }],
               })}
             >
               <Printer className="mr-2 h-4 w-4" />
-              Print League Waiver
+              Print League Forms
             </DropdownMenuItem>
           )}
           {activeSport === 'football' && (
@@ -692,7 +707,7 @@ export default function MasterRosterPage() {
         <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
             <h1 className="text-xl md:text-2xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-sm text-muted-foreground">Build and print your league roster — team assignments, league waivers, and uniform exports.</p>
+            <p className="text-sm text-muted-foreground">Build and print your league roster — team assignments, league forms, and uniform exports.</p>
           </div>
           {isMobile ? (
             <DropdownMenu>
@@ -711,7 +726,7 @@ export default function MasterRosterPage() {
                 </DropdownMenuItem>
                 {activeSport === 'football' && (
                   <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
-                    <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+                    <Printer className="mr-2 h-4 w-4" /> Print League Forms
                   </DropdownMenuItem>
                 )}
                 {isAdmin && (
@@ -747,7 +762,7 @@ export default function MasterRosterPage() {
                   </DropdownMenuItem>
                   {activeSport === 'football' && (
                     <DropdownMenuItem onClick={handleBulkWaiverPrint} disabled={!displayEnrollments?.length}>
-                      <Printer className="mr-2 h-4 w-4" /> Print League Waivers
+                      <Printer className="mr-2 h-4 w-4" /> Print League Forms
                     </DropdownMenuItem>
                   )}
                   {isAdmin && (

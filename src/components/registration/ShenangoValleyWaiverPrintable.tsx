@@ -13,12 +13,19 @@ export interface WaiverPlayerData {
   waiverSignatureUrl?: string;
   waiverSignedAt?: string;
   waiverSignedRelationship?: string;
+  waiverSignedName?: string;
 }
 
 export interface WaiverPrintEntry {
   player: WaiverPlayerData;
   parentPhone?: string | null;
   weightEstimate?: number;
+  parentName?: string | null;
+  teamName?: string;
+  // Gates the signature on the Child/Parent Contract and Adult Code of Ethics
+  // sheets — players signed before those documents existed in the portal never
+  // consented to them, so their pages print with blank lines to sign by hand.
+  parentalAgreementSigned?: boolean;
 }
 
 function formatBirthDate(dob?: string): string {
@@ -28,7 +35,7 @@ function formatBirthDate(dob?: string): string {
   return `${m}/${d}/${y}`;
 }
 
-function Field({ label, value }: { label: string; value?: string | number | null }) {
+export function Field({ label, value }: { label: string; value?: string | number | null }) {
   const hasValue = value !== undefined && value !== null && value !== '';
   return (
     <div className="flex items-baseline gap-2 text-sm">

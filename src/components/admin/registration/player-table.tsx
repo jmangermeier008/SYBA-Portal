@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { BadgeCheck, CheckCircle2, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
+import { BadgeCheck, CheckCircle2, Circle, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
 import { openPrintTab } from '@/lib/print-job';
 import { openDocumentPacket } from '@/lib/document-packet';
@@ -36,6 +36,7 @@ export interface PlayerWithDocs {
   waiverSignatureUrl?: string;
   waiverSignedAt?: string;
   waiverSignedRelationship?: string;
+  waiverSignedName?: string;
   parentUserId?: string;
   divisionId?: string;
   birthCertificateUrl?: string;
@@ -52,6 +53,7 @@ export interface PlayerWithDocs {
     verificationStatus?: 'pending' | 'approved' | 'rejected';
     rejectionReason?: string;
     leagueFormSigned?: boolean;
+    parentalAgreementSigned?: boolean;
   };
   _refPath?: string;
 }
@@ -77,6 +79,7 @@ export interface AuditFormData {
   approveAge: boolean;
   approvePhysical: boolean;
   leagueFormSigned?: boolean; // undefined = not applicable (baseball) — don't write
+  parentalAgreementSigned?: boolean; // same semantics as leagueFormSigned
 }
 
 interface PlayerTableProps {
@@ -147,6 +150,7 @@ export function PlayerTable({
   const [approveAge, setApproveAge] = useState(false);
   const [approvePhysical, setApprovePhysical] = useState(false);
   const [leagueFormSigned, setLeagueFormSigned] = useState(false);
+  const [parentalAgreementSigned, setParentalAgreementSigned] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
   const [docViewerExpanded, setDocViewerExpanded] = useState(false);
   const [docPrinting, setDocPrinting] = useState(false);
@@ -205,6 +209,9 @@ export function PlayerTable({
         player,
         parentPhone: enrollment?.emergencyContacts?.[0]?.phone,
         weightEstimate: enrollment?.parentWeightEstimate,
+        // Football team name == division name (teams are auto-created per division)
+        teamName: divisionNameMap.get(enrollment?.divisionId ?? player.divisionId ?? ''),
+        parentalAgreementSigned: player.compliance?.parentalAgreementSigned === true,
       }],
     });
 
@@ -239,6 +246,7 @@ export function PlayerTable({
     setApproveAge(false);
     setApprovePhysical(false);
     setLeagueFormSigned(player.compliance?.leagueFormSigned ?? false);
+    setParentalAgreementSigned(player.compliance?.parentalAgreementSigned ?? false);
     setAuditDocTab('birthCert');
     setAuditingPlayer(player);
   };
@@ -264,7 +272,7 @@ export function PlayerTable({
         <DropdownMenuContent align="end">
           {showLeagueForm && (
             <DropdownMenuItem onClick={() => printWaiver(player, enrollment)}>
-              <Printer className="mr-2 h-4 w-4" /> Print League Waiver
+              <Printer className="mr-2 h-4 w-4" /> Print League Forms
             </DropdownMenuItem>
           )}
           {canWaive && (
@@ -312,6 +320,7 @@ export function PlayerTable({
       approveAge,
       approvePhysical,
       leagueFormSigned: showLeagueForm ? leagueFormSigned : undefined,
+      parentalAgreementSigned: showLeagueForm ? parentalAgreementSigned : undefined,
     });
     setLocalProcessing(false);
     if (success) setAuditingPlayer(null);
@@ -327,7 +336,7 @@ export function PlayerTable({
 
   const exportCSV = () => {
     const headers = ['Player Name', 'Division', 'Age', 'DOB', 'Payment Status', 'Birth Cert Status', 'Physical Status'];
-    if (showLeagueForm) headers.push('League Form');
+    if (showLeagueForm) headers.push('Registration Form', 'Parent/Player Agreement');
     const rows = filteredPlayers.map(player => {
       const divName = player.divisionId ? (divisionNameMap.get(player.divisionId) ?? '') : '';
       const age = getLeagueAge(player.dateOfBirth) ?? '';
@@ -340,7 +349,10 @@ export function PlayerTable({
         divName, String(age), player.dateOfBirth ?? '',
         payStatus, birthCertStatus, physicalStatus,
       ];
-      if (showLeagueForm) row.push(player.compliance?.leagueFormSigned ? 'Signed' : 'Not Signed');
+      if (showLeagueForm) {
+        row.push(player.compliance?.leagueFormSigned ? 'Signed' : 'Not Signed');
+        row.push(player.compliance?.parentalAgreementSigned ? 'Signed' : 'Not Signed');
+      }
       return row;
     });
     const csv = [headers, ...rows]
@@ -447,8 +459,13 @@ export function PlayerTable({
                         }
                         {showLeagueForm && (
                           <>
-                            <span className="text-xs text-muted-foreground ml-2">League Form:</span>
+                            <span className="text-xs text-muted-foreground ml-2">Registration Form:</span>
                             {player.compliance?.leagueFormSigned
+                              ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Signed</Badge>
+                              : <Badge variant="outline">Not Signed</Badge>
+                            }
+                            <span className="text-xs text-muted-foreground ml-2">Parent/Player Agmt:</span>
+                            {player.compliance?.parentalAgreementSigned
                               ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Signed</Badge>
                               : <Badge variant="outline">Not Signed</Badge>
                             }
@@ -487,7 +504,7 @@ export function PlayerTable({
                     <TableHead>Payment</TableHead>
                     <TableHead>Birth Cert</TableHead>
                     <TableHead>Physical</TableHead>
-                    {showLeagueForm && <TableHead>League Form</TableHead>}
+                    {showLeagueForm && <TableHead>Forms</TableHead>}
                     {(isSiteAdmin || showLeagueForm || !!onWaiveFee) && <TableHead className="pr-6 text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -546,14 +563,31 @@ export function PlayerTable({
                           )}
                         </TableCell>
 
-                        {/* League Form — football only */}
+                        {/* Forms — football only: registration form + parent/player agreement */}
                         {showLeagueForm && (
                           <TableCell>
-                            {player.compliance?.leagueFormSigned ? (
-                              <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Signed</Badge>
-                            ) : (
-                              <Badge variant="outline">Not Signed</Badge>
-                            )}
+                            <div className="space-y-1 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 text-xs">
+                                {player.compliance?.leagueFormSigned ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                                ) : (
+                                  <Circle className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
+                                )}
+                                <span className={player.compliance?.leagueFormSigned ? '' : 'text-muted-foreground'}>
+                                  Registration Form
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-xs">
+                                {player.compliance?.parentalAgreementSigned ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                                ) : (
+                                  <Circle className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
+                                )}
+                                <span className={player.compliance?.parentalAgreementSigned ? '' : 'text-muted-foreground'}>
+                                  Parent/Player Agmt
+                                </span>
+                              </div>
+                            </div>
                           </TableCell>
                         )}
 
@@ -747,10 +781,10 @@ export function PlayerTable({
                     )}
                   </div>
 
-                  {/* League Agreement Form — football only; a reversible toggle, unlike the approve-once doc checkboxes */}
+                  {/* League Forms — football only; reversible toggles, unlike the approve-once doc checkboxes */}
                   {showLeagueForm && (
                     <div className="space-y-3 p-3 rounded-xl bg-secondary/10 border">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">League Agreement Form</p>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">League Forms</p>
                       <label className="flex items-center gap-3 cursor-pointer">
                         <input
                           type="checkbox"
@@ -758,7 +792,18 @@ export function PlayerTable({
                           onChange={e => setLeagueFormSigned(e.target.checked)}
                           className="h-4 w-4 accent-green-600"
                         />
-                        <span className="text-sm font-medium">Signed league waiver received</span>
+                        <span className="text-sm font-medium">Signed registration form received</span>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={parentalAgreementSigned}
+                          onChange={e => setParentalAgreementSigned(e.target.checked)}
+                          className="h-4 w-4 accent-green-600"
+                        />
+                        <span className="text-sm font-medium">
+                          Signed parent/player agreement (Child/Parent Contract + Adult Code of Ethics) received
+                        </span>
                       </label>
                     </div>
                   )}
