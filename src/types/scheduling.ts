@@ -380,6 +380,7 @@ export interface Player {
   waiverSignatureUrl?: string; // Digital signature image drawn during enrollment
   waiverSignedAt?: string;     // ISO timestamp of the digital signature
   waiverSignedRelationship?: string; // Signer's relationship to the player (e.g. "Mother")
+  waiverSignedName?: string;   // Signer's printed name, captured at signing time
   clearanceUrl?: string;
   emergencyContacts?: EmergencyContact[];
   medicalNotes?: string;
@@ -396,6 +397,7 @@ export interface Player {
     verificationStatus?: 'pending' | 'approved' | 'rejected';
     rejectionReason?: string;    // Set when admin rejects; cleared on re-upload
     leagueFormSigned?: boolean;  // Football: signed Shenango Valley league agreement received
+    parentalAgreementSigned?: boolean; // Football: signed SVMFL Child/Parent Contract + Adult Code of Ethics received
   };
 }
 

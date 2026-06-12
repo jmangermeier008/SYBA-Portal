@@ -19,6 +19,8 @@ import type { Player, Season, Division, EmergencyContact, Enrollment } from '@/t
 import { getLeagueAge, getSuggestedDivisions, calculateCartPricing } from '@/lib/registration-logic';
 import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { SignaturePadField } from '@/components/registration/SignaturePadField';
+import { ParentalAgreementViewer } from '@/components/registration/ParentalAgreementViewer';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +51,7 @@ interface StepperState {
   grade: string;
   waiverSignatureDataUrl: string; // PNG data URL drawn in step 2; '' = not signed
   waiverRelationship: string;     // Signer's relationship to the player (required when signed)
+  parentalAgreementAccepted: boolean; // Child/Parent Contract + Adult Code of Ethics (required when signed)
   // Document uploads (step 2)
   birthCertUrl: string;
   physicalUrl: string;
@@ -81,6 +84,7 @@ interface CartItem {
   grade?: string;
   waiverSignatureDataUrl?: string;
   waiverRelationship?: string;
+  parentalAgreementAccepted?: boolean;
   birthCertUrl?: string;
   physicalUrl?: string;
   // For new players: the ID used for storage upload paths (same ID used when creating the player doc)
@@ -92,7 +96,7 @@ interface CartItem {
 // ---------------------------------------------------------------------------
 
 export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string }) {
-  const { user, loading: loadingUser } = useUser();
+  const { user, profile, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const db = useFirestore();
   const router = useRouter();
@@ -132,6 +136,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     grade: '',
     waiverSignatureDataUrl: '',
     waiverRelationship: '',
+    parentalAgreementAccepted: false,
     birthCertUrl: '',
     physicalUrl: '',
     preGeneratedPlayerId: crypto.randomUUID(),
@@ -365,6 +370,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       if (activeSport === 'football' && state.waiverSignatureDataUrl && !state.waiverRelationship) {
         return 'Enter your relationship to the player to go with your signature.';
       }
+      if (activeSport === 'football' && state.waiverSignatureDataUrl && !state.parentalAgreementAccepted) {
+        return 'Check the box confirming you agree to the Child/Parent Contract and Adult Code of Ethics.';
+      }
       if (!state.birthCertUrl) return `Upload ${playerFirstName}'s birth certificate in the Documents section.`;
     }
     return null;
@@ -507,6 +515,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
     grade: state.grade || undefined,
     waiverSignatureDataUrl: state.waiverSignatureDataUrl || undefined,
     waiverRelationship: state.waiverRelationship || undefined,
+    parentalAgreementAccepted: state.parentalAgreementAccepted || undefined,
     birthCertUrl: state.birthCertUrl || undefined,
     physicalUrl: state.physicalUrl || undefined,
     preGeneratedPlayerId: state.isNewPlayer ? state.preGeneratedPlayerId : undefined,
@@ -539,6 +548,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       grade: '',
       waiverSignatureDataUrl: '',
       waiverRelationship: '',
+      parentalAgreementAccepted: false,
       birthCertUrl: '',
       physicalUrl: '',
       preGeneratedPlayerId: crypto.randomUUID(),
@@ -647,13 +657,19 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   waiverSignatureUrl: signatureUrl,
                   waiverSignedAt: now,
                   waiverSignedRelationship: item.waiverRelationship ?? '',
+                  waiverSignedName: profile?.displayName ?? '',
                 }
               : {}),
             compliance: {
               birthCertificateVerified: false,
               physicalVerified: false,
               verificationStatus: 'pending',
-              ...(activeSport === 'football' ? { leagueFormSigned: !!signatureUrl } : {}),
+              ...(activeSport === 'football'
+                ? {
+                    leagueFormSigned: !!signatureUrl,
+                    parentalAgreementSigned: !!signatureUrl && !!item.parentalAgreementAccepted,
+                  }
+                : {}),
             },
           });
         } else if (item.playerId && (item.birthCertUrl || item.physicalUrl || activeSport === 'football')) {
@@ -671,14 +687,18 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   grade: item.grade ?? '',
                 }
               : {}),
-            // Never write leagueFormSigned: false here — an unsigned
-            // re-enrollment must not un-sign a previously signed player.
+            // Never write leagueFormSigned/parentalAgreementSigned: false here —
+            // an unsigned re-enrollment must not un-sign a previously signed player.
             ...(signatureUrl
               ? {
                   waiverSignatureUrl: signatureUrl,
                   waiverSignedAt: now,
                   waiverSignedRelationship: item.waiverRelationship ?? '',
+                  waiverSignedName: profile?.displayName ?? '',
                   'compliance.leagueFormSigned': true,
+                  ...(item.parentalAgreementAccepted
+                    ? { 'compliance.parentalAgreementSigned': true }
+                    : {}),
                 }
               : {}),
             ...(item.birthCertUrl || item.physicalUrl
@@ -1406,8 +1426,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       Parent/Guardian Signature <span className="text-muted-foreground font-normal">(optional)</span>
                     </Label>
                     <p className="text-xs text-muted-foreground">
-                      Sign with your finger or mouse to complete the league agreement now,
-                      or skip and sign the printed form later.
+                      Sign with your finger or mouse to complete the league paperwork now —
+                      your signature is placed on the Football Player Agreement and, with the
+                      checkbox below, the Child/Parent Contract and Adult Code of Ethics. Or
+                      skip and sign the printed forms later.
                     </p>
                     <div className="space-y-2">
                       <Label htmlFor="waiverRelationship">Relationship to player</Label>
@@ -1423,6 +1445,23 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       value={state.waiverSignatureDataUrl}
                       onChange={(dataUrl) => setState(prev => ({ ...prev, waiverSignatureDataUrl: dataUrl }))}
                     />
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-start gap-2">
+                        <Checkbox
+                          id="parentalAgreementAccepted"
+                          className="mt-0.5"
+                          checked={state.parentalAgreementAccepted}
+                          onCheckedChange={(checked) =>
+                            setState(prev => ({ ...prev, parentalAgreementAccepted: checked === true }))
+                          }
+                        />
+                        <Label htmlFor="parentalAgreementAccepted" className="text-xs font-normal leading-snug">
+                          I have read and agree to the Child/Parent Contract and Adult Code of
+                          Ethics. <span className="text-muted-foreground">(required if signing above)</span>
+                        </Label>
+                      </div>
+                      <ParentalAgreementViewer />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1665,6 +1704,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) ||
                 (state.step === 2 && activeSport === 'football' &&
                   !!state.waiverSignatureDataUrl && !state.waiverRelationship) ||
+                (state.step === 2 && activeSport === 'football' &&
+                  !!state.waiverSignatureDataUrl && !state.parentalAgreementAccepted) ||
                 (state.step === 2 && !state.birthCertUrl)
               }
             >

@@ -70,11 +70,13 @@ export default function ParentDashboard() {
     waiverSignatureUrl?: string;
     waiverSignedAt?: string;
     waiverSignedRelationship?: string;
+    waiverSignedName?: string;
     birthCertificateUrl?: string;
     physicalFormUrl?: string;
     compliance?: {
       verificationStatus?: 'pending' | 'approved' | 'rejected';
       rejectionReason?: string;
+      parentalAgreementSigned?: boolean;
     };
   }>(playersQuery);
 
@@ -489,12 +491,14 @@ export default function ParentDashboard() {
             </div>
           )}
 
-          {/* League paperwork — printable Shenango Valley waiver for football players */}
+          {/* League paperwork — printable Shenango Valley forms for football players */}
           {activeSport === 'football' && footballEnrollmentByPlayer.size > 0 && (
             <div className="rounded-xl border px-4 py-3 mb-4">
               <p className="text-sm font-semibold">League Paperwork</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Print the Shenango Valley player agreement form, sign it, and hand it to your coach.
+                Print the Shenango Valley player agreement, Child/Parent Contract, and Adult
+                Code of Ethics. Anything not signed digitally during registration must be
+                signed by hand and given to your coach.
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 {players?.filter(p => footballEnrollmentByPlayer.has(p.id)).map(p => (
@@ -517,15 +521,18 @@ export default function ParentDashboard() {
                           waiverSignatureUrl: p.waiverSignatureUrl,
                           waiverSignedAt: p.waiverSignedAt,
                           waiverSignedRelationship: p.waiverSignedRelationship,
+                          waiverSignedName: p.waiverSignedName,
                         },
                         weightEstimate: footballEnrollmentByPlayer.get(p.id)?.parentWeightEstimate,
                         parentPhone: footballEnrollmentByPlayer.get(p.id)?.emergencyContacts?.[0]?.phone
                           ?? profile?.phoneNumber,
+                        parentName: profile?.displayName ?? undefined,
+                        parentalAgreementSigned: p.compliance?.parentalAgreementSigned === true,
                       }],
                     })}
                   >
                     <Printer className="h-3.5 w-3.5 mr-1.5" />
-                    Print League Waiver — {p.firstName}
+                    Print League Forms — {p.firstName}
                   </Button>
                 ))}
               </div>
