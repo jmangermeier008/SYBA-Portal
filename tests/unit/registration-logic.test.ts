@@ -96,21 +96,33 @@ describe('getSuggestedDivisions', () => {
   });
 });
 
-describe('calculateCartPricing (sibling discount)', () => {
-  it('charges $125 for the first player in a family', () => {
-    expect(calculateCartPricing(0, 1)).toEqual([12500]);
+describe('calculateCartPricing (division fee + sibling discount)', () => {
+  it('charges the division fee for the first player in a family', () => {
+    expect(calculateCartPricing(0, [12500], 5000)).toEqual([12500]);
   });
 
-  it('charges $50 for each sibling after the first in one cart', () => {
-    expect(calculateCartPricing(0, 3)).toEqual([12500, 5000, 5000]);
+  it('charges the sibling fee for each player after the first, across mixed division fees', () => {
+    expect(calculateCartPricing(0, [12500, 7500, 10000], 5000)).toEqual([12500, 5000, 5000]);
   });
 
-  it('charges $50 when the family already paid for a player this season', () => {
-    expect(calculateCartPricing(1, 1)).toEqual([5000]);
-    expect(calculateCartPricing(2, 2)).toEqual([5000, 5000]);
+  it('never charges a sibling more than their own division fee', () => {
+    expect(calculateCartPricing(0, [12500, 3000], 5000)).toEqual([12500, 3000]);
+  });
+
+  it('applies sibling pricing when the family already paid this season', () => {
+    expect(calculateCartPricing(1, [12500], 5000)).toEqual([5000]);
+    expect(calculateCartPricing(2, [7500, 4000], 5000)).toEqual([5000, 4000]);
+  });
+
+  it('prices zero-fee divisions at zero', () => {
+    expect(calculateCartPricing(0, [0, 0], 5000)).toEqual([0, 0]);
+  });
+
+  it('defaults the sibling fee to $50 when the season has no value', () => {
+    expect(calculateCartPricing(0, [12500, 12500])).toEqual([12500, 5000]);
   });
 
   it('returns an empty array for an empty cart', () => {
-    expect(calculateCartPricing(0, 0)).toEqual([]);
+    expect(calculateCartPricing(0, [], 5000)).toEqual([]);
   });
 });

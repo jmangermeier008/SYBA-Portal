@@ -413,7 +413,7 @@ export default function GameDetailPage({
                   Concession Coverage
                 </CardTitle>
                 <Link
-                  href="/admin/concessions"
+                  href="/admin/volunteers"
                   className="text-xs text-primary hover:underline"
                 >
                   Manage →

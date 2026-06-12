@@ -26,7 +26,7 @@ import {
   X,
   BarChart3,
   MapPin,
-  ShoppingCart,
+  HeartHandshake,
   Handshake,
   Bell,
   BookOpen,
@@ -87,7 +87,7 @@ const adminOperationsItems = [
   { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
   { label: 'Fields', icon: MapPin, href: '/admin/fields' },
-  { label: 'Concessions', icon: ShoppingCart, href: '/admin/concessions' },
+  { label: 'Volunteer Management', icon: HeartHandshake, href: '/admin/volunteers' },
   { label: 'Announcements', icon: Bell, href: '/admin/announcements' },
   { label: 'Board Meetings', icon: BookOpen, href: '/admin/board-meetings' },
   { label: 'Sponsorships', icon: Handshake, href: '/admin/sponsorships' },
@@ -107,7 +107,7 @@ function getAdminSectionForPath(p: string): string | null {
   if (['/admin/seasons', '/admin/divisions', '/admin/teams'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Setup';
   if (['/admin/registration', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Registration';
   if (['/admin/roster', '/admin/equipment'].some(r => p === r || p.startsWith(r + '/'))) return 'Equipment & Rosters';
-  if (['/admin/calendar', '/admin/games', '/admin/practice-slots', '/admin/fields', '/admin/concessions', '/admin/announcements', '/admin/board-meetings', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Operations';
+  if (['/admin/calendar', '/admin/games', '/admin/practice-slots', '/admin/fields', '/admin/volunteers', '/admin/announcements', '/admin/board-meetings', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Operations';
   if (['/admin/import', '/admin/roles', '/admin/settings', '/admin/developer'].some(r => p === r || p.startsWith(r + '/'))) return 'System Maintenance';
   return null;
 }
@@ -130,7 +130,7 @@ const parentItems = [
   { label: 'My Teams', icon: Users, href: '/parent/teams' },
   { label: 'Schedules', icon: Calendar, href: '/parent/schedules' },
   { label: 'Announcements', icon: Bell, href: '/parent/announcements' },
-  { label: 'Concessions', icon: ShoppingCart, href: '/parent/concessions' },
+  { label: 'Volunteer Signups', icon: HeartHandshake, href: '/parent/volunteers' },
   { label: 'Notifications', icon: Inbox, href: '/parent/notifications' },
   { label: 'Contact Us', icon: MessageSquare, href: '/parent/contact' },
   { label: 'Settings', icon: Settings, href: '/parent/settings' },

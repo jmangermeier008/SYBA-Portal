@@ -623,9 +623,11 @@ export function PlayerTable({
       {/* Audit Dialog */}
       <Dialog open={!!auditingPlayer} onOpenChange={open => !open && setAuditingPlayer(null)}>
         <DialogContent className="w-[95vw] sm:max-w-4xl rounded-2xl p-0 overflow-hidden">
-          <div className="flex flex-col sm:flex-row sm:h-[82vh]">
+          {/* Bounded on mobile too — without a height cap the dialog overflows the
+              viewport and overflow-hidden clips the Save footer out of reach. */}
+          <div className="flex flex-col sm:flex-row h-[92dvh] sm:h-[82vh]">
             {/* Left: document viewer */}
-            <div className={`flex-1 bg-secondary/10 sm:border-r flex flex-col min-w-0 ${isMobile ? (docViewerExpanded ? 'h-[70vh]' : 'h-[25vh]') : ''} sm:min-h-0`}>
+            <div className={`bg-secondary/10 sm:border-r flex flex-col min-w-0 sm:flex-1 sm:min-h-0 ${isMobile ? (docViewerExpanded ? 'h-[55dvh] shrink-0' : 'h-[25dvh] shrink-0') : 'flex-1'}`}>
               <div className="flex border-b bg-white shrink-0 items-center">
                 <button
                   className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${auditDocTab === 'birthCert' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}
@@ -663,9 +665,10 @@ export function PlayerTable({
               </div>
             </div>
 
-            {/* Right: audit form */}
-            <div className="w-full sm:w-80 flex flex-col shrink-0 border-t sm:border-t-0">
-              <DialogHeader className="p-5 border-b bg-primary/5">
+            {/* Right: audit form — flex-1 min-h-0 on mobile so the ScrollArea is the
+                only scrolling region and the footer stays on screen */}
+            <div className="w-full sm:w-80 flex flex-col flex-1 min-h-0 sm:flex-initial sm:shrink-0 border-t sm:border-t-0">
+              <DialogHeader className="p-5 border-b bg-primary/5 shrink-0">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <DialogTitle className="font-headline">
@@ -724,7 +727,7 @@ export function PlayerTable({
                 </div>
               </DialogHeader>
 
-              <ScrollArea className="flex-1 p-5">
+              <ScrollArea className="flex-1 min-h-0 p-5">
                 <div className="space-y-4">
                   {/* Birth Certificate */}
                   <div className="space-y-3 p-3 rounded-xl bg-secondary/10 border">
@@ -832,7 +835,7 @@ export function PlayerTable({
                 </div>
               </ScrollArea>
 
-              <DialogFooter className="sticky bottom-0 bg-background border-t p-4 z-20">
+              <DialogFooter className="sticky bottom-0 shrink-0 bg-background border-t p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] z-50">
                 <Button
                   className="w-full rounded-xl bg-green-600 hover:bg-green-700"
                   onClick={handleAuditSubmit}

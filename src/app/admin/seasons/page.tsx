@@ -27,6 +27,7 @@ interface Season {
   status?: string;
   volunteerSlotsRequired?: number;
   ageCutoffDate?: string;
+  siblingFee?: number; // cents — flat fee per child after the first this season
   sport?: string;
   hasDivisions?: boolean;
 }
@@ -47,6 +48,7 @@ export default function SeasonsAdminPage() {
     registrationClose: '',
     volunteerSlotsRequired: 1,
     ageCutoffDate: '',
+    siblingFee: '50', // dollars in the input; stored in cents
   });
   const [isUpdating, setIsUpdating] = useState(false);
   const [formData, setFormData] = useState({
@@ -55,6 +57,7 @@ export default function SeasonsAdminPage() {
     registrationClose: '',
     volunteerSlotsRequired: 1,
     ageCutoffDate: '',
+    siblingFee: '50', // dollars in the input; stored in cents
   });
 
   const seasonsQuery = useMemoFirebase(() => {
@@ -83,6 +86,7 @@ export default function SeasonsAdminPage() {
       id: seasonId,
       ...formData,
       volunteerSlotsRequired: Number(formData.volunteerSlotsRequired),
+      siblingFee: formData.siblingFee === '' ? 5000 : Math.round(Number(formData.siblingFee) * 100),
       sport: activeSport,
       hasDivisions: true,
     };
@@ -120,7 +124,7 @@ export default function SeasonsAdminPage() {
 
       toast({ title: "Season Created", description: `${formData.name} is now active.` });
       setOpen(false);
-      setFormData({ name: '', registrationOpen: '', registrationClose: '', volunteerSlotsRequired: 1, ageCutoffDate: '' });
+      setFormData({ name: '', registrationOpen: '', registrationClose: '', volunteerSlotsRequired: 1, ageCutoffDate: '', siblingFee: '50' });
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -208,6 +212,7 @@ export default function SeasonsAdminPage() {
         registrationOpen: editFormData.registrationOpen,
         registrationClose: editFormData.registrationClose,
         volunteerSlotsRequired: Number(editFormData.volunteerSlotsRequired),
+        siblingFee: editFormData.siblingFee === '' ? 5000 : Math.round(Number(editFormData.siblingFee) * 100),
         ...(editFormData.ageCutoffDate ? { ageCutoffDate: editFormData.ageCutoffDate } : {}),
       });
       toast({ title: "Season Updated", description: `${editingSeason.name} registration dates saved.` });
@@ -323,6 +328,18 @@ export default function SeasonsAdminPage() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="siblingFee">Sibling Registration Fee ($)</Label>
+                    <Input
+                      id="siblingFee"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={formData.siblingFee}
+                      onChange={(e) => setFormData({...formData, siblingFee: e.target.value})}
+                    />
+                    <p className="text-xs text-muted-foreground">First child pays the division fee. Each additional child this season pays this flat amount (never more than their division fee).</p>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="ageCutoffDate">Age Cutoff Date</Label>
                     <Input
                       id="ageCutoffDate"
@@ -402,6 +419,7 @@ export default function SeasonsAdminPage() {
                             registrationClose: season.registrationClose,
                             volunteerSlotsRequired: season.volunteerSlotsRequired ?? 1,
                             ageCutoffDate: season.ageCutoffDate ?? '',
+                            siblingFee: season.siblingFee != null ? String(season.siblingFee / 100) : '50',
                           });
                           setEditingSeason(season);
                         }}
@@ -428,6 +446,9 @@ export default function SeasonsAdminPage() {
                       Age Cutoff: {season.ageCutoffDate}
                     </div>
                   )}
+                  <div className="text-xs text-muted-foreground">
+                    Sibling fee: ${((season.siblingFee ?? 5000) / 100).toFixed(2)}
+                  </div>
                 </CardContent>
               </Card>
             ))
@@ -476,6 +497,18 @@ export default function SeasonsAdminPage() {
                   value={editFormData.volunteerSlotsRequired}
                   onChange={(e) => setEditFormData({ ...editFormData, volunteerSlotsRequired: Number(e.target.value) })}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editSiblingFee">Sibling Registration Fee ($)</Label>
+                <Input
+                  id="editSiblingFee"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={editFormData.siblingFee}
+                  onChange={(e) => setEditFormData({ ...editFormData, siblingFee: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">First child pays the division fee. Each additional child this season pays this flat amount (never more than their division fee).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="editAgeCutoffDate">Age Cutoff Date</Label>
