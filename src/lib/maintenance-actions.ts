@@ -130,12 +130,16 @@ export async function nukeTestSeason(
     db.collection('userProfiles').doc(TEST_PARENT_UID).collection('players').doc(pid)
   );
 
+  // Keep division capacity counters honest for enrollments that counted.
+  const decrements = divisionDecrementsFor(enrollmentSnap.docs);
+
   // Delete enrollments and build fake snapshot array for player refs so batchDelete can handle them
   const [enrollmentsDeleted, gamesDeleted, practiceSlotsDeleted] = await Promise.all([
     batchDelete(enrollmentSnap.docs),
     batchDelete(gamesSnap.docs),
     batchDelete(slotsSnap.docs),
   ]);
+  await applyDivisionDecrements(decrements);
 
   // Player deletion runs after enrollments (depends on playerIds from enrollment scan)
   let playersDeleted = 0;
@@ -161,7 +165,10 @@ export async function forceDeleteSeasonEnrollments(
     .where('seasonId', '==', seasonId)
     .get();
 
+  // Keep division capacity counters honest for enrollments that counted.
+  const decrements = divisionDecrementsFor(snap.docs);
   const enrollmentsDeleted = await batchDelete(snap.docs);
+  await applyDivisionDecrements(decrements);
   return { enrollmentsDeleted };
 }
 
@@ -484,6 +491,45 @@ export async function deleteEnrollmentRecord(
   const decrements = divisionDecrementsFor([snap as QueryDocumentSnapshot]);
   await ref.delete();
   await applyDivisionDecrements(decrements);
+}
+
+/**
+ * Rebuilds every division's registeredCount for a season from the actual
+ * enrollment data (paid + fee_waived occupy a spot — same predicate as
+ * divisionDecrementsFor). Fixes counter drift from deletions or manual edits.
+ */
+export async function recountDivisionRegistrations(
+  seasonId: string,
+  idToken: string
+): Promise<{ divisionsUpdated: number; totalCounted: number }> {
+  await verifyAdminCaller(idToken);
+  const db = getAdminFirestore();
+
+  const [enrollSnap, divisionsSnap] = await Promise.all([
+    db.collectionGroup('enrollments').where('seasonId', '==', seasonId).get(),
+    db.collection('seasons').doc(seasonId).collection('divisions').get(),
+  ]);
+  if (divisionsSnap.empty) throw new Error('No divisions found for this season.');
+
+  const countsByDivision = new Map<string, number>();
+  for (const d of enrollSnap.docs) {
+    const e = d.data();
+    const status = e.paymentStatus ?? e.payment_status;
+    if ((status === 'paid' || status === 'fee_waived') && e.divisionId) {
+      countsByDivision.set(e.divisionId, (countsByDivision.get(e.divisionId) ?? 0) + 1);
+    }
+  }
+
+  const batch = db.batch();
+  let totalCounted = 0;
+  for (const divDoc of divisionsSnap.docs) {
+    const count = countsByDivision.get(divDoc.id) ?? 0;
+    batch.set(divDoc.ref, { registeredCount: count }, { merge: true });
+    totalCounted += count;
+  }
+  await batch.commit();
+
+  return { divisionsUpdated: divisionsSnap.size, totalCounted };
 }
 
 export async function clearUserNotifications(

@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, getDocs, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -299,9 +299,29 @@ export default function RegistrationDashboardPage() {
     if (!db) return false;
     const refPath = (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`;
     const playerRef = doc(db, refPath);
+    // The player's enrollments live in the same parent's subcollection —
+    // delete them too (no orphans) and release any division spots they held.
+    const parentUid = refPath.split('/')[1];
     try {
-      await deleteDoc(playerRef);
-      toast({ title: 'Player Deleted', description: `${player.firstName} ${player.lastName} has been removed.` });
+      const batch = writeBatch(db);
+      batch.delete(playerRef);
+      const enrollSnap = await getDocs(
+        query(collection(db, 'userProfiles', parentUid, 'enrollments'), where('playerId', '==', player.id))
+      );
+      for (const enrollDoc of enrollSnap.docs) {
+        const e = enrollDoc.data() as any;
+        batch.delete(enrollDoc.ref);
+        const status = e.paymentStatus ?? e.payment_status;
+        if ((status === 'paid' || status === 'fee_waived') && e.seasonId && e.divisionId) {
+          batch.set(
+            doc(db, 'seasons', e.seasonId, 'divisions', e.divisionId),
+            { registeredCount: increment(-1) },
+            { merge: true },
+          );
+        }
+      }
+      await batch.commit();
+      toast({ title: 'Player Deleted', description: `${player.firstName} ${player.lastName} and their registrations have been removed.` });
       return true;
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Delete Failed', description: error.message });
@@ -369,6 +389,20 @@ export default function RegistrationDashboardPage() {
         waiver_reason: feeWaiverDialog.reason.trim(),
         updatedAt: new Date().toISOString(),
       });
+
+      // A waived registration occupies a roster spot just like a paid one —
+      // count it toward division capacity (waiving is only offered on unpaid
+      // rows, so this can't double-count).
+      if (enrollment.seasonId && enrollment.divisionId) {
+        try {
+          await updateDoc(
+            doc(db, 'seasons', enrollment.seasonId, 'divisions', enrollment.divisionId),
+            { registeredCount: increment(1) },
+          );
+        } catch {
+          // Division may have been deleted — the recount tool reconciles any drift
+        }
+      }
 
       // Look up parent email from userProfiles
       let parentEmail = '';

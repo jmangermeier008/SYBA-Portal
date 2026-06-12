@@ -346,6 +346,18 @@ export default function MasterRosterPage() {
     try {
       const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
       await deleteDoc(enrollmentRef);
+      // Paid/fee-waived enrollments counted toward division capacity — release the spot.
+      const status = getPaymentStatus(enrollment);
+      if ((status === 'paid' || status === 'fee_waived') && enrollment.seasonId && enrollment.divisionId) {
+        try {
+          await updateDoc(
+            doc(db, 'seasons', enrollment.seasonId, 'divisions', enrollment.divisionId),
+            { registeredCount: increment(-1) },
+          );
+        } catch {
+          // Division may have been deleted — the recount tool reconciles any drift
+        }
+      }
       if (enrollment.teamId && enrollment.playerId) {
         try {
           const teamRef = doc(db, 'teams', enrollment.teamId);
