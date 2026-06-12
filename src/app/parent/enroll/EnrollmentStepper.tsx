@@ -367,10 +367,13 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       if (activeSport === 'football' && (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) {
         return `Enter ${playerFirstName}'s address, school, and grade for the league form.`;
       }
-      if (activeSport === 'football' && state.waiverSignatureDataUrl && !state.waiverRelationship) {
+      if (activeSport === 'football' && !state.waiverSignatureDataUrl) {
+        return 'Sign the league paperwork with your finger or mouse.';
+      }
+      if (activeSport === 'football' && !state.waiverRelationship) {
         return 'Enter your relationship to the player to go with your signature.';
       }
-      if (activeSport === 'football' && state.waiverSignatureDataUrl && !state.parentalAgreementAccepted) {
+      if (activeSport === 'football' && !state.parentalAgreementAccepted) {
         return 'Check the box confirming you agree to the Parent/Player Agreement.';
       }
       if (!state.birthCertUrl) return `Upload ${playerFirstName}'s birth certificate in the Documents section.`;
@@ -1423,16 +1426,16 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   </div>
                   <div className="space-y-2 pt-2">
                     <Label>
-                      Parent/Guardian Signature <span className="text-muted-foreground font-normal">(optional)</span>
+                      Parent/Guardian Signature <span className="text-destructive">*</span>
                     </Label>
                     <p className="text-xs text-muted-foreground">
-                      Sign with your finger or mouse to complete the league paperwork now —
-                      your signature is placed on the league Registration Form and, with the
-                      checkbox below, the Parent/Player Agreement. Or skip and sign the
-                      printed forms later.
+                      Sign with your finger or mouse — your signature is placed on the league
+                      Registration Form and the Parent/Player Agreement.
                     </p>
                     <div className="space-y-2">
-                      <Label htmlFor="waiverRelationship">Relationship to player</Label>
+                      <Label htmlFor="waiverRelationship">
+                        Relationship to player <span className="text-destructive">*</span>
+                      </Label>
                       <Input
                         id="waiverRelationship"
                         className="rounded-xl"
@@ -1458,7 +1461,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                         <Label htmlFor="parentalAgreementAccepted" className="text-xs font-normal leading-snug">
                           I have read and agree to the Parent/Player Agreement — the Child/Parent
                           Contract and Adult Code of Ethics.{' '}
-                          <span className="text-muted-foreground">(required if signing above)</span>
+                          <span className="text-destructive">*</span>
                         </Label>
                       </div>
                       <ParentalAgreementViewer />
@@ -1704,9 +1707,8 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                 (state.step === 2 && activeSport === 'football' &&
                   (!state.streetAddress || !state.city || !state.schoolEnrolled || !state.grade)) ||
                 (state.step === 2 && activeSport === 'football' &&
-                  !!state.waiverSignatureDataUrl && !state.waiverRelationship) ||
-                (state.step === 2 && activeSport === 'football' &&
-                  !!state.waiverSignatureDataUrl && !state.parentalAgreementAccepted) ||
+                  (!state.waiverSignatureDataUrl || !state.waiverRelationship)) ||
+                (state.step === 2 && activeSport === 'football' && !state.parentalAgreementAccepted) ||
                 (state.step === 2 && !state.birthCertUrl)
               }
             >
