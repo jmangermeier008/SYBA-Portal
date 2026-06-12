@@ -371,7 +371,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         return 'Enter your relationship to the player to go with your signature.';
       }
       if (activeSport === 'football' && state.waiverSignatureDataUrl && !state.parentalAgreementAccepted) {
-        return 'Check the box confirming you agree to the Child/Parent Contract and Adult Code of Ethics.';
+        return 'Check the box confirming you agree to the Parent/Player Agreement.';
       }
       if (!state.birthCertUrl) return `Upload ${playerFirstName}'s birth certificate in the Documents section.`;
     }
@@ -657,7 +657,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   waiverSignatureUrl: signatureUrl,
                   waiverSignedAt: now,
                   waiverSignedRelationship: item.waiverRelationship ?? '',
-                  waiverSignedName: profile?.displayName ?? '',
+                  waiverSignedName: profile?.displayName || user.displayName || '',
                 }
               : {}),
             compliance: {
@@ -694,7 +694,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   waiverSignatureUrl: signatureUrl,
                   waiverSignedAt: now,
                   waiverSignedRelationship: item.waiverRelationship ?? '',
-                  waiverSignedName: profile?.displayName ?? '',
+                  waiverSignedName: profile?.displayName || user.displayName || '',
                   'compliance.leagueFormSigned': true,
                   ...(item.parentalAgreementAccepted
                     ? { 'compliance.parentalAgreementSigned': true }
@@ -1427,9 +1427,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     </Label>
                     <p className="text-xs text-muted-foreground">
                       Sign with your finger or mouse to complete the league paperwork now —
-                      your signature is placed on the Football Player Agreement and, with the
-                      checkbox below, the Child/Parent Contract and Adult Code of Ethics. Or
-                      skip and sign the printed forms later.
+                      your signature is placed on the league Registration Form and, with the
+                      checkbox below, the Parent/Player Agreement. Or skip and sign the
+                      printed forms later.
                     </p>
                     <div className="space-y-2">
                       <Label htmlFor="waiverRelationship">Relationship to player</Label>
@@ -1456,8 +1456,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                           }
                         />
                         <Label htmlFor="parentalAgreementAccepted" className="text-xs font-normal leading-snug">
-                          I have read and agree to the Child/Parent Contract and Adult Code of
-                          Ethics. <span className="text-muted-foreground">(required if signing above)</span>
+                          I have read and agree to the Parent/Player Agreement — the Child/Parent
+                          Contract and Adult Code of Ethics.{' '}
+                          <span className="text-muted-foreground">(required if signing above)</span>
                         </Label>
                       </div>
                       <ParentalAgreementViewer />

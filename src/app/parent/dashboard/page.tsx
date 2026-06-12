@@ -496,9 +496,9 @@ export default function ParentDashboard() {
             <div className="rounded-xl border px-4 py-3 mb-4">
               <p className="text-sm font-semibold">League Paperwork</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Print the Shenango Valley player agreement, Child/Parent Contract, and Adult
-                Code of Ethics. Anything not signed digitally during registration must be
-                signed by hand and given to your coach.
+                Print the league Registration Form and Parent/Player Agreement (Child/Parent
+                Contract + Adult Code of Ethics). Anything not signed digitally during
+                registration must be signed by hand and given to your coach.
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 {players?.filter(p => footballEnrollmentByPlayer.has(p.id)).map(p => (

@@ -707,7 +707,7 @@ export default function MasterRosterPage() {
         <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
             <h1 className="text-xl md:text-2xl font-bold font-headline">Master Roster Center</h1>
-            <p className="text-sm text-muted-foreground">Build and print your league roster — team assignments, league waivers, and uniform exports.</p>
+            <p className="text-sm text-muted-foreground">Build and print your league roster — team assignments, league forms, and uniform exports.</p>
           </div>
           {isMobile ? (
             <DropdownMenu>

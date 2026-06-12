@@ -49,12 +49,12 @@ export function ParentalAgreementViewer() {
     <Dialog>
       <DialogTrigger asChild>
         <button type="button" className="text-xs text-primary underline underline-offset-2">
-          View the {seasonYear} Child/Parent Contract &amp; Adult Code of Ethics
+          View the {seasonYear} Parent/Player Agreement
         </button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{seasonYear} Parental Agreement</DialogTitle>
+          <DialogTitle>{seasonYear} Parent/Player Agreement</DialogTitle>
           <DialogDescription>
             Shenango Valley Midget Football League — Child/Parent Contract and Adult Code of
             Ethics. Your enrollment signature is applied to both documents.

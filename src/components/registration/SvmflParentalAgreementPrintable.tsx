@@ -40,7 +40,7 @@ function SignatureNameDateRow({
   onImageReady?: () => void;
 }) {
   return (
-    <div className="flex gap-4 pt-8 text-sm">
+    <div className="flex gap-4 pt-6 text-sm">
       <div className="flex-[2] flex flex-col">
         <div className="border-b border-black flex items-end justify-center min-h-[1.75rem]">
           {signatureUrl ? (
@@ -107,7 +107,7 @@ function AgreementSignatureBlock({
 function TitleBlock({ title, subtitle }: { title: string; subtitle: string }) {
   const seasonYear = new Date().getFullYear();
   return (
-    <div className="text-center space-y-1 pb-4">
+    <div className="text-center space-y-1 pb-3">
       <h1 className="text-xl font-bold tracking-wide">{SVMFL_LEAGUE_NAME}</h1>
       <h2 className="text-base font-bold">
         {seasonYear} {title}
@@ -129,9 +129,9 @@ export function ChildParentContractSheet(props: SheetProps) {
 
       <TitleBlock title={CONTRACT_TITLE} subtitle={CONTRACT_SUBTITLE} />
 
-      <p className="text-sm font-bold pb-3">{CONTRACT_SECTION_HEADING}</p>
+      <p className="text-sm font-bold pb-2">{CONTRACT_SECTION_HEADING}</p>
 
-      <div className="text-xs space-y-2.5">
+      <div className="text-xs leading-snug space-y-2">
         {CONTRACT_PARAGRAPHS.map((text, i) => (
           <p key={i}>
             {i + 1}. {text}
@@ -151,16 +151,18 @@ export function AdultCodeOfEthicsSheet(props: SheetProps) {
     <div>
       <TitleBlock title={ETHICS_TITLE} subtitle={ETHICS_SUBTITLE} />
 
-      <div className="text-xs space-y-2.5">
+      {/* The ethics page carries the most text in the packet — slightly smaller
+          type and tighter leading keep it on a single printed page. */}
+      <div className="text-[11px] leading-snug space-y-2">
         {ETHICS_INTRO_PARAGRAPHS.map((text, i) => (
           <p key={i}>{text}</p>
         ))}
-        <p className="text-center text-base font-bold py-1">{ETHICS_QUOTE}</p>
+        <p className="text-center text-sm font-bold py-0.5">{ETHICS_QUOTE}</p>
         {ETHICS_CONSENT_PARAGRAPHS.map((text, i) => (
           <p key={i}>{text}</p>
         ))}
         <p>{ETHICS_REMOVAL_PARAGRAPH}</p>
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {ETHICS_COMMITMENTS.map((text, i) => (
             <p key={i}>
               {i + 1}. {text}
