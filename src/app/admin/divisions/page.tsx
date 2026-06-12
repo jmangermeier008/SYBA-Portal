@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Layers, Loader2, Trash2, Pencil, Lock, Check, X, Users } from 'lucide-react';
+import { Plus, Layers, Loader2, Trash2, Pencil, Lock, Check, X, Users, RefreshCw } from 'lucide-react';
+import { recountDivisionRegistrations } from '@/lib/maintenance-actions';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { collection, doc, addDoc, deleteDoc, getDocs, updateDoc, setDoc, query, where, Timestamp } from 'firebase/firestore';
@@ -43,11 +44,12 @@ interface Season {
 
 export default function DivisionsAdminPage() {
   const db = useFirestore();
-  const { loading: loadingUser } = useUser();
+  const { user, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
+  const [isRecounting, setIsRecounting] = useState(false);
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -200,6 +202,25 @@ export default function DivisionsAdminPage() {
     );
   }
 
+  // Rebuild registeredCount for every division in the selected season from
+  // actual enrollment data — fixes drift from deleted test registrations.
+  const handleRecount = async () => {
+    if (!selectedSeasonId || !user) return;
+    setIsRecounting(true);
+    try {
+      const idToken = await user.getIdToken();
+      const result = await recountDivisionRegistrations(selectedSeasonId, idToken);
+      toast({
+        title: 'Capacity Recounted',
+        description: `${result.totalCounted} registration${result.totalCounted === 1 ? '' : 's'} across ${result.divisionsUpdated} division${result.divisionsUpdated === 1 ? '' : 's'}.`,
+      });
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Recount Failed', description: error.message });
+    } finally {
+      setIsRecounting(false);
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -220,6 +241,19 @@ export default function DivisionsAdminPage() {
                 {seasons?.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
               </SelectContent>
             </Select>
+
+            <Button
+              variant="outline"
+              className="rounded-full"
+              disabled={!selectedSeasonId || isRecounting}
+              onClick={handleRecount}
+              title="Rebuild the registered counts for this season from actual enrollment data"
+            >
+              {isRecounting
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <RefreshCw className="mr-2 h-4 w-4" />}
+              Recalculate Counts
+            </Button>
 
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>

@@ -433,7 +433,7 @@ export interface Division {
   fee: number;              // Registration fee in cents (e.g. 12500 = $125)
   capacity?: number;        // Max enrolled players; absent = unlimited
   waitlistEnabled?: boolean;
-  registeredCount?: number; // Denormalized count — updated on each enrollment write
+  registeredCount?: number; // Denormalized: +1 on payment/fee-waiver, -1 on refund/delete/reassignment; admin "Recalculate Counts" rebuilds from enrollments
   sport?: Sport;
   minAge?: number;          // Minimum league age (inclusive) for this division
   maxAge?: number;          // Maximum league age (inclusive) for this division
