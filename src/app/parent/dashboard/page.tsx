@@ -5,10 +5,9 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, CreditCard, AlertTriangle, ChevronRight, Upload, UserCheck, Printer } from 'lucide-react';
+import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, ChevronRight, Printer } from 'lucide-react';
 import { openPrintTab } from '@/lib/print-job';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Label } from '@/components/ui/label';
+import { TaskCenter } from '@/components/parent/task-center';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -304,6 +303,16 @@ export default function ParentDashboard() {
     );
   }, [players, enrollments]);
 
+  const rejectedPlayers = useMemo(() =>
+    playersNeedingAction
+      .filter(p => p.compliance?.verificationStatus === 'rejected')
+      .map(p => ({ id: p.id, firstName: p.firstName, reason: p.compliance?.rejectionReason })),
+  [playersNeedingAction]);
+
+  const pendingReviewPlayers = useMemo(() =>
+    playersNeedingAction.filter(p => p.compliance?.verificationStatus === 'pending'),
+  [playersNeedingAction]);
+
   // Derived: pending player details for payment card
   const pendingPlayer = useMemo(() => {
     if (!pendingEnrollment || !players) return null;
@@ -398,98 +407,25 @@ export default function ParentDashboard() {
             </div>
           )}
 
-          {/* Incoming Co-Parent Link Requests */}
-          {incomingLinkRequests && incomingLinkRequests.length > 0 && (
-            <div className="space-y-2 mb-4">
-              {incomingLinkRequests.map(req => (
-                <div key={req.id} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <UserCheck className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-blue-900">
-                        Co-Parent Access Request for {req.playerSnapshot.firstName} {req.playerSnapshot.lastName}
-                      </p>
-                      <p className="text-xs text-blue-700 mt-0.5">
-                        Another parent is requesting shared access to manage this player.
-                      </p>
-                      <div className="flex gap-2 mt-2">
-                        <Button
-                          size="sm"
-                          className="h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white"
-                          onClick={() => handleApproveLinkRequest(req)}
-                        >
-                          <Check className="h-3 w-3 mr-1.5" /> Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 rounded-full border-blue-300 text-blue-700 hover:bg-blue-100"
-                          onClick={() => handleDenyLinkRequest(req)}
-                        >
-                          <X className="h-3 w-3 mr-1.5" /> Deny
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Compliance Alerts — reframed as neutral guidance, not destructive */}
-          {playersNeedingAction.length > 0 && (
-            <div className="space-y-2 mb-4">
-              {playersNeedingAction.map(p => (
-                p.compliance?.verificationStatus === 'rejected' ? (
-                  <div key={p.id} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                    <p className="text-sm font-semibold text-amber-900">One more step for {p.firstName}</p>
-                    <p className="text-sm text-amber-800 mt-0.5">
-                      {p.compliance.rejectionReason ?? 'A document needs to be re-submitted.'}
-                    </p>
-                    <Button size="sm" asChild className="mt-2 h-8 rounded-full bg-amber-600 hover:bg-amber-700">
-                      <Link href="/parent/family">Re-upload document</Link>
-                    </Button>
-                  </div>
-                ) : (
-                  <Alert key={p.id} className="border-yellow-300 bg-yellow-50 text-yellow-900">
-                    <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                    <AlertDescription>
-                      <span className="font-semibold">{p.firstName} {p.lastName}</span>
-                      {' — Documents are pending admin review. We\'ll notify you once verified.'}
-                    </AlertDescription>
-                  </Alert>
-                )
-              ))}
-            </div>
-          )}
-
-          {/* Physical form upload prompts */}
-          {playersMissingPhysical.length > 0 && (
-            <div className="space-y-2 mb-4">
-              {playersMissingPhysical.map(p => (
-                <div key={p.id} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-blue-900">Physical form needed for {p.firstName}</p>
-                    <p className="text-sm text-blue-800 mt-0.5">Upload a copy to complete {p.firstName}&apos;s registration.</p>
-                  </div>
-                  <Label className="cursor-pointer shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-100 transition-colors flex items-center gap-1.5">
-                    {uploadingPhysicalFor === p.id
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <Upload className="h-3.5 w-3.5" />}
-                    Upload
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      multiple
-                      disabled={!!uploadingPhysicalFor}
-                      onChange={e => { const fs = Array.from(e.target.files ?? []); if (fs.length) handlePhysicalUpload(p.id, fs); e.target.value = ''; }}
-                    />
-                  </Label>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Action Required — single task center consolidating payment, document, and access tasks */}
+          <TaskCenter
+            pendingPayment={hasPendingPayment ? {
+              playerName: pendingPlayer
+                ? `${pendingPlayer.firstName ?? ''} ${pendingPlayer.lastName ?? ''}`.trim() || 'Enrollment'
+                : 'Enrollment',
+              amountCents: pendingEnrollment?.registrationFeeAmount ?? 0,
+            } : null}
+            onResumePayment={handleResumePayment}
+            resumingPayment={resumingPayment}
+            rejectedPlayers={rejectedPlayers}
+            missingPhysicalPlayers={playersMissingPhysical}
+            uploadingPhysicalFor={uploadingPhysicalFor}
+            onPhysicalUpload={handlePhysicalUpload}
+            linkRequests={incomingLinkRequests ?? []}
+            onApproveLink={handleApproveLinkRequest}
+            onDenyLink={handleDenyLinkRequest}
+            pendingReviewPlayers={pendingReviewPlayers}
+          />
 
           {/* League paperwork — printable Shenango Valley forms for football players */}
           {activeSport === 'football' && footballEnrollmentByPlayer.size > 0 && (
@@ -673,26 +609,16 @@ export default function ParentDashboard() {
                 </CardContent>
               </Card>
             ) : hasPendingPayment ? (
-              <Card className="border border-amber-200 bg-amber-50/50 shadow-sm">
+              <Card className="border shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-amber-700">Payment Due</CardTitle>
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Enrollment</CardTitle>
                   <AlertCircle className="h-4 w-4 text-amber-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-sm font-semibold text-amber-900 mb-0.5">
-                    {pendingPlayer
-                      ? `${pendingPlayer.firstName ?? ''} ${pendingPlayer.lastName ?? ''}`.trim()
-                      : 'Enrollment'} — ${((pendingEnrollment?.registrationFeeAmount ?? 0) / 100).toFixed(2)} due
-                  </div>
-                  <Button
-                    size="sm"
-                    className="mt-2 h-8 rounded-full bg-amber-500 hover:bg-amber-600 text-white"
-                    onClick={handleResumePayment}
-                    disabled={resumingPayment}
-                  >
-                    {resumingPayment ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CreditCard className="mr-1.5 h-3 w-3" />}
-                    Pay ${((pendingEnrollment?.registrationFeeAmount ?? 0) / 100).toFixed(2)} →
-                  </Button>
+                  <div className="text-2xl font-bold text-amber-600">Payment pending</div>
+                  <p className="text-xs text-muted-foreground">
+                    Finish up in the Action Required list above.
+                  </p>
                 </CardContent>
               </Card>
             ) : (

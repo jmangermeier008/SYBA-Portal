@@ -101,7 +101,7 @@ function normalizeConcessionSlot(slot: ConcessionSlot): CalendarEvent {
     date: slot.gameDate,
     startTime: slot.startTime,
     endTime: slot.endTime,
-    title: slot.description || 'Concession Shift',
+    title: slot.description || 'Volunteer Shift',
     status: 'active',
     capacity: slot.capacity,
     claimedCount: slot.signups?.length ?? 0,
@@ -233,10 +233,12 @@ export default function ConcessionsAdminPage() {
         cancelCutoffHours: Number(formData.cancelCutoffHours),
         description: formData.description.trim(),
         signups: [],
+        claimedCount: 0,
+        status: 'active',
         sport: activeSport,
         createdAt: new Date().toISOString(),
       });
-      toast({ title: 'Slot Created', description: `Concession slot for ${formData.gameDate} added.` });
+      toast({ title: 'Slot Created', description: `Volunteer slot for ${formData.gameDate} added.` });
       setAddDialog(false);
       setFormData(emptySlot);
     } catch (err: any) {
@@ -583,8 +585,8 @@ export default function ConcessionsAdminPage() {
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
         <header className="mb-4 md:mb-6 flex justify-between items-start">
           <div>
-            <h1 className="text-xl md:text-2xl font-bold font-headline">Concessions Management</h1>
-            <p className="text-sm text-muted-foreground">Create volunteer slots and track parent sign-ups.</p>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Volunteer Management</h1>
+            <p className="text-sm text-muted-foreground">Create concession stand and tagging shifts, and track parent sign-ups.</p>
           </div>
         </header>
 
@@ -633,7 +635,7 @@ export default function ConcessionsAdminPage() {
                 <Card className="border-none shadow-md border-dashed">
                   <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                     <ShoppingCart className="h-12 w-12 text-muted-foreground/40 mb-4" />
-                    <p className="text-muted-foreground font-medium">No concession slots yet</p>
+                    <p className="text-muted-foreground font-medium">No volunteer slots yet</p>
                     <p className="text-sm text-muted-foreground mb-4">Add your first volunteer slot to get started.</p>
                     <Button onClick={() => setAddDialog(true)} className="rounded-full">
                       <Plus className="mr-2 h-4 w-4" /> Add Slot
@@ -1014,7 +1016,7 @@ export default function ConcessionsAdminPage() {
       <Dialog open={addDialog} onOpenChange={setAddDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Concession Slot</DialogTitle>
+            <DialogTitle>Add Volunteer Slot</DialogTitle>
             <DialogDescription>Create a volunteer slot for a game date.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1068,7 +1070,7 @@ export default function ConcessionsAdminPage() {
           <DialogHeader>
             <DialogTitle>Delete Slot</DialogTitle>
             <DialogDescription>
-              Delete the concession slot for <strong>{deleteDialog.slot?.gameDate}</strong>? All sign-ups will be lost.
+              Delete the volunteer slot for <strong>{deleteDialog.slot?.gameDate}</strong>? All sign-ups will be lost.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

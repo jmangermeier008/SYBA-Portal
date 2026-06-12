@@ -48,6 +48,7 @@ export interface Season {
   createdAt: string;
   volunteerSlotsRequired?: number; // min concession slots required per enrolled player
   ageCutoffDate?: string; // YYYY-MM-DD — baseball age is calculated as of this date (e.g. "2026-04-30")
+  siblingFee?: number; // Cents — flat fee for each child after the first paid/fee-waived enrollment this season; absent = 5000 ($50)
   sport: Sport;
   isTest?: boolean; // When true, this season is synthetic test data — excluded from live UI queries
   hasDivisions?: boolean; // True when at least one division subcollection doc exists; controls enrollment visibility
@@ -429,7 +430,7 @@ export interface LinkRequest {
 export interface Division {
   id: string;
   name: string;
-  fee: number;              // Registration fee in dollars
+  fee: number;              // Registration fee in cents (e.g. 12500 = $125)
   capacity?: number;        // Max enrolled players; absent = unlimited
   waitlistEnabled?: boolean;
   registeredCount?: number; // Denormalized count — updated on each enrollment write

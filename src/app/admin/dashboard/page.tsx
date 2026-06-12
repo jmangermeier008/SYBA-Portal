@@ -366,7 +366,7 @@ export default function AdminDashboard({
       items.push({
         severity: 'orange',
         message: `${undercoveredSlots.length} concession slot${undercoveredSlots.length > 1 ? 's' : ''} need more volunteers`,
-        href: '/admin/concessions',
+        href: '/admin/volunteers',
       });
     }
     if (fieldsWithClosures.length > 0) {
@@ -896,7 +896,7 @@ export default function AdminDashboard({
                       const pct = cap > 0 ? filled / cap : 0;
                       const colorClass = pct >= 1 ? 'bg-green-100 text-green-800' : pct > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800';
                       return (
-                        <Link key={slot.id} href="/admin/concessions">
+                        <Link key={slot.id} href="/admin/volunteers">
                           <div className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2.5 hover:bg-secondary/40 transition-colors cursor-pointer group">
                             <div>
                               <p className="text-sm font-medium">
@@ -919,7 +919,7 @@ export default function AdminDashboard({
                   </div>
                 )}
                 <div className="mt-3 pt-3 border-t">
-                  <Link href="/admin/concessions" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link href="/admin/volunteers" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Manage concessions <ChevronRight className="h-3 w-3" />
                   </Link>
                 </div>

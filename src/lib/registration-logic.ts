@@ -78,20 +78,22 @@ export function getSuggestedDivisions(
 
 /**
  * Returns an array of per-player registration fees (in cents) applying sibling pricing.
- * $125 base for the first unregistered player in the season, $50 for each subsequent sibling.
+ * The first payable player in the season pays their division's configured fee. Each
+ * subsequent player (counting prior paid/fee-waived enrollments this season) pays the
+ * season's flat sibling fee — but never more than their own division fee.
  *
- * @param pastPaidEnrollmentsCount  Number of already-paid enrollments for this family in the same season.
- * @param currentCartSize           Number of players in the current checkout batch.
- * @returns                         Array of fees in cents, one per player in currentCartSize order.
+ * @param pastPaidEnrollmentsCount  Already-paid/fee-waived enrollments for this family in the season.
+ * @param itemFees                  Division fee (cents) for each payable player, in cart order.
+ * @param siblingFeeCents           Season's flat sibling fee in cents (default 5000 = $50).
+ * @returns                         Array of fees in cents, aligned with itemFees order.
  */
 export function calculateCartPricing(
   pastPaidEnrollmentsCount: number,
-  currentCartSize: number,
+  itemFees: number[],
+  siblingFeeCents: number = 5000,
 ): number[] {
-  const prices: number[] = [];
-  for (let i = 0; i < currentCartSize; i++) {
+  return itemFees.map((fee, i) => {
     const totalPrior = pastPaidEnrollmentsCount + i;
-    prices.push(totalPrior === 0 ? 12500 : 5000);
-  }
-  return prices;
+    return totalPrior === 0 ? fee : Math.min(fee, siblingFeeCents);
+  });
 }

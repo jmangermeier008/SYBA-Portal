@@ -33,7 +33,7 @@ function NotifIcon({ type }: { type: NotificationType }) {
 // ─── Navigation routing ────────────────────────────────────────────────────────
 
 function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, isCoach: boolean): string | null {
-  if (relatedDocType === 'concessionSlot') return '/parent/concessions';
+  if (relatedDocType === 'concessionSlot') return '/parent/volunteers';
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
   if (relatedDocType === 'game') return isCoach ? '/coach/schedules' : '/parent/schedules';
   if (relatedDocType === 'announcement') return isCoach ? '/coach/announcements' : '/parent/announcements';

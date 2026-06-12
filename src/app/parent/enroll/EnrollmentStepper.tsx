@@ -595,6 +595,21 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         }
       }
 
+      // Compute each payable item's actual price (division fee + sibling
+      // discount) so the enrollment record matches what Stripe will charge.
+      // The webhook overwrites this with the confirmed amount on payment.
+      const submitSeason = seasons?.find(s => s.id === items[0]?.seasonId);
+      const submitPastPaid = (allEnrollments ?? []).filter(
+        e => e.seasonId === items[0]?.seasonId &&
+             (e.paymentStatus === 'paid' || (e as any).payment_status === 'paid' || e.paymentStatus === 'fee_waived'),
+      ).length;
+      const payablePrices = calculateCartPricing(
+        submitPastPaid,
+        payableItems.map(i => i.divisionFee),
+        submitSeason?.siblingFee ?? 5000,
+      );
+      let payableIdx = 0;
+
       // ── Write all Firestore documents ──────────────────────────────────
       // All player + enrollment docs are committed in a single batch so a
       // failure mid-cart can't leave an orphaned player without an enrollment.
@@ -746,7 +761,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           stripe_payment_id: '',
           fee_waived: false,
           waiver_reason: '',
-          registrationFeeAmount: item.divisionFee,
+          registrationFeeAmount: item.isWaitlisted ? item.divisionFee : payablePrices[payableIdx++],
           registered_at: now,
           enrollmentDate: now,
           // Firestore rejects undefined values — omit the field entirely or use ''
@@ -947,7 +962,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
            (e.paymentStatus === 'paid' || (e as any).payment_status === 'paid' || e.paymentStatus === 'fee_waived'),
     ).length;
     const payableCartItems = cart.filter(i => !i.isWaitlisted);
-    const cartPrices = calculateCartPricing(pastPaidCount, payableCartItems.length);
+    const cartSiblingFee = seasons?.find(s => s.id === selectedSeasonId)?.siblingFee ?? 5000;
+    const cartPrices = calculateCartPricing(
+      pastPaidCount,
+      payableCartItems.map(i => i.divisionFee),
+      cartSiblingFee,
+    );
     const cartTotal = cartPrices.reduce((sum, p) => sum + p, 0);
 
     return (
@@ -971,7 +991,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                   ) : (() => {
                     const idx = payableCartItems.indexOf(item);
                     const price = idx >= 0 ? cartPrices[idx] : item.divisionFee;
-                    const isDiscount = idx > 0 || pastPaidCount > 0;
+                    const isDiscount = idx >= 0 && cartPrices[idx] < item.divisionFee;
                     return (
                       <div className="text-right">
                         <span className="font-semibold text-primary">${(price / 100).toFixed(2)}</span>
@@ -1646,6 +1666,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                       <p className="text-2xl font-bold text-primary">
                         ${((selectedDivision?.fee ?? 0) / 100).toFixed(2)}
                       </p>
+                      <p className="text-xs text-muted-foreground">
+                        Sibling discounts apply automatically in the cart when you register more than one child.
+                      </p>
                     </div>
                     <div className="flex flex-col items-end">
                       <Badge className="bg-accent text-accent-foreground border-none mb-1">Payment Required</Badge>
@@ -1656,8 +1679,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
                 {!state.isWaitlisted && (
                   <p className="text-xs text-muted-foreground px-1">
-                    Registering brothers &amp; sisters? Each additional player this season is $50 —
-                    use &ldquo;Register Another Child&rdquo; below before paying.
+                    Registering brothers &amp; sisters? Each additional player this season is
+                    ${(((selectedSeason?.siblingFee ?? 5000)) / 100).toFixed(2)} (never more than
+                    that player&apos;s division fee) — use &ldquo;Register Another Child&rdquo; below
+                    before paying.
                   </p>
                 )}
 

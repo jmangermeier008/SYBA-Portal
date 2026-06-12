@@ -4,14 +4,19 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, collectionGroup, doc, updateDoc, arrayRemove, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, collectionGroup, doc, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import type { Season } from '@/types/scheduling';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import {
   Loader2,
   CheckCircle2,
+  AlertCircle,
+  CalendarDays,
+  Clock,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, parseISO, isAfter } from 'date-fns';
+import { format, parseISO, isAfter, differenceInHours } from 'date-fns';
 import { useMemo, useState } from 'react';
 
 interface ConcessionSignup {
@@ -49,12 +54,13 @@ function getSlotStartDateTime(slot: ConcessionSlot): Date {
   return d;
 }
 
-export default function ParentConcessionsPage() {
+export default function ParentVolunteersPage() {
   const db = useFirestore();
   const { profile, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const { toast } = useToast();
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
+  const [actioningSlotId, setActioningSlotId] = useState<string | null>(null);
 
   const activeSeasonsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
@@ -63,16 +69,15 @@ export default function ParentConcessionsPage() {
   const { data: activeSeasons } = useCollection<Season>(activeSeasonsQuery);
   const activeSeason = useMemo(() => activeSeasons?.[0] ?? null, [activeSeasons]);
 
+  // Equality-only query: combining where('sport') with a gameDate range needs a
+  // composite index, and a missing index fails the subscription silently for
+  // parents. Date filtering happens client-side below (slot volume is tiny).
   const slotsQuery = useMemoFirebase(() => {
-    if (!db || !profile || !activeSeason || !activeSeason.startDate || !activeSport) return null;
-    return query(
-      collection(db, 'concessionSlots'),
-      where('sport', '==', activeSport),
-      where('gameDate', '>=', activeSeason.startDate),
-    );
-  }, [db, profile, activeSeason?.startDate, activeSport]);
+    if (!db || !profile || !activeSport) return null;
+    return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
+  }, [db, profile, activeSport]);
 
-  const { data: slots, isLoading } = useCollection<ConcessionSlot>(slotsQuery);
+  const { data: slots, isLoading, error: slotsError } = useCollection<ConcessionSlot>(slotsQuery);
 
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || !profile || !activeSeason) return null;
@@ -93,7 +98,8 @@ export default function ParentConcessionsPage() {
             const isActive = !s.status || s.status === 'active';
             return isActive && isAfter(getSlotStartDateTime(s), new Date());
           })
-          .sort((a, b) => a.gameDate.localeCompare(b.gameDate))
+          .sort((a, b) =>
+            a.gameDate.localeCompare(b.gameDate) || a.startTime.localeCompare(b.startTime))
       : [],
   [slots]);
 
@@ -117,7 +123,7 @@ export default function ParentConcessionsPage() {
       date: slot.gameDate,
       startTime: slot.startTime,
       endTime: slot.endTime,
-      title: slot.description || 'Concession Shift',
+      title: slot.description || 'Volunteer Shift',
       status: slot.status ?? 'active',
       capacity: slot.capacity,
       claimedCount: slot.signups?.length ?? 0,
@@ -130,6 +136,7 @@ export default function ParentConcessionsPage() {
 
   const handleSignUp = async (slot: ConcessionSlot) => {
     if (!db || !profile) return;
+    setActioningSlotId(slot.id);
     try {
       const slotRef = doc(db, 'concessionSlots', slot.id);
       // H13: Use a Firestore transaction to prevent overbooking race condition
@@ -147,12 +154,13 @@ export default function ParentConcessionsPage() {
           displayName: profile.displayName ?? 'Parent',
           signedUpAt: new Date().toISOString(),
         };
-        transaction.update(slotRef, { signups: [...(current.signups ?? []), newSignup], claimedCount: (current.signups?.length ?? 0) + 1 });
+        const newSignups = [...(current.signups ?? []), newSignup];
+        transaction.update(slotRef, { signups: newSignups, claimedCount: newSignups.length });
       });
       await addDoc(collection(db, 'notifications'), {
         userId: profile.id,
         type: 'concessionSignupConfirmed',
-        title: 'Concession Shift Confirmed',
+        title: 'Volunteer Shift Confirmed',
         body: `You're signed up for the shift on ${format(parseISO(slot.gameDate), 'MMM d')} (${formatTime(slot.startTime)}–${formatTime(slot.endTime)}).`,
         relatedDocId: slot.id,
         relatedDocType: 'concessionSlot',
@@ -162,31 +170,42 @@ export default function ParentConcessionsPage() {
       toast({ title: 'Signed Up!', description: `You're volunteering for the ${slot.gameDate} shift.` });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setActioningSlotId(null);
     }
   };
 
   const handleCancel = async (slot: ConcessionSlot) => {
     if (!db || !profile) return;
-    const signup = slot.signups.find(s => s.parentUserId === profile.id);
-    if (!signup) return;
+    setActioningSlotId(slot.id);
     try {
       const slotRef = doc(db, 'concessionSlots', slot.id);
-      await updateDoc(slotRef, {
-        signups: arrayRemove(signup),
+      // Transaction keeps claimedCount in sync with the signups array
+      await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotRef);
+        if (!slotSnap.exists()) throw new Error('Slot no longer exists.');
+        const current = slotSnap.data() as ConcessionSlot;
+        const newSignups = (current.signups ?? []).filter(s => s.parentUserId !== profile.id);
+        if (newSignups.length === (current.signups?.length ?? 0)) {
+          throw new Error('You are not signed up for this slot.');
+        }
+        transaction.update(slotRef, { signups: newSignups, claimedCount: newSignups.length });
       });
       await addDoc(collection(db, 'notifications'), {
         userId: profile.id,
         type: 'concessionSignupCancelled',
-        title: 'Concession Shift Cancelled',
+        title: 'Volunteer Shift Cancelled',
         body: `Your signup for the shift on ${format(parseISO(slot.gameDate), 'MMM d')} has been removed.`,
         relatedDocId: slot.id,
         relatedDocType: 'concessionSlot',
         read: false,
         createdAt: Timestamp.now(),
       });
-      toast({ title: 'Cancelled', description: 'Your concession sign-up has been removed.' });
+      toast({ title: 'Cancelled', description: 'Your volunteer sign-up has been removed.' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setActioningSlotId(null);
     }
   };
 
@@ -206,8 +225,8 @@ export default function ParentConcessionsPage() {
         <header className="mb-4 md:mb-6">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-xl md:text-2xl font-bold font-headline">Concessions</h1>
-              <p className="text-sm text-muted-foreground">Sign up to volunteer at the concession stand during games.</p>
+              <h1 className="text-xl md:text-2xl font-bold font-headline">Volunteer Signups</h1>
+              <p className="text-sm text-muted-foreground">Sign up for concession stand and tagging shifts to support the league.</p>
             </div>
             <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
               {activeSeason && requiredSlots > 0 && (
@@ -236,6 +255,105 @@ export default function ParentConcessionsPage() {
             </div>
           </div>
         </header>
+
+        {slotsError && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 mb-4 flex items-start gap-2.5">
+            <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-destructive">Couldn&apos;t load volunteer shifts</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Please refresh the page. If this keeps happening, contact the league so we can fix it.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Upcoming shifts list — the primary signup path on phones */}
+        <Card className="border shadow-sm mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-headline flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              Upcoming Shifts
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {isLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : upcomingSlots.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No upcoming shifts yet — check back once the league posts volunteer slots.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {upcomingSlots.map(slot => {
+                  const claimed = slot.signups?.length ?? 0;
+                  const isFull = claimed >= slot.capacity;
+                  const isSigned = slot.signups?.some(s => s.parentUserId === profile?.id) ?? false;
+                  const hoursUntil = differenceInHours(getSlotStartDateTime(slot), new Date());
+                  const pastCutoff = isSigned && (slot.cancelCutoffHours ?? 0) > 0 && hoursUntil < slot.cancelCutoffHours;
+                  const busy = actioningSlotId === slot.id;
+                  return (
+                    <div key={slot.id} className="rounded-xl border px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">
+                          {format(parseISO(slot.gameDate), 'EEE, MMM d')}
+                          <span className="text-muted-foreground font-normal"> · {formatTime(slot.startTime)}–{formatTime(slot.endTime)}</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{slot.description || 'Volunteer Shift'}</p>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <div className="h-1.5 w-24 rounded-full bg-secondary overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${isFull ? 'bg-destructive' : 'bg-primary'}`}
+                              style={{ width: `${Math.min((claimed / Math.max(slot.capacity, 1)) * 100, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {claimed} of {slot.capacity} spot{slot.capacity === 1 ? '' : 's'} filled
+                          </span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 w-full sm:w-auto">
+                        {isSigned ? (
+                          pastCutoff ? (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              <Clock className="h-3.5 w-3.5" />
+                              Signed up — too close to the shift to cancel online
+                            </p>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              className="w-full sm:w-auto min-h-[44px] rounded-full border-destructive/40 text-destructive hover:bg-destructive/5"
+                              onClick={() => handleCancel(slot)}
+                              disabled={busy}
+                            >
+                              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              Cancel Sign-Up
+                            </Button>
+                          )
+                        ) : isFull ? (
+                          <span className="inline-flex items-center rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+                            Full
+                          </span>
+                        ) : (
+                          <Button
+                            className="w-full sm:w-auto min-h-[44px] rounded-full"
+                            onClick={() => handleSignUp(slot)}
+                            disabled={busy}
+                          >
+                            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Sign Up
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <LeagueCalendar
           events={concessionEvents}
