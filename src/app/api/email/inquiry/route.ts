@@ -1,89 +1,29 @@
 import { NextResponse } from 'next/server';
-import { getAdminFirestore } from '@/lib/firebase-admin';
-import { SPORT_CONFIG } from '@/config/sports';
-import type { Sport } from '@/types/scheduling';
+import { sendInquiryNotification } from '@/lib/inquiry-notification';
 
-async function getRecipientEmails(assignedToRole: string): Promise<string[]> {
-  const db = getAdminFirestore();
-  const snap = await db.collection('userProfiles')
-    .where('officerTitles', 'array-contains', assignedToRole)
-    .get();
-
-  const emails: string[] = [];
-  snap.forEach(doc => {
-    const email = doc.data().email;
-    if (email) emails.push(email);
-  });
-  return emails;
-}
-
+/**
+ * POST /api/email/inquiry
+ *
+ * Notifies the assigned board member(s) about an inquiry. Accepts only an
+ * `inquiryId` — the email content is built server-side from the Firestore
+ * document, and a notify-once flag on the doc caps repeat calls, so this
+ * endpoint can stay open to the public contact form without becoming an
+ * email-forgery or spam relay.
+ */
 export async function POST(req: Request) {
   try {
-    const { senderName, topic, subject, message, assignedToRole, inquiryId, sport } = await req.json();
+    const { inquiryId } = await req.json();
 
-    const recipients = await getRecipientEmails(assignedToRole);
-
-    if (recipients.length === 0) {
-      const fallback = process.env.INQUIRY_NOTIFICATION_EMAIL;
-      if (!fallback) {
-        console.warn('[email] No recipients found for role and no fallback configured, skipping notification');
-        return NextResponse.json({ ok: true, skipped: true });
-      }
-      recipients.push(fallback);
+    if (!inquiryId || typeof inquiryId !== 'string') {
+      return NextResponse.json({ error: 'Missing inquiryId' }, { status: 400 });
     }
 
-    const siteAdminEmail = process.env.INQUIRY_EMAIL_SITE_ADMIN;
-    if (siteAdminEmail && !recipients.includes(siteAdminEmail)) {
-      recipients.push(siteAdminEmail);
+    const result = await sendInquiryNotification(inquiryId);
+    if (!result.ok) {
+      const status = result.error === 'Inquiry not found' ? 404 : 500;
+      return NextResponse.json({ ok: false, error: result.error }, { status });
     }
-
-    const appUrl = process.env.NEXT_PUBLIC_BASE_URL ?? '';
-    const portalUrl = inquiryId
-      ? `${appUrl}/admin/inquiries?id=${inquiryId}`
-      : `${appUrl}/admin/inquiries`;
-
-    const sportConfig = sport === 'baseball' || sport === 'football'
-      ? SPORT_CONFIG[sport as Sport]
-      : null;
-    const subjectPrefix = sportConfig ? `[${sportConfig.acronym} ${sportConfig.label}] ` : '';
-    const replyTo = sportConfig?.contactEmail;
-    const emailSubject = `${subjectPrefix}[${topic}] New Inquiry: ${subject}`;
-    const emailBody = [
-      `New inquiry received.`,
-      ``,
-      `From:    ${senderName}`,
-      `Topic:   ${topic}`,
-      `Subject: ${subject}`,
-      ``,
-      `--- Message ---`,
-      message,
-      `---------------`,
-      ``,
-      `Reply in Portal: ${portalUrl}`,
-    ].join('\n');
-
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <notifications@syba.blue>',
-        to: recipients,
-        ...(replyTo ? { reply_to: replyTo } : {}),
-        subject: emailSubject,
-        text: emailBody,
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error('[email] Resend error:', err);
-      return NextResponse.json({ ok: false, error: err }, { status: 500 });
-    }
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(result);
   } catch (error: any) {
     console.error('[email] Inquiry notification error:', error.message);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

@@ -23,6 +23,7 @@ import {
   Lock,
   TrendingUp,
   UserCheck,
+  UserPlus,
   ShieldCheck,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -31,6 +32,7 @@ import { FirestorePermissionError } from '@/firebase/errors';
 import { MetricsCards } from '@/components/admin/registration/metrics-cards';
 import { PlayerTable, type PlayerWithDocs, type AuditFormData, type EnrollmentRecord } from '@/components/admin/registration/player-table';
 import { CoachComplianceTable } from '@/components/admin/registration/coach-compliance-table';
+import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
 import type { Division } from '@/types/scheduling';
 
 interface Enrollment {
@@ -78,6 +80,7 @@ export default function RegistrationDashboardPage() {
 
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [globalProcessing, setGlobalProcessing] = useState(false);
+  const [manualRegOpen, setManualRegOpen] = useState(false);
 
   // Fee waiver dialog state — opened from the PlayerTable waive action
   const [feeWaiverDialog, setFeeWaiverDialog] = useState<{
@@ -411,16 +414,18 @@ export default function RegistrationDashboardPage() {
         parentEmail = profileSnap.data()?.email || '';
       } catch {}
 
-      // Send confirmation email
+      // Send confirmation email — with human-readable season/division names,
+      // not the raw Firestore IDs.
       try {
+        const idToken = await user?.getIdToken();
         const emailRes = await fetch('/api/email/confirmation', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
           body: JSON.stringify({
             toEmail: parentEmail,
             playerName: player ? `${player.firstName} ${player.lastName}` : '',
-            seasonName: enrollment.seasonId,
-            divisionName: enrollment.divisionId,
+            seasonName: (seasons ?? []).find((s: any) => s.id === enrollment.seasonId)?.name ?? enrollment.seasonId,
+            divisionName: sportFilteredDivisions.find(d => d.id === enrollment.divisionId)?.name ?? enrollment.divisionId,
             isWaitlisted: false,
             feeWaived: true,
           }),
@@ -506,10 +511,21 @@ export default function RegistrationDashboardPage() {
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 min-w-0 overflow-x-hidden">
-        <header className="mb-4 md:mb-6">
-          <h1 className="text-xl md:text-2xl font-bold font-headline">Registrations &amp; Compliance</h1>
-          <p className="text-sm text-muted-foreground">Player registrations, document verification, and volunteer clearances.</p>
+        <header className="mb-4 md:mb-6 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Registrations &amp; Compliance</h1>
+            <p className="text-sm text-muted-foreground">Player registrations, document verification, and volunteer clearances.</p>
+          </div>
+          <Button onClick={() => setManualRegOpen(true)} className="rounded-full">
+            <UserPlus className="mr-2 h-4 w-4" /> Manually Register
+          </Button>
         </header>
+
+        <ManualRegistrationDialog
+          open={manualRegOpen}
+          onOpenChange={setManualRegOpen}
+          seasons={(seasons ?? []) as { id: string; name: string; status?: string }[]}
+        />
 
         {/* Metrics */}
         <MetricsCards

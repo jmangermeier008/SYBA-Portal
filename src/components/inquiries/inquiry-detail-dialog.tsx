@@ -23,7 +23,7 @@ interface InquiryDetailDialogProps {
 }
 
 export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDetailDialogProps) {
-  const { profile } = useUser();
+  const { user, profile } = useUser();
   const { isBoardMember } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
@@ -98,17 +98,19 @@ export function InquiryDetailDialog({ inquiry, open, onOpenChange }: InquiryDeta
       });
 
       // Fire-and-forget email notification to sender
-      fetch('/api/email/inquiry-reply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toEmail: inquiry.senderEmail,
-          replierName: profile.displayName || 'SYBA Board',
-          originalSubject: inquiry.subject,
-          replyMessage: replyMessage.trim(),
-          inquiryId: inquiry.id,
-        }),
-      }).catch((err) => { console.error('[inquiry] Reply email notification failed:', err); });
+      user?.getIdToken().then(idToken =>
+        fetch('/api/email/inquiry-reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({
+            toEmail: inquiry.senderEmail,
+            replierName: profile.displayName || 'SYBA Board',
+            originalSubject: inquiry.subject,
+            replyMessage: replyMessage.trim(),
+            inquiryId: inquiry.id,
+          }),
+        })
+      ).catch((err) => { console.error('[inquiry] Reply email notification failed:', err); });
 
       toast({ title: 'Reply Sent' });
       setReplyMessage('');

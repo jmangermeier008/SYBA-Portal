@@ -785,11 +785,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
       // ── Handle waitlisted players ──────────────────────────────────────
       if (waitlistedItems.length > 0) {
+        const confirmationToken = await user.getIdToken();
         for (const item of waitlistedItems) {
           try {
             await fetch('/api/email/confirmation', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${confirmationToken}` },
               body: JSON.stringify({
                 toEmail: user.email,
                 playerName: item.playerDisplayName,

@@ -50,7 +50,7 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
-      await addDoc(collection(db, 'inquiries'), {
+      const inquiryRef = await addDoc(collection(db, 'inquiries'), {
         senderId: null,
         senderName: name.trim(),
         senderEmail: email.trim(),
@@ -67,17 +67,12 @@ export function PublicInquiryForm({ initialTopic }: { initialTopic?: InquiryTopi
         replies: [],
       });
 
-      // Fire-and-forget email notification
+      // Fire-and-forget email notification — the server builds the email from
+      // the inquiry doc itself, so only the ID is sent.
       fetch('/api/email/inquiry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderName: name.trim(),
-          topic: topicConfig.label,
-          subject: subject.trim(),
-          message: message.trim(),
-          assignedToRole: topicConfig.assignedToRole,
-        }),
+        body: JSON.stringify({ inquiryId: inquiryRef.id }),
       }).catch((err) => { console.error('[inquiry] Email notification failed:', err); });
 
       setSubmittedRole(topicConfig.assignedToRole);

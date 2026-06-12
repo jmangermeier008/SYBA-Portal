@@ -178,8 +178,10 @@ export default function ParentDashboard() {
     }
   };
 
-  // Next upcoming game for first assigned team
-  const now = useMemo(() => new Date().toISOString(), []);
+  // Next upcoming game for first assigned team. Team-game dateTime strings are
+  // naive local time (no Z), so the comparison value must be too — comparing
+  // against UTC toISOString() makes today's game vanish hours before kickoff.
+  const now = useMemo(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"), []);
   const nextGameQuery = useMemoFirebase(() => {
     if (!db || !selectedTeamId) return null;
     return query(

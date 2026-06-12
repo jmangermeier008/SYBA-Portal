@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 import { getTopicConfig } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
+import { verifyMailgunSignature } from '@/lib/mailgun';
+import { sendInquiryNotification } from '@/lib/inquiry-notification';
 
 
 function parseEmailAddress(raw: string): { name: string; email: string } {
@@ -18,30 +20,30 @@ function normalizeEmail(raw: string): string {
   return email;
 }
 
-export async function GET() {
-  const keySet = !!process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  let firestoreOk = false;
-  let firestoreError = '';
-  if (keySet) {
-    try {
-      const db = getAdminFirestore();
-      await db.collection('inquiries').limit(1).get();
-      firestoreOk = true;
-    } catch (e: any) {
-      firestoreError = e.message;
-    }
-  }
-  return NextResponse.json({
-    ok: keySet && firestoreOk,
-    FIREBASE_SERVICE_ACCOUNT_KEY: keySet ? 'set' : 'MISSING',
-    firestore: firestoreOk ? 'connected' : `error: ${firestoreError}`,
-  });
-}
-
 export async function POST(req: Request) {
   try {
     // Mailgun sends multipart/form-data with full email content including body
     const formData = await req.formData();
+
+    // Reject anything not signed by Mailgun — without this check, anyone who
+    // discovers the URL can inject forged inquiries and trigger board emails.
+    const signingKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY ?? '';
+    if (!signingKey) {
+      console.error('[inbound-email] MAILGUN_WEBHOOK_SIGNING_KEY is not configured — rejecting all inbound mail');
+      return NextResponse.json({ ok: false, error: 'Webhook not configured' }, { status: 503 });
+    }
+    const signatureValid = verifyMailgunSignature(
+      {
+        timestamp: (formData.get('timestamp') as string) ?? '',
+        token: (formData.get('token') as string) ?? '',
+        signature: (formData.get('signature') as string) ?? '',
+      },
+      signingKey
+    );
+    if (!signatureValid) {
+      console.warn('[inbound-email] Rejected request with missing/invalid Mailgun signature');
+      return NextResponse.json({ ok: false, error: 'Invalid signature' }, { status: 401 });
+    }
 
     const fromRaw: string = (formData.get('sender') as string) ?? '';
     const toRaw: string = (formData.get('recipient') as string) ?? '';
@@ -113,26 +115,14 @@ export async function POST(req: Request) {
       inboundRecipient: recipientEmail,
     });
 
-    // Notify the assigned board member — fire-and-forget after confirmed Firestore write
+    // Notify the assigned board member after the confirmed Firestore write.
+    // Direct library call — same process, no HTTP round-trip needed.
     try {
-      const appUrl = process.env.NEXT_PUBLIC_BASE_URL ?? '';
-      const notifyRes = await fetch(`${appUrl}/api/email/inquiry`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderName: senderName || senderEmail,
-          topic,
-          subject: subject.slice(0, 100),
-          message,
-          assignedToRole,
-          inquiryId: docRef.id,
-        }),
-      });
-      if (notifyRes.ok) {
-        console.log('[inbound-email] Notification relay successful');
+      const notifyResult = await sendInquiryNotification(docRef.id);
+      if (notifyResult.ok) {
+        console.log('[inbound-email] Notification sent', notifyResult.skipped ? '(skipped)' : '');
       } else {
-        const errText = await notifyRes.text();
-        console.error('[inbound-email] Notification relay failed:', notifyRes.status, errText);
+        console.error('[inbound-email] Notification failed:', notifyResult.error);
       }
     } catch (notifyErr: any) {
       console.error('[inbound-email] Notification dispatch failed:', notifyErr.message);

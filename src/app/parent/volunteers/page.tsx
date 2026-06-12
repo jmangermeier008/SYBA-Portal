@@ -177,6 +177,17 @@ export default function ParentVolunteersPage() {
 
   const handleCancel = async (slot: ConcessionSlot) => {
     if (!db || !profile) return;
+    // Enforce the cancellation cutoff here, not just in the list-view UI — the
+    // calendar popover's cancel button doesn't get hidden past the cutoff.
+    const hoursUntil = differenceInHours(getSlotStartDateTime(slot), new Date());
+    if ((slot.cancelCutoffHours ?? 0) > 0 && hoursUntil < slot.cancelCutoffHours) {
+      toast({
+        title: 'Too close to the shift',
+        description: `Cancellations close ${slot.cancelCutoffHours} hours before a shift starts. Please contact the board if you can't make it.`,
+        variant: 'destructive',
+      });
+      return;
+    }
     setActioningSlotId(slot.id);
     try {
       const slotRef = doc(db, 'concessionSlots', slot.id);
