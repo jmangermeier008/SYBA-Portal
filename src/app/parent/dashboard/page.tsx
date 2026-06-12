@@ -387,7 +387,7 @@ export default function ParentDashboard() {
 
           {/* Player switcher — sticky sub-header, drives the whole dashboard */}
           {(players?.length ?? 0) > 1 && (
-            <div className="sticky top-14 z-20 -mx-3 md:-mx-6 px-3 md:px-6 py-2 bg-background/95 backdrop-blur border-b mb-4">
+            <div className="sticky top-14 md:top-0 z-20 -mx-3 md:-mx-6 px-3 md:px-6 py-2 bg-background border-b mb-4">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-primary shrink-0" />
                 <span className="text-xs font-medium text-muted-foreground">Viewing:</span>
