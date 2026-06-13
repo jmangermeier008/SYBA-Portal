@@ -20,7 +20,8 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent } from '@/types/scheduling';
+import type { CalendarEvent, VolunteerShiftType } from '@/types/scheduling';
+import { VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT } from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,6 +64,8 @@ interface ConcessionSignup {
 
 interface ConcessionSlot {
   id: string;
+  title?: string;
+  type?: VolunteerShiftType;
   gameDate: string;
   startTime: string;
   endTime: string;
@@ -72,6 +75,14 @@ interface ConcessionSlot {
   signups: ConcessionSignup[];
   createdAt: string;
 }
+
+const VOLUNTEER_TYPE_OPTIONS: { value: VolunteerShiftType; label: string }[] = [
+  { value: 'concessions', label: 'Concessions' },
+  { value: 'tagging', label: 'Tagging' },
+  { value: 'fundraiser', label: 'Fundraiser' },
+  { value: 'chains', label: 'Chains' },
+  { value: 'maintenance', label: 'Maintenance' },
+];
 
 interface Season {
   id: string;
@@ -101,7 +112,7 @@ function normalizeConcessionSlot(slot: ConcessionSlot): CalendarEvent {
     date: slot.gameDate,
     startTime: slot.startTime,
     endTime: slot.endTime,
-    title: slot.description || 'Volunteer Shift',
+    title: slot.title || slot.description || 'Volunteer Shift',
     status: 'active',
     capacity: slot.capacity,
     claimedCount: slot.signups?.length ?? 0,
@@ -111,6 +122,8 @@ function normalizeConcessionSlot(slot: ConcessionSlot): CalendarEvent {
 }
 
 const emptySlot = {
+  title: '',
+  type: 'concessions' as VolunteerShiftType,
   gameDate: '',
   startTime: '10:00',
   endTime: '14:00',
@@ -226,6 +239,8 @@ export default function ConcessionsAdminPage() {
     setSaving(true);
     try {
       await addDoc(collection(db, 'concessionSlots'), {
+        title: formData.title.trim(),
+        type: formData.type,
         gameDate: formData.gameDate,
         startTime: formData.startTime,
         endTime: formData.endTime,
@@ -234,6 +249,7 @@ export default function ConcessionsAdminPage() {
         description: formData.description.trim(),
         signups: [],
         claimedCount: 0,
+        isStandalone: true,
         status: 'active',
         sport: activeSport,
         createdAt: new Date().toISOString(),
@@ -436,6 +452,10 @@ export default function ConcessionsAdminPage() {
 
       allSlotsSnap.docs.forEach(d => {
         const slotData = d.data() as ConcessionSlot;
+        // Only certain shift types count toward a family's volunteer requirement.
+        // Slots predating the `type` field are treated as 'concessions'.
+        const slotType = slotData.type ?? 'concessions';
+        if (!VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT.includes(slotType)) return;
         const gameDate = slotData.gameDate;
         const inRange =
           (!season.registrationOpen || gameDate >= season.registrationOpen) &&
@@ -1017,13 +1037,32 @@ export default function ConcessionsAdminPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add Volunteer Slot</DialogTitle>
-            <DialogDescription>Create a volunteer slot for a game date.</DialogDescription>
+            <DialogDescription>Create a standalone volunteer shift on any date.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
-              <Label>Game Date *</Label>
-              <Input type="date" value={formData.gameDate}
-                onChange={e => setFormData(prev => ({ ...prev, gameDate: e.target.value }))} />
+              <Label>Title</Label>
+              <Input placeholder="e.g. Tagging at D'Onofrios" value={formData.title}
+                onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Type</Label>
+                <Select value={formData.type}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, type: v as VolunteerShiftType }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {VOLUNTEER_TYPE_OPTIONS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Date *</Label>
+                <Input type="date" value={formData.gameDate}
+                  onChange={e => setFormData(prev => ({ ...prev, gameDate: e.target.value }))} />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">

@@ -1620,32 +1620,32 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
             <>
               <div className="space-y-3">
                 <div className="p-4 rounded-xl bg-secondary/20 space-y-2 text-sm">
-                  <div className="flex justify-between">
+                  <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-2">
                     <span className="text-muted-foreground">Player</span>
                     <span className="font-medium">{playerDisplayName()}</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-2">
                     <span className="text-muted-foreground">Season</span>
                     <span className="font-medium">{selectedSeason?.name ?? '—'}</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-2">
                     <span className="text-muted-foreground">Division</span>
                     <span className="font-medium">{selectedDivision?.name ?? '—'}</span>
                   </div>
                   {activeSport !== 'football' && state.uniformNumberPreference && (
-                    <div className="flex justify-between">
+                    <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-2">
                       <span className="text-muted-foreground">Uniform # Preference</span>
                       <span className="font-medium">#{state.uniformNumberPreference}</span>
                     </div>
                   )}
                   {state.shirtSize && (
-                    <div className="flex justify-between">
+                    <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-2">
                       <span className="text-muted-foreground">Shirt Size</span>
                       <span className="font-medium">{state.shirtSize}</span>
                     </div>
                   )}
                   {activeSport === 'football' && state.parentWeightEstimate && (
-                    <div className="flex justify-between">
+                    <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-2">
                       <span className="text-muted-foreground">Weight Estimate</span>
                       <span className="font-medium">{state.parentWeightEstimate} lbs</span>
                     </div>
@@ -1661,7 +1661,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                     </div>
                   </div>
                 ) : (
-                  <div className="p-4 rounded-xl bg-secondary/30 flex items-center justify-between">
+                  <div className="p-4 rounded-xl bg-secondary/30 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Registration Fee</p>
                       <p className="text-2xl font-bold text-primary">

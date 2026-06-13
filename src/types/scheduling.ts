@@ -199,9 +199,34 @@ export interface ConcessionSignup {
   attendance?: 'pending' | 'worked' | 'no-show'; // admin-recorded after the shift
 }
 
+/**
+ * Kind of volunteer shift. A shift with no `type` set predates this field and
+ * is treated as 'concessions' for backward compatibility.
+ */
+export type VolunteerShiftType =
+  | 'concessions'
+  | 'tagging'
+  | 'fundraiser'
+  | 'chains'
+  | 'maintenance';
+
+/**
+ * Shift types that count toward a family's required volunteer credit for the
+ * season. Other types (fundraiser, chains, maintenance) are optional/extra.
+ */
+export const VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT: VolunteerShiftType[] = [
+  'concessions',
+  'tagging',
+];
+
 /** A volunteer concession shift. claimedCount mirrors signups.length — keep in sync via transaction. */
 export interface ConcessionSlot {
   id: string;
+  // --- Identity ---
+  // Optional human label for standalone shifts (e.g. "Tagging at D'Onofrios").
+  title?: string;
+  // Kind of shift. Absent = legacy concession shift (treated as 'concessions').
+  type?: VolunteerShiftType;
   // --- Linking ---
   // gameId is the "silent link" to a Game document.
   // Null / absent = standalone shift (e.g. tournament day).

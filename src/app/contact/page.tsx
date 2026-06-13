@@ -19,22 +19,22 @@ export default async function ContactPage({
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
-      <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
-        <Link className="flex items-center justify-center gap-2" href="/">
+      <header className="px-4 lg:px-6 h-16 flex items-center gap-2 border-b bg-white/50 backdrop-blur-md sticky top-0 z-50">
+        <Link className="flex items-center gap-2 min-w-0" href="/">
           <Image
             src="/contentrotator637479479383661633.png"
             alt="SYBA Logo"
             width={36}
             height={36}
-            className="object-contain"
+            className="object-contain shrink-0 w-9 h-9"
           />
-          <span className="text-xl font-bold font-headline tracking-tight text-primary">SYBA Portal</span>
+          <span className="text-lg sm:text-xl font-bold font-headline tracking-tight text-primary truncate">SYBA Portal</span>
         </Link>
-        <nav className="ml-auto flex gap-4 sm:gap-6 items-center">
+        <nav className="ml-auto flex shrink-0 gap-3 sm:gap-6 items-center">
           <Link className="text-sm font-medium hover:text-primary transition-colors" href="/login">
             Login
           </Link>
-          <Button asChild className="rounded-full px-6 shadow-md">
+          <Button asChild className="rounded-full px-4 sm:px-6 shadow-md">
             <Link href="/signup">Register Player</Link>
           </Button>
         </nav>
