@@ -170,7 +170,7 @@ function normalizeConcessionSlot(s: ConcessionSlotType): CalendarEvent {
     date: s.gameDate,
     startTime: s.startTime,
     endTime: s.endTime,
-    title: s.description || 'Concession Shift',
+    title: s.title || s.description || 'Volunteer Shift',
     status: s.status ?? 'active',
     sourceType: 'concession-slot',
     sourceId: s.id,
@@ -770,7 +770,7 @@ export default function AdminDashboard({
                       onClick={(e) => (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
                     >
                       <ShoppingCart className="h-3.5 w-3.5" />
-                      Concessions
+                      Volunteer
                     </TabsTrigger>
                     <TabsTrigger
                       value="meetings"

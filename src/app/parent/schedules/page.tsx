@@ -73,7 +73,7 @@ function normalizeConcessionSlot(s: ConcessionSlot, userId: string): CalendarEve
     date: s.gameDate,
     startTime: s.startTime,
     endTime: s.endTime,
-    title: s.description || 'Concession Shift',
+    title: s.title || s.description || 'Volunteer Shift',
     status: s.status ?? 'active',
     sourceType: 'concession-slot',
     sourceId: s.id,

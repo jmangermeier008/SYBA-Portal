@@ -27,6 +27,7 @@ interface ConcessionSignup {
 
 interface ConcessionSlot {
   id: string;
+  title?: string;
   gameDate: string;
   startTime: string;
   endTime: string;
@@ -123,7 +124,7 @@ export default function ParentVolunteersPage() {
       date: slot.gameDate,
       startTime: slot.startTime,
       endTime: slot.endTime,
-      title: slot.description || 'Volunteer Shift',
+      title: slot.title || slot.description || 'Volunteer Shift',
       status: slot.status ?? 'active',
       capacity: slot.capacity,
       claimedCount: slot.signups?.length ?? 0,

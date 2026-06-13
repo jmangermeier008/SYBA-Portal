@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter, SheetDescription } from '@/components/ui/sheet';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -90,6 +92,7 @@ export default function SponsorshipsPage() {
   const { loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   const [addDialog, setAddDialog] = useState(false);
   const [editSponsor, setEditSponsor] = useState<Sponsor | null>(null);
@@ -227,6 +230,75 @@ export default function SponsorshipsPage() {
       </div>
     );
   }
+
+  const sponsorFormTitle = editSponsor ? 'Edit Sponsor' : 'Add Sponsor';
+  const sponsorFormFields = (
+    <div className="grid grid-cols-2 gap-4 py-2">
+      <div className="col-span-2 space-y-1">
+        <Label>Sponsor Name *</Label>
+        <Input placeholder="e.g. Joe's Auto Shop" value={formData.name}
+          onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} />
+      </div>
+      <div className="space-y-1">
+        <Label>Tier</Label>
+        <Select value={formData.tier} onValueChange={v => setFormData(prev => ({ ...prev, tier: v as SponsorTier }))}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Gold">Gold</SelectItem>
+            <SelectItem value="Silver">Silver</SelectItem>
+            <SelectItem value="Bronze">Bronze</SelectItem>
+            <SelectItem value="In-Kind">In-Kind</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label>Status</Label>
+        <Select value={formData.status} onValueChange={v => setFormData(prev => ({ ...prev, status: v as SponsorStatus }))}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Pending">Pending</SelectItem>
+            <SelectItem value="Lapsed">Lapsed</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label>Contact Name</Label>
+        <Input placeholder="Jane Smith" value={formData.contactName}
+          onChange={e => setFormData(prev => ({ ...prev, contactName: e.target.value }))} />
+      </div>
+      <div className="space-y-1">
+        <Label>Contact Email</Label>
+        <Input type="email" placeholder="jane@company.com" value={formData.contactEmail}
+          onChange={e => setFormData(prev => ({ ...prev, contactEmail: e.target.value }))} />
+      </div>
+      <div className="space-y-1">
+        <Label>Pledged Amount ($)</Label>
+        <Input type="number" min={0} step="0.01" placeholder="500.00" value={formData.pledgedDollars}
+          onChange={e => setFormData(prev => ({ ...prev, pledgedDollars: e.target.value }))} />
+      </div>
+      <div className="space-y-1">
+        <Label>Amount Received ($)</Label>
+        <Input type="number" min={0} step="0.01" placeholder="0.00" value={formData.receivedDollars}
+          onChange={e => setFormData(prev => ({ ...prev, receivedDollars: e.target.value }))} />
+      </div>
+      <div className="col-span-2 space-y-1">
+        <Label>Notes (optional)</Label>
+        <Textarea placeholder="Any notes about this sponsor..." value={formData.notes}
+          onChange={e => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+          className="resize-none" rows={2} />
+      </div>
+    </div>
+  );
+  const sponsorFormFooterButtons = (
+    <>
+      <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>Cancel</Button>
+      <Button onClick={handleSave} disabled={saving || !formData.name.trim()}>
+        {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        {editSponsor ? 'Save Changes' : 'Add Sponsor'}
+      </Button>
+    </>
+  );
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -396,78 +468,35 @@ export default function SponsorshipsPage() {
         )}
       </main>
 
-      {/* Add / Edit Sponsor Dialog */}
-      <Dialog open={addDialog} onOpenChange={(open) => !saving && setAddDialog(open)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editSponsor ? 'Edit Sponsor' : 'Add Sponsor'}</DialogTitle>
-            <DialogDescription>Track a sponsor's commitment and payment progress.</DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-1">
-              <Label>Sponsor Name *</Label>
-              <Input placeholder="e.g. Joe's Auto Shop" value={formData.name}
-                onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Tier</Label>
-              <Select value={formData.tier} onValueChange={v => setFormData(prev => ({ ...prev, tier: v as SponsorTier }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Gold">Gold</SelectItem>
-                  <SelectItem value="Silver">Silver</SelectItem>
-                  <SelectItem value="Bronze">Bronze</SelectItem>
-                  <SelectItem value="In-Kind">In-Kind</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Status</Label>
-              <Select value={formData.status} onValueChange={v => setFormData(prev => ({ ...prev, status: v as SponsorStatus }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Active">Active</SelectItem>
-                  <SelectItem value="Pending">Pending</SelectItem>
-                  <SelectItem value="Lapsed">Lapsed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Contact Name</Label>
-              <Input placeholder="Jane Smith" value={formData.contactName}
-                onChange={e => setFormData(prev => ({ ...prev, contactName: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Contact Email</Label>
-              <Input type="email" placeholder="jane@company.com" value={formData.contactEmail}
-                onChange={e => setFormData(prev => ({ ...prev, contactEmail: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Pledged Amount ($)</Label>
-              <Input type="number" min={0} step="0.01" placeholder="500.00" value={formData.pledgedDollars}
-                onChange={e => setFormData(prev => ({ ...prev, pledgedDollars: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Amount Received ($)</Label>
-              <Input type="number" min={0} step="0.01" placeholder="0.00" value={formData.receivedDollars}
-                onChange={e => setFormData(prev => ({ ...prev, receivedDollars: e.target.value }))} />
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label>Notes (optional)</Label>
-              <Textarea placeholder="Any notes about this sponsor..." value={formData.notes}
-                onChange={e => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                className="resize-none" rows={2} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving || !formData.name.trim()}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editSponsor ? 'Save Changes' : 'Add Sponsor'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Add / Edit Sponsor — Sheet on mobile (keeps inputs above the keyboard), Dialog on desktop */}
+      {isMobile ? (
+        <Sheet open={addDialog} onOpenChange={(open) => !saving && setAddDialog(open)}>
+          <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto"
+            onOpenAutoFocus={(e) => e.preventDefault()}>
+            <SheetHeader>
+              <SheetTitle>{sponsorFormTitle}</SheetTitle>
+              <SheetDescription>Track a sponsor's commitment and payment progress.</SheetDescription>
+            </SheetHeader>
+            {sponsorFormFields}
+            <SheetFooter className="flex-row justify-end gap-2">
+              {sponsorFormFooterButtons}
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={addDialog} onOpenChange={(open) => !saving && setAddDialog(open)}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{sponsorFormTitle}</DialogTitle>
+              <DialogDescription>Track a sponsor's commitment and payment progress.</DialogDescription>
+            </DialogHeader>
+            {sponsorFormFields}
+            <DialogFooter>
+              {sponsorFormFooterButtons}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Delete Sponsor Dialog */}
       <Dialog open={deleteDialog.open} onOpenChange={(open) => !deleting && setDeleteDialog(prev => ({ ...prev, open }))}>

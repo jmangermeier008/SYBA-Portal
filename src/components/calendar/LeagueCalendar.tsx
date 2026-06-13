@@ -228,7 +228,7 @@ function EventPopoverContent({
       ? 'Practice'
       : event.eventType === 'closure'
       ? (event.sourceType === 'complex-closure' ? 'Complex Closure' : 'Field Closure')
-      : 'Concession Shift';
+      : (event.title || 'Volunteer Shift');
 
   const isCancelled = event.status === 'cancelled';
 
@@ -892,7 +892,7 @@ export function LeagueCalendar({
   const filterLabels: Record<string, string> = {
     games: 'Games',
     practices: 'Practices',
-    concessions: 'Concessions',
+    concessions: 'Volunteer',
   };
 
   const navigatePrev = () => {
