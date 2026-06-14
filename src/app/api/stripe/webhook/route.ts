@@ -3,8 +3,7 @@ import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 import { sendConfirmationEmail } from '@/lib/email';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getWebhookSecrets, getStripeClientForMode } from '@/lib/stripe-config';
 
 export async function POST(req: Request) {
   // CRITICAL: Use req.text() — raw body required for signature verification
@@ -15,13 +14,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
   }
 
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-  } catch (err: any) {
-    console.error('[stripe/webhook] Signature verification failed:', err.message);
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+  // Stripe signs each event with the Dashboard endpoint's own secret (test ≠ live),
+  // independent of our runtime mode — so try every signing secret we have.
+  const secrets = getWebhookSecrets();
+  if (secrets.length === 0) {
+    console.error('[stripe/webhook] No webhook signing secret configured');
+    return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
   }
+
+  // constructEvent only uses the signing secret, not the API key — any instance works.
+  const verifier = new Stripe(process.env.STRIPE_SECRET_KEY ?? 'sk_unused');
+
+  let event: Stripe.Event | null = null;
+  let lastError = '';
+  for (const secret of secrets) {
+    try {
+      event = verifier.webhooks.constructEvent(rawBody, sig, secret);
+      break;
+    } catch (err: any) {
+      lastError = err.message;
+    }
+  }
+  if (!event) {
+    console.error('[stripe/webhook] Signature verification failed:', lastError);
+    return NextResponse.json({ error: `Webhook Error: ${lastError}` }, { status: 400 });
+  }
+
+  // The verified event tells us which mode it came from — use the matching client
+  // for any follow-up Stripe API calls (e.g. PaymentIntent lookups on refunds).
+  const stripe = getStripeClientForMode(event.livemode ? 'production' : 'sandbox');
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
