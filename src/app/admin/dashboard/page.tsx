@@ -459,6 +459,20 @@ export default function AdminDashboard({
 
   const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
 
+  // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
+  // concession stand; football volunteering spans chain gangs, clock, and gate
+  // crews, so it uses generic "volunteer" language. Cosmetic only — the data
+  // model, queries, and the `concessions` filter key stay identical.
+  const volunteerTerms = useMemo(() => {
+    const isFootball = activeSport === 'football';
+    return {
+      emptyWeek: isFootball
+        ? 'No volunteer slots in the next 7 days.'
+        : 'No concession slots in the next 7 days.',
+      manageLink: isFootball ? 'Manage volunteers' : 'Manage concessions',
+    };
+  }, [activeSport]);
+
   const { totalEnrollmentsCount, missingDocumentsCount, verifiedCount, enrolledPlayersCount, pendingPaymentsCount } = useMemo(() => {
     const total = seasonEnrollments.length;
     const enrolledPlayerIds = new Set(seasonEnrollments.map((e) => e.playerId).filter(Boolean));
@@ -886,7 +900,7 @@ export default function AdminDashboard({
               <TabsContent value="concessions" className="mt-0">
                 {!concessionSlots || concessionSlots.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">
-                    No concession slots in the next 7 days.
+                    {volunteerTerms.emptyWeek}
                   </p>
                 ) : (
                   <div className="space-y-1.5">
@@ -920,7 +934,7 @@ export default function AdminDashboard({
                 )}
                 <div className="mt-3 pt-3 border-t">
                   <Link href="/admin/volunteers" className="text-xs text-primary hover:underline flex items-center gap-1">
-                    Manage concessions <ChevronRight className="h-3 w-3" />
+                    {volunteerTerms.manageLink} <ChevronRight className="h-3 w-3" />
                   </Link>
                 </div>
               </TabsContent>
