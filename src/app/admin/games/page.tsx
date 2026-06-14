@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, limit, type WriteBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, type WriteBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
@@ -132,6 +132,7 @@ export default function AdminGamesPage() {
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSeasonId, setSelectedSeasonId] = useState('');
 
   // Reschedule cascade confirmation
   const pendingShiftsRef = useRef<any[]>([]);
@@ -201,7 +202,10 @@ export default function AdminGamesPage() {
 
   const calendarEvents = useMemo((): CalendarEvent[] => {
     if (!allGames) return [];
-    return allGames.map(g => ({
+    const scoped = selectedSeasonId && selectedSeasonId !== 'all-seasons'
+      ? allGames.filter(g => g.seasonId === selectedSeasonId)
+      : allGames;
+    return scoped.map(g => ({
       id: g.id,
       eventType: g.type === 'game' ? 'game' as const : 'practice' as const,
       date: g.date,
@@ -221,7 +225,7 @@ export default function AdminGamesPage() {
       sourceType: 'global-game' as const,
       sourceId: g.id,
     }));
-  }, [allGames]);
+  }, [allGames, selectedSeasonId]);
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -233,17 +237,30 @@ export default function AdminGamesPage() {
     return query(collection(db, 'fields'), where('sport', '==', activeSport));
   }, [db, activeSport, isAdmin, isBoardMember]);
 
-  const activeSeasonQuery = useMemoFirebase(() => {
+  // All of the sport's seasons — drives the season selector. The active season is
+  // derived from this list (the one with status 'active') and still governs writes.
+  const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
-    return query(collection(db, 'seasons'), where('sport', '==', activeSport), where('status', '==', 'active'), limit(1));
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
   }, [db, isAdmin, isBoardMember, activeSport]);
-  const { data: activeSeasons } = useCollection<Season>(activeSeasonQuery);
-  const activeSeason = activeSeasons?.[0] ?? null;
+  const { data: seasons } = useCollection<Season>(seasonsQuery);
+  const activeSeason = useMemo(() => seasons?.find(s => s.status === 'active') ?? null, [seasons]);
 
+  // Default the season picker to the active season once seasons load.
+  useEffect(() => {
+    if (seasons && seasons.length > 0 && !selectedSeasonId) {
+      setSelectedSeasonId(activeSeason?.id ?? seasons[0].id);
+    }
+  }, [seasons, activeSeason, selectedSeasonId]);
+
+  // Non-active seasons are view-only: writes always target the active season.
+  const canEdit = !!activeSeason && selectedSeasonId === activeSeason.id;
+
+  // Divisions for the season currently being viewed.
   const divisionsQuery = useMemoFirebase(() => {
-    if (!db || !activeSeason?.id) return null;
-    return collection(db, 'seasons', activeSeason.id, 'divisions');
-  }, [db, activeSeason?.id]);
+    if (!db || !selectedSeasonId) return null;
+    return collection(db, 'seasons', selectedSeasonId, 'divisions');
+  }, [db, selectedSeasonId]);
   const { data: divisions } = useCollection<Division>(divisionsQuery);
 
   // Fixed palette — assigned to divisions by index (must match admin/calendar/page.tsx)
@@ -1017,14 +1034,21 @@ export default function AdminGamesPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   const filterGames = (list: Game[]) => {
-    if (!searchQuery.trim()) return list;
-    const q = searchQuery.toLowerCase();
-    return list.filter(g =>
-      (g.homeTeamName ?? '').toLowerCase().includes(q) ||
-      (g.awayTeamName ?? '').toLowerCase().includes(q) ||
-      (g.teamName ?? '').toLowerCase().includes(q) ||
-      (g.fieldName ?? '').toLowerCase().includes(q)
-    );
+    let result = list;
+    // Scope to the selected season (client-side avoids a new composite index).
+    if (selectedSeasonId && selectedSeasonId !== 'all-seasons') {
+      result = result.filter(g => g.seasonId === selectedSeasonId);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(g =>
+        (g.homeTeamName ?? '').toLowerCase().includes(q) ||
+        (g.awayTeamName ?? '').toLowerCase().includes(q) ||
+        (g.teamName ?? '').toLowerCase().includes(q) ||
+        (g.fieldName ?? '').toLowerCase().includes(q)
+      );
+    }
+    return result;
   };
 
   return (
@@ -1039,6 +1063,20 @@ export default function AdminGamesPage() {
             <p className="text-sm text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            {/* Season selector */}
+            <Select value={selectedSeasonId} onValueChange={setSelectedSeasonId}>
+              <SelectTrigger className="rounded-full w-44 h-9">
+                <SelectValue placeholder="Select season" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all-seasons">All Seasons</SelectItem>
+                {seasons?.map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}{s.id === activeSeason?.id ? ' (Active)' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {/* List / Calendar toggle */}
             <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
               <button
@@ -1054,14 +1092,24 @@ export default function AdminGamesPage() {
               <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35"/></svg>
               <Input placeholder="Search games…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 rounded-xl w-full sm:w-48" />
             </div>
-            <Button variant="outline" className="rounded-full px-5" onClick={() => setImportOpen(true)}>
+            <Button
+              variant="outline"
+              className="rounded-full px-5"
+              onClick={() => setImportOpen(true)}
+              disabled={!canEdit}
+              title={!canEdit ? 'Switch to the active season to import' : undefined}
+            >
               <Upload className="mr-2 h-4 w-4" />
               <span className="hidden sm:inline">Import Schedule</span>
               <span className="sm:hidden">Import</span>
             </Button>
             <Dialog open={open} onOpenChange={(o) => { if (!o) closeDialog(); else setOpen(true); }}>
               <DialogTrigger asChild>
-                <Button className="rounded-full px-6">
+                <Button
+                  className="rounded-full px-6"
+                  disabled={!canEdit}
+                  title={!canEdit ? 'Switch to the active season to add games' : undefined}
+                >
                   <Plus className="mr-2 h-4 w-4" />
                   <span className="hidden sm:inline">Add Game / Practice</span>
                   <span className="sm:hidden">Add</span>
@@ -1442,7 +1490,7 @@ export default function AdminGamesPage() {
                 ) : (
                   <div className="space-y-2">
                     {filterGames(upcomingGames ?? []).map(g => (
-                      <GameRow key={g.id} game={g}
+                      <GameRow key={g.id} game={g} readOnly={!canEdit}
                         onEdit={() => handleOpenEdit(g)}
                         onCancel={() => handleInitiateCancel(g)}
                         onDelete={() => handleInitiateDelete(g)}
@@ -1474,7 +1522,7 @@ export default function AdminGamesPage() {
                   ) : (
                     <div className="space-y-2 opacity-60">
                       {filterGames(pastGames ?? []).map(g => (
-                        <GameRow key={g.id} game={g}
+                        <GameRow key={g.id} game={g} readOnly={!canEdit}
                           onEdit={() => handleOpenEdit(g)}
                           onCancel={() => handleInitiateCancel(g)}
                           onDelete={() => handleInitiateDelete(g)}
@@ -1691,7 +1739,7 @@ export default function AdminGamesPage() {
 
 // ─── Game Row ─────────────────────────────────────────────────────────────────
 
-function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, onUmpireNotifiedToggle }: {
+function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, onUmpireNotifiedToggle, readOnly = false }: {
   game: Game;
   onEdit: () => void;
   onCancel: () => void;
@@ -1699,6 +1747,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
   onScore: () => void;
   onUmpireUpdate: (umpireName: string) => Promise<void>;
   onUmpireNotifiedToggle: (checked: boolean) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [localUmpire, setLocalUmpire] = useState(game.umpireName ?? '');
   const isGame = game.type === 'game';
@@ -1751,6 +1800,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
         </div>
       </div>
 
+      {!readOnly && (
       <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">
         {/* Score button — league games only, not cancelled */}
         {isGame && !isCancelled && (
@@ -1784,6 +1834,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
+      )}
       </div>
 
       {/* Umpire row — league games only */}
@@ -1796,12 +1847,14 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
             value={localUmpire}
             onChange={e => setLocalUmpire(e.target.value)}
             onBlur={() => onUmpireUpdate(localUmpire.trim())}
+            disabled={readOnly}
           />
           {isCancelled && localUmpire && (
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
               <Checkbox
                 checked={game.umpireNotified ?? false}
                 onCheckedChange={(checked) => onUmpireNotifiedToggle(checked === true)}
+                disabled={readOnly}
               />
               Umpire Notified?
             </label>
