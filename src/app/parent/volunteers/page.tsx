@@ -117,6 +117,19 @@ export default function ParentVolunteersPage() {
     return count * perPlayer;
   }, [enrollments, activeSeason]);
 
+  // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
+  // concession stand; football volunteering spans chain gangs, clock, and gate
+  // crews, so it uses generic "volunteer" language. Cosmetic only — the data
+  // model, queries, and the `concessions` filter key stay identical.
+  const volunteerTerms = useMemo(() => {
+    const isFootball = activeSport === 'football';
+    return {
+      subtitle: isFootball
+        ? 'Sign up for volunteer duties to support the league.'
+        : 'Sign up for concession stand and tagging shifts to support the league.',
+    };
+  }, [activeSport]);
+
   const concessionEvents = useMemo(
     () => upcomingSlots.map(slot => ({
       id: slot.id,
@@ -238,7 +251,7 @@ export default function ParentVolunteersPage() {
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-xl md:text-2xl font-bold font-headline">Volunteer Signups</h1>
-              <p className="text-sm text-muted-foreground">Sign up for concession stand and tagging shifts to support the league.</p>
+              <p className="text-sm text-muted-foreground">{volunteerTerms.subtitle}</p>
             </div>
             <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
               {activeSeason && requiredSlots > 0 && (
