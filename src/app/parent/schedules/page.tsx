@@ -249,6 +249,22 @@ export default function ParentSchedulesPage() {
     }
   };
 
+  // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
+  // concession stand; football volunteering spans chain gangs, clock, and gate
+  // crews, so it uses generic "volunteer" language. Cosmetic only — the data
+  // model, queries, and the `concessions` filter key stay identical.
+  const volunteerTerms = useMemo(() => {
+    const isFootball = activeSport === 'football';
+    return {
+      scheduleSubtitle: isFootball
+        ? 'View upcoming games and your volunteer duties.'
+        : 'View upcoming games and your concession shifts.',
+      signupRemoved: isFootball
+        ? 'Your volunteer sign-up has been removed.'
+        : 'Your concession sign-up has been removed.',
+    };
+  }, [activeSport]);
+
   // ── Concession sign-up handler ──────────────────────────────────────────────
   const handleConcessionSignup = async (slotId: string) => {
     if (!db || !profile) return;
@@ -298,7 +314,7 @@ export default function ParentSchedulesPage() {
         const filtered = (current.signups ?? []).filter(s => s.parentUserId !== profile.id);
         transaction.update(slotRef, { signups: filtered, claimedCount: filtered.length });
       });
-      toast({ title: 'Cancelled', description: 'Your concession sign-up has been removed.' });
+      toast({ title: 'Cancelled', description: volunteerTerms.signupRemoved });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
@@ -338,7 +354,7 @@ export default function ParentSchedulesPage() {
           <p className="text-sm text-muted-foreground">
             {selectedPlayerId === 'all'
               ? 'Viewing combined league schedule for all your players.'
-              : 'View upcoming games and your concession shifts.'}
+              : volunteerTerms.scheduleSubtitle}
           </p>
         </header>
 
