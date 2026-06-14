@@ -44,6 +44,7 @@ import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType 
 interface Enrollment {
   id: string;
   seasonId: string;
+  divisionId?: string;
   playerId?: string;
   payment_status?: string;
   paymentStatus?: string;
@@ -324,6 +325,30 @@ export default function AdminDashboard({
     if (!allEnrollments || !displaySeason) return [];
     return allEnrollments.filter((e) => e.seasonId === displaySeason.id);
   }, [allEnrollments, displaySeason]);
+
+  // Divisions for the displayed season — used to label the per-division
+  // enrollment breakdown. Stored at seasons/{seasonId}/divisions/{id}.
+  const divisionsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember) || !displaySeason) return null;
+    return collection(db, 'seasons', displaySeason.id, 'divisions');
+  }, [db, isAdmin, isBoardMember, displaySeason]);
+  const { data: seasonDivisions } = useCollection<{ id: string; name: string }>(divisionsQuery);
+
+  const enrollmentsByDivision = useMemo(() => {
+    const nameById = new Map((seasonDivisions ?? []).map((d) => [d.id, d.name]));
+    const counts = new Map<string, number>();
+    seasonEnrollments.forEach((e) => {
+      const key = e.divisionId ?? '';
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    return [...counts.entries()]
+      .map(([divisionId, count]) => ({
+        divisionId,
+        name: nameById.get(divisionId) ?? 'Unassigned',
+        count,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [seasonEnrollments, seasonDivisions]);
 
   const paidEnrollments = useMemo(
     () => seasonEnrollments.filter((e) => ['paid', 'fee_waived'].includes(getEnrollmentStatus(e))),
@@ -672,6 +697,34 @@ export default function AdminDashboard({
             </Card>
           </Link>
         </div>
+
+        {/* ── Zone 2.4: Enrollments by Division ── */}
+        {enrollmentsByDivision.length > 0 && (
+          <Link href="/admin/registration">
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer mb-4">
+              <CardContent className="px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-blue-500 shrink-0" />
+                    <p className="text-xs font-medium text-muted-foreground">Enrollments by Division</p>
+                  </div>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {enrollmentsByDivision.map((d) => (
+                    <div
+                      key={d.divisionId || 'unassigned'}
+                      className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-3 py-1 text-xs"
+                    >
+                      <span className="font-medium text-muted-foreground">{d.name}</span>
+                      <span className="font-bold text-foreground">{d.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        )}
 
         {/* ── Zone 2.5: Practice Slot Coverage ── */}
         {activeSport !== 'football' && <Link href="/admin/practice-slots?tab=distribution">
