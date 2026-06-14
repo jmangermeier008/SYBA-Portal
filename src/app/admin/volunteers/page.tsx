@@ -90,6 +90,10 @@ interface Season {
   registrationOpen: string;
   registrationClose: string;
   volunteerSlotsRequired?: number;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string;   // YYYY-MM-DD
+  status?: string;
+  isActive?: boolean;
 }
 
 interface FamilyCompliance {
@@ -232,9 +236,29 @@ export default function ConcessionsAdminPage() {
     }
   }, [seasons, selectedSeasonId]);
 
-  const sortedSlots = slots
-    ? [...slots].sort((a, b) => a.gameDate.localeCompare(b.gameDate))
-    : [];
+  const activeSeason = useMemo(
+    () => seasons?.find((s: any) => s.status === 'active' || s.isActive) ?? null,
+    [seasons]
+  );
+  const viewingSeason = useMemo(
+    () => seasons?.find(s => s.id === selectedSeasonId) ?? null,
+    [seasons, selectedSeasonId]
+  );
+  // Slots aren't stamped with a seasonId, so scope them to the selected season's
+  // date range (gameDate is YYYY-MM-DD, which compares lexicographically).
+  const sortedSlots = useMemo(() => {
+    if (!slots) return [];
+    let result = [...slots].sort((a, b) => a.gameDate.localeCompare(b.gameDate));
+    if (viewingSeason?.startDate && viewingSeason?.endDate) {
+      result = result.filter(
+        s => s.gameDate >= viewingSeason.startDate! && s.gameDate <= viewingSeason.endDate!
+      );
+    }
+    return result;
+  }, [slots, viewingSeason]);
+
+  // Non-active seasons are view-only — slot creation always applies to "now".
+  const canEditSlots = !!activeSeason && selectedSeasonId === activeSeason.id;
 
   // ── Calendar events ───────────────────────────────────────────────────────
   const concessionEvents = useMemo(
@@ -627,22 +651,41 @@ export default function ConcessionsAdminPage() {
 
           {/* ── Manage Slots Tab ── */}
           <TabsContent value="slots">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
-                <button
-                  onClick={() => setSlotView('list')}
-                  className={cn('px-3 py-1 rounded-full transition-colors flex items-center gap-1.5', slotView === 'list' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
-                >
-                  <LayoutList className="h-3.5 w-3.5" /> List
-                </button>
-                <button
-                  onClick={() => setSlotView('calendar')}
-                  className={cn('px-3 py-1 rounded-full transition-colors flex items-center gap-1.5', slotView === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
-                >
-                  <CalendarIcon className="h-3.5 w-3.5" /> Calendar
-                </button>
+            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
+                <Select value={selectedSeasonId} onValueChange={setSelectedSeasonId}>
+                  <SelectTrigger className="rounded-full w-44 h-9">
+                    <SelectValue placeholder="Select season" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {seasons?.map(s => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}{s.id === activeSeason?.id ? ' (Active)' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm">
+                  <button
+                    onClick={() => setSlotView('list')}
+                    className={cn('px-3 py-1 rounded-full transition-colors flex items-center gap-1.5', slotView === 'list' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                  >
+                    <LayoutList className="h-3.5 w-3.5" /> List
+                  </button>
+                  <button
+                    onClick={() => setSlotView('calendar')}
+                    className={cn('px-3 py-1 rounded-full transition-colors flex items-center gap-1.5', slotView === 'calendar' ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                  >
+                    <CalendarIcon className="h-3.5 w-3.5" /> Calendar
+                  </button>
+                </div>
               </div>
-              <Button onClick={() => setAddDialog(true)} className="rounded-full shadow-lg">
+              <Button
+                onClick={() => setAddDialog(true)}
+                className="rounded-full shadow-lg"
+                disabled={!canEditSlots}
+                title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
+              >
                 <Plus className="mr-2 h-4 w-4" /> Add Slot
               </Button>
             </div>
@@ -666,7 +709,12 @@ export default function ConcessionsAdminPage() {
                     <ShoppingCart className="h-12 w-12 text-muted-foreground/40 mb-4" />
                     <p className="text-muted-foreground font-medium">No volunteer slots yet</p>
                     <p className="text-sm text-muted-foreground mb-4">Add your first volunteer slot to get started.</p>
-                    <Button onClick={() => setAddDialog(true)} className="rounded-full">
+                    <Button
+                      onClick={() => setAddDialog(true)}
+                      className="rounded-full"
+                      disabled={!canEditSlots}
+                      title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
+                    >
                       <Plus className="mr-2 h-4 w-4" /> Add Slot
                     </Button>
                   </CardContent>
