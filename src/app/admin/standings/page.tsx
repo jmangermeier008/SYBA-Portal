@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,7 +11,7 @@ import { Loader2, Lock, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-interface Season { id: string; name: string; }
+interface Season { id: string; name: string; status?: string; isActive?: boolean; }
 interface Division { id: string; name: string; }
 interface Team { id: string; name: string; seasonId: string; divisionId: string; }
 
@@ -74,6 +74,14 @@ export default function StandingsPage() {
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: divisions } = useCollection<Division>(divisionsQuery);
+
+  // Default the season picker to the active season once seasons load.
+  useEffect(() => {
+    if (seasons && seasons.length > 0 && !selectedSeasonId) {
+      const active = seasons.find(s => s.status === 'active' || s.isActive);
+      setSelectedSeasonId(active?.id ?? seasons[0].id);
+    }
+  }, [seasons, selectedSeasonId]);
   const { data: teams } = useCollection<Team>(teamsQuery);
   const { data: completedGames, isLoading: loadingGames } = useCollection<CompletedGame>(gamesQuery);
 

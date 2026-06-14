@@ -148,7 +148,7 @@ export default function RegistrationDashboardPage() {
   const enrollments = useMemo(() => {
     if (!allEnrollments) return [];
     const sportFiltered = allEnrollments.filter(e => sportSeasonIds.has(e.seasonId));
-    if (!selectedSeason || selectedSeason === 'all-seasons') return [];
+    if (!selectedSeason || selectedSeason === 'all-seasons') return sportFiltered;
     return sportFiltered.filter(e => e.seasonId === selectedSeason);
   }, [allEnrollments, selectedSeason, sportSeasonIds]);
 
@@ -204,10 +204,13 @@ export default function RegistrationDashboardPage() {
     [sportFilteredDivisions]
   );
 
-  // Auto-select the first season when seasons load
+  // Auto-select the active season when seasons load (falls back to the first
+  // season). Seasons aren't ordered, so picking seasons[0] outright could land
+  // on an archived season and show $0 revenue for the current one.
   useEffect(() => {
     if (seasons && seasons.length > 0 && !selectedSeason) {
-      setSelectedSeason(seasons[0].id);
+      const active = seasons.find((s: any) => s.status === 'active');
+      setSelectedSeason(active?.id ?? seasons[0].id);
     }
   }, [seasons, selectedSeason]);
 
@@ -590,6 +593,7 @@ export default function RegistrationDashboardPage() {
                       <SelectValue placeholder="All Seasons" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="all-seasons">All Seasons</SelectItem>
                       {seasons?.map((s: any) => (
                         <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                       ))}
