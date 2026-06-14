@@ -6,13 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock, ChevronRight, Check } from 'lucide-react';
+import { Plus, Users, Loader2, Trash2, Trophy, UserCog, Lock, ChevronRight, Check, Pencil } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser, deleteDocumentNonBlocking } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, collectionGroup, doc, setDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, collectionGroup, doc, setDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
+import { syncTeamNameDenormalization } from '@/lib/team-rename';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import Link from 'next/link';
@@ -48,6 +50,10 @@ export default function TeamsAdminPage() {
   const [open, setOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editTeam, setEditTeam] = useState<Team | null>(null);
+  const [editName, setEditName] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const isFootball = activeSport === 'football';
   const [searchQuery, setSearchQuery] = useState('');
   const [filterSeason, setFilterSeason] = useState<string>('all');
   const [filterDivision, setFilterDivision] = useState<string>('all');
@@ -182,6 +188,34 @@ export default function TeamsAdminPage() {
     setDeleteConfirmId(null);
   };
 
+  const openEditTeam = (e: React.MouseEvent, team: Team) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditTeam(team);
+    setEditName(team.name);
+  };
+
+  const handleSaveTeamName = async () => {
+    if (!editTeam) return;
+    const newName = editName.trim();
+    if (!newName || newName === editTeam.name) {
+      setEditTeam(null);
+      return;
+    }
+    setIsSavingEdit(true);
+    try {
+      await updateDoc(doc(db, 'teams', editTeam.id), { name: newName });
+      // Keep denormalized name caches on games + opponent mirrors in sync.
+      await syncTeamNameDenormalization(db, editTeam.id, newName);
+      toast({ title: 'Team Renamed', description: `Now "${newName}".` });
+      setEditTeam(null);
+    } catch {
+      toast({ variant: 'destructive', title: 'Error', description: 'Could not rename the team.' });
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const getCoachLabel = (team: Team) => {
     const ids = team.coachIds?.length ? team.coachIds : (team.coach_uid ? [team.coach_uid] : []);
     if (!ids.length) return 'Unassigned';
@@ -222,6 +256,7 @@ export default function TeamsAdminPage() {
   }
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
@@ -391,6 +426,37 @@ export default function TeamsAdminPage() {
                           </span>
                         </div>
                       </div>
+                      {isFootball ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            {/* span wrapper so the tooltip still fires on the disabled button */}
+                            <span tabIndex={0} onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                type="button"
+                                disabled
+                                className="h-7 w-7 text-muted-foreground shrink-0"
+                              >
+                                <Lock className="h-3.5 w-3.5" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[200px] text-center">
+                            Football team names follow their division. Rename the division to rename this team.
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          type="button"
+                          className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0"
+                          onClick={(e) => openEditTeam(e, team)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -425,6 +491,36 @@ export default function TeamsAdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Rename team dialog (baseball only) */}
+      <Dialog open={!!editTeam} onOpenChange={(o) => !o && setEditTeam(null)}>
+        <DialogContent className="rounded-2xl max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-headline text-xl">Rename Team</DialogTitle>
+            <DialogDescription>
+              Update the team name. Game schedules and standings update automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="editTeamName">Team Name</Label>
+            <Input
+              id="editTeamName"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTeamName(); }}
+              placeholder="e.g. Blue Jays"
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="gap-2 mt-2">
+            <Button variant="outline" onClick={() => setEditTeam(null)}>Cancel</Button>
+            <Button onClick={handleSaveTeamName} disabled={isSavingEdit || !editName.trim()}>
+              {isSavingEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+    </TooltipProvider>
   );
 }
