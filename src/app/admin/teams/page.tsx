@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -87,6 +87,17 @@ export default function TeamsAdminPage() {
 
   const { data: teams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const { data: seasons } = useCollection<any>(seasonsQuery);
+
+  // Default the season filter to the active season the first time seasons load.
+  // One-time only, so the "Clear filters" reset to "all" isn't overridden.
+  const seasonFilterInit = useRef(false);
+  useEffect(() => {
+    if (!seasonFilterInit.current && seasons && seasons.length > 0) {
+      const active = seasons.find((s: any) => s.status === 'active' || s.isActive);
+      if (active) setFilterSeason(active.id);
+      seasonFilterInit.current = true;
+    }
+  }, [seasons]);
   const { data: allUsers } = useCollection<CoachProfile>(usersQuery);
   const { data: allEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
 

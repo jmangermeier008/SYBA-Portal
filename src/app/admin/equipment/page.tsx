@@ -263,6 +263,15 @@ export default function EquipmentPage() {
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
 
+  // Default the season picker to the active season once seasons load (a seasonId
+  // from the URL takes precedence — that effect runs on mount and sets it first).
+  useEffect(() => {
+    if (seasons && seasons.length > 0 && !selectedSeasonId) {
+      const active = seasons.find((s: any) => s.status === 'active' || s.isActive);
+      setSelectedSeasonId(active?.id ?? seasons[0].id);
+    }
+  }, [seasons, selectedSeasonId]);
+
   const enrollmentsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport || !selectedSeasonId) return null;
     return query(

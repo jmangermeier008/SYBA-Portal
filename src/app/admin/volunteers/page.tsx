@@ -223,6 +223,15 @@ export default function ConcessionsAdminPage() {
 
   const { data: seasons } = useCollection<Season>(seasonsQuery);
 
+  // Default the compliance season picker to the active season once seasons load.
+  // The existing selectedSeasonId effect then loads that season's report.
+  useEffect(() => {
+    if (seasons && seasons.length > 0 && !selectedSeasonId) {
+      const active = seasons.find((s: any) => s.status === 'active' || s.isActive);
+      setSelectedSeasonId(active?.id ?? seasons[0].id);
+    }
+  }, [seasons, selectedSeasonId]);
+
   const sortedSlots = slots
     ? [...slots].sort((a, b) => a.gameDate.localeCompare(b.gameDate))
     : [];

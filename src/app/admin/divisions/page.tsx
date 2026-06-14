@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -81,6 +81,14 @@ export default function DivisionsAdminPage() {
   const { data: seasons } = useCollection<Season>(seasonsQuery);
   const { data: divisions, isLoading: loadingDivisions } = useCollection<Division>(divisionsQuery);
   const { data: teams } = useCollection<Team>(teamsQuery);
+
+  // Default the season picker to the active season once seasons load.
+  useEffect(() => {
+    if (seasons && seasons.length > 0 && !selectedSeasonId) {
+      const active = seasons.find(s => s.status === 'active');
+      setSelectedSeasonId(active?.id ?? seasons[0].id);
+    }
+  }, [seasons, selectedSeasonId]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
