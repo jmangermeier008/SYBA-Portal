@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Layers, Loader2, Trash2, Pencil, Lock, Check, X, Users, RefreshCw } from 'lucide-react';
 import { recountDivisionRegistrations } from '@/lib/maintenance-actions';
+import { syncTeamNameDenormalization } from '@/lib/team-rename';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { collection, doc, addDoc, deleteDoc, getDocs, updateDoc, setDoc, query, where, Timestamp } from 'firebase/firestore';
@@ -129,13 +130,25 @@ export default function DivisionsAdminPage() {
 
   const handleEditSave = async (divId: string) => {
     if (!editName.trim()) return;
+    const newName = editName.trim();
     try {
       await updateDoc(doc(db, 'seasons', selectedSeasonId, 'divisions', divId), {
-        name: editName.trim(),
+        name: newName,
         ageGroup: editAgeGroup.trim(),
         fee: editFee !== '' ? Math.round(Number(editFee) * 100) : 0,
         capacity: editCapacity !== '' ? Number(editCapacity) : 20,
       });
+
+      // Football: a division and its auto-created team share one name. Rename the
+      // matching team to match, then sync the cached names on its games.
+      if (activeSport === 'football') {
+        const matchingTeam = teams?.find(t => t.divisionId === divId);
+        if (matchingTeam) {
+          await updateDoc(doc(db, 'teams', matchingTeam.id), { name: newName });
+          await syncTeamNameDenormalization(db, matchingTeam.id, newName, newName);
+        }
+      }
+
       toast({ title: 'Division Updated' });
       setEditingId(null);
     } catch {
