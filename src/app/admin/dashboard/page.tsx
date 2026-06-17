@@ -29,6 +29,7 @@ import {
   FileText,
   Dumbbell,
   ShieldCheck,
+  HeartPulse,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -417,16 +418,24 @@ export default function AdminDashboard({
     }
     if (activeSport === 'football') {
       const enrolledPlayerIds = new Set(seasonEnrollments.map((e) => e.playerId).filter(Boolean));
-      const missingDocs = (allPlayers ?? []).filter(
-        (p) => enrolledPlayerIds.has(p.id) && (
-          !(p.compliance?.birthCertificateVerified || (p as any).ageVerified) ||
-          !p.compliance?.physicalVerified
-        )
+      const enrolledPlayers = (allPlayers ?? []).filter((p) => enrolledPlayerIds.has(p.id));
+      const missingBirthCert = enrolledPlayers.filter(
+        (p) => !(p.compliance?.birthCertificateVerified || (p as any).ageVerified)
       ).length;
-      if (missingDocs > 0) {
+      const missingPhysical = enrolledPlayers.filter(
+        (p) => !p.compliance?.physicalVerified
+      ).length;
+      if (missingBirthCert > 0) {
         items.push({
           severity: 'orange',
-          message: `${missingDocs} player${missingDocs > 1 ? 's' : ''} missing verified documents`,
+          message: `${missingBirthCert} player${missingBirthCert > 1 ? 's' : ''} missing birth certificate`,
+          href: '/admin/registration',
+        });
+      }
+      if (missingPhysical > 0) {
+        items.push({
+          severity: 'orange',
+          message: `${missingPhysical} player${missingPhysical > 1 ? 's' : ''} missing physical`,
           href: '/admin/registration',
         });
       }
@@ -498,18 +507,17 @@ export default function AdminDashboard({
     };
   }, [activeSport]);
 
-  const { totalEnrollmentsCount, missingDocumentsCount, verifiedCount, enrolledPlayersCount, pendingPaymentsCount } = useMemo(() => {
+  const { totalEnrollmentsCount, birthCertVerifiedCount, physicalVerifiedCount, enrolledPlayersCount, pendingPaymentsCount } = useMemo(() => {
     const total = seasonEnrollments.length;
     const enrolledPlayerIds = new Set(seasonEnrollments.map((e) => e.playerId).filter(Boolean));
     const enrolled = (allPlayers ?? []).filter((p) => enrolledPlayerIds.has(p.id));
-    const missing = enrolled.filter(
-      (p) => !p.compliance?.birthCertificateVerified || !p.compliance?.physicalVerified
-    ).length;
+    const birthCertVerified = enrolled.filter((p) => p.compliance?.birthCertificateVerified).length;
+    const physicalVerified = enrolled.filter((p) => p.compliance?.physicalVerified).length;
     const pending = seasonEnrollments.filter((e) => getEnrollmentStatus(e) === 'pending_payment').length;
     return {
       totalEnrollmentsCount: total,
-      missingDocumentsCount: missing,
-      verifiedCount: enrolled.length - missing,
+      birthCertVerifiedCount: birthCertVerified,
+      physicalVerifiedCount: physicalVerified,
       enrolledPlayersCount: enrolled.length,
       pendingPaymentsCount: pending,
     };
@@ -642,7 +650,7 @@ export default function AdminDashboard({
         </div>
 
         {/* ── Zone 2: Action Row ── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <Link href="/admin/registration">
             <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
               <CardContent className="px-4 py-4 flex items-center justify-between gap-3">
@@ -660,17 +668,37 @@ export default function AdminDashboard({
             </Card>
           </Link>
 
-          <Link href="/admin/roster">
+          <Link href="/admin/registration">
             <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
               <CardContent className="px-4 py-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className={cn('rounded-lg p-2 shrink-0', missingDocumentsCount > 0 ? 'bg-yellow-100' : 'bg-green-100')}>
-                    <ShieldCheck className={cn('h-4 w-4', missingDocumentsCount > 0 ? 'text-yellow-600' : 'text-green-600')} />
+                  <div className={cn('rounded-lg p-2 shrink-0', birthCertVerifiedCount < enrolledPlayersCount ? 'bg-yellow-100' : 'bg-green-100')}>
+                    <ShieldCheck className={cn('h-4 w-4', birthCertVerifiedCount < enrolledPlayersCount ? 'text-yellow-600' : 'text-green-600')} />
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground leading-none mb-1">Identity & Medical</p>
+                    <p className="text-xs text-muted-foreground leading-none mb-1">Birth Cert</p>
                     <p className="text-2xl font-bold leading-none">
-                      {verifiedCount}
+                      {birthCertVerifiedCount}
+                      <span className="text-sm font-normal text-muted-foreground"> / {enrolledPlayersCount} verified</span>
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link href="/admin/registration">
+            <Card className="border-none shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+              <CardContent className="px-4 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn('rounded-lg p-2 shrink-0', physicalVerifiedCount < enrolledPlayersCount ? 'bg-yellow-100' : 'bg-green-100')}>
+                    <HeartPulse className={cn('h-4 w-4', physicalVerifiedCount < enrolledPlayersCount ? 'text-yellow-600' : 'text-green-600')} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground leading-none mb-1">Physical</p>
+                    <p className="text-2xl font-bold leading-none">
+                      {physicalVerifiedCount}
                       <span className="text-sm font-normal text-muted-foreground"> / {enrolledPlayersCount} verified</span>
                     </p>
                   </div>
