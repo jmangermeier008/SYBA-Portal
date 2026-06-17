@@ -74,6 +74,7 @@ interface UserProfile {
   email: string;
   role?: string;
   roles?: string[];
+  sportRoles?: Record<string, string[]>;
 }
 
 interface Team {
@@ -86,7 +87,7 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
   const { teamId } = use(params);
   const db = useFirestore();
   const { loading: loadingUser } = useUser();
-  const { isAdmin, isBoardMember } = useSport();
+  const { isAdmin, isBoardMember, activeSport } = useSport();
   const { toast } = useToast();
   const [addCoachOpen, setAddCoachOpen] = useState(false);
   const [selectedCoachId, setSelectedCoachId] = useState('');
@@ -120,10 +121,14 @@ export default function AdminTeamRosterPage({ params }: { params: Promise<{ team
   const { data: allUsers, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
 
 
-  const eligibleCoaches = allUsers?.filter(u =>
-    (u.roles?.includes('Coach') || u.roles?.includes('Admin') || u.role === 'Coach' || u.role === 'Admin') &&
-    !team?.coachIds?.includes(u.id)
-  ) ?? [];
+  const eligibleCoaches = allUsers?.filter(u => {
+    const sportRoles = activeSport ? (u.sportRoles?.[activeSport] ?? []) : [];
+    const isCoachEligible =
+      sportRoles.includes('Coach') || sportRoles.includes('Admin') ||
+      u.roles?.includes('Coach') || u.roles?.includes('Admin') ||
+      u.role === 'Coach' || u.role === 'Admin';
+    return isCoachEligible && !team?.coachIds?.includes(u.id);
+  }) ?? [];
 
   const handleAddCoach = async () => {
     if (!selectedCoachId || !db) return;
