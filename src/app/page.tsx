@@ -178,7 +178,9 @@ export default function Home() {
   const filteredOfficers = useMemo(() => {
     if (!officers) return [];
     return officers.filter(o =>
-      EXECUTIVE_TITLES.includes(o.title) &&
+      // `isExecutive` is admin-controlled; fall back to the seed-default titles for
+      // any legacy officer doc saved before the flag existed.
+      (o.isExecutive ?? EXECUTIVE_TITLES.includes(o.title)) &&
       o.name != null && o.name !== ''
     );
   }, [officers]);

@@ -117,6 +117,24 @@ export default function RolesPage() {
 
   const { data: users, isLoading } = useCollection<UserData>(usersQuery);
 
+  // Officer titles are now admin-defined per sport (officers collection). The title picker
+  // reads the live list instead of a hardcoded array.
+  const officersQuery = useMemoFirebase(() => {
+    if (!db) return null;
+    if (!isSiteAdmin && !isBoardMember) return null;
+    return collection(db, 'officers');
+  }, [db, isSiteAdmin, isBoardMember]);
+  const { data: officerRecords } = useCollection<{ id: string; title: string; sport?: string; order?: number }>(officersQuery);
+
+  const availableTitles = useMemo(() => {
+    const fromDirectory = (officerRecords ?? [])
+      .filter((o) => sportFilter === 'all' || o.sport === sportFilter)
+      .map((o) => o.title);
+    // Union with seed defaults so the picker is never empty before any role is saved.
+    const merged = [...new Set([...OFFICER_TITLES, ...fromDirectory])];
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [officerRecords, sportFilter]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
@@ -515,7 +533,7 @@ export default function RolesPage() {
                                     <PopoverContent className="w-64 p-3" align="start">
                                       <p className="text-xs font-semibold mb-2 text-muted-foreground">Assign Officer Titles</p>
                                       <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                                        {OFFICER_TITLES.map((t) => (
+                                        {availableTitles.map((t) => (
                                           <label key={t} className="flex items-center gap-2 text-xs cursor-pointer">
                                             <Checkbox
                                               checked={currentTitles.includes(t)}
@@ -833,7 +851,7 @@ export default function RolesPage() {
                   <div className="space-y-1.5 pt-2 border-t">
                     <Label className="text-xs text-muted-foreground">Officer Titles</Label>
                     <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                      {OFFICER_TITLES.map((t) => (
+                      {availableTitles.map((t) => (
                         <label key={t} className="flex items-center gap-2 text-xs cursor-pointer">
                           <Checkbox
                             checked={currentTitles.includes(t)}

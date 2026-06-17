@@ -607,6 +607,26 @@ export interface LeagueOfficer {
   mappedTopic?: import('@/data/inquiry-topics').InquiryTopic;
   order: number;
   sport?: Sport;
+  /** Show this role in the public homepage leadership grid (replaces the old hardcoded EXECUTIVE_TITLES check). */
+  isExecutive?: boolean;
+  /** Web-form inquiry topics that route to this role. The role's email receives those inquiries. */
+  handlesTopics?: import('@/data/inquiry-topics').InquiryTopic[];
+}
+
+/**
+ * Site-Admin-managed inquiry delivery config — singleton doc `systemConfig/inquiries`.
+ * Read server-side by sendInquiryNotification (Admin SDK); written only via /api/admin/inquiry-config.
+ */
+export interface InquiryDeliveryConfig {
+  /** CC'd on EVERY inquiry notification, regardless of routing. */
+  alwaysCcEmails?: string[];
+  /** Ad-hoc recipient emails per topic, per sport — added on top of role routing. */
+  topicOverrides?: Partial<Record<Sport, Partial<Record<import('@/data/inquiry-topics').InquiryTopic, string[]>>>>;
+  /** Used only when nothing else resolves. `all` applies to every sport. */
+  fallbackEmails?: Partial<Record<Sport | 'all', string[]>>;
+  updatedAt?: string;
+  updatedByName?: string;
+  updatedByUid?: string;
 }
 
 // ---------------------------------------------------------------------------
