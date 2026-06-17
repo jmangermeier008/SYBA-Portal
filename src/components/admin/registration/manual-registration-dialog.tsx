@@ -260,8 +260,8 @@ export function ManualRegistrationDialog({ open, onOpenChange, seasons }: Manual
       }
 
       // Settled enrollment, mirroring the stepper's field names. The truthy
-      // offline_ payment id follows the zero-cart no_charge_ convention so
-      // resume-payment prompts and webhook idempotency treat it as paid.
+      // offline_/waived_ payment id follows the zero-cart no_charge_ convention so
+      // resume-payment prompts and webhook idempotency treat it as settled.
       batch.set(doc(db, 'userProfiles', parent.id, 'enrollments', enrollmentId), {
         id: enrollmentId,
         playerId,
@@ -275,7 +275,7 @@ export function ManualRegistrationDialog({ open, onOpenChange, seasons }: Manual
         emergencyContacts: [],
         medicalNotes: '',
         paymentStatus: paymentMode === 'waived' ? 'fee_waived' : 'paid',
-        stripe_payment_id: paymentMode === 'waived' ? '' : `offline_${enrollmentId}`,
+        stripe_payment_id: paymentMode === 'waived' ? `waived_${enrollmentId}` : `offline_${enrollmentId}`,
         fee_waived: paymentMode === 'waived',
         waiver_reason: paymentMode === 'waived' ? waiverReason.trim() : '',
         registrationFeeAmount: amountCents,

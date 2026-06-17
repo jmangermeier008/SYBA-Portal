@@ -105,6 +105,7 @@ export default function DivisionsAdminPage() {
         capacity: formData.capacity ? Number(formData.capacity) : 20,
         waitlistEnabled: true,
         registeredCount: 0,
+        reservedCount: 0,
       });
       // Store the auto-generated id inside the document for easy reference
       await updateDoc(ref, { id: ref.id });

@@ -79,16 +79,28 @@ export async function POST(req: Request) {
         }
         if (enrollment.stripe_payment_id) return { status: 'already-paid' as const, enrollment };
 
+        const wasReserved = enrollment.capacityReserved === true;
         tx.update(enrollmentRef, {
           paymentStatus: 'paid',
           stripe_payment_id: session.payment_intent ?? session.id,
           gross_amount_paid: session.amount_total ?? 0,
+          capacityReserved: false,
           updatedAt: new Date().toISOString(),
         });
 
         if (enrollment.seasonId && enrollment.divisionId) {
           const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
-          tx.set(divRef, { registeredCount: FieldValue.increment(1) }, { merge: true });
+          // Convert the checkout-time reservation into a held seat: registeredCount
+          // +1, and release the reservedCount taken at checkout (flag guards against
+          // double-release vs the webhook / reconcile guard).
+          tx.set(
+            divRef,
+            {
+              registeredCount: FieldValue.increment(1),
+              ...(wasReserved ? { reservedCount: FieldValue.increment(-1) } : {}),
+            },
+            { merge: true }
+          );
         }
 
         return { status: 'paid' as const, enrollment };

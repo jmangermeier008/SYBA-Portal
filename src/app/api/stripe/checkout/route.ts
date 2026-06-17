@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
-import { calculateCartPricing } from '@/lib/registration-logic';
+import { calculateCartPricing, classifyCapacity } from '@/lib/registration-logic';
 import { getStripeClient } from '@/lib/stripe-config';
 
 async function verifyFirebaseToken(token: string): Promise<string | null> {
@@ -128,16 +128,23 @@ export async function POST(req: Request) {
           if (!snap.exists) return false;
           const data = snap.data() as any;
           if (data.stripe_payment_id) return true; // webhook/confirm won the race
+          // Reconciling a settled payment also converts any checkout-time
+          // reservation into a held seat (registeredCount +1, release reservedCount).
+          const wasReserved = data.capacityReserved === true;
           tx.update(ref, {
             paymentStatus: 'paid',
             stripe_payment_id: finalizedSession.payment_intent ?? finalizedSession.id,
             gross_amount_paid: finalizedSession.amount_total ?? 0,
+            capacityReserved: false,
             updatedAt: new Date().toISOString(),
           });
           if (data.seasonId && data.divisionId) {
             tx.set(
               db.doc(`seasons/${data.seasonId}/divisions/${data.divisionId}`),
-              { registeredCount: FieldValue.increment(1) },
+              {
+                registeredCount: FieldValue.increment(1),
+                ...(wasReserved ? { reservedCount: FieldValue.increment(-1) } : {}),
+              },
               { merge: true }
             );
           }
@@ -150,7 +157,6 @@ export async function POST(req: Request) {
       const unpaidEnrollments = resolvedEnrollments.filter(
         ({ enrollmentId }) => !settledEnrollmentIds.has(enrollmentId)
       );
-      const unpaidEnrollmentIds = unpaidEnrollments.map((e) => e.enrollmentId);
 
       // Everything the parent asked to pay for is already settled — the "Resume
       // Payment" click self-heals into a finalize, so send them to success with
@@ -159,6 +165,100 @@ export async function POST(req: Request) {
         const sportParam = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
         return NextResponse.json({
           url: `${baseUrl}/parent/enroll/success?enrollment_ids=${encodeURIComponent(enrollmentIds.join(','))}${sportParam}`,
+        });
+      }
+
+      // ── Capacity reservation (Fix E) ──────────────────────────────────────
+      // Atomically reserve a seat per still-unpaid enrollment against its division
+      // capacity BEFORE creating the Stripe session, so concurrent checkouts cannot
+      // overbook. Firestore Admin transactions can't run count queries, so capacity
+      // is enforced against the registeredCount + reservedCount counters. Runs after
+      // reconciliation so already-settled enrollments are never re-reserved.
+      const now = new Date().toISOString();
+      const waitlistedIds = new Set<string>();
+      try {
+        await db.runTransaction(async (tx) => {
+          const divKey = (e: any) => `${e.seasonId}/${e.divisionId}`;
+
+          // Reads first: every distinct division doc this cart touches.
+          const distinctDivs = new Map<string, ReturnType<typeof db.doc>>();
+          for (const { enrollment } of unpaidEnrollments) {
+            if (enrollment.seasonId && enrollment.divisionId) {
+              distinctDivs.set(
+                divKey(enrollment),
+                db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`)
+              );
+            }
+          }
+          const divData = new Map<string, any>();
+          for (const [key, ref] of distinctDivs) {
+            const snap = await tx.get(ref);
+            divData.set(key, snap.exists ? snap.data() : null);
+          }
+
+          // Decide each enrollment in cart order, tracking seats taken this tx.
+          const occupied = new Map<string, number>();
+          const reservedDelta = new Map<string, number>();
+          for (const { enrollmentId, enrollment } of unpaidEnrollments) {
+            // Missing season/division → can't capacity-check; leave it payable.
+            if (!enrollment.seasonId || !enrollment.divisionId) continue;
+            const key = divKey(enrollment);
+            const div = divData.get(key);
+            const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
+            const decision = classifyCapacity({
+              capacity: div?.capacity,
+              registeredCount: div?.registeredCount ?? 0,
+              reservedCount: div?.reservedCount ?? 0,
+              waitlistEnabled: div?.waitlistEnabled,
+              occupiedSoFar: occupied.get(key) ?? 0,
+            });
+            if (decision === 'reject') {
+              const e = new Error(`DIVISION_FULL:${div?.name ?? 'This division'}`);
+              (e as any).divisionFull = true;
+              throw e; // aborts the whole tx — no partial reservations commit
+            }
+            if (decision === 'waitlist') {
+              tx.update(enrollmentRef, { paymentStatus: 'waitlisted', waitlisted_at: now, updatedAt: now });
+              waitlistedIds.add(enrollmentId);
+              continue;
+            }
+            if (decision === 'reserve') {
+              occupied.set(key, (occupied.get(key) ?? 0) + 1);
+              reservedDelta.set(key, (reservedDelta.get(key) ?? 0) + 1);
+              tx.update(enrollmentRef, { capacityReserved: true, updatedAt: now });
+            }
+            // 'unlimited' → payable, no reservation needed
+          }
+
+          for (const [key, delta] of reservedDelta) {
+            if (delta > 0) {
+              tx.set(distinctDivs.get(key)!, { reservedCount: FieldValue.increment(delta) }, { merge: true });
+            }
+          }
+        });
+      } catch (capErr: any) {
+        if (capErr?.divisionFull || String(capErr?.message ?? '').startsWith('DIVISION_FULL:')) {
+          const divName = String(capErr.message).slice('DIVISION_FULL:'.length) || 'This division';
+          return NextResponse.json(
+            { error: `${divName} is now full and does not have a waitlist. Please choose a different division.`, divisionFull: true },
+            { status: 402 }
+          );
+        }
+        throw capErr;
+      }
+
+      // Enrollments still payable after capacity resolution (waitlisted drop out).
+      const payableEnrollments = unpaidEnrollments.filter(e => !waitlistedIds.has(e.enrollmentId));
+      const payableEnrollmentIds = payableEnrollments.map(e => e.enrollmentId);
+      const waitlistedEnrollmentIds = [...waitlistedIds];
+
+      // All payable items were just moved to the waitlist by the capacity race —
+      // nothing to charge. Send the parent to the waitlisted success screen.
+      if (payableEnrollments.length === 0) {
+        const sportQ = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
+        return NextResponse.json({
+          url: `${baseUrl}/parent/enroll/success?waitlisted=1${sportQ}`,
+          waitlistedEnrollmentIds,
         });
       }
 
@@ -196,7 +296,7 @@ export async function POST(req: Request) {
       // division or fee means the league config is broken — refuse to guess.
       const divisionFees: number[] = [];
       const divisionNames: string[] = [];
-      for (const { enrollment } of unpaidEnrollments) {
+      for (const { enrollment } of payableEnrollments) {
         const divSnap = await db
           .doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`)
           .get();
@@ -215,9 +315,10 @@ export async function POST(req: Request) {
       const prices = calculateCartPricing(pastPaidCount, divisionFees, siblingFeeCents);
 
       // Stripe metadata value limit is 500 chars. UUIDs are 36 chars each + commas.
-      // Only the unpaid enrollments ride on this session — reconciled-paid ones
-      // are excluded so the webhook/confirm never re-finalizes them.
-      const enrollmentIdsStr = unpaidEnrollmentIds.join(',');
+      // Only payable enrollments ride on the session: reconciled-paid ones are
+      // already settled and waitlisted ones aren't charged, so the webhook/confirm
+      // never re-finalizes either.
+      const enrollmentIdsStr = payableEnrollmentIds.join(',');
       const sportParam = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
 
       // ── Zero-total carts (e.g. $0-fee divisions) skip Stripe entirely ─────
@@ -227,22 +328,30 @@ export async function POST(req: Request) {
       // so resume-payment and webhook idempotency guards treat it as settled).
       const cartTotal = prices.reduce((sum, p) => sum + p, 0);
       if (cartTotal === 0) {
-        for (const { enrollmentId, enrollment } of unpaidEnrollments) {
+        for (const { enrollmentId, enrollment } of payableEnrollments) {
           await db.runTransaction(async (tx) => {
             const ref = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
             const snap = await tx.get(ref);
             if (!snap.exists || (snap.data() as any).stripe_payment_id) return;
+            const reserved = (snap.data() as any).capacityReserved === true;
             tx.update(ref, {
               paymentStatus: 'paid',
               stripe_payment_id: `no_charge_${enrollmentId}`,
               registrationFeeAmount: 0,
               gross_amount_paid: 0,
+              fee_waived: false,
+              capacityReserved: false,
               updatedAt: new Date().toISOString(),
             });
             if (enrollment.seasonId && enrollment.divisionId) {
+              // Convert the reservation into a held seat: registeredCount +1,
+              // and release the reservedCount we took at the top of this request.
               tx.set(
                 db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`),
-                { registeredCount: FieldValue.increment(1) },
+                {
+                  registeredCount: FieldValue.increment(1),
+                  ...(reserved ? { reservedCount: FieldValue.increment(-1) } : {}),
+                },
                 { merge: true }
               );
             }
@@ -250,13 +359,14 @@ export async function POST(req: Request) {
         }
         return NextResponse.json({
           url: `${baseUrl}/parent/enroll/success?enrollment_ids=${encodeURIComponent(enrollmentIdsStr)}${sportParam}`,
+          waitlistedEnrollmentIds,
         });
       }
 
       // ── Build Stripe line items ────────────────────────────────────────────
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-      for (let i = 0; i < unpaidEnrollments.length; i++) {
-        const { enrollment } = unpaidEnrollments[i];
+      for (let i = 0; i < payableEnrollments.length; i++) {
+        const { enrollment } = payableEnrollments[i];
 
         // Resolve player name for the line item description
         let playerName = '';
@@ -288,7 +398,7 @@ export async function POST(req: Request) {
       // Stripe session instead of creating a duplicate. Pricing is part of the
       // key so a legitimately changed cart gets a fresh session.
       const idempotencyKey = createHash('sha256')
-        .update(`${userId}|${[...unpaidEnrollmentIds].sort().join(',')}|${prices.join(',')}`)
+        .update(`${userId}|${[...payableEnrollmentIds].sort().join(',')}|${prices.join(',')}`)
         .digest('hex');
 
       const session = await stripe.checkout.sessions.create({
@@ -310,7 +420,7 @@ export async function POST(req: Request) {
       // dashboard "Resume Payment" button, which does not write it client-side)
       // can reconcile against it via the guard above instead of charging again.
       await Promise.all(
-        unpaidEnrollmentIds.map((eid) =>
+        payableEnrollmentIds.map((eid) =>
           db
             .doc(`userProfiles/${userId}/enrollments/${eid}`)
             .set({ stripeSessionId: session.id }, { merge: true })
@@ -318,7 +428,7 @@ export async function POST(req: Request) {
         )
       );
 
-      return NextResponse.json({ url: session.url, sessionId: session.id });
+      return NextResponse.json({ url: session.url, sessionId: session.id, waitlistedEnrollmentIds });
     }
 
     // Legacy single-enrollment path (client-supplied fee) removed — all callers

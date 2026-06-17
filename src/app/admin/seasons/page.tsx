@@ -92,13 +92,16 @@ export default function SeasonsAdminPage() {
     };
 
     try {
-      await setDoc(seasonRef, seasonData);
-
+      // Write divisions (and teams for non-team sports) BEFORE the season doc, so a
+      // partial failure can't leave an orphaned season that appears in enrollment
+      // dropdowns with no divisions. Subcollection writes don't require the parent
+      // season doc to pre-exist, so this ordering is safe.
       const sportConfig = SPORT_CONFIG[activeSport!];
       const divisions = sportConfig.defaultDivisions.map(d => ({
         ...d,
         waitlistEnabled: true,
         registeredCount: 0,
+        reservedCount: 0,
       }));
 
       await Promise.all(
@@ -121,6 +124,9 @@ export default function SeasonsAdminPage() {
           )
         );
       }
+
+      // Season doc last — only now does the season become visible to enrollment.
+      await setDoc(seasonRef, seasonData);
 
       toast({ title: "Season Created", description: `${formData.name} is now active.` });
       setOpen(false);
@@ -183,10 +189,16 @@ export default function SeasonsAdminPage() {
   };
 
   const handleSetActive = async (id: string) => {
-    if (!seasons) return;
+    if (!activeSport) return;
     try {
+      // Re-query fresh instead of trusting the in-memory `seasons` snapshot, which
+      // can be stale if another admin added/changed a season. Scoped to the current
+      // sport so the other sport's active season is never disturbed.
+      const freshSnap = await getDocs(
+        query(collection(db, 'seasons'), where('sport', '==', activeSport))
+      );
       const batch = writeBatch(db);
-      seasons.forEach((s) => {
+      freshSnap.docs.forEach((s) => {
         batch.update(doc(db, 'seasons', s.id), {
           isActive: s.id === id,
           status: s.id === id ? 'active' : 'archived',
