@@ -401,8 +401,10 @@ export default function AdminSettingsPage() {
     if (!allUsers || !activeSport) return [];
     return allUsers.filter(u => {
       // Site Admin is a behind-the-scenes superuser role, not a board seat —
-      // never auto-list them as an At-Large Board Member.
-      if (u.isSiteAdmin) return false;
+      // never auto-list them as an At-Large Board Member. Mirror the same
+      // dedicated-field + legacy-roles fallback used by useUser() so legacy
+      // profiles (Site Admin stored only in `roles`) are also excluded.
+      if (u.isSiteAdmin || u.roles?.includes('Site Admin')) return false;
       const sportRoleList = u.sportRoles?.[activeSport] ?? [];
       const isBoardMember =
         sportRoleList.some(r => r === 'Board Member' || r === 'Admin') ||
