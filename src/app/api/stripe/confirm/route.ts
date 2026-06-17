@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
 import { getStripeClient } from '@/lib/stripe-config';
+import { sendConfirmationEmail } from '@/lib/email';
 
 // Client-triggered fallback for when the Stripe webhook is delayed. The session
 // metadata — not the request body — is the source of truth for which
@@ -50,23 +51,29 @@ export async function POST(req: Request) {
 
     const db = getAdminFirestore();
 
+    // Track which enrollments THIS request newly transitions to paid. The confirmation
+    // email is sent only for those, so whichever path (this route or the webhook) wins
+    // the race sends exactly one email — never zero, never two.
+    let newlyPaidCount = 0;
+    const playerNames: string[] = [];
+
     for (const enrollmentId of enrollmentIds) {
       const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
 
       // Atomic mark-paid + registeredCount increment; the in-transaction read of
       // stripe_payment_id prevents double-processing when the webhook lands
       // concurrently.
-      await db.runTransaction(async (tx) => {
+      const outcome = await db.runTransaction(async (tx) => {
         const snap = await tx.get(enrollmentRef);
-        if (!snap.exists) return;
+        if (!snap.exists) return { status: 'missing' as const };
 
         const enrollment = snap.data() as any;
 
         if (enrollment.parentUserId && enrollment.parentUserId !== userId) {
           console.error(`[stripe/confirm] Enrollment ${enrollmentId} does not belong to user ${userId}`);
-          return;
+          return { status: 'forbidden' as const };
         }
-        if (enrollment.stripe_payment_id) return; // already processed
+        if (enrollment.stripe_payment_id) return { status: 'already-paid' as const, enrollment };
 
         tx.update(enrollmentRef, {
           paymentStatus: 'paid',
@@ -79,7 +86,66 @@ export async function POST(req: Request) {
           const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
           tx.set(divRef, { registeredCount: FieldValue.increment(1) }, { merge: true });
         }
+
+        return { status: 'paid' as const, enrollment };
       });
+
+      if (outcome.status === 'paid') {
+        newlyPaidCount++;
+        // Resolve the player name for the email (cosmetic — non-fatal on failure)
+        const playerId = outcome.enrollment?.playerId;
+        if (playerId) {
+          try {
+            const playerSnap = await db.doc(`userProfiles/${userId}/players/${playerId}`).get();
+            if (playerSnap.exists) {
+              const p = playerSnap.data() as any;
+              playerNames.push(`${p.firstName ?? ''} ${p.lastName ?? ''}`.trim());
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
+      }
+    }
+
+    // Send a single confirmation email if this request was the one to finalize payment.
+    // Mirrors the webhook's email logic so a delayed/absent webhook never leaves the
+    // parent without confirmation. Never fails the response — email is cosmetic.
+    if (newlyPaidCount > 0) {
+      try {
+        const [userSnap, firstEnrollmentSnap] = await Promise.all([
+          db.doc(`userProfiles/${userId}`).get(),
+          db.doc(`userProfiles/${userId}/enrollments/${enrollmentIds[0]}`).get(),
+        ]);
+        const user = userSnap.exists ? (userSnap.data() as any) : null;
+        const firstEnrollment = firstEnrollmentSnap.exists ? (firstEnrollmentSnap.data() as any) : null;
+
+        if (firstEnrollment?.seasonId && firstEnrollment?.divisionId) {
+          const [seasonSnap, divisionSnap] = await Promise.all([
+            db.doc(`seasons/${firstEnrollment.seasonId}`).get(),
+            db.doc(`seasons/${firstEnrollment.seasonId}/divisions/${firstEnrollment.divisionId}`).get(),
+          ]);
+
+          const toEmail = session.customer_details?.email ?? user?.email ?? '';
+          const playerName = playerNames.join(', ') || 'Your player';
+
+          if (toEmail) {
+            await sendConfirmationEmail({
+              toEmail,
+              playerName,
+              seasonName: seasonSnap.data()?.name ?? '',
+              divisionName: divisionSnap.data()?.name ?? '',
+              isWaitlisted: false,
+              feeWaived: firstEnrollment?.fee_waived ?? false,
+              sport: firstEnrollment?.sport,
+            });
+          }
+        } else {
+          console.error('[stripe/confirm] Missing seasonId or divisionId on enrollment, skipping email');
+        }
+      } catch (emailErr: any) {
+        console.error('[stripe/confirm] Email send error:', emailErr.message);
+      }
     }
 
     return NextResponse.json({ confirmed: true });
