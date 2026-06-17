@@ -181,24 +181,25 @@ export async function purgeStripeTestData(
   // Two detection signals for Stripe test-mode enrollments:
   // 1. stripeSessionId starts with 'cs_test_' (Stripe test mode checkout sessions)
   // 2. stripe_payment_id === 'test_seed' (records from seedTestEnrollments)
-  const [testSessionSnap, testSeedSnap] = await Promise.all([
-    db.collectionGroup('enrollments')
-      .where('stripeSessionId', '>=', 'cs_test_')
-      .where('stripeSessionId', '<', 'cs_test_~')
-      .get(),
-    db.collectionGroup('enrollments')
-      .where('stripe_payment_id', '==', 'test_seed')
-      .get(),
-  ]);
+  //
+  // Matched in memory off a single unfiltered collection-group read. A filtered
+  // collection-group query on these fields would need COLLECTION_GROUP indexes
+  // (which don't exist), throwing FAILED_PRECONDITION. The dataset is small.
+  // NOTE: 'no_charge_'/'offline_' markers are deliberately NOT treated as test
+  // data — they also occur in LIVE mode (real $0 and admin-manual registrations).
+  const allSnap = await db.collectionGroup('enrollments').get();
+  const testDocs = allSnap.docs.filter(d => {
+    const e = d.data();
+    const sid = e.stripeSessionId;
+    return (typeof sid === 'string' && sid.startsWith('cs_test_')) || e.stripe_payment_id === 'test_seed';
+  });
 
-  // De-duplicate by Firestore document path
-  const docsById = new Map<string, QueryDocumentSnapshot>();
-  [...testSessionSnap.docs, ...testSeedSnap.docs].forEach(d => docsById.set(d.ref.path, d));
-  const uniqueDocs = [...docsById.values()];
+  if (testDocs.length === 0) return { purged: 0 };
 
-  if (uniqueDocs.length === 0) return { purged: 0 };
-
-  const purged = await batchDelete(uniqueDocs);
+  // Keep division capacity counters honest for any paid/fee_waived test enrollments.
+  const decrements = divisionDecrementsFor(testDocs);
+  const purged = await batchDelete(testDocs);
+  await applyDivisionDecrements(decrements);
   return { purged };
 }
 
