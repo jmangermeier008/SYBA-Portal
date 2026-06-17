@@ -41,6 +41,7 @@ export function getSdks(firebaseApp: FirebaseApp) {
   try {
     firestore = initializeFirestore(firebaseApp, {
       localCache: persistentLocalCache(),
+      experimentalAutoDetectLongPolling: true,
     });
   } catch {
     // Already initialized (e.g. hot reload in dev) — get the existing instance

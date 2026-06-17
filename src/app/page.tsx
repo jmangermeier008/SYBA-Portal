@@ -5,7 +5,7 @@ import { setActiveSport as writeActiveSport, clearActiveSport } from '@/hooks/us
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Link from 'next/link';
 import Image from 'next/image';
 import { AlertTriangle, Loader2, Megaphone, Calendar, Pin, Users } from 'lucide-react';
@@ -481,6 +481,9 @@ export default function Home() {
               <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Full Board of Directors</DialogTitle>
+                  <DialogDescription>
+                    The complete roster of SYBA board members and their roles.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 py-2">
                   {fullBoardOfficers.map((o) => (

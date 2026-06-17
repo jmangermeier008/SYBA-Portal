@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -125,6 +125,9 @@ export function DocumentViewerDialog({
           <DialogTitle className="font-headline">
             {player ? `${player.firstName} ${player.lastName}` : ''} — Documents
           </DialogTitle>
+          <DialogDescription>
+            View and verify this player's uploaded clearance and registration documents.
+          </DialogDescription>
           {player?.dateOfBirth && (
             <p className="text-xs text-muted-foreground">DOB {player.dateOfBirth}</p>
           )}
