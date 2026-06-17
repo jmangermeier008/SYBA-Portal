@@ -4,8 +4,7 @@ import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
 import { calculateCartPricing } from '@/lib/registration-logic';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getStripeClient } from '@/lib/stripe-config';
 
 async function verifyFirebaseToken(token: string): Promise<string | null> {
   try {
@@ -43,6 +42,9 @@ export async function POST(req: Request) {
     if (tokenUid !== userId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+
+    // Stripe client for the currently active runtime mode (test vs live)
+    const { stripe } = await getStripeClient();
 
     // ── Multi-enrollment path (new) ──────────────────────────────────────────
     // Accepts enrollmentIds: string[] — reads enrollment docs from Firestore to build line items.

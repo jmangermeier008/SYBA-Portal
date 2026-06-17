@@ -186,6 +186,16 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
+    // System config (e.g. runtime Stripe mode)
+    // ---------------------------------------------------------------------------
+    // Reads allowed for admins (UI surfacing). All writes go through the Admin SDK
+    // (server route), which bypasses these rules — clients can never set the mode.
+    match /systemConfig/{doc} {
+      allow read: if isSiteAdmin() || isAdmin();
+      allow write: if false;
+    }
+
+    // ---------------------------------------------------------------------------
     // Seasons & Divisions
     // ---------------------------------------------------------------------------
 

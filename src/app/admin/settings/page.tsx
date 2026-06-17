@@ -16,6 +16,16 @@ import { useToast } from '@/hooks/use-toast';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from '@/components/ui/alert-dialog';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
 import { clearUserNotifications } from '@/lib/maintenance-actions';
 import type { LeagueOfficer, Game } from '@/types/scheduling';
@@ -129,13 +139,59 @@ export default function AdminSettingsPage() {
 
   const [notifEmail, setNotifEmail] = useState('');
   const [stripeConfigured, setStripeConfigured] = useState<boolean | null>(null);
+  const [stripeMode, setStripeMode] = useState<'sandbox' | 'production' | null>(null);
+  const [stripeKeys, setStripeKeys] = useState<{ test: boolean; live: boolean }>({ test: false, live: false });
+  const [stripeAudit, setStripeAudit] = useState<{ updatedAt: string; updatedByName: string }>({ updatedAt: '', updatedByName: '' });
+  const [confirmSandboxOpen, setConfirmSandboxOpen] = useState(false);
+  const [switchingMode, setSwitchingMode] = useState(false);
+
+  const loadStripeStatus = async () => {
+    try {
+      const res = await fetch('/api/stripe/status');
+      const data = await res.json();
+      setStripeConfigured(!!data.configured);
+      setStripeMode(data.mode ?? 'sandbox');
+      setStripeKeys({ test: !!data.testConfigured, live: !!data.liveConfigured });
+      setStripeAudit({ updatedAt: data.updatedAt ?? '', updatedByName: data.updatedByName ?? '' });
+    } catch {
+      setStripeConfigured(false);
+    }
+  };
 
   useEffect(() => {
-    fetch('/api/stripe/status')
-      .then((r) => r.json())
-      .then((data) => setStripeConfigured(!!data.configured))
-      .catch(() => setStripeConfigured(false));
+    loadStripeStatus();
   }, []);
+
+  // Flip the runtime Stripe payment mode (Site Admin only). Switching INTO sandbox is
+  // confirmed first because it stops real payments from being collected on the live site.
+  const applyStripeMode = async (mode: 'sandbox' | 'production') => {
+    setSwitchingMode(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/stripe/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ mode }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to change mode');
+      }
+      await loadStripeStatus();
+      toast({ title: `Payments now in ${mode === 'production' ? 'Live' : 'Test'} mode` });
+    } catch (e: any) {
+      toast({ title: 'Could not change payment mode', description: e.message, variant: 'destructive' });
+    } finally {
+      setSwitchingMode(false);
+      setConfirmSandboxOpen(false);
+    }
+  };
+
+  const onToggleStripeMode = (checked: boolean) => {
+    // checked = Live mode. Going live is immediate; going to test asks for confirmation.
+    if (checked) applyStripeMode('production');
+    else setConfirmSandboxOpen(true);
+  };
 
   // Rain-out engine state
   const [rainoutDate, setRainoutDate] = useState('');
@@ -415,24 +471,92 @@ export default function AdminSettingsPage() {
                   </div>
                   {stripeConfigured === null ? (
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  ) : stripeConfigured ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
-                      <Check className="h-3.5 w-3.5" /> Connected
-                    </span>
-                  ) : (
+                  ) : !stripeConfigured ? (
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-700">
                       Not Configured
                     </span>
+                  ) : stripeMode === 'production' ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                      <Check className="h-3.5 w-3.5" /> Live mode
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                      TEST mode
+                    </span>
                   )}
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    {stripeConfigured
-                      ? 'Stripe is active. Registration fees will be collected at checkout.'
-                      : 'Add STRIPE_SECRET_KEY to your environment to enable payment collection.'}
+                    {!stripeConfigured
+                      ? 'Add STRIPE_SECRET_KEY to your environment to enable payment collection.'
+                      : stripeMode === 'production'
+                        ? 'Payments are LIVE — real registration fees are collected at checkout.'
+                        : 'Payments are in TEST mode — no real money is collected. Parents can register with test cards only.'}
                   </p>
+
+                  {stripeConfigured && isSiteAdmin && (
+                    <div className="rounded-xl border p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-0.5">
+                          <Label>Live payment mode</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Off = Test mode (no real charges). On = Live (real charges).
+                          </p>
+                        </div>
+                        {switchingMode ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : (
+                          <Switch
+                            checked={stripeMode === 'production'}
+                            onCheckedChange={onToggleStripeMode}
+                            disabled={
+                              stripeMode === null ||
+                              (stripeMode === 'sandbox' && !stripeKeys.live) ||
+                              (stripeMode === 'production' && !stripeKeys.test)
+                            }
+                          />
+                        )}
+                      </div>
+                      {(!stripeKeys.live || !stripeKeys.test) && (
+                        <p className="text-xs text-amber-600">
+                          {!stripeKeys.live && 'Live keys not configured. '}
+                          {!stripeKeys.test && 'Test keys not configured. '}
+                          Add the missing STRIPE_SECRET_KEY_TEST / STRIPE_SECRET_KEY_LIVE values to enable switching.
+                        </p>
+                      )}
+                      {stripeAudit.updatedAt && (
+                        <p className="text-xs text-muted-foreground">
+                          Last changed{stripeAudit.updatedByName ? ` by ${stripeAudit.updatedByName}` : ''} on{' '}
+                          {new Date(stripeAudit.updatedAt).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
+
+              <AlertDialog open={confirmSandboxOpen} onOpenChange={setConfirmSandboxOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Switch payments to TEST mode?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This puts the live site into test mode. Real payments will <strong>NOT</strong> be
+                      collected — parents who register will be marked paid using test cards only. Remember to
+                      switch back to Live mode before real registration resumes.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={switchingMode}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={(e) => { e.preventDefault(); applyStripeMode('sandbox'); }}
+                      disabled={switchingMode}
+                      className="bg-amber-600 hover:bg-amber-700"
+                    >
+                      {switchingMode ? 'Switching…' : 'Switch to Test mode'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
               {/* Security (read-only preview) */}
               <Card className="border-none shadow-md opacity-60">

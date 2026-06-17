@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore, getAdminAuth } from '@/lib/firebase-admin';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+import { getStripeClient } from '@/lib/stripe-config';
 
 // Client-triggered fallback for when the Stripe webhook is delayed. The session
 // metadata — not the request body — is the source of truth for which
@@ -23,6 +21,9 @@ export async function POST(req: Request) {
     if (!sessionId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
+
+    // Stripe client for the currently active runtime mode (test vs live)
+    const { stripe } = await getStripeClient();
 
     // Retrieve the session from Stripe to verify payment status
     const session = await stripe.checkout.sessions.retrieve(sessionId);
