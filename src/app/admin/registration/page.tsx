@@ -571,6 +571,7 @@ export default function RegistrationDashboardPage() {
                 divisions={sportFilteredDivisions}
                 playerSportMap={playerSportMap}
                 isSiteAdmin={isSiteAdmin}
+                canAudit={isBoardMember}
                 isProcessing={globalProcessing}
                 showLeagueForm={activeSport === 'football'}
                 initialAuditPlayerId={auditPlayerId ?? undefined}
