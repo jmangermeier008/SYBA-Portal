@@ -75,13 +75,13 @@ for the single-enrollment partial path.
 
 ---
 
-## Documentation discrepancy (no code change) — role booleans
+## Documentation discrepancy — role booleans (RESOLVED)
 
-`CLAUDE.md` (Role System section) documents `useUser()` as returning
+`CLAUDE.md` (Role System section) previously documented `useUser()` as returning
 `isAdmin / isSiteAdmin / isBoardMember / isCoach / isParent`. In the current code, `useUser()`
 (`src/firebase/auth/use-user.tsx`) returns `user`, `profile`, `loading`, and `isSiteAdmin`
 only. The **per-sport** role booleans (`isAdmin`, `isBoardMember`, `isCoach`, `isParent`) are
 derived in `useSport()` (`src/firebase/sport-context.tsx`) because they depend on the active
-sport (and honor the sandbox-role override). Components correctly read them from `useSport()`.
+sport (and honor the sandbox-role override). Components already read them from `useSport()`.
 
-**Action:** Update `CLAUDE.md` to point role-boolean consumers at `useSport()`. No code change.
+**Resolved:** `CLAUDE.md` Role System section updated to split the two hooks. No code change.

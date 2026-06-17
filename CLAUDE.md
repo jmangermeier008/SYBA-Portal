@@ -191,19 +191,30 @@ Football games only mirror to **one** team subcollection (the SYBA team). Baseba
 
 ## Role System
 
-`useUser()` in `src/firebase/auth/use-user.tsx`:
+Roles are split across two hooks. `useUser()` (`src/firebase/auth/use-user.tsx`) owns
+auth/profile state plus the cross-sport `isSiteAdmin` flag. The **per-sport** role booleans
+(`isAdmin`, `isBoardMember`, `isCoach`, `isParent`) live in `useSport()`
+(`src/firebase/sport-context.tsx`) because they depend on the active sport and honor the
+sandbox-role override. Read the per-sport booleans from `useSport()`, not `useUser()`.
 
 ```ts
+// Auth state + cross-sport superuser flag
 const {
   user,        // FirebaseUser | null
   profile,     // UserProfile | null
   loading,     // boolean
-  isAdmin,     // 'Admin' in profile.roles
-  isSiteAdmin, // 'Site Admin' in profile.roles
-  isBoardMember, // 'Board Member' in profile.roles
-  isCoach,     // 'Coach' in profile.roles
-  isParent,    // 'Parent' in profile.roles
+  isSiteAdmin, // authoritative cross-sport superuser flag (with legacy fallback)
 } = useUser();
+
+// Per-sport role booleans (scoped to the active sport)
+const {
+  activeSport,
+  isAdmin,       // 'Admin' for the active sport
+  isSiteAdmin,   // also re-exposed here for convenience
+  isBoardMember, // 'Board Member' (Admins included)
+  isCoach,       // 'Coach'
+  isParent,      // every authenticated user is a baseline parent
+} = useSport();
 ```
 
 Users can hold multiple roles simultaneously. Check the appropriate boolean before rendering role-specific content. All pages begin with `if (loadingUser) return <spinner>` followed by a role guard.
