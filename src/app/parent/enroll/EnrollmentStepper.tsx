@@ -1427,6 +1427,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
                         value={state.grade}
                         onChange={(e) => setState(prev => ({ ...prev, grade: e.target.value }))}
                       />
+                      <p className="text-xs text-muted-foreground">
+                        Grade for 2026-2027 school year
+                      </p>
                     </div>
                   </div>
                   <div className="space-y-2">
