@@ -303,11 +303,13 @@ export default function AdminSettingsPage() {
     sportRoles?: Record<string, string[]>;
   }>(usersQuery);
 
-  // Inquiry delivery config (systemConfig/inquiries) — master CC + per-sport fallback (Site Admin)
+  // Inquiry delivery config (systemConfig/inquiries) — master CC + per-sport fallback.
+  // Only Site Admins can read systemConfig (per Firestore rules), so skip the subscription
+  // for other viewers to avoid a permission-denied error.
   const inquiryConfigRef = useMemoFirebase(() => {
-    if (!db) return null;
+    if (!db || !isSiteAdmin) return null;
     return doc(db, 'systemConfig', 'inquiries');
-  }, [db]);
+  }, [db, isSiteAdmin]);
   const { data: inquiryConfig } = useDoc<InquiryDeliveryConfig>(inquiryConfigRef);
   const [masterCc, setMasterCc] = useState('');
   const [sportFallback, setSportFallback] = useState('');
