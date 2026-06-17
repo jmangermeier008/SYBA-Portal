@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, setDoc, updateDoc, getDoc, query, where, orderBy, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, query, where, orderBy, getDocs, writeBatch } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -813,33 +813,10 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         return;
       }
 
-      // Fix #5: Re-validate division capacity at checkout time to prevent overbooking.
-      // The page-load registeredCount may be stale if another family enrolled concurrently.
-      for (const item of payableItems) {
-        const divSnap = await getDoc(doc(db, 'seasons', item.seasonId, 'divisions', item.divisionId));
-        if (divSnap.exists()) {
-          const div = divSnap.data() as any;
-          const currentCount = div.registeredCount ?? 0;
-          const capacity = div.capacity ?? null;
-          if (capacity !== null && currentCount >= capacity) {
-            if (div.waitlistEnabled) {
-              toast({
-                variant: 'destructive',
-                title: 'Division Just Filled Up',
-                description: `${div.name ?? 'This division'} reached capacity while you were registering. You've been placed on the waitlist instead.`,
-              });
-            } else {
-              toast({
-                variant: 'destructive',
-                title: 'Division Now Closed',
-                description: `${div.name ?? 'This division'} is now full and does not have a waitlist. Please choose a different division.`,
-              });
-              setSubmitting(false);
-              return;
-            }
-          }
-        }
-      }
+      // Capacity is now enforced authoritatively server-side in /api/stripe/checkout
+      // (atomic reservation against registeredCount + reservedCount). The server may
+      // reject a now-full hard-cap division (402) or move some enrollments to the
+      // waitlist; we handle both from the response below.
 
       // ── Launch Stripe for payable items ────────────────────────────────
       const payableEnrollmentIds = enrollmentIds.filter((_, i) => !items[i].isWaitlisted);
@@ -857,6 +834,25 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
       });
 
       const data = await resp.json();
+
+      // Server refused: a hard-cap division filled up while registering (no waitlist).
+      if (!resp.ok || data.divisionFull) {
+        toast({
+          variant: 'destructive',
+          title: 'Division Now Closed',
+          description: data.error || 'A division filled up while you were registering. Please choose a different division.',
+        });
+        setSubmitting(false);
+        return;
+      }
+
+      // Server moved some payable enrollments to the waitlist (capacity race).
+      if (Array.isArray(data.waitlistedEnrollmentIds) && data.waitlistedEnrollmentIds.length > 0) {
+        toast({
+          title: 'Some Players Waitlisted',
+          description: `${data.waitlistedEnrollmentIds.length} player(s) reached capacity while you were registering and were placed on the waitlist.`,
+        });
+      }
 
       if (data.url) {
         if (data.sessionId) {

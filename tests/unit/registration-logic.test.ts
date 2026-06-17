@@ -3,6 +3,7 @@ import {
   getLeagueAge,
   getSuggestedDivisions,
   calculateCartPricing,
+  classifyCapacity,
 } from '@/lib/registration-logic';
 import type { Division } from '@/types/scheduling';
 
@@ -124,5 +125,41 @@ describe('calculateCartPricing (division fee + sibling discount)', () => {
 
   it('returns an empty array for an empty cart', () => {
     expect(calculateCartPricing(0, [], 5000)).toEqual([]);
+  });
+});
+
+describe('classifyCapacity (division reservation decision)', () => {
+  it('treats a division with no capacity as unlimited', () => {
+    expect(classifyCapacity({ capacity: undefined, registeredCount: 99 })).toBe('unlimited');
+    expect(classifyCapacity({ capacity: null, registeredCount: 99 })).toBe('unlimited');
+  });
+
+  it('reserves a seat when there is room', () => {
+    expect(classifyCapacity({ capacity: 10, registeredCount: 4, reservedCount: 2 })).toBe('reserve');
+  });
+
+  it('counts reservedCount and registeredCount together against capacity', () => {
+    // 8 registered + 2 reserved = 10 == capacity → full
+    expect(classifyCapacity({ capacity: 10, registeredCount: 8, reservedCount: 2, waitlistEnabled: true })).toBe('waitlist');
+  });
+
+  it('counts seats already taken earlier in the same cart (occupiedSoFar)', () => {
+    // 9 registered + 0 reserved, one seat already taken this cart → 10 == capacity
+    expect(classifyCapacity({ capacity: 10, registeredCount: 9, occupiedSoFar: 1 })).toBe('reject');
+    // one fewer occupied → still room
+    expect(classifyCapacity({ capacity: 10, registeredCount: 9, occupiedSoFar: 0 })).toBe('reserve');
+  });
+
+  it('waitlists when full and waitlist is enabled', () => {
+    expect(classifyCapacity({ capacity: 5, registeredCount: 5, waitlistEnabled: true })).toBe('waitlist');
+  });
+
+  it('rejects when full and no waitlist', () => {
+    expect(classifyCapacity({ capacity: 5, registeredCount: 5, waitlistEnabled: false })).toBe('reject');
+    expect(classifyCapacity({ capacity: 5, registeredCount: 6 })).toBe('reject');
+  });
+
+  it('treats missing counters as zero', () => {
+    expect(classifyCapacity({ capacity: 1 })).toBe('reserve');
   });
 });

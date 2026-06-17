@@ -459,6 +459,7 @@ export interface Division {
   capacity?: number;        // Max enrolled players; absent = unlimited
   waitlistEnabled?: boolean;
   registeredCount?: number; // Denormalized: +1 on payment/fee-waiver, -1 on refund/delete/reassignment; admin "Recalculate Counts" rebuilds from enrollments
+  reservedCount?: number;   // In-flight checkouts that reserved a seat but haven't paid; +1 at Stripe checkout, -1 on payment (→registeredCount) or session expiry. Absent = 0.
   sport?: Sport;
   minAge?: number;          // Minimum league age (inclusive) for this division
   maxAge?: number;          // Maximum league age (inclusive) for this division
@@ -503,6 +504,7 @@ export interface Enrollment {
   payment_status?: EnrollmentPaymentStatus;
   stripe_payment_id: string;   // Empty string until Stripe webhook confirms payment
   stripeSessionId?: string;    // Stripe Checkout Session ID — used for orphan reconciliation
+  capacityReserved?: boolean;  // True while this enrollment holds a division reservedCount seat (set at checkout, cleared on payment or session expiry)
   fee_waived: boolean;
   waiver_reason: string;
   registrationFeeAmount: number;

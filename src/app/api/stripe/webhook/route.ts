@@ -71,6 +71,19 @@ export async function POST(req: Request) {
       .map((a: string) => parseInt(a.trim(), 10))
       .filter((n: number) => !isNaN(n));
 
+    // When per-enrollment amounts are present they must align 1:1 with the IDs.
+    // On a mismatch, falling back to session.amount_total (the WHOLE cart) for a
+    // missing index would inflate that enrollment's gross_amount_paid — record 0
+    // instead and flag it. The legacy single-enrollment path sends no amounts at
+    // all; there the cart total is the correct per-enrollment amount, so keep it.
+    const amountsProvided = enrollmentAmounts.length > 0;
+    const amountsMisaligned = amountsProvided && enrollmentAmounts.length !== enrollmentIds.length;
+    if (amountsMisaligned) {
+      console.error(
+        `[stripe/webhook] enrollmentAmounts length (${enrollmentAmounts.length}) != enrollmentIds length (${enrollmentIds.length}) for session ${session.id} — recording 0 for unmatched indices to avoid inflating financial records`
+      );
+    }
+
     const db = getAdminFirestore();
     const playerNames: string[] = [];
     // Enrollments that could not be marked paid. Any entry here means money was
@@ -83,7 +96,7 @@ export async function POST(req: Request) {
       const enrollmentId = enrollmentIds[i];
       console.log(`[stripe/webhook] Processing for User: ${userId} | Enrollment: ${enrollmentId}`);
       const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
-      const amountPaid = enrollmentAmounts[i] ?? (session.amount_total ?? 0);
+      const amountPaid = enrollmentAmounts[i] ?? (amountsProvided ? 0 : (session.amount_total ?? 0));
 
       let outcome: { status: string; enrollment?: any };
       try {
@@ -103,18 +116,29 @@ export async function POST(req: Request) {
             return { status: 'already-paid', enrollment };
           }
 
+          const wasReserved = enrollment.capacityReserved === true;
           tx.update(enrollmentRef, {
             paymentStatus: 'paid',
             stripe_payment_id: session.payment_intent ?? session.id,
             registrationFeeAmount: amountPaid,
             gross_amount_paid: amountPaid,
+            capacityReserved: false,
             updatedAt: new Date().toISOString(),
           });
 
           if (enrollment.seasonId && enrollment.divisionId) {
             const divRef = db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`);
-            // set+merge so a missing division doc can't block the payment record
-            tx.set(divRef, { registeredCount: FieldValue.increment(1) }, { merge: true });
+            // Convert the checkout-time reservation into a held seat: registeredCount
+            // +1, and release the reservedCount taken at checkout (flag guards against
+            // double-release). set+merge so a missing division doc can't block payment.
+            tx.set(
+              divRef,
+              {
+                registeredCount: FieldValue.increment(1),
+                ...(wasReserved ? { reservedCount: FieldValue.increment(-1) } : {}),
+              },
+              { merge: true }
+            );
           }
 
           return { status: 'paid', enrollment };
@@ -229,6 +253,60 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+  }
+
+  // Abandoned checkout — release any capacity reservation the session held so the
+  // seat returns to the pool. Requires the checkout.session.expired event to be
+  // subscribed on the Stripe webhook endpoint (test + live).
+  if (event.type === 'checkout.session.expired') {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const userId = session.metadata?.userId;
+    const rawIds = session.metadata?.enrollmentIds ?? session.metadata?.enrollmentId ?? '';
+    const enrollmentIds = rawIds.split(',').map((id: string) => id.trim()).filter(Boolean);
+
+    if (!userId || enrollmentIds.length === 0) {
+      return NextResponse.json({ received: true });
+    }
+
+    const db = getAdminFirestore();
+    const released: string[] = [];
+    for (const enrollmentId of enrollmentIds) {
+      const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
+      try {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(enrollmentRef);
+          if (!snap.exists) return;
+          const enrollment = snap.data() as any;
+          // Only release if still unpaid AND still reserved. A late 'completed'
+          // event already cleared the flag and converted the seat, so the guard
+          // makes this idempotent and safe against event ordering.
+          const status = enrollment.paymentStatus ?? enrollment.payment_status;
+          if (status !== 'pending_payment' || enrollment.capacityReserved !== true) return;
+
+          tx.update(enrollmentRef, { capacityReserved: false, updatedAt: new Date().toISOString() });
+          if (enrollment.seasonId && enrollment.divisionId) {
+            tx.set(
+              db.doc(`seasons/${enrollment.seasonId}/divisions/${enrollment.divisionId}`),
+              { reservedCount: FieldValue.increment(-1) },
+              { merge: true }
+            );
+          }
+          released.push(enrollmentId);
+        });
+      } catch (err: any) {
+        console.error(`[stripe/webhook] Reservation release failed for ${enrollmentId}:`, err.message);
+      }
+    }
+
+    db.collection('paymentEvents').add({
+      kind: 'checkout.expired',
+      status: 'ok',
+      sessionId: session.id,
+      userId,
+      enrollmentIds,
+      releasedEnrollmentIds: released,
+      createdAt: new Date().toISOString(),
+    }).catch((err: any) => console.error('[stripe/webhook] paymentEvents write error:', err.message));
   }
 
   if (event.type === 'charge.refunded') {

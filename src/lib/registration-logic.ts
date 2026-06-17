@@ -97,3 +97,36 @@ export function calculateCartPricing(
     return totalPrior === 0 ? fee : Math.min(fee, siblingFeeCents);
   });
 }
+
+/**
+ * Decide how a single enrollment should be treated against its division's capacity.
+ * Pure function so it can be unit-tested without Firestore; the server applies the
+ * result inside a transaction.
+ *
+ * Capacity is enforced against maintained counters because Firestore Admin
+ * transactions cannot run count queries:
+ *   - `registeredCount` — players who have paid / been fee-waived (a held seat)
+ *   - `reservedCount`   — in-flight checkouts that have reserved but not yet paid
+ *   - `occupiedSoFar`   — seats already reserved earlier in THIS same cart/transaction
+ *
+ * @returns
+ *   'unlimited' — division has no finite capacity → payable, no reservation needed
+ *   'reserve'   — room available → reserve a seat (caller increments reservedCount)
+ *   'waitlist'  — full but waitlist is enabled → move to waitlist, do not charge
+ *   'reject'    — full and no waitlist → refuse (caller returns 402, no charge)
+ */
+export function classifyCapacity(opts: {
+  capacity?: number | null;
+  registeredCount?: number;
+  reservedCount?: number;
+  waitlistEnabled?: boolean;
+  occupiedSoFar?: number;
+}): 'unlimited' | 'reserve' | 'waitlist' | 'reject' {
+  const { capacity } = opts;
+  if (capacity == null || !Number.isFinite(capacity)) return 'unlimited';
+  const registered = opts.registeredCount ?? 0;
+  const reserved = opts.reservedCount ?? 0;
+  const occupied = opts.occupiedSoFar ?? 0;
+  if (registered + reserved + occupied < capacity) return 'reserve';
+  return opts.waitlistEnabled ? 'waitlist' : 'reject';
+}
