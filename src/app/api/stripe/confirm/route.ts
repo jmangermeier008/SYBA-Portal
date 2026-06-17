@@ -56,6 +56,10 @@ export async function POST(req: Request) {
     // the race sends exactly one email — never zero, never two.
     let newlyPaidCount = 0;
     const playerNames: string[] = [];
+    // Enrollments this request could not finalize (missing doc, ownership
+    // mismatch, or a thrown transaction) — surfaced in the audit record below
+    // so the Payments Health page isn't blind when the confirm fallback fails.
+    const failedEnrollmentIds: string[] = [];
 
     for (const enrollmentId of enrollmentIds) {
       const enrollmentRef = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
@@ -89,6 +93,10 @@ export async function POST(req: Request) {
 
         return { status: 'paid' as const, enrollment };
       });
+
+      if (outcome.status === 'missing' || outcome.status === 'forbidden') {
+        failedEnrollmentIds.push(enrollmentId);
+      }
 
       if (outcome.status === 'paid') {
         newlyPaidCount++;
@@ -147,6 +155,21 @@ export async function POST(req: Request) {
         console.error('[stripe/confirm] Email send error:', emailErr.message);
       }
     }
+
+    // Payment health audit trail — mirrors the webhook's checkout.completed
+    // record so the Payments Health page can see when the client-side confirm
+    // fallback finalized (or failed to finalize) a payment (fire-and-forget).
+    db.collection('paymentEvents').add({
+      kind: 'confirm.fallback',
+      status: failedEnrollmentIds.length > 0 ? 'error' : 'ok',
+      sessionId,
+      userId,
+      enrollmentIds,
+      newlyPaidCount,
+      failedEnrollmentIds,
+      amountTotal: session.amount_total ?? 0,
+      createdAt: new Date().toISOString(),
+    }).catch((err: any) => console.error('[stripe/confirm] paymentEvents write error:', err.message));
 
     return NextResponse.json({ confirmed: true });
   } catch (err: any) {

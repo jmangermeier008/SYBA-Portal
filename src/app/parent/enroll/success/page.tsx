@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, use, useState, useEffect } from 'react';
+import { Suspense, use, useState, useEffect, useCallback } from 'react';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 import { setActiveSport } from '@/hooks/use-active-sport';
 import type { Sport } from '@/types/scheduling';
@@ -208,24 +208,71 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
     }
   }, [sport]);
 
-  // Confirm payment immediately on page load — handles cases where the Stripe webhook
-  // is delayed or unreachable (e.g. local dev). Idempotent: the endpoint skips enrollments
-  // that are already marked paid.
-  useEffect(() => {
-    if (!user || !sessionId || isWaitlistedOnly) return;
+  // True only after the client-side confirm fallback has exhausted its retries
+  // without Stripe reporting the payment as settled. Used purely for a calm
+  // "still finalizing" note — never blocks the success screen.
+  const [finalizeFailed, setFinalizeFailed] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+
+  // Confirm payment on page load — handles cases where the Stripe webhook is
+  // delayed or unreachable (e.g. local dev). Idempotent: the endpoint skips
+  // enrollments already marked paid. Retries a few times to ride out the brief
+  // window where Stripe's session payment_status isn't 'paid' yet, and aborts
+  // cleanly if the parent navigates away mid-flight (never setState post-unmount).
+  const runConfirm = useCallback(async (signal: AbortSignal): Promise<boolean> => {
+    if (!user || !sessionId || isWaitlistedOnly) return true;
     const ids = enrollmentIds
       ? enrollmentIds.split(',').map(s => s.trim()).filter(Boolean)
       : enrollmentId ? [enrollmentId] : [];
-    if (ids.length === 0) return;
+    if (ids.length === 0) return true;
 
-    user.getIdToken().then(idToken =>
-      fetch('/api/stripe/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ sessionId, enrollmentIds: ids, userId: user.uid }),
-      })
-    ).catch(() => { /* non-fatal — webhook will cover it */ });
+    let idToken: string;
+    try {
+      idToken = await user.getIdToken();
+    } catch {
+      return false;
+    }
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (signal.aborted) return true;
+      try {
+        const res = await fetch('/api/stripe/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({ sessionId, enrollmentIds: ids, userId: user.uid }),
+          signal,
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({} as any));
+          if (data?.confirmed) return true;
+          // confirmed:false → Stripe hasn't reported the payment paid yet; retry.
+        }
+        // non-OK → retry
+      } catch (e: any) {
+        if (signal.aborted || e?.name === 'AbortError') return true;
+        // network error → retry
+      }
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
+    }
+    return false; // retries exhausted without confirmation
   }, [user, sessionId, enrollmentIds, enrollmentId, isWaitlistedOnly]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    runConfirm(controller.signal).then(ok => {
+      if (!controller.signal.aborted && !ok) setFinalizeFailed(true);
+    });
+    return () => controller.abort();
+  }, [runConfirm]);
+
+  const handleCheckAgain = useCallback(() => {
+    setRechecking(true);
+    const controller = new AbortController();
+    runConfirm(controller.signal).then(ok => {
+      setRechecking(false);
+      setFinalizeFailed(!ok);
+    });
+  }, [runConfirm]);
 
   if (loading) {
     return (
@@ -312,6 +359,23 @@ function SuccessContent({ searchParams }: { searchParams: { [key: string]: strin
               <li>Games and practices will appear in your Schedule tab once the league publishes them.</li>
             </ul>
           </div>
+          {finalizeFailed && (
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/20 rounded-xl text-sm text-left text-muted-foreground space-y-1.5">
+              <p>
+                Your payment was received — we&apos;re still finalizing your registration.
+                This usually clears within a minute; you can safely head to your dashboard.
+              </p>
+              <button
+                type="button"
+                onClick={handleCheckAgain}
+                disabled={rechecking}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                {rechecking && <Loader2 className="h-3 w-3 animate-spin" />}
+                {rechecking ? 'Checking…' : 'Check again'}
+              </button>
+            </div>
+          )}
           {displayId && (
             <p className="text-[11px] text-muted-foreground">Reference for support: {displayId.slice(0, 8)}</p>
           )}
