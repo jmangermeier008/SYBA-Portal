@@ -301,6 +301,7 @@ export default function AdminSettingsPage() {
     officerTitles?: string[];
     roles?: string[];
     sportRoles?: Record<string, string[]>;
+    isSiteAdmin?: boolean;
   }>(usersQuery);
 
   // Inquiry delivery config (systemConfig/inquiries) — master CC + per-sport fallback.
@@ -399,6 +400,9 @@ export default function AdminSettingsPage() {
   const atLargeMembers = useMemo(() => {
     if (!allUsers || !activeSport) return [];
     return allUsers.filter(u => {
+      // Site Admin is a behind-the-scenes superuser role, not a board seat —
+      // never auto-list them as an At-Large Board Member.
+      if (u.isSiteAdmin) return false;
       const sportRoleList = u.sportRoles?.[activeSport] ?? [];
       const isBoardMember =
         sportRoleList.some(r => r === 'Board Member' || r === 'Admin') ||
