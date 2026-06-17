@@ -8,14 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
+import { useUser, useFirestore, useCollection, useDoc, useMemoFirebase, useAuth } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy, where, writeBatch } from 'firebase/firestore';
 import { useSport } from '@/firebase/sport-context';
-import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain } from 'lucide-react';
+import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain, Trash2, Plus, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -28,56 +28,111 @@ import {
 } from '@/components/ui/alert-dialog';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
 import { clearUserNotifications } from '@/lib/maintenance-actions';
-import type { LeagueOfficer, Game } from '@/types/scheduling';
+import type { LeagueOfficer, Game, InquiryDeliveryConfig, Sport } from '@/types/scheduling';
 import { Checkbox } from '@/components/ui/checkbox';
-import { EXECUTIVE_TITLES } from '@/data/officers';
+import { EXECUTIVE_TITLES, getCoordinators } from '@/data/officers';
 
 type OfficerRecord = LeagueOfficer;
 
-function OfficerRow({ officer, holderName, onSave }: {
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+/** First-run default roles for a sport: executives + coordinators, with topic routing seeded. */
+function buildDefaultRoles(sport: Sport): OfficerRecord[] {
+  const execs = (EXECUTIVE_TITLES as readonly string[]).map((title) => ({ title, isExecutive: true }));
+  const coords = getCoordinators(sport).map((c) => ({ title: c.title, isExecutive: false }));
+  return [...execs, ...coords].map((r, idx) => ({
+    id: `${sport}-${slug(r.title)}`,
+    title: r.title,
+    name: null,
+    email: null,
+    contactHint: '',
+    isExecutive: r.isExecutive,
+    handlesTopics: INQUIRY_TOPICS.filter((t) => t.assignedToRole === r.title).map((t) => t.value),
+    mappedTopic: (INQUIRY_TOPICS.find((t) => t.assignedToRole === r.title)?.value ?? 'general') as InquiryTopic,
+    order: idx,
+    sport,
+  }));
+}
+
+interface OfficerRowValues {
+  title: string;
+  email: string;
+  hint: string;
+  isExecutive: boolean;
+  handlesTopics: InquiryTopic[];
+}
+
+function OfficerRow({ officer, holderName, onSave, onDelete }: {
   officer: OfficerRecord;
   holderName: string | null;
-  onSave: (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => Promise<void>;
+  onSave: (id: string, holderName: string | null, values: OfficerRowValues) => Promise<void>;
+  onDelete: (id: string, title: string) => Promise<void>;
 }) {
+  const [title, setTitle] = useState(officer.title ?? '');
   const [email, setEmail] = useState(officer.email ?? '');
   const [hint, setHint] = useState(officer.contactHint ?? '');
-  const [mappedTopic, setMappedTopic] = useState(officer.mappedTopic ?? 'general');
+  const [isExecutive, setIsExecutive] = useState(officer.isExecutive ?? false);
+  const [handlesTopics, setHandlesTopics] = useState<InquiryTopic[]>(officer.handlesTopics ?? []);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    setTitle(officer.title ?? '');
     setEmail(officer.email ?? '');
     setHint(officer.contactHint ?? '');
-    setMappedTopic(officer.mappedTopic ?? 'general');
-  }, [officer.email, officer.contactHint, officer.mappedTopic]);
+    setIsExecutive(officer.isExecutive ?? false);
+    setHandlesTopics(officer.handlesTopics ?? []);
+  }, [officer.title, officer.email, officer.contactHint, officer.isExecutive, officer.handlesTopics]);
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(officer.id, holderName, email, hint, mappedTopic);
+    await onSave(officer.id, holderName, { title, email, hint, isExecutive, handlesTopics });
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const sameTopics =
+    handlesTopics.length === (officer.handlesTopics?.length ?? 0) &&
+    handlesTopics.every((t) => officer.handlesTopics?.includes(t));
   const dirty =
+    title.trim() !== (officer.title ?? '') ||
     email !== (officer.email ?? '') ||
     hint !== (officer.contactHint ?? '') ||
-    mappedTopic !== (officer.mappedTopic ?? 'general');
+    isExecutive !== (officer.isExecutive ?? false) ||
+    !sameTopics;
+
+  const topicSummary =
+    handlesTopics.length === 0
+      ? 'No topics'
+      : INQUIRY_TOPICS.filter((t) => handlesTopics.includes(t.value)).map((t) => t.label).join(', ');
 
   return (
     <div className="border rounded-xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="font-semibold text-sm">{officer.title}</p>
-          {(!holderName || holderName.trim() === '') && (
-            <span className="text-xs text-muted-foreground border rounded px-1.5 py-0.5">Hidden from public</span>
-          )}
+      <div className="flex items-center justify-between gap-2">
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={60}
+          placeholder="Role / title name"
+          className="font-semibold text-sm h-9 max-w-xs"
+        />
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-muted-foreground">{holderName ?? 'TBA'}</span>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+            title="Delete role"
+            onClick={() => onDelete(officer.id, officer.title)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
-        <span className="text-xs text-muted-foreground">{holderName ?? 'TBA'}</span>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Email</Label>
+          <Label className="text-xs text-muted-foreground">Email (where these inquiries are sent)</Label>
           <Input
             placeholder="e.g. president@syba.blue"
             type="email"
@@ -87,17 +142,32 @@ function OfficerRow({ officer, holderName, onSave }: {
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Routes inbound email to topic</Label>
-          <Select value={mappedTopic} onValueChange={(v) => setMappedTopic(v as InquiryTopic)}>
-            <SelectTrigger className="rounded-xl text-xs h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {INQUIRY_TOPICS.map((t) => (
-                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label className="text-xs text-muted-foreground">Handles inquiry topics</Label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="rounded-xl w-full text-xs h-9 justify-start font-normal truncate">
+                {topicSummary}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-3" align="start">
+              <p className="text-xs font-semibold mb-2 text-muted-foreground">Topics routed to this role</p>
+              <div className="space-y-1.5">
+                {INQUIRY_TOPICS.map((t) => (
+                  <label key={t.value} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <Checkbox
+                      checked={handlesTopics.includes(t.value)}
+                      onCheckedChange={(checked) => {
+                        setHandlesTopics((prev) =>
+                          checked ? [...prev, t.value] : prev.filter((x) => x !== t.value)
+                        );
+                      }}
+                    />
+                    {t.label}
+                  </label>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
       <div className="space-y-1">
@@ -109,11 +179,15 @@ function OfficerRow({ officer, holderName, onSave }: {
           maxLength={80}
         />
       </div>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <Switch checked={isExecutive} onCheckedChange={setIsExecutive} />
+          Show in public leadership grid
+        </label>
         <Button
           size="sm"
           variant={saved ? 'secondary' : 'default'}
-          disabled={!dirty || saving}
+          disabled={!dirty || saving || title.trim() === ''}
           onClick={handleSave}
           className="min-w-24"
         >
@@ -229,26 +303,80 @@ export default function AdminSettingsPage() {
     sportRoles?: Record<string, string[]>;
   }>(usersQuery);
 
-  // 4 executive rows — merge expected titles with any saved Firestore records
-  const mergedOfficers = useMemo<OfficerRecord[]>(() => {
-    if (!activeSport) return [];
-    return (EXECUTIVE_TITLES as readonly string[]).map((title, idx) => {
-      const existing = officers?.find(o => o.title === title);
-      if (existing) return existing;
-      return {
-        id: `${activeSport}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-        title,
-        name: null,
-        email: null,
-        contactHint: '',
-        mappedTopic: 'general' as InquiryTopic,
-        order: idx,
-        sport: activeSport,
-      } as OfficerRecord;
-    });
-  }, [activeSport, officers]);
+  // Inquiry delivery config (systemConfig/inquiries) — master CC + per-sport fallback (Site Admin)
+  const inquiryConfigRef = useMemoFirebase(() => {
+    if (!db) return null;
+    return doc(db, 'systemConfig', 'inquiries');
+  }, [db]);
+  const { data: inquiryConfig } = useDoc<InquiryDeliveryConfig>(inquiryConfigRef);
+  const [masterCc, setMasterCc] = useState('');
+  const [sportFallback, setSportFallback] = useState('');
+  const [savingDelivery, setSavingDelivery] = useState(false);
 
-  // At-large members — board members for this sport who don't hold an executive title
+  // Hydrate the delivery form from Firestore (and when switching sport for the fallback field).
+  useEffect(() => {
+    setMasterCc((inquiryConfig?.alwaysCcEmails ?? []).join(', '));
+  }, [inquiryConfig?.alwaysCcEmails]);
+  useEffect(() => {
+    if (!activeSport) return;
+    setSportFallback((inquiryConfig?.fallbackEmails?.[activeSport] ?? []).join(', '));
+  }, [inquiryConfig?.fallbackEmails, activeSport]);
+
+  const handleSaveDelivery = async () => {
+    if (!activeSport) return;
+    setSavingDelivery(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/admin/inquiry-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          alwaysCcEmails: masterCc,
+          // Preserve the other sport's fallback + any existing topic overrides.
+          fallbackEmails: { ...(inquiryConfig?.fallbackEmails ?? {}), [activeSport]: sportFallback },
+          topicOverrides: inquiryConfig?.topicOverrides ?? {},
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Save failed');
+      }
+      toast({ title: 'Inquiry delivery updated' });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Could not save', description: e.message });
+    } finally {
+      setSavingDelivery(false);
+    }
+  };
+
+  // Editable role rows — every officer doc for this sport except the auto-synced at-large entries.
+  const roleOfficers = useMemo<OfficerRecord[]>(() => {
+    if (!officers) return [];
+    return officers
+      .filter(o => o.title !== 'At-Large Board Member')
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [officers]);
+
+  // Named position titles in the directory (used to decide who counts as "at-large").
+  const directoryTitles = useMemo(
+    () => new Set(roleOfficers.map(o => o.title)),
+    [roleOfficers],
+  );
+
+  // First-run seed: if a sport has no editable roles yet, populate the defaults once
+  // so non-technical admins never face an empty screen.
+  useEffect(() => {
+    if (!db || !activeSport || officers === null) return;
+    if (roleOfficers.length > 0) return;
+    (async () => {
+      for (const r of buildDefaultRoles(activeSport)) {
+        const { id, ...data } = r;
+        await setDoc(doc(db, 'officers', id), data, { merge: true });
+      }
+    })();
+  }, [db, activeSport, officers, roleOfficers.length]);
+
+  // At-large members — board members for this sport who hold no named directory position.
   const atLargeMembers = useMemo(() => {
     if (!allUsers || !activeSport) return [];
     return allUsers.filter(u => {
@@ -257,9 +385,9 @@ export default function AdminSettingsPage() {
         sportRoleList.some(r => r === 'Board Member' || r === 'Admin') ||
         u.roles?.includes('Board Member');
       if (!isBoardMember) return false;
-      return !(u.officerTitles ?? []).some(t => EXECUTIVE_TITLES.includes(t));
+      return !(u.officerTitles ?? []).some(t => directoryTitles.has(t));
     });
-  }, [allUsers, activeSport]);
+  }, [allUsers, activeSport, directoryTitles]);
 
   // Auto-sync at-large members to the officers collection so the public
   // homepage can read them without requiring authentication.
@@ -297,16 +425,57 @@ export default function AdminSettingsPage() {
     return holders.length ? holders.map(u => u.displayName).filter(Boolean).join(', ') : null;
   }
 
-  const handleSave = async (id: string, name: string | null, email: string, hint: string, mappedTopic: string) => {
+  const handleSave = async (id: string, name: string | null, values: OfficerRowValues) => {
     if (!db || !activeSport) return;
     try {
       await setDoc(
         doc(db, 'officers', id),
-        { name: name || null, email: email.trim() || null, contactHint: hint.trim(), mappedTopic: mappedTopic || 'general', sport: activeSport },
+        {
+          title: values.title.trim(),
+          name: name || null,
+          email: values.email.trim() || null,
+          contactHint: values.hint.trim(),
+          isExecutive: values.isExecutive,
+          handlesTopics: values.handlesTopics,
+          // Keep mappedTopic in sync (drives inbound-email classification) — first handled topic.
+          mappedTopic: (values.handlesTopics[0] ?? 'general') as InquiryTopic,
+          sport: activeSport,
+        },
         { merge: true }
       );
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Save failed', description: err.message });
+    }
+  };
+
+  const handleAddRole = async () => {
+    if (!db || !activeSport) return;
+    try {
+      const ref = doc(collection(db, 'officers'));
+      const nextOrder = roleOfficers.reduce((m, o) => Math.max(m, o.order ?? 0), 0) + 1;
+      await setDoc(ref, {
+        title: 'New Role',
+        name: null,
+        email: null,
+        contactHint: '',
+        isExecutive: false,
+        handlesTopics: [],
+        mappedTopic: 'general' as InquiryTopic,
+        order: nextOrder,
+        sport: activeSport,
+      });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Could not add role', description: err.message });
+    }
+  };
+
+  const handleDeleteRole = async (id: string, title: string) => {
+    if (!db) return;
+    if (!confirm(`Delete the "${title}" role? Inquiries that route to it will fall back to your master/fallback inbox until reassigned.`)) return;
+    try {
+      await deleteDoc(doc(db, 'officers', id));
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Delete failed', description: err.message });
     }
   };
 
@@ -393,10 +562,12 @@ export default function AdminSettingsPage() {
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                     <Users className="h-5 w-5" />
                   </div>
-                  <div>
-                    <CardTitle>Officer Directory</CardTitle>
+                  <div className="flex-1">
+                    <CardTitle>Roles &amp; Inquiry Routing</CardTitle>
                     <CardDescription>
-                      Names and emails update immediately across the parent portal and public homepage. Leave email blank to hide the mailto link.
+                      Add, rename, or remove roles for {activeSport ?? 'this sport'}. The <strong>Email</strong> you set
+                      is where that role&apos;s inquiries are sent. Use <strong>Handles inquiry topics</strong> to choose
+                      which website questions route to each role. Each sport is managed independently.
                     </CardDescription>
                   </div>
                 </CardHeader>
@@ -410,9 +581,19 @@ export default function AdminSettingsPage() {
                       {isLoading && (
                         <p className="text-xs text-muted-foreground pb-1">Loading saved data…</p>
                       )}
-                      {mergedOfficers.map((officer) => (
-                        <OfficerRow key={officer.id} officer={officer} holderName={getHolderName(officer.title)} onSave={handleSave} />
+                      {roleOfficers.map((officer) => (
+                        <OfficerRow
+                          key={officer.id}
+                          officer={officer}
+                          holderName={getHolderName(officer.title)}
+                          onSave={handleSave}
+                          onDelete={handleDeleteRole}
+                        />
                       ))}
+
+                      <Button variant="outline" size="sm" onClick={handleAddRole} className="rounded-xl">
+                        <Plus className="mr-2 h-3.5 w-3.5" /> Add role
+                      </Button>
 
                       {/* At-large board members — auto-derived from user accounts */}
                       {atLargeMembers.length > 0 && (
@@ -436,6 +617,59 @@ export default function AdminSettingsPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Inquiry Delivery — Site Admin only */}
+              {isSiteAdmin && (
+                <Card className="border-none shadow-md">
+                  <CardHeader className="flex flex-row items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                      <Mail className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1">
+                      <CardTitle>Inquiry Delivery</CardTitle>
+                      <CardDescription>
+                        A safety net so no inquiry is ever missed. The master inbox is copied on <strong>every</strong>{' '}
+                        inquiry; the fallback only receives inquiries whose topic has no assigned role.
+                      </CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Master inbox — CC&apos;d on every inquiry (comma-separated)</Label>
+                      <Input
+                        placeholder="you@example.com, board@example.com"
+                        value={masterCc}
+                        onChange={(e) => setMasterCc(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Fallback inbox for {activeSport ?? 'this sport'} — used only when a topic has no role (comma-separated)
+                      </Label>
+                      <Input
+                        placeholder="fallback@example.com"
+                        value={sportFallback}
+                        onChange={(e) => setSportFallback(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      {inquiryConfig?.updatedAt ? (
+                        <p className="text-xs text-muted-foreground">
+                          Last changed{inquiryConfig.updatedByName ? ` by ${inquiryConfig.updatedByName}` : ''} on{' '}
+                          {new Date(inquiryConfig.updatedAt).toLocaleString()}
+                        </p>
+                      ) : <span />}
+                      <Button size="sm" onClick={handleSaveDelivery} disabled={savingDelivery || !activeSport} className="min-w-24">
+                        {savingDelivery ? (
+                          <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> Saving</>
+                        ) : (
+                          <><Save className="mr-2 h-3.5 w-3.5" /> Save</>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Notifications (read-only preview) */}
               <Card className="border-none shadow-md opacity-60">

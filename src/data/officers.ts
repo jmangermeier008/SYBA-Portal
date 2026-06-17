@@ -29,7 +29,10 @@ export const OFFICER_TITLES = [
   'At-Large Board Member',
 ] as const;
 
-export type OfficerTitle = typeof OFFICER_TITLES[number];
+// Titles are now admin-editable per sport (stored on the `officers` collection), so this
+// is a free-form string. The OFFICER_TITLES / EXECUTIVE_TITLES / *_COORDINATORS lists below
+// remain only as first-run seed defaults.
+export type OfficerTitle = string;
 
 export interface OfficerEntry {
   title: OfficerTitle;
