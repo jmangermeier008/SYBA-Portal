@@ -40,6 +40,7 @@ import {
   Megaphone,
   Briefcase,
   FlaskConical,
+  TrendingUp,
 } from 'lucide-react';
 import { where, limit as firestoreLimit } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -105,7 +106,7 @@ const adminSystemAdminItems = [
 
 function getAdminSectionForPath(p: string): string | null {
   if (['/admin/seasons', '/admin/divisions', '/admin/teams'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Setup';
-  if (['/admin/registration', '/admin/inquiries'].some(r => p === r || p.startsWith(r + '/'))) return 'Registration';
+  if (['/admin/registration', '/admin/inquiries', '/admin/payments-health'].some(r => p === r || p.startsWith(r + '/'))) return 'Registration';
   if (['/admin/roster', '/admin/equipment'].some(r => p === r || p.startsWith(r + '/'))) return 'Equipment & Rosters';
   if (['/admin/calendar', '/admin/games', '/admin/practice-slots', '/admin/fields', '/admin/volunteers', '/admin/announcements', '/admin/board-meetings', '/admin/sponsorships'].some(r => p === r || p.startsWith(r + '/'))) return 'Season Operations';
   if (['/admin/import', '/admin/roles', '/admin/settings', '/admin/developer'].some(r => p === r || p.startsWith(r + '/'))) return 'System Maintenance';
@@ -585,7 +586,12 @@ export function Sidebar() {
             <NavSection
               label="Registration"
               sectionIcon={ClipboardList}
-              items={adminRegistrationItems}
+              items={[
+                ...adminRegistrationItems,
+                ...((isAdmin || isSiteAdmin)
+                  ? [{ label: 'Payments Health', icon: TrendingUp, href: '/admin/payments-health' }]
+                  : []),
+              ]}
               pathname={pathname}
               onNavigate={closeMenu}
               isOpen={openSections['Registration']}

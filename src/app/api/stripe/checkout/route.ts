@@ -89,11 +89,91 @@ export async function POST(req: Request) {
         resolvedEnrollments.push({ enrollmentId, enrollment });
       }
 
+      // ── Reconcile already-paid enrollments before charging (double-charge guard) ──
+      // A parent whose payment settled in Stripe but whose enrollment never
+      // finalized (e.g. the live webhook was misconfigured at go-live) is shown a
+      // "Resume Payment" button that re-hits this route. Stripe's idempotency key
+      // only protects a byte-identical cart for 24h, so without this guard a
+      // returning parent — or one resuming part of a multi-child cart — could be
+      // charged twice. We reuse the stripeSessionId persisted on the previous
+      // attempt to reconcile each pending enrollment against Stripe and finalize
+      // it (identical to confirm/route.ts) instead of creating a new charge.
+      const settledEnrollmentIds = new Set<string>();
+      const sessionCache = new Map<string, Stripe.Checkout.Session>();
+      for (const { enrollmentId, enrollment } of resolvedEnrollments) {
+        // Already settled (paid / $0 / offline) — never charge again.
+        if (enrollment.stripe_payment_id) {
+          settledEnrollmentIds.add(enrollmentId);
+          continue;
+        }
+        const priorSessionId: string | undefined = enrollment.stripeSessionId;
+        if (!priorSessionId) continue;
+
+        let priorSession = sessionCache.get(priorSessionId);
+        if (!priorSession) {
+          try {
+            priorSession = await stripe.checkout.sessions.retrieve(priorSessionId);
+            sessionCache.set(priorSessionId, priorSession);
+          } catch (e) {
+            console.warn(`[stripe/checkout] Could not retrieve prior session ${priorSessionId} for enrollment ${enrollmentId}`, e);
+            continue;
+          }
+        }
+        if (priorSession.payment_status !== 'paid') continue;
+
+        const finalizedSession = priorSession;
+        const finalized = await db.runTransaction(async (tx) => {
+          const ref = db.doc(`userProfiles/${userId}/enrollments/${enrollmentId}`);
+          const snap = await tx.get(ref);
+          if (!snap.exists) return false;
+          const data = snap.data() as any;
+          if (data.stripe_payment_id) return true; // webhook/confirm won the race
+          // Reconciling a settled payment also converts any checkout-time
+          // reservation into a held seat (registeredCount +1, release reservedCount).
+          const wasReserved = data.capacityReserved === true;
+          tx.update(ref, {
+            paymentStatus: 'paid',
+            stripe_payment_id: finalizedSession.payment_intent ?? finalizedSession.id,
+            gross_amount_paid: finalizedSession.amount_total ?? 0,
+            capacityReserved: false,
+            updatedAt: new Date().toISOString(),
+          });
+          if (data.seasonId && data.divisionId) {
+            tx.set(
+              db.doc(`seasons/${data.seasonId}/divisions/${data.divisionId}`),
+              {
+                registeredCount: FieldValue.increment(1),
+                ...(wasReserved ? { reservedCount: FieldValue.increment(-1) } : {}),
+              },
+              { merge: true }
+            );
+          }
+          return true;
+        });
+        if (finalized) settledEnrollmentIds.add(enrollmentId);
+      }
+
+      // Only enrollments still genuinely unpaid after reconciliation get charged.
+      const unpaidEnrollments = resolvedEnrollments.filter(
+        ({ enrollmentId }) => !settledEnrollmentIds.has(enrollmentId)
+      );
+
+      // Everything the parent asked to pay for is already settled — the "Resume
+      // Payment" click self-heals into a finalize, so send them to success with
+      // no new Stripe session and no second charge.
+      if (unpaidEnrollments.length === 0) {
+        const sportParam = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
+        return NextResponse.json({
+          url: `${baseUrl}/parent/enroll/success?enrollment_ids=${encodeURIComponent(enrollmentIds.join(','))}${sportParam}`,
+        });
+      }
+
       // ── Capacity reservation (Fix E) ──────────────────────────────────────
-      // Atomically reserve a seat per enrollment against its division capacity
-      // BEFORE creating the Stripe session, so concurrent checkouts cannot
-      // overbook. Firestore Admin transactions can't run count queries, so
-      // capacity is enforced against the registeredCount + reservedCount counters.
+      // Atomically reserve a seat per still-unpaid enrollment against its division
+      // capacity BEFORE creating the Stripe session, so concurrent checkouts cannot
+      // overbook. Firestore Admin transactions can't run count queries, so capacity
+      // is enforced against the registeredCount + reservedCount counters. Runs after
+      // reconciliation so already-settled enrollments are never re-reserved.
       const now = new Date().toISOString();
       const waitlistedIds = new Set<string>();
       try {
@@ -102,7 +182,7 @@ export async function POST(req: Request) {
 
           // Reads first: every distinct division doc this cart touches.
           const distinctDivs = new Map<string, ReturnType<typeof db.doc>>();
-          for (const { enrollment } of resolvedEnrollments) {
+          for (const { enrollment } of unpaidEnrollments) {
             if (enrollment.seasonId && enrollment.divisionId) {
               distinctDivs.set(
                 divKey(enrollment),
@@ -119,7 +199,7 @@ export async function POST(req: Request) {
           // Decide each enrollment in cart order, tracking seats taken this tx.
           const occupied = new Map<string, number>();
           const reservedDelta = new Map<string, number>();
-          for (const { enrollmentId, enrollment } of resolvedEnrollments) {
+          for (const { enrollmentId, enrollment } of unpaidEnrollments) {
             // Missing season/division → can't capacity-check; leave it payable.
             if (!enrollment.seasonId || !enrollment.divisionId) continue;
             const key = divKey(enrollment);
@@ -168,15 +248,14 @@ export async function POST(req: Request) {
       }
 
       // Enrollments still payable after capacity resolution (waitlisted drop out).
-      const payableEnrollments = resolvedEnrollments.filter(e => !waitlistedIds.has(e.enrollmentId));
+      const payableEnrollments = unpaidEnrollments.filter(e => !waitlistedIds.has(e.enrollmentId));
       const payableEnrollmentIds = payableEnrollments.map(e => e.enrollmentId);
       const waitlistedEnrollmentIds = [...waitlistedIds];
 
       // All payable items were just moved to the waitlist by the capacity race —
       // nothing to charge. Send the parent to the waitlisted success screen.
       if (payableEnrollments.length === 0) {
-        const sportQ = resolvedEnrollments[0]?.enrollment?.sport
-          ? `&sport=${encodeURIComponent(resolvedEnrollments[0].enrollment.sport)}` : '';
+        const sportQ = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
         return NextResponse.json({
           url: `${baseUrl}/parent/enroll/success?waitlisted=1${sportQ}`,
           waitlistedEnrollmentIds,
@@ -186,7 +265,7 @@ export async function POST(req: Request) {
       // ── Pricing inputs, all resolved server-side from Firestore ───────────
       // Carts are always single-season (the stepper enforces it), so the first
       // enrollment's season supplies the sibling fee.
-      const resolvedSeasonId: string = resolvedEnrollments[0].enrollment.seasonId ?? '';
+      const resolvedSeasonId: string = unpaidEnrollments[0].enrollment.seasonId ?? '';
 
       // Count paid enrollments for this family in the same season — sibling pricing.
       let pastPaidCount = 0;
@@ -236,8 +315,9 @@ export async function POST(req: Request) {
       const prices = calculateCartPricing(pastPaidCount, divisionFees, siblingFeeCents);
 
       // Stripe metadata value limit is 500 chars. UUIDs are 36 chars each + commas.
-      // Only payable (non-waitlisted) enrollments ride on the session so the
-      // webhook/confirm never finalize a reservation that was waitlisted.
+      // Only payable enrollments ride on the session: reconciled-paid ones are
+      // already settled and waitlisted ones aren't charged, so the webhook/confirm
+      // never re-finalizes either.
       const enrollmentIdsStr = payableEnrollmentIds.join(',');
       const sportParam = enrollmentSport ? `&sport=${encodeURIComponent(enrollmentSport)}` : '';
 
@@ -335,6 +415,18 @@ export async function POST(req: Request) {
         // out of Stripe doesn't look like the registration was lost.
         cancel_url: `${baseUrl}/parent/dashboard`,
       }, { idempotencyKey });
+
+      // Record the session on each enrollment so a later resume/checkout (from the
+      // dashboard "Resume Payment" button, which does not write it client-side)
+      // can reconcile against it via the guard above instead of charging again.
+      await Promise.all(
+        payableEnrollmentIds.map((eid) =>
+          db
+            .doc(`userProfiles/${userId}/enrollments/${eid}`)
+            .set({ stripeSessionId: session.id }, { merge: true })
+            .catch((e) => console.error(`[stripe/checkout] Failed to persist stripeSessionId on ${eid}`, e))
+        )
+      );
 
       return NextResponse.json({ url: session.url, sessionId: session.id, waitlistedEnrollmentIds });
     }
