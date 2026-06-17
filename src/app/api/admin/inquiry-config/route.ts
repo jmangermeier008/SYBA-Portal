@@ -31,6 +31,47 @@ function parseEmails(input: unknown): string[] {
   return out;
 }
 
+/** Verifies the bearer token and Site-Admin status. Returns the decoded user + profile, or a NextResponse error. */
+async function requireSiteAdmin(req: Request) {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
+  let decoded;
+  try {
+    decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
+  } catch {
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
+  const db = getAdminFirestore();
+  const callerSnap = await db.doc(`userProfiles/${decoded.uid}`).get();
+  const caller = callerSnap.data();
+  const isSiteAdmin =
+    caller?.isSiteAdmin === true || caller?.roles?.includes('Site Admin') === true;
+  if (!isSiteAdmin) {
+    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+  }
+  return { db, decoded, caller };
+}
+
+/**
+ * Reads the inquiry delivery config (`systemConfig/inquiries`) server-side. Site Admin only.
+ * The settings page fetches this instead of reading systemConfig from the browser, matching
+ * the Stripe-status pattern — client-side systemConfig reads are blocked by Firestore rules.
+ */
+export async function GET(req: Request) {
+  try {
+    const auth = await requireSiteAdmin(req);
+    if ('error' in auth) return auth.error;
+    const snap = await auth.db.doc('systemConfig/inquiries').get();
+    const config: InquiryDeliveryConfig = snap.exists ? (snap.data() as InquiryDeliveryConfig) : {};
+    return NextResponse.json(config);
+  } catch (err: any) {
+    console.error('[inquiry-config GET] error:', err.message);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
 /**
  * Writes the Site-Admin-managed inquiry delivery config (`systemConfig/inquiries`):
  * master CC, per-topic ad-hoc recipients, and per-sport fallbacks. Site Admin only.
@@ -38,26 +79,9 @@ function parseEmails(input: unknown): string[] {
  */
 export async function POST(req: Request) {
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    let decoded;
-    try {
-      decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
-    } catch {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const db = getAdminFirestore();
-
-    const callerSnap = await db.doc(`userProfiles/${decoded.uid}`).get();
-    const caller = callerSnap.data();
-    const isSiteAdmin =
-      caller?.isSiteAdmin === true || caller?.roles?.includes('Site Admin') === true;
-    if (!isSiteAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const auth = await requireSiteAdmin(req);
+    if ('error' in auth) return auth.error;
+    const { db, decoded, caller } = auth;
 
     const body = await req.json();
 

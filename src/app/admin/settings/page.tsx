@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useUser, useFirestore, useCollection, useDoc, useMemoFirebase, useAuth } from '@/firebase';
+import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy, where, writeBatch } from 'firebase/firestore';
 import { useSport } from '@/firebase/sport-context';
 import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain, Trash2, Plus, Mail } from 'lucide-react';
@@ -304,18 +304,33 @@ export default function AdminSettingsPage() {
   }>(usersQuery);
 
   // Inquiry delivery config (systemConfig/inquiries) — master CC + per-sport fallback.
-  // Only Site Admins can read systemConfig (per Firestore rules), so skip the subscription
-  // for other viewers to avoid a permission-denied error.
-  const inquiryConfigRef = useMemoFirebase(() => {
-    if (!db || !isSiteAdmin) return null;
-    return doc(db, 'systemConfig', 'inquiries');
-  }, [db, isSiteAdmin]);
-  const { data: inquiryConfig } = useDoc<InquiryDeliveryConfig>(inquiryConfigRef);
+  // systemConfig is not client-readable (Firestore rules block it), so we fetch it from a
+  // server endpoint that reads via the Admin SDK — mirrors the Stripe-status pattern.
+  const [inquiryConfig, setInquiryConfig] = useState<InquiryDeliveryConfig | null>(null);
   const [masterCc, setMasterCc] = useState('');
   const [sportFallback, setSportFallback] = useState('');
   const [savingDelivery, setSavingDelivery] = useState(false);
 
-  // Hydrate the delivery form from Firestore (and when switching sport for the fallback field).
+  const loadInquiryConfig = async () => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) return;
+      const res = await fetch('/api/admin/inquiry-config', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      setInquiryConfig((await res.json()) as InquiryDeliveryConfig);
+    } catch {
+      // Non-fatal — the form just starts empty.
+    }
+  };
+
+  useEffect(() => {
+    if (isSiteAdmin) loadInquiryConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSiteAdmin]);
+
+  // Hydrate the delivery form from the loaded config (and when switching sport for the fallback field).
   useEffect(() => {
     setMasterCc((inquiryConfig?.alwaysCcEmails ?? []).join(', '));
   }, [inquiryConfig?.alwaysCcEmails]);
@@ -339,10 +354,12 @@ export default function AdminSettingsPage() {
           topicOverrides: inquiryConfig?.topicOverrides ?? {},
         }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Save failed');
+        throw new Error(data.error || 'Save failed');
       }
+      // POST returns the saved config — refresh local state so values + "Last changed" stay correct.
+      setInquiryConfig(data as InquiryDeliveryConfig);
       toast({ title: 'Inquiry delivery updated' });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Could not save', description: e.message });
