@@ -655,9 +655,9 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         if (item.isNewPlayer) {
           batch.set(doc(db, 'userProfiles', user.uid, 'players', playerId), {
             id: playerId,
-            firstName: item.newPlayerFirst ?? '',
-            lastName: item.newPlayerLast ?? '',
-            dateOfBirth: item.newPlayerDOB ?? '',
+            firstName: (item.newPlayerFirst ?? '').trim(),
+            lastName: (item.newPlayerLast ?? '').trim(),
+            dateOfBirth: (item.newPlayerDOB ?? '').trim(),
             parentIds: [user.uid],
             primaryParentId: user.uid,
             ...(item.birthCertUrl ? { birthCertificateUrl: item.birthCertUrl } : {}),

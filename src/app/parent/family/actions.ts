@@ -27,17 +27,21 @@ export async function searchAndRequestLink(
 
     const db = getAdminFirestore();
 
-    // One read set instead of scanning every profile's subcollection
-    const playersSnap = await db
-      .collectionGroup('players')
-      .where('lastName', '==', lastName.trim())
-      .get();
+    // Match case- and whitespace-insensitively. Player names are not normalized
+    // on write (the enrollment form stores them as typed), so an exact,
+    // case-sensitive comparison misses valid players (e.g. "john smith" vs
+    // "John Smith"). The dataset is small and co-parent requests are rare, so a
+    // collection-group scan with in-code normalized comparison is acceptable —
+    // and it removes the case-sensitive `where('lastName', ...)` limitation.
+    const norm = (s?: string) => (s ?? '').trim().toLowerCase();
+    const playersSnap = await db.collectionGroup('players').get();
 
     const playerDoc = playersSnap.docs.find(d => {
       const data = d.data();
       return (
-        data.firstName === firstName.trim() &&
-        data.dateOfBirth === dateOfBirth
+        norm(data.firstName) === norm(firstName) &&
+        norm(data.lastName) === norm(lastName) &&
+        (data.dateOfBirth ?? '').trim() === dateOfBirth.trim()
       );
     }) ?? null;
 
