@@ -135,9 +135,10 @@ service cloud.firestore {
       allow delete: if isAdmin() || isSiteAdmin();
 
       match /clearances/{clearanceId} {
-        allow read: if isUser(userId) || isAdmin();
+        // Board Members + Admins audit volunteer clearances (matches the registration page UI)
+        allow read: if isUser(userId) || isBoardMember();
         allow create: if isUser(userId) || isAdmin();
-        allow update: if isUser(userId) || isAdmin();
+        allow update: if isUser(userId) || isBoardMember();
         allow delete: if isUser(userId) || isAdmin();
       }
 

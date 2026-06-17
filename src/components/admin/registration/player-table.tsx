@@ -88,6 +88,8 @@ interface PlayerTableProps {
   divisions: Division[];
   playerSportMap: Map<string, string>;
   isSiteAdmin: boolean;
+  /** Admins + Board Members may audit documents; Site Admin still required to delete */
+  canAudit: boolean;
   isProcessing: boolean;
   /** Football: show the league agreement column + audit toggle */
   showLeagueForm?: boolean;
@@ -128,6 +130,7 @@ export function PlayerTable({
   divisions,
   playerSportMap,
   isSiteAdmin,
+  canAudit,
   isProcessing,
   showLeagueForm = false,
   initialAuditPlayerId,
@@ -303,13 +306,13 @@ export function PlayerTable({
   // Deep link (?auditPlayer=...) from the roster page: open that player's audit once data loads
   const deepLinkHandled = useRef(false);
   useEffect(() => {
-    if (deepLinkHandled.current || !initialAuditPlayerId || !isSiteAdmin || players.length === 0) return;
+    if (deepLinkHandled.current || !initialAuditPlayerId || !canAudit || players.length === 0) return;
     const target = players.find(p => p.id === initialAuditPlayerId);
     if (!target) return;
     deepLinkHandled.current = true;
     setStatusFilter('all');
     openAudit(target);
-  }, [initialAuditPlayerId, isSiteAdmin, players]);
+  }, [initialAuditPlayerId, canAudit, players]);
 
   const handleAuditSubmit = async () => {
     if (!auditingPlayer) return;
@@ -376,7 +379,7 @@ export function PlayerTable({
           <CardTitle className="text-xl font-headline">Player Registrations</CardTitle>
           <CardDescription className="text-primary-foreground/80">
             Verify player identity documents and track payment status.
-            {!isSiteAdmin && <span className="ml-1 opacity-70">(Site Admin access required to audit documents.)</span>}
+            {!canAudit && <span className="ml-1 opacity-70">(Admin or Board Member access required to audit documents.)</span>}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 space-y-4">
@@ -472,9 +475,9 @@ export function PlayerTable({
                           </>
                         )}
                       </div>
-                      {(isSiteAdmin || showLeagueForm || !!onWaiveFee) && (
+                      {(canAudit || showLeagueForm || !!onWaiveFee) && (
                         <div className="flex gap-2 pt-1">
-                          {isSiteAdmin && (
+                          {canAudit && (
                             <Button
                               variant="default"
                               size="sm"
@@ -505,7 +508,7 @@ export function PlayerTable({
                     <TableHead>Birth Cert</TableHead>
                     <TableHead>Physical</TableHead>
                     {showLeagueForm && <TableHead>Forms</TableHead>}
-                    {(isSiteAdmin || showLeagueForm || !!onWaiveFee) && <TableHead className="pr-6 text-right">Actions</TableHead>}
+                    {(canAudit || showLeagueForm || !!onWaiveFee) && <TableHead className="pr-6 text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -592,10 +595,10 @@ export function PlayerTable({
                         )}
 
                         {/* Actions — Audit stays a visible button (the page's main job); everything else lives in one labeled menu */}
-                        {(isSiteAdmin || showLeagueForm || !!onWaiveFee) && (
+                        {(canAudit || showLeagueForm || !!onWaiveFee) && (
                           <TableCell className="pr-6 text-right">
                             <div className="flex justify-end gap-2">
-                              {isSiteAdmin && (
+                              {canAudit && (
                                 <Button
                                   variant="default"
                                   size="sm"
