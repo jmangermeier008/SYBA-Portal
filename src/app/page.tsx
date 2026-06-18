@@ -233,7 +233,7 @@ export default function Home() {
           alt={publicSport ? SPORT_CONFIG[publicSport].label : 'The League'}
           width={160}
           height={160}
-          className="object-contain drop-shadow-md transition-all duration-300"
+          className="h-32 w-auto object-contain drop-shadow-md transition-all duration-300"
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
         <div className="space-y-1">
@@ -241,7 +241,7 @@ export default function Home() {
             {publicSport ? SPORT_CONFIG[publicSport].label : 'The League'}
           </h1>
           <p className="text-muted-foreground text-sm">
-            {publicSport ? 'Sharpsville Youth Athletics' : 'The online home for youth athletics'}
+            {publicSport ? 'Sharpsville Youth Athletics' : 'The online home for Sharpsville Youth Sports'}
           </p>
         </div>
 
@@ -289,7 +289,7 @@ export default function Home() {
                   alt={cfg.label}
                   width={120}
                   height={120}
-                  className="object-contain drop-shadow-md"
+                  className="h-20 w-auto object-contain drop-shadow-md"
                   onError={(e) => {
                     const img = e.target as HTMLImageElement;
                     img.style.display = 'none';
