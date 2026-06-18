@@ -143,7 +143,7 @@ function LoginContent() {
         <Link href="/" className="flex flex-col items-center justify-center gap-1 mb-8">
           <div className="flex items-center gap-2">
             <Trophy className="h-8 w-8 text-primary" />
-            <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">SYBA Portal</span>
+            <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">Sharpsville Youth Sports Portal</span>
           </div>
           {searchParams.get('sport') === 'baseball' && (
             <span className="text-sm text-muted-foreground">Baseball</span>
@@ -178,7 +178,7 @@ function LoginContent() {
                 {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in...</> : "Sign In"}
               </Button>
               <p className="text-sm text-center text-muted-foreground">
-                New to SYBA?{" "}
+                Need an Account?{" "}
                 <Link href={signupHref} className="text-primary font-medium hover:underline">Create an account</Link>
               </p>
             </CardFooter>

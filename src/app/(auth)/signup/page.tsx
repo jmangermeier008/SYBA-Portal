@@ -146,7 +146,7 @@ function SignupContent() {
       <div className="w-full max-w-md">
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
           <Trophy className="h-8 w-8 text-primary" />
-          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">SYBA Portal</span>
+          <span className="text-2xl font-bold font-headline text-primary tracking-tight text-center">Sharpsville Youth Sports Portal</span>
         </Link>
         <Card className="border-none shadow-xl">
           <CardHeader className="space-y-1">
