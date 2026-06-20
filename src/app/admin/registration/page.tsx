@@ -98,10 +98,22 @@ export default function RegistrationDashboardPage() {
     return query(collection(db, 'seasons'), where('sport', '==', activeSport));
   }, [db, isAdmin, isBoardMember, activeSport]);
 
+  // Load seasons + derive this sport's season IDs up front so the enrollments
+  // query can filter server-side instead of downloading every enrollment.
+  const { data: seasons } = useCollection<any>(seasonsQuery);
+  const sportSeasonIds = useMemo(
+    () => new Set((seasons ?? []).map((s: any) => s.id as string)),
+    [seasons]
+  );
+
   const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember)) return null;
-    return collectionGroup(db, 'enrollments');
-  }, [db, isAdmin, isBoardMember]);
+    if (!db || (!isAdmin && !isBoardMember) || sportSeasonIds.size === 0) return null;
+    const ids = [...sportSeasonIds];
+    // Firestore 'in' supports at most 30 values; fall back to the unfiltered
+    // collection-group query in the (unlikely) case there are more seasons.
+    if (ids.length > 30) return collectionGroup(db, 'enrollments');
+    return query(collectionGroup(db, 'enrollments'), where('seasonId', 'in', ids));
+  }, [db, isAdmin, isBoardMember, sportSeasonIds]);
 
   const playersQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -123,7 +135,6 @@ export default function RegistrationDashboardPage() {
     return collectionGroup(db, 'divisions');
   }, [db, isAdmin, isBoardMember]);
 
-  const { data: seasons } = useCollection<any>(seasonsQuery);
   const { data: allEnrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<PlayerWithDocs>(playersQuery);
   const { data: coaches, isLoading: loadingCoaches } = useCollection<CoachProfile>(coachQuery);
@@ -131,11 +142,6 @@ export default function RegistrationDashboardPage() {
   const { data: allDivisions } = useCollection<Division>(divisionsQuery);
 
   // ── Derived data ───────────────────────────────────────────────────────────
-
-  const sportSeasonIds = useMemo(() =>
-    new Set((seasons ?? []).map((s: any) => s.id as string)),
-    [seasons]
-  );
 
   // teamsQuery depends on sportSeasonIds so it must come after that memo
   const teamsQuery = useMemoFirebase(() => {
@@ -405,8 +411,9 @@ export default function RegistrationDashboardPage() {
             doc(db, 'seasons', enrollment.seasonId, 'divisions', enrollment.divisionId),
             { registeredCount: increment(1) },
           );
-        } catch {
+        } catch (err) {
           // Division may have been deleted — the recount tool reconciles any drift
+          console.warn('[registration] capacity increment skipped:', err);
         }
       }
 
@@ -415,7 +422,9 @@ export default function RegistrationDashboardPage() {
       try {
         const profileSnap = await getDoc(doc(db, 'userProfiles', enrollment.parentUserId));
         parentEmail = profileSnap.data()?.email || '';
-      } catch {}
+      } catch (err) {
+        console.warn('[registration] parent email lookup failed:', err);
+      }
 
       // Send confirmation email — with human-readable season/division names,
       // not the raw Firestore IDs.
