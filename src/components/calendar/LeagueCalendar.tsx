@@ -603,7 +603,7 @@ function MonthGrid({
               {overflow > 0 && (
                 <button
                   onClick={() => onDayClick(day)}
-                  className="text-[10px] text-primary hover:underline font-medium text-left px-1 touch-manipulation"
+                  className="text-[11px] md:text-[10px] text-primary hover:underline font-medium text-left px-1 py-1 md:py-0 touch-manipulation"
                 >
                   +{overflow} more
                 </button>
@@ -628,6 +628,7 @@ function WeekStrip({
   onConcessionCancel,
   onViewRecord,
   showUmpire,
+  isMobile,
 }: {
   focusDate: Date;
   eventsByDate: Map<string, CalendarEvent[]>;
@@ -638,9 +639,67 @@ function WeekStrip({
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
   showUmpire?: LeagueCalendarProps['showUmpire'];
+  isMobile?: boolean;
 }) {
   const days = getWeekDays(focusDate);
 
+  const renderEvents = (dayEvents: CalendarEvent[]) =>
+    dayEvents.length === 0 ? (
+      <p className="text-[10px] text-muted-foreground/40 text-center mt-4">—</p>
+    ) : (
+      dayEvents.map(e => (
+        <EventPill
+          key={e.id}
+          event={e}
+          divisionColors={divisionColors}
+          onRsvp={onRsvp}
+          onWeatherCancel={onWeatherCancel}
+          onConcessionSignup={onConcessionSignup}
+          onConcessionCancel={onConcessionCancel}
+          onViewRecord={onViewRecord}
+          showUmpire={showUmpire}
+        />
+      ))
+    );
+
+  // Mobile: stack days vertically so the week never forces horizontal scrolling.
+  if (isMobile) {
+    return (
+      <div className="border rounded-xl divide-y">
+        {days.map((day, idx) => {
+          const key = toDateKey(day);
+          const dayEvents = eventsByDate.get(key) ?? [];
+          const today = isToday(day);
+
+          return (
+            <div key={idx} className={cn('flex flex-col', today && 'bg-primary/5')}>
+              {/* Day header — horizontal on mobile */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b bg-secondary/30">
+                <span
+                  className={cn(
+                    'text-sm font-bold w-8 h-8 flex items-center justify-center rounded-full shrink-0',
+                    today ? 'bg-primary text-white' : 'text-foreground'
+                  )}
+                >
+                  {format(day, 'd')}
+                </span>
+                <p className="text-xs font-semibold text-muted-foreground uppercase">
+                  {format(day, 'EEEE')}
+                  {day.getDate() === 1 && (
+                    <span className="ml-1 text-primary/70">{format(day, 'MMM')}</span>
+                  )}
+                </p>
+              </div>
+              {/* Events */}
+              <div className="flex flex-col gap-1 p-2">{renderEvents(dayEvents)}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Desktop: 7-column grid.
   return (
     <div className="border rounded-xl overflow-x-auto">
       <div className="grid grid-cols-7">
@@ -684,23 +743,7 @@ function WeekStrip({
 
               {/* Events */}
               <div className="flex flex-col gap-1 p-1.5 flex-1">
-                {dayEvents.length === 0 ? (
-                  <p className="text-[10px] text-muted-foreground/40 text-center mt-4">—</p>
-                ) : (
-                  dayEvents.map(e => (
-                    <EventPill
-                      key={e.id}
-                      event={e}
-                      divisionColors={divisionColors}
-                      onRsvp={onRsvp}
-                      onWeatherCancel={onWeatherCancel}
-                      onConcessionSignup={onConcessionSignup}
-                      onConcessionCancel={onConcessionCancel}
-                      onViewRecord={onViewRecord}
-                      showUmpire={showUmpire}
-                    />
-                  ))
-                )}
+                {renderEvents(dayEvents)}
               </div>
             </div>
           );
@@ -965,11 +1008,11 @@ export function LeagueCalendar({
 
         {/* Month/week navigator */}
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" className="h-10 w-10" onClick={navigatePrev} aria-label="Previous">
+          <Button variant="outline" size="icon" className="h-11 w-11 md:h-10 md:w-10" onClick={navigatePrev} aria-label="Previous">
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm font-semibold min-w-[120px] text-center">{titleLabel}</span>
-          <Button variant="outline" size="icon" className="h-10 w-10" onClick={navigateNext} aria-label="Next">
+          <Button variant="outline" size="icon" className="h-11 w-11 md:h-10 md:w-10" onClick={navigateNext} aria-label="Next">
             <ChevronRight className="h-4 w-4" />
           </Button>
           <Button
@@ -1182,6 +1225,7 @@ export function LeagueCalendar({
           onConcessionCancel={onConcessionCancel}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
+          isMobile={isMobile}
         />
       )}
     </div>

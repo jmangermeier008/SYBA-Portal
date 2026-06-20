@@ -1699,7 +1699,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
 
         {/* Sticky above the mobile bottom tab bar (h-14); explains a disabled
             Next instead of leaving the parent staring at a gray button. */}
-        <CardFooter className="flex flex-col gap-3 bg-card border-t shadow-sm rounded-b-xl pt-4 sticky bottom-14 md:bottom-0 z-10">
+        <CardFooter className="flex flex-col gap-3 bg-card border-t shadow-sm rounded-b-xl pt-4 sticky bottom-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:bottom-0 z-10">
           {state.step < totalSteps && !checkingDuplicate && nextBlockedReason() && (
             <p className="w-full text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               {nextBlockedReason()}

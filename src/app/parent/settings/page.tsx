@@ -95,7 +95,9 @@ export default function ParentSettingsPage() {
               [player.id]: { uid: snap.docs[0].id, displayName: data.displayName || null, email: data.email || null },
             }));
           }
-        } catch {}
+        } catch (err) {
+          console.warn('[settings] linked parent lookup failed:', err);
+        }
       }
     };
     fetchLinkedParents();
