@@ -639,11 +639,13 @@ export function Sidebar() {
         {activeContext === 'coach' && isCoach && (
           <NavSection
             label="Coaching"
-            items={coachItems.map(item => {
-              if (item.href === '/coach/notifications') return { ...item, badge: hasUnreadNotifs };
-              if (item.href === '/coach/announcements') return { ...item, badge: hasUnreadCoach };
-              return item;
-            })}
+            items={coachItems
+              .filter(item => !(activeSport === 'football' && item.href === '/coach/practice-slots'))
+              .map(item => {
+                if (item.href === '/coach/notifications') return { ...item, badge: hasUnreadNotifs };
+                if (item.href === '/coach/announcements') return { ...item, badge: hasUnreadCoach };
+                return item;
+              })}
             pathname={pathname}
             onNavigate={closeMenu}
             isOpen={openSections['Coaching']}
