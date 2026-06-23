@@ -1117,7 +1117,7 @@ export default function AdminGamesPage() {
               </DialogTrigger>
               <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle className="font-headline">{editingGame ? 'Edit Game' : 'Add Game or Practice'}</DialogTitle>
+                  <DialogTitle className="font-headline">{editingGame ? (editingGame.type === 'practice' ? 'Edit Practice' : 'Edit Game') : 'Add Game or Practice'}</DialogTitle>
                   {editingGame && <p className="text-sm text-muted-foreground">Changes to date or time will move any linked concession shifts.</p>}
                 </DialogHeader>
                 <div className="space-y-4 py-2">
