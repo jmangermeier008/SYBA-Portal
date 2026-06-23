@@ -52,7 +52,7 @@ export default function CoachAnnouncementsPage() {
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 max-w-3xl">
         <header className="mb-4 md:mb-6">
           <h1 className="text-xl md:text-2xl font-bold font-headline">League Announcements</h1>
-          <p className="text-sm text-muted-foreground">Stay up to date with the latest news from SYBA.</p>
+          <p className="text-sm text-muted-foreground">Stay up to date with the latest news.</p>
         </header>
 
         <div className="relative mb-6">
