@@ -85,7 +85,7 @@ const adminRegistrationItems = [
 
 const adminOperationsItems = [
   { label: 'League Calendar', icon: Calendar, href: '/admin/calendar' },
-  { label: 'Game Schedule', icon: CalendarDays, href: '/admin/games' },
+  { label: 'Scheduling', icon: CalendarDays, href: '/admin/games' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/admin/practice-slots' },
   { label: 'Fields', icon: MapPin, href: '/admin/fields' },
   { label: 'Volunteer Management', icon: HeartHandshake, href: '/admin/volunteers' },

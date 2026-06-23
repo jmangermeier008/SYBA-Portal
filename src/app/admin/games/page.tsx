@@ -1059,7 +1059,7 @@ export default function AdminGamesPage() {
         {/* Header */}
         <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-xl md:text-2xl font-bold font-headline">Game Schedule</h1>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Scheduling</h1>
             <p className="text-sm text-muted-foreground">Add and manage games and practices for all teams.</p>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">

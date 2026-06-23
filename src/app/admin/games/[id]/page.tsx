@@ -192,7 +192,7 @@ export default function GameDetailPage({
               <p className="font-semibold text-lg mb-1">Game Not Found</p>
               <p className="text-muted-foreground text-sm mb-4">This event may have been deleted.</p>
               <Button asChild variant="outline" className="rounded-full px-8">
-                <Link href="/admin/games">← Back to Game Schedule</Link>
+                <Link href="/admin/games">← Back to Scheduling</Link>
               </Button>
             </CardContent>
           </Card>
@@ -228,12 +228,12 @@ export default function GameDetailPage({
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            Game Schedule
+            Scheduling
           </Link>
           <Button asChild variant="outline" size="sm" className="rounded-full gap-1.5">
             <Link href="/admin/games">
               <Settings2 className="h-3.5 w-3.5" />
-              Manage in Game Schedule
+              Manage in Scheduling
             </Link>
           </Button>
         </div>
