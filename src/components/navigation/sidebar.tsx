@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -157,22 +157,38 @@ function NavSection({
   sectionIcon?: React.ElementType;
 }) {
   const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const isSectionActive = items.some(
     item => pathname === item.href || pathname.startsWith(item.href + '/')
   );
+
+  // Close the collapsed-mode flyout when clicking anywhere outside it.
+  useEffect(() => {
+    if (!flyoutOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setFlyoutOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [flyoutOpen]);
 
   if (collapsed) {
     const Icon = sectionIcon ?? items[0]?.icon ?? LayoutDashboard;
 
     return (
       <div
+        ref={wrapperRef}
         className="relative flex flex-col items-center mt-2"
         onMouseEnter={() => setFlyoutOpen(true)}
-        onMouseLeave={() => setFlyoutOpen(false)}
       >
         <button
           title={label}
+          onClick={() => setFlyoutOpen(o => !o)}
+          aria-expanded={flyoutOpen}
+          aria-haspopup="menu"
           className={cn(
             "flex items-center justify-center w-11 h-11 rounded-lg transition-colors",
             isSectionActive
