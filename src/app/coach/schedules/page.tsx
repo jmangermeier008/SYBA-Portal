@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, query, orderBy, doc, updateDoc, where, limit } from 'firebase/firestore';
+import { collection, query, doc, updateDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent } from '@/types/scheduling';
+import { AddEventDialog } from '@/components/calendar/AddEventDialog';
+import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
+import type { CalendarEvent, CustomEvent } from '@/types/scheduling';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,35 +54,61 @@ function normalizeTeamGame(g: GameEvent, teamId: string): CalendarEvent {
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CoachSchedulesPage() {
-  const { user, loading: loadingUser } = useUser();
+  const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
-  const { activeSport } = useSport();
+  const { activeSport, isAdmin } = useSport();
   const { toast } = useToast();
 
   // ── Filter state ────────────────────────────────────────────────────────────
-  const [filters, setFilters] = useState({ games: true, practices: true, concessions: false });
+  const [filters, setFilters] = useState({ games: true, practices: true, concessions: false, events: true });
+  const [addEventOpen, setAddEventOpen] = useState(false);
+  const [allTeamGames, setAllTeamGames] = useState<(GameEvent & { _teamId: string })[]>([]);
+  const [loadingGames, setLoadingGames] = useState(false);
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user || !activeSport) return null;
-    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), where('sport', '==', activeSport), limit(1));
+    return query(collection(db, 'teams'), where('coachIds', 'array-contains', user.uid), where('sport', '==', activeSport));
   }, [db, user?.uid, activeSport]);
 
   const { data: userTeams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const activeTeam = userTeams?.[0];
+  const coachTeamIds = useMemo(() => (userTeams ?? []).map(t => t.id), [userTeams]);
+  const coachTeamIdsKey = coachTeamIds.join(',');
 
-  const gamesQuery = useMemoFirebase(() => {
-    if (!db || !activeTeam) return null;
-    return query(collection(db, 'teams', activeTeam.id, 'games'), orderBy('dateTime', 'asc'));
-  }, [db, activeTeam?.id]);
+  // Fetch games for every team the coach is on (a coach may have multiple teams).
+  useEffect(() => {
+    if (!db || coachTeamIds.length === 0) {
+      setAllTeamGames([]);
+      return;
+    }
+    setLoadingGames(true);
+    Promise.all(
+      coachTeamIds.map(teamId =>
+        getDocs(collection(db, 'teams', teamId, 'games'))
+          .then(snap => snap.docs.map(d => ({ ...(d.data() as GameEvent), id: d.id, _teamId: teamId })))
+      )
+    ).then(results => {
+      setAllTeamGames(results.flat());
+      setLoadingGames(false);
+    }).catch(() => setLoadingGames(false));
+  }, [db, coachTeamIdsKey]);
 
-  const { data: games, isLoading: loadingGames } = useCollection<GameEvent>(gamesQuery);
+  const customEventsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+
+  const { data: customEvents } = useCollection<CustomEvent>(customEventsQuery);
 
   // ── Normalize to CalendarEvent ──────────────────────────────────────────────
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
-    if (!games || !activeTeam) return [];
-    return games.map(g => normalizeTeamGame(g, activeTeam.id));
-  }, [games, activeTeam]);
+    const events: CalendarEvent[] = [];
+    events.push(...allTeamGames.map(g => normalizeTeamGame(g, g._teamId)));
+    const myEvents = visibleCustomEvents(customEvents ?? [], { isAdmin, teamIds: coachTeamIds });
+    events.push(...myEvents.map(normalizeCustomEvent));
+    return events;
+  }, [allTeamGames, customEvents, isAdmin, coachTeamIds]);
 
   // ── Weather cancel (passed to calendar via onWeatherCancel) ─────────────────
   const handleWeatherCancel = async (teamId: string, gameId: string) => {
@@ -96,9 +124,24 @@ export default function CoachSchedulesPage() {
     }
   };
 
-  const handleFilterChange = (key: 'games' | 'practices' | 'concessions', val: boolean) => {
+  const handleFilterChange = (key: 'games' | 'practices' | 'concessions' | 'events', val: boolean) => {
     setFilters(f => ({ ...f, [key]: val }));
   };
+
+  const handleEventDelete = async (eventId: string) => {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'customEvents', eventId));
+      toast({ title: 'Event deleted' });
+    } catch (err: any) {
+      toast({ title: 'Could not delete event', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const eventTeams = useMemo(
+    () => (userTeams ?? []).map(t => ({ id: t.id, name: t.name })),
+    [userTeams]
+  );
 
   const isLoading = loadingTeams || loadingGames;
 
@@ -135,10 +178,23 @@ export default function CoachSchedulesPage() {
             isLoading={isLoading}
             filters={filters}
             onFilterChange={handleFilterChange}
-            visibleFilters={['games', 'practices']}
+            visibleFilters={['games', 'practices', 'events']}
             onWeatherCancel={handleWeatherCancel}
+            onAddEvent={() => setAddEventOpen(true)}
+            onEventDelete={handleEventDelete}
+            currentUserId={user?.uid}
           />
         )}
+
+        <AddEventDialog
+          open={addEventOpen}
+          onOpenChange={setAddEventOpen}
+          db={db}
+          sport={activeSport}
+          seasonId={activeTeam?.seasonId}
+          teams={eventTeams}
+          creator={{ uid: user?.uid ?? '', name: profile?.displayName ?? undefined }}
+        />
       </main>
     </div>
   );

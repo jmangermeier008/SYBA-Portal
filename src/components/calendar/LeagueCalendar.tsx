@@ -51,6 +51,7 @@ const pillColors: Record<CalendarEventType, string> = {
   practice: 'bg-green-600 text-white',
   concession: 'bg-amber-500 text-white',
   closure: 'bg-red-600 text-white',
+  event: 'bg-purple-600 text-white',
 };
 
 const dotColors: Record<CalendarEventType, string> = {
@@ -58,6 +59,7 @@ const dotColors: Record<CalendarEventType, string> = {
   practice: 'bg-green-600',
   concession: 'bg-amber-500',
   closure: 'bg-red-600',
+  event: 'bg-purple-600',
 };
 
 const FALLBACK_GAME_COLOR = '#3b82f6';    // blue-500
@@ -74,6 +76,7 @@ function getEventStyles(
   // Non-division event types — always static
   if (event.eventType === 'concession') return { className: pillColors.concession, style: {} };
   if (event.eventType === 'closure') return { className: pillColors.closure, style: {} };
+  if (event.eventType === 'event') return { className: pillColors.event, style: {} };
 
   // No division color map — fall back to static colors (coach/parent)
   if (!divisionColors) {
@@ -108,6 +111,7 @@ function getEventStyles(
 function getDotColor(event: CalendarEvent, divisionColors?: Record<string, string>): string {
   if (event.eventType === 'concession') return '#f59e0b'; // amber-500
   if (event.eventType === 'closure') return '#dc2626';    // red-600
+  if (event.eventType === 'event') return '#9333ea';      // purple-600
   if (!divisionColors) {
     return event.eventType === 'game' ? FALLBACK_GAME_COLOR : PRACTICE_BG_COLOR;
   }
@@ -120,6 +124,7 @@ const filterKeyToEventType: Record<string, CalendarEventType> = {
   games: 'game',
   practices: 'practice',
   concessions: 'concession',
+  events: 'event',
 };
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
@@ -176,10 +181,10 @@ function getWeekDays(focusDate: Date): Date[] {
 export interface LeagueCalendarProps {
   events: CalendarEvent[];
   isLoading: boolean;
-  filters: { games: boolean; practices: boolean; concessions: boolean; divisions?: string[] };
-  onFilterChange: (key: 'games' | 'practices' | 'concessions', val: boolean) => void;
-  // Which filter checkboxes to show (undefined = show all three)
-  visibleFilters?: ('games' | 'practices' | 'concessions')[];
+  filters: { games: boolean; practices: boolean; concessions: boolean; events?: boolean; divisions?: string[] };
+  onFilterChange: (key: 'games' | 'practices' | 'concessions' | 'events', val: boolean) => void;
+  // Which filter checkboxes to show (undefined = show all)
+  visibleFilters?: ('games' | 'practices' | 'concessions' | 'events')[];
   // Division filter — optional; renders checkboxes when provided
   availableDivisions?: Array<{ id: string; name: string }>;
   onDivisionFilterChange?: (divisionIds: string[]) => void;
@@ -191,8 +196,13 @@ export interface LeagueCalendarProps {
   onConcessionSignup?: (slotId: string) => void;
   onConcessionCancel?: (slotId: string) => void;
   onConcessionViewDetails?: (slotId: string) => void;
-  // Coach Add Event button — renders in toolbar if provided
+  // Add Event button — renders in toolbar if provided (admin/coach)
   onAddEvent?: () => void;
+  // Delete a custom event from its popover — shown for eventType 'event' when provided
+  onEventDelete?: (eventId: string) => void;
+  // Current viewer's UID — when set, the delete button only shows for events they created;
+  // when omitted (admin views), delete shows for all custom events.
+  currentUserId?: string;
   // Child selector slot (parent only)
   childSelector?: React.ReactNode;
   // View full record link — board/admin use; undefined = hidden
@@ -215,9 +225,11 @@ function EventPopoverContent({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const { activeSport } = useSport();
@@ -230,6 +242,8 @@ function EventPopoverContent({
       ? 'Practice'
       : event.eventType === 'closure'
       ? (event.sourceType === 'complex-closure' ? 'Complex Closure' : 'Field Closure')
+      : event.eventType === 'event'
+      ? 'Event'
       : (event.title || 'Volunteer Shift');
 
   const isCancelled = event.status === 'cancelled';
@@ -384,7 +398,7 @@ function EventPopoverContent({
           )}
 
           {/* Add to Calendar (ICS) */}
-          {(event.eventType === 'game' || event.eventType === 'practice') && (
+          {(event.eventType === 'game' || event.eventType === 'practice' || event.eventType === 'event') && (
             <Button
               variant="ghost"
               size="sm"
@@ -399,6 +413,18 @@ function EventPopoverContent({
               }}
             >
               <CalendarPlus className="h-3.5 w-3.5 mr-1.5" /> Add to Calendar
+            </Button>
+          )}
+
+          {/* Delete custom event (admin always; coach for events they created) */}
+          {event.eventType === 'event' && onEventDelete && (!currentUserId || event.createdByUid === currentUserId) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full text-xs border-destructive/30 text-destructive hover:bg-destructive/5"
+              onClick={() => onEventDelete(event.sourceId)}
+            >
+              Delete event
             </Button>
           )}
         </div>
@@ -429,9 +455,11 @@ function EventPill({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const { className: pillCls, style: pillStyle } = getEventStyles(event, divisionColors);
@@ -459,6 +487,8 @@ function EventPill({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onConcessionViewDetails={onConcessionViewDetails}
+          onEventDelete={onEventDelete}
+          currentUserId={currentUserId}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
         />
@@ -477,9 +507,11 @@ function EventDot({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const dotColor = getDotColor(event, divisionColors);
@@ -509,6 +541,8 @@ function EventDot({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onConcessionViewDetails={onConcessionViewDetails}
+          onEventDelete={onEventDelete}
+          currentUserId={currentUserId}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
         />
@@ -532,6 +566,8 @@ function MonthGrid({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
 }: {
@@ -545,6 +581,8 @@ function MonthGrid({
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onConcessionViewDetails?: LeagueCalendarProps['onConcessionViewDetails'];
+  onEventDelete?: LeagueCalendarProps['onEventDelete'];
+  currentUserId?: LeagueCalendarProps['currentUserId'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
   showUmpire?: LeagueCalendarProps['showUmpire'];
 }) {
@@ -615,6 +653,8 @@ function MonthGrid({
                   onConcessionSignup={onConcessionSignup}
                   onConcessionCancel={onConcessionCancel}
                   onConcessionViewDetails={onConcessionViewDetails}
+                  onEventDelete={onEventDelete}
+                  currentUserId={currentUserId}
                   onViewRecord={onViewRecord}
                   showUmpire={showUmpire}
                 />
@@ -646,6 +686,8 @@ function WeekStrip({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
   isMobile,
@@ -658,6 +700,8 @@ function WeekStrip({
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onConcessionViewDetails?: LeagueCalendarProps['onConcessionViewDetails'];
+  onEventDelete?: LeagueCalendarProps['onEventDelete'];
+  currentUserId?: LeagueCalendarProps['currentUserId'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
   showUmpire?: LeagueCalendarProps['showUmpire'];
   isMobile?: boolean;
@@ -678,6 +722,8 @@ function WeekStrip({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onConcessionViewDetails={onConcessionViewDetails}
+          onEventDelete={onEventDelete}
+          currentUserId={currentUserId}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
         />
@@ -785,9 +831,11 @@ function DayEventCard({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   return (
@@ -800,6 +848,8 @@ function DayEventCard({
         onConcessionSignup={onConcessionSignup}
         onConcessionCancel={onConcessionCancel}
         onConcessionViewDetails={onConcessionViewDetails}
+        onEventDelete={onEventDelete}
+        currentUserId={currentUserId}
         onViewRecord={onViewRecord}
         showUmpire={showUmpire}
       />
@@ -816,6 +866,8 @@ function DayView({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onViewRecord,
   showUmpire,
 }: {
@@ -827,6 +879,8 @@ function DayView({
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
   onConcessionViewDetails?: LeagueCalendarProps['onConcessionViewDetails'];
+  onEventDelete?: LeagueCalendarProps['onEventDelete'];
+  currentUserId?: LeagueCalendarProps['currentUserId'];
   onViewRecord?: LeagueCalendarProps['onViewRecord'];
   showUmpire?: LeagueCalendarProps['showUmpire'];
 }) {
@@ -873,6 +927,8 @@ function DayView({
               onConcessionSignup={onConcessionSignup}
               onConcessionCancel={onConcessionCancel}
               onConcessionViewDetails={onConcessionViewDetails}
+              onEventDelete={onEventDelete}
+              currentUserId={currentUserId}
               onViewRecord={onViewRecord}
               showUmpire={showUmpire}
             />
@@ -899,6 +955,8 @@ export function LeagueCalendar({
   onConcessionSignup,
   onConcessionCancel,
   onConcessionViewDetails,
+  onEventDelete,
+  currentUserId,
   onAddEvent,
   childSelector,
   onViewRecord,
@@ -953,17 +1011,19 @@ export function LeagueCalendar({
       }
       if (e.eventType === 'practice') return filters.practices;
       if (e.eventType === 'concession') return filters.concessions;
+      if (e.eventType === 'event') return filters.events !== false;
       return true;
     });
   }, [events, filters, activeSport, showMyKidsOnly, myTeamIds]);
 
   const eventsByDate = useMemo(() => groupByDate(filteredEvents), [filteredEvents]);
 
-  const shown = visibleFilters ?? ['games', 'practices', 'concessions'];
+  const shown = visibleFilters ?? ['games', 'practices', 'concessions', 'events'];
   const filterLabels: Record<string, string> = {
     games: 'Games',
     practices: 'Practices',
     concessions: 'Volunteer',
+    events: 'Events',
   };
 
   const navigatePrev = () => {
@@ -1057,11 +1117,11 @@ export function LeagueCalendar({
       {/* Toolbar — row 2: filters as visible pill chips + add event */}
       <div className="flex flex-wrap items-center gap-2">
         {shown.map(key => {
-          const isOn = !!filters[key as 'games' | 'practices' | 'concessions'];
+          const isOn = !!filters[key as 'games' | 'practices' | 'concessions' | 'events'];
           return (
             <button
               key={key}
-              onClick={() => onFilterChange(key as 'games' | 'practices' | 'concessions', !isOn)}
+              onClick={() => onFilterChange(key as 'games' | 'practices' | 'concessions' | 'events', !isOn)}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition-colors',
                 isOn
@@ -1218,6 +1278,8 @@ export function LeagueCalendar({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onConcessionViewDetails={onConcessionViewDetails}
+          onEventDelete={onEventDelete}
+          currentUserId={currentUserId}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
         />
@@ -1241,6 +1303,8 @@ export function LeagueCalendar({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onConcessionViewDetails={onConcessionViewDetails}
+          onEventDelete={onEventDelete}
+          currentUserId={currentUserId}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
         />
@@ -1254,6 +1318,8 @@ export function LeagueCalendar({
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
           onConcessionViewDetails={onConcessionViewDetails}
+          onEventDelete={onEventDelete}
+          currentUserId={currentUserId}
           onViewRecord={onViewRecord}
           showUmpire={showUmpire}
           isMobile={isMobile}

@@ -21,7 +21,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, VolunteerShiftType } from '@/types/scheduling';
+import type { VolunteerShiftType } from '@/types/scheduling';
 import {
   VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT,
   FOOTBALL_PER_PLAYER_REQUIREMENTS,
@@ -59,6 +59,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { buildConcessionEvents } from '@/lib/calendar-events';
 
 // ── Local types ────────────────────────────────────────────────────────────────
 
@@ -149,22 +150,6 @@ interface FamilyCompliance extends FamilyRoster {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function normalizeConcessionSlot(slot: ConcessionSlot): CalendarEvent {
-  return {
-    id: slot.id,
-    eventType: 'concession',
-    date: slot.gameDate,
-    startTime: slot.startTime,
-    endTime: slot.endTime,
-    title: slot.title || slot.description || 'Volunteer Shift',
-    status: 'active',
-    capacity: slot.capacity,
-    claimedCount: slot.signups?.length ?? 0,
-    sourceType: 'concession-slot',
-    sourceId: slot.id,
-  };
-}
 
 const emptySlot = {
   title: '',
@@ -348,7 +333,7 @@ export default function ConcessionsAdminPage() {
 
   // ── Calendar events ───────────────────────────────────────────────────────
   const concessionEvents = useMemo(
-    () => sortedSlots.map(s => normalizeConcessionSlot(s)),
+    () => buildConcessionEvents(sortedSlots),
     [sortedSlots]
   );
 

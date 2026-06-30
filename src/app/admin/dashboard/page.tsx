@@ -38,7 +38,8 @@ import { Progress } from '@/components/ui/progress';
 import Link from 'next/link';
 import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
-import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType } from '@/types/scheduling';
+import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType, CustomEvent } from '@/types/scheduling';
+import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -165,22 +166,6 @@ function normalizePracticeSlot(s: PracticeSlot): CalendarEvent {
   };
 }
 
-function normalizeConcessionSlot(s: ConcessionSlotType): CalendarEvent {
-  return {
-    id: s.id,
-    eventType: 'concession',
-    date: s.gameDate,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    title: s.title || s.description || 'Volunteer Shift',
-    status: s.status ?? 'active',
-    sourceType: 'concession-slot',
-    sourceId: s.id,
-    capacity: s.capacity,
-    claimedCount: s.signups?.length ?? s.claimedCount ?? 0,
-  };
-}
-
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard({
@@ -200,7 +185,7 @@ export default function AdminDashboard({
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('calendar');
-  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: true });
+  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: true, events: true });
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [showLeftFade, setShowLeftFade] = useState(false);
 
@@ -291,6 +276,11 @@ export default function AdminDashboard({
     return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
   }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
 
+  const customEventsQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
+    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
+  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
+
   const allPlayersQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
     return collectionGroup(db, 'players');
@@ -306,6 +296,7 @@ export default function AdminDashboard({
   const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
   const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
+  const { data: allCustomEvents } = useCollection<CustomEvent>(customEventsQuery);
   const { data: allTeams } = useCollection<{ id: string; name: string }>(allTeamsQuery);
   const { data: allPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string; compliance?: { verificationStatus?: string; birthCertificateVerified?: boolean; physicalVerified?: boolean } }>(allPlayersQuery);
 
@@ -483,13 +474,14 @@ export default function AdminDashboard({
     const events: CalendarEvent[] = [];
     (allGames ?? []).forEach(g => events.push(normalizeGame(g)));
     (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s)));
-    (allConcessionSlots ?? []).forEach(s => events.push(normalizeConcessionSlot(s)));
+    events.push(...buildConcessionEvents(allConcessionSlots ?? []));
+    (allCustomEvents ?? []).forEach(e => events.push(normalizeCustomEvent(e)));
     return events.sort((a, b) => {
       const dateComp = a.date.localeCompare(b.date);
       if (dateComp !== 0) return dateComp;
       return (a.startTime ?? '').localeCompare(b.startTime ?? '');
     });
-  }, [allGames, practiceSlots, allConcessionSlots]);
+  }, [allGames, practiceSlots, allConcessionSlots, allCustomEvents]);
 
   const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
 
@@ -1063,7 +1055,7 @@ export default function AdminDashboard({
                   isLoading={calendarLoading}
                   filters={calendarFilters}
                   onFilterChange={(key, val) => setCalendarFilters(f => ({ ...f, [key]: val }))}
-                  visibleFilters={['games', 'practices', 'concessions']}
+                  visibleFilters={['games', 'practices', 'concessions', 'events']}
                   defaultView="week"
                   showUmpire
                   onViewRecord={(event) => {

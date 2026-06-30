@@ -2,12 +2,15 @@
 
 import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { useFirestore, useMemoFirebase, useCollection, useDoc } from '@/firebase';
+import { useFirestore, useMemoFirebase, useCollection, useDoc, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, doc, query, where } from 'firebase/firestore';
+import { collection, doc, query, where, deleteDoc } from 'firebase/firestore';
 import { CalendarDays } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, Team } from '@/types/scheduling';
+import { AddEventDialog } from '@/components/calendar/AddEventDialog';
+import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
+import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, Team, CustomEvent } from '@/types/scheduling';
 
 // Fixed palette — assigned to divisions by index
 const DIVISION_COLOR_PALETTE = [
@@ -69,22 +72,6 @@ function normalizePracticeSlot(s: PracticeSlot, teams: Team[]): CalendarEvent {
   };
 }
 
-function normalizeConcessionSlot(s: ConcessionSlot): CalendarEvent {
-  return {
-    id: s.id,
-    eventType: 'concession',
-    date: s.gameDate,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    title: s.title || s.description || 'Volunteer Shift',
-    status: s.status ?? 'active',
-    sourceType: 'concession-slot',
-    sourceId: s.id,
-    capacity: s.capacity,
-    claimedCount: s.signups?.length ?? 0,
-  };
-}
-
 function normalizeFieldClosure(field: Field, closure: MaintenanceClosure): CalendarEvent {
   return {
     id: `closure-field-${field.id}-${closure.date}`,
@@ -124,7 +111,10 @@ interface Division {
 export default function AdminCalendarPage() {
   const db = useFirestore();
   const { activeSport } = useSport();
-  const [filters, setFilters] = useState({ games: true, practices: true, concessions: true });
+  const { user, profile } = useUser();
+  const { toast } = useToast();
+  const [filters, setFilters] = useState({ games: true, practices: true, concessions: true, events: true });
+  const [addEventOpen, setAddEventOpen] = useState(false);
 
   // ── Fetch all collections ────────────────────────────────────────────────────
   const gamesQuery = useMemoFirebase(() => {
@@ -140,6 +130,11 @@ export default function AdminCalendarPage() {
   const concessionSlotsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
     return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+
+  const customEventsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
   }, [db, activeSport]);
 
   const fieldsQuery = useMemoFirebase(() => {
@@ -165,6 +160,7 @@ export default function AdminCalendarPage() {
   const { data: games, isLoading: loadingGames } = useCollection<Game>(gamesQuery);
   const { data: practiceSlots, isLoading: loadingPractice } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: concessionSlots, isLoading: loadingConcessions } = useCollection<ConcessionSlot>(concessionSlotsQuery);
+  const { data: customEvents } = useCollection<CustomEvent>(customEventsQuery);
   const { data: fields } = useCollection<Field>(fieldsQuery);
   const { data: complexClosuresDoc } = useDoc<ComplexClosuresDocument>(complexClosuresRef);
   const { data: teams } = useCollection<Team>(teamsQuery);
@@ -196,18 +192,35 @@ export default function AdminCalendarPage() {
     const events: CalendarEvent[] = [];
     (games ?? []).forEach(g => events.push(normalizeGame(g)));
     (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s, teamsList)));
-    (concessionSlots ?? []).forEach(s => events.push(normalizeConcessionSlot(s)));
+    events.push(...buildConcessionEvents(concessionSlots ?? []));
     (fields ?? []).forEach(f =>
       (f.maintenanceClosures ?? []).forEach(c => events.push(normalizeFieldClosure(f, c)))
     );
     (complexClosuresDoc?.closures ?? []).forEach(c => events.push(normalizeComplexClosure(c)));
+    // Admins see every custom event for the sport
+    (customEvents ?? []).forEach(e => events.push(normalizeCustomEvent(e)));
     return events;
-  }, [games, practiceSlots, concessionSlots, fields, complexClosuresDoc, teams]);
+  }, [games, practiceSlots, concessionSlots, fields, complexClosuresDoc, teams, customEvents]);
 
   const isLoading = loadingGames || loadingPractice || loadingConcessions;
 
-  const handleFilterChange = (key: 'games' | 'practices' | 'concessions', val: boolean) => {
+  const handleFilterChange = (key: 'games' | 'practices' | 'concessions' | 'events', val: boolean) => {
     setFilters(f => ({ ...f, [key]: val }));
+  };
+
+  const eventTeams = useMemo(
+    () => (teams ?? []).map(t => ({ id: t.id, name: t.name })),
+    [teams]
+  );
+
+  const handleEventDelete = async (eventId: string) => {
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'customEvents', eventId));
+      toast({ title: 'Event deleted' });
+    } catch (err: any) {
+      toast({ title: 'Could not delete event', description: err.message, variant: 'destructive' });
+    }
   };
 
   return (
@@ -229,10 +242,21 @@ export default function AdminCalendarPage() {
           isLoading={isLoading}
           filters={filters}
           onFilterChange={handleFilterChange}
-          visibleFilters={['games', 'practices', 'concessions']}
+          visibleFilters={['games', 'practices', 'concessions', 'events']}
           availableDivisions={availableDivisions}
           divisionColors={divisionColors}
-          // No action callbacks — board member calendar is view-only
+          onAddEvent={() => setAddEventOpen(true)}
+          onEventDelete={handleEventDelete}
+        />
+
+        <AddEventDialog
+          open={addEventOpen}
+          onOpenChange={setAddEventOpen}
+          db={db}
+          sport={activeSport}
+          seasonId={activeSeason?.id}
+          teams={eventTeams}
+          creator={{ uid: user?.uid ?? '', name: profile?.displayName ?? undefined }}
         />
       </main>
     </div>

@@ -291,6 +291,21 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
+    // Custom Events (generic calendar events — meetings, picture day, fundraisers)
+    //
+    // Any signed-in user may read; visibility is enforced client-side.
+    // Board members (incl. admins) and coaches may create/update.
+    // Board members may delete any; coaches may delete only events they created.
+    // ---------------------------------------------------------------------------
+
+    match /customEvents/{eventId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isBoardMember() || isCoach();
+      allow delete: if isBoardMember() ||
+        (isSignedIn() && resource.data.createdByUid == request.auth.uid);
+    }
+
+    // ---------------------------------------------------------------------------
     // Practice Slots
     //
     // Board members: full CRUD.

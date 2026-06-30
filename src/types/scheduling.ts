@@ -575,7 +575,31 @@ export interface Enrollment {
 // Calendar Events  (normalized type for the unified calendar view)
 // ---------------------------------------------------------------------------
 
-export type CalendarEventType = 'game' | 'practice' | 'concession' | 'closure';
+export type CalendarEventType = 'game' | 'practice' | 'concession' | 'closure' | 'event';
+
+/**
+ * Generic admin/coach-created calendar event (meetings, picture day, fundraisers, etc.) —
+ * anything that isn't a game, practice, or volunteer shift. Stored in the top-level
+ * `customEvents` collection. Only `title` and `date` are required.
+ */
+export interface CustomEvent {
+  id: string;
+  title: string;
+  date: string;          // YYYY-MM-DD
+  startTime?: string;    // HH:MM — optional (all-day when omitted)
+  endTime?: string;      // HH:MM
+  location?: string;
+  notes?: string;
+  visibility: 'all' | 'team';
+  teamId?: string;       // set when visibility === 'team'
+  teamName?: string;
+  sport: Sport;
+  seasonId?: string;
+  createdByUid: string;
+  createdByName?: string;
+  createdAt: string;     // ISO
+  status: 'scheduled' | 'cancelled';
+}
 
 /**
  * Normalized unified event type consumed by LeagueCalendar.
@@ -592,7 +616,7 @@ export interface CalendarEvent {
   status: string;       // 'scheduled' | 'cancelled' | 'completed' | 'claimed' | 'active' etc.
   fieldName?: string;
   fieldId?: string;     // Firestore fields/{id} — used to cross-reference closures
-  sourceType: 'global-game' | 'team-game' | 'practice-slot' | 'concession-slot' | 'field-closure' | 'complex-closure';
+  sourceType: 'global-game' | 'team-game' | 'practice-slot' | 'concession-slot' | 'field-closure' | 'complex-closure' | 'custom-event';
   sourceId: string;     // Firestore doc ID
   // Game-specific
   homeTeamName?: string;
@@ -602,6 +626,8 @@ export interface CalendarEvent {
   division?: string;
   divisionId?: string;
   notes?: string;
+  // Custom-event-specific — creator UID, used to gate the delete affordance
+  createdByUid?: string;
   // Concession-specific
   capacity?: number;
   claimedCount?: number;

@@ -23,6 +23,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { buildConcessionEvents } from '@/lib/calendar-events';
 import { format, parseISO, isAfter, differenceInHours } from 'date-fns';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -372,20 +373,7 @@ export default function ParentVolunteersPage() {
   }, [activeSport]);
 
   const concessionEvents = useMemo(
-    () => upcomingSlots.map(slot => ({
-      id: slot.id,
-      eventType: 'concession' as const,
-      date: slot.gameDate,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      title: slot.title || slot.description || 'Volunteer Shift',
-      status: slot.status ?? 'active',
-      capacity: slot.capacity,
-      claimedCount: slot.signups?.length ?? 0,
-      isSigned: slot.signups?.some(s => s.parentUserId === profile?.id) ?? false,
-      sourceType: 'concession-slot' as const,
-      sourceId: slot.id,
-    })),
+    () => buildConcessionEvents(upcomingSlots, profile?.id),
     [upcomingSlots, profile?.id]
   );
 

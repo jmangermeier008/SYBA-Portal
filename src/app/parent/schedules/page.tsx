@@ -22,7 +22,8 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, ConcessionSlot, VolunteerShiftType } from '@/types/scheduling';
+import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
+import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
 
@@ -65,68 +66,12 @@ function normalizeTeamGame(g: TeamGame, teamId: string): CalendarEvent {
   };
 }
 
-
-// Display labels for volunteer shift types. Missing type = legacy concession shift.
-const TYPE_LABELS: Record<VolunteerShiftType, string> = {
-  concessions: 'Concessions',
-  tagging: 'Tagging',
-  fundraiser: 'Fundraiser',
-  chains: 'Chains',
-  maintenance: 'Maintenance',
-};
-
-function fmtTime(t: string): string {
-  return format(new Date(`1970-01-01T${t}`), 'h:mm a');
-}
-
-// Combine volunteer slots into one calendar entry per (event, type). The parent
-// schedule is view-only — multiple shifts collapse into a single pill spanning
-// the full time range; a single shift shows just the type label. Signing up
-// happens on the dedicated Volunteer Signups page.
-function buildConcessionEvents(slots: ConcessionSlot[], userId: string): CalendarEvent[] {
-  const groups = new Map<string, ConcessionSlot[]>();
-  for (const s of slots) {
-    const type = s.type ?? 'concessions';
-    const key = `${s.gameId || s.eventId || s.gameDate}__${type}`;
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(s);
-    else groups.set(key, [s]);
-  }
-
-  const events: CalendarEvent[] = [];
-  for (const bucket of groups.values()) {
-    const sorted = [...bucket].sort((a, b) => a.startTime.localeCompare(b.startTime));
-    const first = sorted[0];
-    const typeLabel = TYPE_LABELS[first.type ?? 'concessions'];
-    const startTime = sorted[0].startTime;
-    const endTime = sorted.reduce((max, s) => (s.endTime > max ? s.endTime : max), sorted[0].endTime);
-    const title =
-      sorted.length > 1 ? `${typeLabel} · ${fmtTime(startTime)} – ${fmtTime(endTime)}` : typeLabel;
-
-    events.push({
-      id: first.id,
-      eventType: 'concession',
-      date: first.gameDate,
-      startTime,
-      endTime,
-      title,
-      status: 'active',
-      sourceType: 'concession-slot',
-      sourceId: first.id,
-      capacity: bucket.reduce((sum, s) => sum + (s.capacity ?? 0), 0),
-      claimedCount: bucket.reduce((sum, s) => sum + (s.signups?.length ?? 0), 0),
-      isSigned: bucket.some(s => s.signups?.some(su => su.parentUserId === userId)),
-    });
-  }
-  return events;
-}
-
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ParentSchedulesPage() {
   const { user } = useUser();
   const db = useFirestore();
-  const { activeSport } = useSport();
+  const { activeSport, isAdmin } = useSport();
   const { toast } = useToast();
   const router = useRouter();
 
@@ -134,7 +79,7 @@ export default function ParentSchedulesPage() {
 
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
   const [activeTeamId, setActiveTeamId] = useState<string>('');
-  const [filters, setFilters] = useState({ games: true, practices: false, concessions: true });
+  const [filters, setFilters] = useState({ games: true, practices: false, concessions: true, events: true });
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [allTeamGames, setAllTeamGames] = useState<(TeamGame & { _teamId: string })[]>([]);
   const [loadingAllTeams, setLoadingAllTeams] = useState(false);
@@ -214,6 +159,14 @@ export default function ParentSchedulesPage() {
 
   const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionsQuery);
 
+  // ── Custom events (read-only for parents) ────────────────────────────────────
+  const customEventsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+
+  const { data: customEvents } = useCollection<CustomEvent>(customEventsQuery);
+
   // ── Normalize to CalendarEvent[] ────────────────────────────────────────────
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
     const events: CalendarEvent[] = [];
@@ -246,8 +199,12 @@ export default function ParentSchedulesPage() {
       events.push(...buildConcessionEvents(upcoming, user.uid));
     }
 
+    // Custom events visible to this parent (league-wide + their kids' teams)
+    const myEvents = visibleCustomEvents(customEvents ?? [], { isAdmin, teamIds: allTeamIds });
+    events.push(...myEvents.map(normalizeCustomEvent));
+
     return events;
-  }, [selectedPlayerId, teamGames, allTeamGames, concessionSlots, activeTeamId, user]);
+  }, [selectedPlayerId, teamGames, allTeamGames, concessionSlots, activeTeamId, user, customEvents, isAdmin, allTeamIds]);
 
   const isLoading = loadingTeamGames || loadingAllTeams;
 
@@ -294,7 +251,7 @@ export default function ParentSchedulesPage() {
     };
   }, [activeSport]);
 
-  const handleFilterChange = (key: 'games' | 'practices' | 'concessions', val: boolean) => {
+  const handleFilterChange = (key: 'games' | 'practices' | 'concessions' | 'events', val: boolean) => {
     setFilters(f => ({ ...f, [key]: val }));
   };
 
@@ -337,7 +294,7 @@ export default function ParentSchedulesPage() {
           isLoading={isLoading}
           filters={filters}
           onFilterChange={handleFilterChange}
-          visibleFilters={['games', 'concessions']}
+          visibleFilters={['games', 'concessions', 'events']}
           onRsvp={selectedPlayerId !== 'all' ? handleRSVP : undefined}
           onConcessionViewDetails={() => router.push('/parent/volunteers')}
           childSelector={childSelector}
