@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
@@ -234,6 +234,68 @@ const ATTENDANCE_CONFIG: Record<
     className: 'bg-red-100 text-red-700 hover:bg-red-200',
   },
 };
+
+// Icon + selected-state styling for the attendance segmented control
+const ATTENDANCE_ICON = {
+  pending: Clock,
+  worked: CheckCircle2,
+  'no-show': XCircle,
+} as const;
+
+const ATTENDANCE_SELECTED: Record<AttendanceStatus, string> = {
+  pending: 'bg-muted text-foreground border-muted-foreground/30',
+  worked: 'bg-green-100 text-green-700 border-green-300',
+  'no-show': 'bg-red-100 text-red-700 border-red-300',
+};
+
+// ── Attendance segmented control ─────────────────────────────────────────────
+// Three large, color-coded, one-tap buttons (full-width on mobile) that replace
+// the old tiny status pills. Optimistically highlights the chosen status and
+// shows a spinner on it while the Firestore write is in flight.
+function AttendanceToggle({
+  current,
+  isSaving,
+  onSelect,
+}: {
+  current: AttendanceStatus;
+  isSaving: boolean;
+  onSelect: (status: AttendanceStatus) => void;
+}) {
+  const [pending, setPending] = useState<AttendanceStatus | null>(null);
+  useEffect(() => {
+    if (!isSaving) setPending(null);
+  }, [isSaving]);
+  const effective = pending ?? current;
+
+  return (
+    <div role="group" aria-label="Mark attendance" className="grid grid-cols-3 gap-1 w-full sm:max-w-xs">
+      {(['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => {
+        const Icon = ATTENDANCE_ICON[status];
+        const selected = effective === status;
+        return (
+          <button
+            key={status}
+            type="button"
+            disabled={isSaving}
+            aria-pressed={selected}
+            onClick={() => { setPending(status); onSelect(status); }}
+            className={cn(
+              'flex items-center justify-center gap-1.5 min-h-[44px] px-2 rounded-md border text-sm font-medium transition-colors disabled:cursor-not-allowed',
+              selected
+                ? ATTENDANCE_SELECTED[status]
+                : 'border-transparent bg-muted/50 text-muted-foreground hover:bg-muted disabled:opacity-60'
+            )}
+          >
+            {isSaving && pending === status
+              ? <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+              : <Icon className="h-4 w-4 shrink-0" />}
+            <span>{ATTENDANCE_CONFIG[status].label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -946,31 +1008,16 @@ export default function ConcessionsAdminPage() {
                 const isSaving = attendanceSaving.has(key);
                 const current = s.attendance ?? 'pending';
                 return (
-                  <div key={s.signupId ?? i} className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-foreground truncate">{s.displayName}</span>
+                  <div key={s.signupId ?? i} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                    <span className="text-xs font-medium text-foreground sm:truncate">{s.displayName}</span>
                     {canMark ? (
-                      <div className="flex items-center gap-1 shrink-0">
-                        {isSaving ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                        ) : (
-                          (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
-                            <button
-                              key={status}
-                              onClick={() => setAttendance(slot.id, s.signupId, s.parentUserId, status)}
-                              className={cn(
-                                'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
-                                current === status
-                                  ? ATTENDANCE_CONFIG[status].className
-                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                              )}
-                            >
-                              {ATTENDANCE_CONFIG[status].label}
-                            </button>
-                          ))
-                        )}
-                      </div>
+                      <AttendanceToggle
+                        current={current}
+                        isSaving={isSaving}
+                        onSelect={status => setAttendance(slot.id, s.signupId, s.parentUserId, status)}
+                      />
                     ) : (
-                      <Badge variant="secondary" className="text-[10px] shrink-0">Signed Up</Badge>
+                      <Badge variant="secondary" className="text-[10px] w-fit shrink-0">Signed Up</Badge>
                     )}
                   </div>
                 );
@@ -1007,7 +1054,7 @@ export default function ConcessionsAdminPage() {
           const current = sh.attendance ?? 'pending';
           const typeLabel = VOLUNTEER_TYPE_OPTIONS.find(o => o.value === sh.type)?.label ?? 'Volunteer';
           return (
-            <div key={sh.signupId ?? `${sh.slotId}_${i}`} className="flex items-center justify-between gap-3 flex-wrap rounded-lg border bg-card px-3 py-2">
+            <div key={sh.signupId ?? `${sh.slotId}_${i}`} className="flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <div className="min-w-0 text-xs">
                 <span className="font-medium">{sh.gameDate ? format(parseISO(sh.gameDate), 'EEE, MMM d') : sh.gameDate}</span>
                 <span className="text-muted-foreground"> · {formatTime(sh.startTime)}–{formatTime(sh.endTime)} · {typeLabel}</span>
@@ -1015,28 +1062,105 @@ export default function ConcessionsAdminPage() {
                   <span className="text-muted-foreground"> · by {sh.signerName}</span>
                 )}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {isSaving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                ) : (
-                  (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
-                    <button
-                      key={status}
-                      onClick={() => setAttendance(sh.slotId, sh.signupId, sh.signerUid, status)}
-                      className={cn(
-                        'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
-                        current === status ? ATTENDANCE_CONFIG[status].className : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                      )}
-                    >
-                      {ATTENDANCE_CONFIG[status].label}
-                    </button>
-                  ))
-                )}
-              </div>
+              <AttendanceToggle
+                current={current}
+                isSaving={isSaving}
+                onSelect={status => setAttendance(sh.slotId, sh.signupId, sh.signerUid, status)}
+              />
             </div>
           );
         })}
       </div>
+    );
+  };
+
+  // ── Family compliance card (single layout for mobile + desktop) ─────────────
+  const renderFamilyCard = (family: FamilyCompliance) => {
+    const status = complianceStatus(family);
+    const isExpanded = expandedFamilies.has(family.parentUserId);
+    return (
+      <Card key={family.parentUserId} className="border shadow-sm">
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-semibold text-sm leading-tight">{family.displayName}</p>
+              {family.playerNames.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-0.5">{family.playerNames.join(' · ')}</p>
+              )}
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">{family.email}</p>
+            </div>
+            <div className="shrink-0">
+              {status === 'met' && (
+                <Badge className="bg-green-100 text-green-700 border-green-200 gap-1 text-xs">
+                  <CheckCircle2 className="h-3 w-3" /> Met
+                </Badge>
+              )}
+              {status === 'partial' && (
+                <Badge variant="secondary" className="gap-1 text-xs">
+                  <AlertCircle className="h-3 w-3" /> Partial
+                </Badge>
+              )}
+              {status === 'none' && (
+                <Badge variant="destructive" className="gap-1 text-xs">
+                  <XCircle className="h-3 w-3" /> Not Signed Up
+                </Badge>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
+            {family.isFootball ? (
+              <span className="font-medium flex flex-col gap-0.5">
+                <span>Concessions {family.concessionsWorked + family.manualCredits} / {family.perTypeRequired}</span>
+                <span>Tagging {family.taggingWorked} / {family.perTypeRequired}</span>
+              </span>
+            ) : (
+              <span className="font-medium">
+                Worked {workedTotal(family)} / {family.pooledRequired}
+              </span>
+            )}
+            {pendingTotal(family) > 0 && (
+              <span className="text-yellow-600 font-medium">+{pendingTotal(family)} upcoming</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => toggleSet(setExpandedFamilies, family.parentUserId)}
+            className="mt-2 flex items-center gap-1 text-xs font-medium text-primary"
+          >
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {isExpanded ? 'Hide shifts' : `View ${family.shifts.length} signed-up shift${family.shifts.length !== 1 ? 's' : ''}`}
+          </button>
+          {isExpanded && <div className="mt-2">{renderFamilyShifts(family)}</div>}
+          {(status !== 'met' || family.manualCredits > 0) && (
+            <div className="flex gap-2 mt-3 flex-wrap">
+              {status !== 'met' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setCreditDialog({ open: true, parentId: family.parentUserId, currentCredits: family.manualCredits }); setCreditInput(1); }}
+                  className="rounded-full text-xs gap-1.5"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Adjust Credits
+                </Button>
+              )}
+              {family.manualCredits > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={overriding.has(family.parentUserId)}
+                  onClick={() => handleResetManualCredits(family.parentUserId)}
+                  className="rounded-full text-xs gap-1.5 text-destructive hover:text-destructive"
+                >
+                  {overriding.has(family.parentUserId)
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <XCircle className="h-3.5 w-3.5" />}
+                  Reset Credits
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </Card>
     );
   };
 
@@ -1352,210 +1476,14 @@ export default function ConcessionsAdminPage() {
                     className="max-w-sm"
                   />
 
-                  {/* Mobile card list */}
-                  <div className="sm:hidden space-y-2">
-                    {filteredFamilies.map(family => {
-                      const status = complianceStatus(family);
-                      const isExpanded = expandedFamilies.has(family.parentUserId);
-                      return (
-                        <Card key={family.parentUserId} className="border shadow-sm">
-                          <div className="p-4">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="font-semibold text-sm leading-tight">{family.displayName}</p>
-                                {family.playerNames.length > 0 && (
-                                  <p className="text-xs text-muted-foreground mt-0.5">{family.playerNames.join(' · ')}</p>
-                                )}
-                              </div>
-                              <div className="shrink-0">
-                                {status === 'met' && (
-                                  <Badge className="bg-green-100 text-green-700 border-green-200 gap-1 text-xs">
-                                    <CheckCircle2 className="h-3 w-3" /> Met
-                                  </Badge>
-                                )}
-                                {status === 'partial' && (
-                                  <Badge variant="secondary" className="gap-1 text-xs">
-                                    <AlertCircle className="h-3 w-3" /> Partial
-                                  </Badge>
-                                )}
-                                {status === 'none' && (
-                                  <Badge variant="destructive" className="gap-1 text-xs">
-                                    <XCircle className="h-3 w-3" /> Not Signed Up
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
-                              {family.isFootball ? (
-                                <span className="font-medium flex flex-col gap-0.5">
-                                  <span>Concessions {family.concessionsWorked + family.manualCredits} / {family.perTypeRequired}</span>
-                                  <span>Tagging {family.taggingWorked} / {family.perTypeRequired}</span>
-                                </span>
-                              ) : (
-                                <span className="font-medium">
-                                  Worked {workedTotal(family)} / {family.pooledRequired}
-                                </span>
-                              )}
-                              {pendingTotal(family) > 0 && (
-                                <span className="text-yellow-600 font-medium">+{pendingTotal(family)} upcoming</span>
-                              )}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => toggleSet(setExpandedFamilies, family.parentUserId)}
-                              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary"
-                            >
-                              {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                              {isExpanded ? 'Hide shifts' : `View ${family.shifts.length} signed-up shift${family.shifts.length !== 1 ? 's' : ''}`}
-                            </button>
-                            {isExpanded && <div className="mt-2">{renderFamilyShifts(family)}</div>}
-                            {(status !== 'met' || family.manualCredits > 0) && (
-                              <div className="flex gap-2 mt-3">
-                                {status !== 'met' && (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => { setCreditDialog({ open: true, parentId: family.parentUserId, currentCredits: family.manualCredits }); setCreditInput(1); }}
-                                    className="rounded-full text-xs gap-1.5"
-                                  >
-                                    <CheckCircle2 className="h-3.5 w-3.5" /> Adjust Credits
-                                  </Button>
-                                )}
-                                {family.manualCredits > 0 && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    disabled={overriding.has(family.parentUserId)}
-                                    onClick={() => handleResetManualCredits(family.parentUserId)}
-                                    className="rounded-full text-xs gap-1.5 text-destructive hover:text-destructive"
-                                  >
-                                    {overriding.has(family.parentUserId)
-                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      : <XCircle className="h-3.5 w-3.5" />}
-                                    Reset Credits
-                                  </Button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
-
-                  {/* Desktop table */}
-                  <Card className="hidden sm:block border-none shadow-md overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b bg-muted/30">
-                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Family</th>
-                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Email</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Worked</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Pending</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Status</th>
-                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredFamilies.map(family => {
-                            const status = complianceStatus(family);
-                            const isExpanded = expandedFamilies.has(family.parentUserId);
-                            return (
-                              <Fragment key={family.parentUserId}>
-                              <tr className="border-b last:border-0 hover:bg-muted/20">
-                                <td className="px-4 py-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleSet(setExpandedFamilies, family.parentUserId)}
-                                    className="flex items-start gap-1.5 text-left"
-                                  >
-                                    {isExpanded
-                                      ? <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                                      : <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />}
-                                    <span>
-                                      <span className="font-medium block">{family.displayName}</span>
-                                      {family.playerNames.length > 0 && (
-                                        <span className="text-xs text-muted-foreground">{family.playerNames.join(' · ')}</span>
-                                      )}
-                                    </span>
-                                  </button>
-                                </td>
-                                <td className="px-4 py-3 text-muted-foreground">{family.email}</td>
-                                <td className="px-4 py-3 text-center font-medium">
-                                  {family.isFootball ? (
-                                    <div className="flex flex-col gap-0.5 text-xs">
-                                      <span>Concessions {family.concessionsWorked + family.manualCredits} / {family.perTypeRequired}</span>
-                                      <span>Tagging {family.taggingWorked} / {family.perTypeRequired}</span>
-                                    </div>
-                                  ) : (
-                                    <>{workedTotal(family)} / {family.pooledRequired}</>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center text-muted-foreground">
-                                  {pendingTotal(family) > 0
-                                    ? <span className="text-yellow-600 font-medium">+{pendingTotal(family)} upcoming</span>
-                                    : '—'}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  {status === 'met' && (
-                                    <Badge className="bg-green-100 text-green-700 border-green-200 gap-1">
-                                      <CheckCircle2 className="h-3 w-3" /> Met
-                                    </Badge>
-                                  )}
-                                  {status === 'partial' && (
-                                    <Badge variant="secondary" className="gap-1">
-                                      <AlertCircle className="h-3 w-3" /> Partial
-                                    </Badge>
-                                  )}
-                                  {status === 'none' && (
-                                    <Badge variant="destructive" className="gap-1">
-                                      <XCircle className="h-3 w-3" /> Not Signed Up
-                                    </Badge>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  {status !== 'met' && (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => { setCreditDialog({ open: true, parentId: family.parentUserId, currentCredits: family.manualCredits }); setCreditInput(1); }}
-                                      className="rounded-full text-xs gap-1.5"
-                                    >
-                                      <CheckCircle2 className="h-3.5 w-3.5" /> Adjust Credits
-                                    </Button>
-                                  )}
-                                  {family.manualCredits > 0 && (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      disabled={overriding.has(family.parentUserId)}
-                                      onClick={() => handleResetManualCredits(family.parentUserId)}
-                                      className="rounded-full text-xs gap-1.5 text-destructive hover:text-destructive ml-1"
-                                    >
-                                      {overriding.has(family.parentUserId)
-                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                        : <XCircle className="h-3.5 w-3.5" />}
-                                      Reset Credits
-                                    </Button>
-                                  )}
-                                </td>
-                              </tr>
-                              {isExpanded && (
-                                <tr className="bg-muted/10">
-                                  <td colSpan={6} className="px-4 py-3">
-                                    <p className="text-xs font-bold uppercase text-muted-foreground mb-2">Signed-up shifts</p>
-                                    {renderFamilyShifts(family)}
-                                  </td>
-                                </tr>
-                              )}
-                              </Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                  {/* Family cards — one consistent layout for mobile + desktop */}
+                  {filteredFamilies.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-6 text-center">No families match your search.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      {filteredFamilies.map(family => renderFamilyCard(family))}
                     </div>
-                  </Card>
+                  )}
                 </>
               )}
             </div>
