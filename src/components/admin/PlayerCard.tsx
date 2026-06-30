@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   Phone,
-  Mail,
+  MessageSquare,
   AlertTriangle,
   CalendarCheck,
   User as UserIcon,
@@ -256,10 +256,10 @@ export function PlayerCard({
                   size="sm"
                   className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
                   asChild
-                  disabled={!parent.email}
+                  disabled={!parent.phoneNumber}
                 >
-                  <a href={`mailto:${parent.email}`}>
-                    <Mail className="mr-2 h-3 w-3 text-primary" /> Email
+                  <a href={`sms:${parent.phoneNumber}`}>
+                    <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
                   </a>
                 </Button>
               </div>
