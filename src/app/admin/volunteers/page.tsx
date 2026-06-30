@@ -202,8 +202,9 @@ function formatTime(t: string) {
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-function isPastSlot(gameDate: string): boolean {
-  return gameDate < format(new Date(), 'yyyy-MM-dd');
+// Attendance can be recorded once the shift's day has arrived (today or past).
+function isMarkableSlot(gameDate: string): boolean {
+  return gameDate <= format(new Date(), 'yyyy-MM-dd');
 }
 
 // Total worked credit (manual credits apply to the concessions bucket).
@@ -875,8 +876,8 @@ export default function ConcessionsAdminPage() {
     const signupCount = slot.signups?.length ?? 0;
     const spotsLeft = slot.capacity - signupCount;
     const isFull = spotsLeft <= 0;
-    const isPast = isPastSlot(slot.gameDate);
-    const showBulk = isPast && signupCount > 0 && hasUnmarked(slot);
+    const canMark = isMarkableSlot(slot.gameDate);
+    const showBulk = canMark && signupCount > 0 && hasUnmarked(slot);
     return (
       <Card key={slot.id} className="border shadow-sm">
         <CardHeader className="pb-3">
@@ -958,7 +959,7 @@ export default function ConcessionsAdminPage() {
                 return (
                   <div key={i} className="flex items-center justify-between gap-2">
                     <span className="text-xs text-foreground truncate">{s.displayName}</span>
-                    {isPast ? (
+                    {canMark ? (
                       <div className="flex items-center gap-1 shrink-0">
                         {isSaving ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -988,8 +989,8 @@ export default function ConcessionsAdminPage() {
             </div>
           )}
 
-          {/* Manual Assign — only for past slots */}
-          {isPast && (
+          {/* Manual Assign — once the shift day has arrived */}
+          {canMark && (
             <Button
               variant="outline"
               size="sm"
@@ -1170,7 +1171,7 @@ export default function ConcessionsAdminPage() {
                     const totalCap = ev.shifts.reduce((n, s) => n + s.capacity, 0);
                     const totalSign = ev.shifts.reduce((n, s) => n + (s.signups?.length ?? 0), 0);
                     const totalWorked = ev.shifts.reduce((n, s) => n + (s.signups?.filter(x => x.attendance === 'worked').length ?? 0), 0);
-                    const eventHasUnmarked = ev.shifts.some(s => isPastSlot(s.gameDate) && (s.signups?.length ?? 0) > 0 && hasUnmarked(s));
+                    const eventHasUnmarked = ev.shifts.some(s => isMarkableSlot(s.gameDate) && (s.signups?.length ?? 0) > 0 && hasUnmarked(s));
                     const evKey = `event_${ev.eventId}`;
                     return (
                       <Card key={ev.eventId} className="border-none shadow-md">
