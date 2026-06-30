@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
@@ -12,7 +13,6 @@ import {
   setDoc,
   where,
   collectionGroup,
-  runTransaction,
   getDocs,
 } from 'firebase/firestore';
 import { Users } from 'lucide-react';
@@ -22,7 +22,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, ConcessionSlot } from '@/types/scheduling';
+import type { CalendarEvent, ConcessionSlot, VolunteerShiftType } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
 
@@ -66,30 +66,69 @@ function normalizeTeamGame(g: TeamGame, teamId: string): CalendarEvent {
 }
 
 
-function normalizeConcessionSlot(s: ConcessionSlot, userId: string): CalendarEvent {
-  return {
-    id: s.id,
-    eventType: 'concession',
-    date: s.gameDate,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    title: s.title || s.description || 'Volunteer Shift',
-    status: s.status ?? 'active',
-    sourceType: 'concession-slot',
-    sourceId: s.id,
-    capacity: s.capacity,
-    claimedCount: s.signups?.length ?? 0,
-    isSigned: s.signups?.some(su => su.parentUserId === userId) ?? false,
-  };
+// Display labels for volunteer shift types. Missing type = legacy concession shift.
+const TYPE_LABELS: Record<VolunteerShiftType, string> = {
+  concessions: 'Concessions',
+  tagging: 'Tagging',
+  fundraiser: 'Fundraiser',
+  chains: 'Chains',
+  maintenance: 'Maintenance',
+};
+
+function fmtTime(t: string): string {
+  return format(new Date(`1970-01-01T${t}`), 'h:mm a');
+}
+
+// Combine volunteer slots into one calendar entry per (event, type). The parent
+// schedule is view-only — multiple shifts collapse into a single pill spanning
+// the full time range; a single shift shows just the type label. Signing up
+// happens on the dedicated Volunteer Signups page.
+function buildConcessionEvents(slots: ConcessionSlot[], userId: string): CalendarEvent[] {
+  const groups = new Map<string, ConcessionSlot[]>();
+  for (const s of slots) {
+    const type = s.type ?? 'concessions';
+    const key = `${s.gameId || s.eventId || s.gameDate}__${type}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(s);
+    else groups.set(key, [s]);
+  }
+
+  const events: CalendarEvent[] = [];
+  for (const bucket of groups.values()) {
+    const sorted = [...bucket].sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const first = sorted[0];
+    const typeLabel = TYPE_LABELS[first.type ?? 'concessions'];
+    const startTime = sorted[0].startTime;
+    const endTime = sorted.reduce((max, s) => (s.endTime > max ? s.endTime : max), sorted[0].endTime);
+    const title =
+      sorted.length > 1 ? `${typeLabel} · ${fmtTime(startTime)} – ${fmtTime(endTime)}` : typeLabel;
+
+    events.push({
+      id: first.id,
+      eventType: 'concession',
+      date: first.gameDate,
+      startTime,
+      endTime,
+      title,
+      status: 'active',
+      sourceType: 'concession-slot',
+      sourceId: first.id,
+      capacity: bucket.reduce((sum, s) => sum + (s.capacity ?? 0), 0),
+      claimedCount: bucket.reduce((sum, s) => sum + (s.signups?.length ?? 0), 0),
+      isSigned: bucket.some(s => s.signups?.some(su => su.parentUserId === userId)),
+    });
+  }
+  return events;
 }
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ParentSchedulesPage() {
-  const { user, profile } = useUser();
+  const { user } = useUser();
   const db = useFirestore();
   const { activeSport } = useSport();
   const { toast } = useToast();
+  const router = useRouter();
 
   const todayISO = format(new Date(), 'yyyy-MM-dd');
 
@@ -175,13 +214,6 @@ export default function ParentSchedulesPage() {
 
   const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionsQuery);
 
-  // Keep raw slot data keyed by id for signup/cancel handlers
-  const rawSlotsById = useMemo(() => {
-    const map = new Map<string, ConcessionSlot>();
-    (concessionSlots ?? []).forEach(s => map.set(s.id, s));
-    return map;
-  }, [concessionSlots]);
-
   // ── Normalize to CalendarEvent[] ────────────────────────────────────────────
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
     const events: CalendarEvent[] = [];
@@ -202,16 +234,16 @@ export default function ParentSchedulesPage() {
       }
     }
 
-    // Concession slots — always show upcoming active ones
+    // Concession slots — always show upcoming active ones, combined per (event, type)
     if (user && concessionSlots) {
       const now = new Date();
-      for (const s of concessionSlots) {
+      const upcoming = concessionSlots.filter(s => {
         const isActive = !s.status || s.status === 'active';
-        if (!isActive) continue;
+        if (!isActive) return false;
         const slotDate = new Date(`${s.gameDate}T${s.startTime}`);
-        if (slotDate <= now) continue;
-        events.push(normalizeConcessionSlot(s, user.uid));
-      }
+        return slotDate > now;
+      });
+      events.push(...buildConcessionEvents(upcoming, user.uid));
     }
 
     return events;
@@ -259,66 +291,8 @@ export default function ParentSchedulesPage() {
       scheduleSubtitle: isFootball
         ? 'View upcoming games and your volunteer duties.'
         : 'View upcoming games and your concession shifts.',
-      signupRemoved: isFootball
-        ? 'Your volunteer sign-up has been removed.'
-        : 'Your concession sign-up has been removed.',
     };
   }, [activeSport]);
-
-  // ── Concession sign-up handler ──────────────────────────────────────────────
-  const handleConcessionSignup = async (slotId: string) => {
-    if (!db || !profile) return;
-    const slot = rawSlotsById.get(slotId);
-    if (!slot) return;
-    try {
-      const slotRef = doc(db, 'concessionSlots', slotId);
-      await runTransaction(db, async (transaction) => {
-        const snap = await transaction.get(slotRef);
-        if (!snap.exists()) throw new Error('Slot no longer exists.');
-        const current = snap.data() as ConcessionSlot;
-        if ((current.signups?.length ?? 0) >= current.capacity) {
-          throw new Error('This slot is now full. Please choose another time.');
-        }
-        if (current.signups?.some(s => s.parentUserId === profile.id)) {
-          throw new Error('You are already signed up for this slot.');
-        }
-        const newSignup = {
-          parentUserId: profile.id,
-          displayName: profile.displayName ?? 'Parent',
-          signedUpAt: new Date().toISOString(),
-        };
-        transaction.update(slotRef, {
-          signups: [...(current.signups ?? []), newSignup],
-          claimedCount: (current.signups?.length ?? 0) + 1,
-        });
-      });
-      toast({ title: 'Signed Up!', description: `You're volunteering for the ${slot.gameDate} shift.` });
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
-    }
-  };
-
-  // ── Concession cancel handler ───────────────────────────────────────────────
-  const handleConcessionCancel = async (slotId: string) => {
-    if (!db || !profile) return;
-    const slot = rawSlotsById.get(slotId);
-    if (!slot) return;
-    const signup = slot.signups.find(s => s.parentUserId === profile.id);
-    if (!signup) return;
-    try {
-      const slotRef = doc(db, 'concessionSlots', slotId);
-      await runTransaction(db, async (transaction) => {
-        const snap = await transaction.get(slotRef);
-        if (!snap.exists()) throw new Error('Slot no longer exists.');
-        const current = snap.data() as ConcessionSlot;
-        const filtered = (current.signups ?? []).filter(s => s.parentUserId !== profile.id);
-        transaction.update(slotRef, { signups: filtered, claimedCount: filtered.length });
-      });
-      toast({ title: 'Cancelled', description: volunteerTerms.signupRemoved });
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
-    }
-  };
 
   const handleFilterChange = (key: 'games' | 'practices' | 'concessions', val: boolean) => {
     setFilters(f => ({ ...f, [key]: val }));
@@ -365,8 +339,7 @@ export default function ParentSchedulesPage() {
           onFilterChange={handleFilterChange}
           visibleFilters={['games', 'concessions']}
           onRsvp={selectedPlayerId !== 'all' ? handleRSVP : undefined}
-          onConcessionSignup={handleConcessionSignup}
-          onConcessionCancel={handleConcessionCancel}
+          onConcessionViewDetails={() => router.push('/parent/volunteers')}
           childSelector={childSelector}
         />
       </main>
