@@ -555,3 +555,17 @@ export async function clearUserNotifications(
   return { deleted: await batchDelete(snapshot.docs) };
 }
 
+export async function clearAllNotifications(
+  idToken: string
+): Promise<{ deleted: number }> {
+  await verifyAdminCaller(idToken);
+
+  const db = getAdminFirestore();
+
+  const snapshot = await db.collection('notifications').get();
+
+  if (snapshot.empty) return { deleted: 0 };
+
+  return { deleted: await batchDelete(snapshot.docs) };
+}
+

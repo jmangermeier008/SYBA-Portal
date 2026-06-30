@@ -21,6 +21,7 @@ import { format, parseISO, isAfter, differenceInHours } from 'date-fns';
 import { useMemo, useState } from 'react';
 
 interface ConcessionSignup {
+  signupId?: string;
   parentUserId: string;
   displayName: string;
   signedUpAt: string;
@@ -129,11 +130,16 @@ export default function ParentVolunteersPage() {
       : [],
   [slots]);
 
-  // Count signups across all season slots (past + future) for compliance tracking
+  // Total spots claimed across all season slots (each spot counts; a parent can
+  // hold more than one spot in a slot to cover multiple players).
   const mySignupCount = useMemo(
-    () => (slots ?? []).filter(s => s.signups?.some(su => su.parentUserId === profile?.id)).length,
+    () => (slots ?? []).reduce((n, s) => n + (s.signups?.filter(su => su.parentUserId === profile?.id).length ?? 0), 0),
     [slots, profile?.id]
   );
+
+  // How many spots a family may hold in a single shift: their number of enrolled
+  // players, with a floor of 1 so co-parents/helpers keep their single spot.
+  const maxSpotsPerShift = useMemo(() => Math.max(1, enrollments?.length ?? 0), [enrollments]);
 
   const requiredSlots = useMemo(() => {
     if (!activeSeason) return 0;
@@ -156,10 +162,12 @@ export default function ParentVolunteersPage() {
       (slots ?? []).forEach(s => {
         const st = (s.type ?? 'concessions') === 'tagging' ? 'tagging' : (s.type ?? 'concessions') === 'concessions' ? 'concessions' : null;
         if (st !== type) return;
-        const mine = s.signups?.find(su => su.parentUserId === profile?.id);
-        if (!mine) return;
-        if (mine.attendance === 'worked') worked++;
-        else if (mine.attendance !== 'no-show') pending++;
+        // Every spot this parent holds in the slot counts separately.
+        (s.signups ?? []).forEach(su => {
+          if (su.parentUserId !== profile?.id) return;
+          if (su.attendance === 'worked') worked++;
+          else if (su.attendance !== 'no-show') pending++;
+        });
       });
       return { worked, pending };
     };
@@ -210,9 +218,12 @@ export default function ParentVolunteersPage() {
         if ((current.signups?.length ?? 0) >= current.capacity) {
           throw new Error('This slot is now full. Please choose another time.');
         }
-        const alreadySignedUp = current.signups?.some(s => s.parentUserId === profile.id);
-        if (alreadySignedUp) throw new Error('You are already signed up for this slot.');
+        const myCurrentSpots = current.signups?.filter(s => s.parentUserId === profile.id).length ?? 0;
+        if (myCurrentSpots >= maxSpotsPerShift) {
+          throw new Error(`Your family can take up to ${maxSpotsPerShift} spot${maxSpotsPerShift !== 1 ? 's' : ''} on this shift.`);
+        }
         const newSignup = {
+          signupId: crypto.randomUUID(),
           parentUserId: profile.id,
           displayName: profile.displayName ?? 'Parent',
           signedUpAt: new Date().toISOString(),
@@ -259,10 +270,14 @@ export default function ParentVolunteersPage() {
         const slotSnap = await transaction.get(slotRef);
         if (!slotSnap.exists()) throw new Error('Slot no longer exists.');
         const current = slotSnap.data() as ConcessionSlot;
-        const newSignups = (current.signups ?? []).filter(s => s.parentUserId !== profile.id);
-        if (newSignups.length === (current.signups?.length ?? 0)) {
-          throw new Error('You are not signed up for this slot.');
+        const signups = current.signups ?? [];
+        // Remove only ONE of this parent's spots (the most recently added).
+        let removeIdx = -1;
+        for (let i = signups.length - 1; i >= 0; i--) {
+          if (signups[i].parentUserId === profile.id) { removeIdx = i; break; }
         }
+        if (removeIdx === -1) throw new Error('You are not signed up for this slot.');
+        const newSignups = signups.filter((_, i) => i !== removeIdx);
         transaction.update(slotRef, { signups: newSignups, claimedCount: newSignups.length });
       });
       await addDoc(collection(db, 'notifications'), {
@@ -376,7 +391,9 @@ export default function ParentVolunteersPage() {
                 {upcomingSlots.map(slot => {
                   const claimed = slot.signups?.length ?? 0;
                   const isFull = claimed >= slot.capacity;
-                  const isSigned = slot.signups?.some(s => s.parentUserId === profile?.id) ?? false;
+                  const mySpots = slot.signups?.filter(s => s.parentUserId === profile?.id).length ?? 0;
+                  const isSigned = mySpots > 0;
+                  const canAddMore = mySpots > 0 && mySpots < maxSpotsPerShift && !isFull;
                   const hoursUntil = differenceInHours(getSlotStartDateTime(slot), new Date());
                   const pastCutoff = isSigned && (slot.cancelCutoffHours ?? 0) > 0 && hoursUntil < slot.cancelCutoffHours;
                   const busy = actioningSlotId === slot.id;
@@ -400,24 +417,43 @@ export default function ParentVolunteersPage() {
                           </span>
                         </div>
                       </div>
-                      <div className="shrink-0 w-full sm:w-auto">
+                      <div className="shrink-0 w-full sm:w-auto flex flex-col items-stretch sm:items-end gap-1.5">
+                        {isSigned && (
+                          <span className="text-xs font-medium text-primary flex items-center gap-1 sm:justify-end">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            You have {mySpots} spot{mySpots !== 1 ? 's' : ''}
+                          </span>
+                        )}
                         {isSigned ? (
-                          pastCutoff ? (
-                            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                              <Clock className="h-3.5 w-3.5" />
-                              Signed up — too close to the shift to cancel online
-                            </p>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              className="w-full sm:w-auto min-h-[44px] rounded-full border-destructive/40 text-destructive hover:bg-destructive/5"
-                              onClick={() => handleCancel(slot)}
-                              disabled={busy}
-                            >
-                              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                              Cancel Sign-Up
-                            </Button>
-                          )
+                          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                            {canAddMore && (
+                              <Button
+                                variant="outline"
+                                className="w-full sm:w-auto min-h-[44px] rounded-full"
+                                onClick={() => handleSignUp(slot)}
+                                disabled={busy}
+                              >
+                                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Add another spot
+                              </Button>
+                            )}
+                            {pastCutoff ? (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                <Clock className="h-3.5 w-3.5" />
+                                Too close to the shift to cancel online
+                              </p>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                className="w-full sm:w-auto min-h-[44px] rounded-full border-destructive/40 text-destructive hover:bg-destructive/5"
+                                onClick={() => handleCancel(slot)}
+                                disabled={busy}
+                              >
+                                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Cancel{mySpots > 1 ? ' a spot' : ' Sign-Up'}
+                              </Button>
+                            )}
+                          </div>
                         ) : isFull ? (
                           <span className="inline-flex items-center rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">
                             Full

@@ -193,6 +193,7 @@ export interface TeamGame {
 // ---------------------------------------------------------------------------
 
 export interface ConcessionSignup {
+  signupId?: string; // unique per spot — lets one parent hold multiple spots in a slot
   parentUserId: string;
   displayName: string;
   signedUpAt: string;

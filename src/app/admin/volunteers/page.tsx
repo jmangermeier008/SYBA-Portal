@@ -65,6 +65,7 @@ import { cn } from '@/lib/utils';
 type AttendanceStatus = 'pending' | 'worked' | 'no-show';
 
 interface ConcessionSignup {
+  signupId?: string;
   parentUserId: string;
   displayName: string;
   signedUpAt: string;
@@ -124,6 +125,7 @@ interface FamilyRoster {
 // One of a family's signed-up shifts, shown in the expandable compliance detail.
 interface FamilyShift {
   slotId: string;
+  signupId?: string;      // identifies the exact spot (a parent can hold several)
   gameDate: string;
   startTime: string;
   endTime: string;
@@ -498,14 +500,15 @@ export default function ConcessionsAdminPage() {
   };
 
   // ── Attendance ─────────────────────────────────────────────────────────────
-  // Set one family's attendance on one shift. Works off the live `slots` data,
-  // so it can be called from both the shift cards and the compliance detail.
-  async function setAttendance(slotId: string, parentUserId: string, newStatus: AttendanceStatus) {
+  // Set attendance on one specific signup spot. Works off the live `slots` data,
+  // so it can be called from both the shift cards and the compliance detail. The
+  // spot is identified by signupId when present, else by parentUserId (legacy).
+  async function setAttendance(slotId: string, signupId: string | undefined, parentUserId: string, newStatus: AttendanceStatus) {
     if (!db) return;
     const slot = (slots ?? []).find(s => s.id === slotId);
-    const signup = slot?.signups?.find(s => s.parentUserId === parentUserId);
+    const signup = slot?.signups?.find(s => (signupId ? s.signupId === signupId : s.parentUserId === parentUserId));
     if (!slot || !signup) return;
-    const key = `${slotId}_${parentUserId}`;
+    const key = `${slotId}_${signupId ?? parentUserId}`;
     setAttendanceSaving(prev => new Set(prev).add(key));
     try {
       const slotRef = doc(db, 'concessionSlots', slotId);
@@ -617,6 +620,7 @@ export default function ConcessionsAdminPage() {
       }
       const displayName = parentMap.get(assignParentId) ?? assignParentId;
       const newSignup: ConcessionSignup = {
+        signupId: crypto.randomUUID(),
         parentUserId: assignParentId,
         displayName,
         signedUpAt: new Date().toISOString(),
@@ -763,7 +767,7 @@ export default function ConcessionsAdminPage() {
         const att = su.attendance;
         familyKeys.forEach(familyKey => {
           const a = get(familyKey);
-          a.shifts.push({ slotId: slot.id, gameDate: slot.gameDate, startTime: slot.startTime, endTime: slot.endTime, type: slotType, attendance: att, signerUid: su.parentUserId, signerName: su.displayName });
+          a.shifts.push({ slotId: slot.id, signupId: su.signupId, gameDate: slot.gameDate, startTime: slot.startTime, endTime: slot.endTime, type: slotType, attendance: att, signerUid: su.parentUserId, signerName: su.displayName });
           if (att === 'worked') { isTagging ? a.tW++ : a.cW++; }
           else if (att !== 'no-show' && slot.gameDate >= today) { isTagging ? a.tP++ : a.cP++; }
         });
@@ -953,11 +957,11 @@ export default function ConcessionsAdminPage() {
                 )}
               </div>
               {slot.signups.map((s, i) => {
-                const key = `${slot.id}_${s.parentUserId}`;
+                const key = `${slot.id}_${s.signupId ?? s.parentUserId}`;
                 const isSaving = attendanceSaving.has(key);
                 const current = s.attendance ?? 'pending';
                 return (
-                  <div key={i} className="flex items-center justify-between gap-2">
+                  <div key={s.signupId ?? i} className="flex items-center justify-between gap-2">
                     <span className="text-xs text-foreground truncate">{s.displayName}</span>
                     {canMark ? (
                       <div className="flex items-center gap-1 shrink-0">
@@ -967,7 +971,7 @@ export default function ConcessionsAdminPage() {
                           (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
                             <button
                               key={status}
-                              onClick={() => setAttendance(slot.id, s.parentUserId, status)}
+                              onClick={() => setAttendance(slot.id, s.signupId, s.parentUserId, status)}
                               className={cn(
                                 'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
                                 current === status
@@ -1012,13 +1016,13 @@ export default function ConcessionsAdminPage() {
     }
     return (
       <div className="space-y-2">
-        {family.shifts.map(sh => {
-          const key = `${sh.slotId}_${family.parentUserId}`;
+        {family.shifts.map((sh, i) => {
+          const key = `${sh.slotId}_${sh.signupId ?? sh.signerUid}`;
           const isSaving = attendanceSaving.has(key);
           const current = sh.attendance ?? 'pending';
           const typeLabel = VOLUNTEER_TYPE_OPTIONS.find(o => o.value === sh.type)?.label ?? 'Volunteer';
           return (
-            <div key={sh.slotId} className="flex items-center justify-between gap-3 flex-wrap rounded-lg border bg-card px-3 py-2">
+            <div key={sh.signupId ?? `${sh.slotId}_${i}`} className="flex items-center justify-between gap-3 flex-wrap rounded-lg border bg-card px-3 py-2">
               <div className="min-w-0 text-xs">
                 <span className="font-medium">{sh.gameDate ? format(parseISO(sh.gameDate), 'EEE, MMM d') : sh.gameDate}</span>
                 <span className="text-muted-foreground"> · {formatTime(sh.startTime)}–{formatTime(sh.endTime)} · {typeLabel}</span>
@@ -1033,7 +1037,7 @@ export default function ConcessionsAdminPage() {
                   (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
                     <button
                       key={status}
-                      onClick={() => setAttendance(sh.slotId, family.parentUserId, status)}
+                      onClick={() => setAttendance(sh.slotId, sh.signupId, sh.signerUid, status)}
                       className={cn(
                         'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
                         current === status ? ATTENDANCE_CONFIG[status].className : 'bg-muted/50 text-muted-foreground hover:bg-muted'
