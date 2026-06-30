@@ -632,6 +632,9 @@ export default function AdminGamesPage() {
             capacity: Number(shiftForm.capacity), claimedCount: 0,
             cancelCutoffHours: 24, description: shiftForm.description.trim(),
             status: 'active', signups: [], createdAt: Timestamp.now(),
+            // Stamp sport + type so the slot matches the sport-filtered volunteer
+            // queries on the parent and admin volunteer pages.
+            sport: activeSport, type: 'concessions',
           });
         }
 

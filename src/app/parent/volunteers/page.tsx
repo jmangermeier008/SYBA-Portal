@@ -5,7 +5,8 @@ import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { collection, collectionGroup, doc, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
-import type { Season } from '@/types/scheduling';
+import type { Season, VolunteerShiftType } from '@/types/scheduling';
+import { FOOTBALL_PER_PLAYER_REQUIREMENTS } from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,11 +24,13 @@ interface ConcessionSignup {
   parentUserId: string;
   displayName: string;
   signedUpAt: string;
+  attendance?: 'pending' | 'worked' | 'no-show';
 }
 
 interface ConcessionSlot {
   id: string;
   title?: string;
+  type?: VolunteerShiftType;
   gameDate: string;
   startTime: string;
   endTime: string;
@@ -53,6 +56,28 @@ function getSlotStartDateTime(slot: ConcessionSlot): Date {
   const d = parseISO(slot.gameDate);
   d.setHours(h, m, 0, 0);
   return d;
+}
+
+// A single labeled progress bar toward a volunteer requirement. "Worked" counts
+// toward the requirement (matching the admin compliance report); shifts signed
+// up but not yet marked worked show as a pending note.
+function CommitmentBar({ label, worked, pending, required }: { label: string; worked: number; pending: number; required: number }) {
+  const pct = required > 0 ? Math.min((worked / required) * 100, 100) : 0;
+  const color = worked >= required ? 'bg-green-500' : worked > 0 ? 'bg-amber-500' : 'bg-destructive';
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs gap-2">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-semibold">
+          {worked} / {required}
+          {pending > 0 && <span className="text-amber-600 font-normal"> (+{pending} pending)</span>}
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-1">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
 export default function ParentVolunteersPage() {
@@ -116,6 +141,30 @@ export default function ParentVolunteersPage() {
     const perPlayer = activeSeason.volunteerSlotsRequired ?? 1;
     return count * perPlayer;
   }, [enrollments, activeSeason]);
+
+  // Football enforces a split requirement: 1 worked concession shift + 1 worked
+  // tagging shift per enrolled player. "Worked" (admin-confirmed) attendance is
+  // what counts; signed-up-but-unconfirmed shifts surface as pending.
+  const isFootball = activeSport === 'football';
+  const perTypeRequired = useMemo(
+    () => (enrollments?.length ?? 0) * (FOOTBALL_PER_PLAYER_REQUIREMENTS.concessions ?? 1),
+    [enrollments]
+  );
+  const myProgress = useMemo(() => {
+    const countFor = (type: 'concessions' | 'tagging') => {
+      let worked = 0, pending = 0;
+      (slots ?? []).forEach(s => {
+        const st = (s.type ?? 'concessions') === 'tagging' ? 'tagging' : (s.type ?? 'concessions') === 'concessions' ? 'concessions' : null;
+        if (st !== type) return;
+        const mine = s.signups?.find(su => su.parentUserId === profile?.id);
+        if (!mine) return;
+        if (mine.attendance === 'worked') worked++;
+        else if (mine.attendance !== 'no-show') pending++;
+      });
+      return { worked, pending };
+    };
+    return { concessions: countFor('concessions'), tagging: countFor('tagging') };
+  }, [slots, profile?.id]);
 
   // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
   // concession stand; football volunteering spans chain gangs, clock, and gate
@@ -254,28 +303,40 @@ export default function ParentVolunteersPage() {
               <p className="text-sm text-muted-foreground">{volunteerTerms.subtitle}</p>
             </div>
             <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
-              {activeSeason && requiredSlots > 0 && (
-                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[180px]">
-                  <p className="text-xs text-muted-foreground mb-1">Volunteer Commitment</p>
-                  <p className="text-sm font-semibold">{mySignupCount} / {requiredSlots} shifts</p>
-                  <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-1.5">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        mySignupCount >= requiredSlots ? 'bg-green-500' :
-                        mySignupCount > 0 ? 'bg-amber-500' : 'bg-destructive'
-                      }`}
-                      style={{ width: `${Math.min((mySignupCount / requiredSlots) * 100, 100)}%` }}
-                    />
+              {isFootball ? (
+                activeSeason && perTypeRequired > 0 && (
+                  <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[230px] space-y-2.5">
+                    <p className="text-xs text-muted-foreground">Volunteer Commitment</p>
+                    <CommitmentBar label="Concessions" worked={myProgress.concessions.worked} pending={myProgress.concessions.pending} required={perTypeRequired} />
+                    <CommitmentBar label="Tagging" worked={myProgress.tagging.worked} pending={myProgress.tagging.pending} required={perTypeRequired} />
                   </div>
-                </div>
-              )}
-              {mySignupCount > 0 && (
-                <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[120px] text-center">
-                  <p className="text-xs text-muted-foreground mb-0.5">My Sign-Ups</p>
-                  <p className="text-sm font-semibold flex items-center justify-center gap-1">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> {mySignupCount}
-                  </p>
-                </div>
+                )
+              ) : (
+                <>
+                  {activeSeason && requiredSlots > 0 && (
+                    <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[180px]">
+                      <p className="text-xs text-muted-foreground mb-1">Volunteer Commitment</p>
+                      <p className="text-sm font-semibold">{mySignupCount} / {requiredSlots} shifts</p>
+                      <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-1.5">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            mySignupCount >= requiredSlots ? 'bg-green-500' :
+                            mySignupCount > 0 ? 'bg-amber-500' : 'bg-destructive'
+                          }`}
+                          style={{ width: `${Math.min((mySignupCount / requiredSlots) * 100, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {mySignupCount > 0 && (
+                    <div className="rounded-xl border bg-card shadow-sm px-4 py-3 w-full sm:w-auto sm:min-w-[120px] text-center">
+                      <p className="text-xs text-muted-foreground mb-0.5">My Sign-Ups</p>
+                      <p className="text-sm font-semibold flex items-center justify-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> {mySignupCount}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

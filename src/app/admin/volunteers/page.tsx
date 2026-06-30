@@ -21,7 +21,10 @@ import {
 } from 'firebase/firestore';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import type { CalendarEvent, VolunteerShiftType } from '@/types/scheduling';
-import { VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT } from '@/types/scheduling';
+import {
+  VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT,
+  FOOTBALL_PER_PLAYER_REQUIREMENTS,
+} from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,6 +49,7 @@ import {
   LayoutList,
   CalendarIcon,
   UserPlus,
+  Tag,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
@@ -66,6 +70,7 @@ interface ConcessionSlot {
   id: string;
   title?: string;
   type?: VolunteerShiftType;
+  eventId?: string;
   gameDate: string;
   startTime: string;
   endTime: string;
@@ -94,17 +99,25 @@ interface Season {
   endDate?: string;   // YYYY-MM-DD
   status?: string;
   isActive?: boolean;
+  sport?: string;
 }
 
 interface FamilyCompliance {
   parentUserId: string;
   displayName: string;
   email: string;
-  workedCount: number;
-  pendingCount: number;
-  required: number;
   manualCredits: number;
   playerNames: string[];
+  enrollmentCount: number;
+  // Football enforces a split requirement (concessions + tagging), so worked/
+  // pending counts are tracked per type. Baseball pools both into one total.
+  isFootball: boolean;
+  concessionsWorked: number;
+  concessionsPending: number;
+  taggingWorked: number;
+  taggingPending: number;
+  perTypeRequired: number; // football: required worked shifts of EACH type
+  pooledRequired: number;  // baseball: required worked shifts total
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -136,6 +149,34 @@ const emptySlot = {
   description: '',
 };
 
+const emptyEvent = {
+  title: '',
+  location: '',
+  gameDate: '',
+  startTime: '09:00',
+  endTime: '17:00',
+  shiftLengthHours: 2,
+  capacity: 3,
+  cancelCutoffHours: 24,
+};
+
+// Split an event window (start→end) into back-to-back shifts of lengthHours.
+// A trailing remainder shorter than lengthHours is kept as a final partial shift.
+function generateShiftWindows(start: string, end: string, lengthHours: number) {
+  const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  const toStr = (mins: number) =>
+    `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  const startMin = toMin(start);
+  const endMin = toMin(end);
+  const step = Math.round(lengthHours * 60);
+  const windows: { startTime: string; endTime: string }[] = [];
+  if (step <= 0 || endMin <= startMin) return windows;
+  for (let s = startMin; s < endMin; s += step) {
+    windows.push({ startTime: toStr(s), endTime: toStr(Math.min(s + step, endMin)) });
+  }
+  return windows;
+}
+
 function formatTime(t: string) {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
@@ -148,10 +189,26 @@ function isPastSlot(gameDate: string): boolean {
   return gameDate < format(new Date(), 'yyyy-MM-dd');
 }
 
-function complianceStatus(family: FamilyCompliance) {
-  const totalCredits = family.workedCount + family.manualCredits;
-  if (totalCredits >= family.required) return 'met';
-  if (totalCredits > 0 || family.pendingCount > 0) return 'partial';
+// Total worked credit (manual credits apply to the concessions bucket).
+function workedTotal(f: FamilyCompliance) {
+  return f.concessionsWorked + f.taggingWorked + f.manualCredits;
+}
+function pendingTotal(f: FamilyCompliance) {
+  return f.concessionsPending + f.taggingPending;
+}
+
+function complianceStatus(family: FamilyCompliance): 'met' | 'partial' | 'none' {
+  if (family.isFootball) {
+    // Both a concession shift AND a tagging shift are required per player.
+    const concessionsMet = family.concessionsWorked + family.manualCredits >= family.perTypeRequired;
+    const taggingMet = family.taggingWorked >= family.perTypeRequired;
+    if (concessionsMet && taggingMet) return 'met';
+    const anyProgress = workedTotal(family) > 0 || pendingTotal(family) > 0;
+    return anyProgress ? 'partial' : 'none';
+  }
+  // Baseball: single pooled requirement.
+  if (workedTotal(family) >= family.pooledRequired) return 'met';
+  if (workedTotal(family) > 0 || pendingTotal(family) > 0) return 'partial';
   return 'none';
 }
 
@@ -187,6 +244,12 @@ export default function ConcessionsAdminPage() {
   const [saving, setSaving] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
   const [deleting, setDeleting] = useState(false);
+  // Tagging event (multi-shift) creation — football only
+  const [eventDialog, setEventDialog] = useState(false);
+  const [eventForm, setEventForm] = useState(emptyEvent);
+  const [eventSaving, setEventSaving] = useState(false);
+  const [deleteEventDialog, setDeleteEventDialog] = useState<{ open: boolean; eventId: string; title: string; count: number }>({ open: false, eventId: '', title: '', count: 0 });
+  const [deletingEvent, setDeletingEvent] = useState(false);
   const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
   const [overriding, setOverriding] = useState<Set<string>>(new Set());
@@ -266,6 +329,26 @@ export default function ConcessionsAdminPage() {
     [sortedSlots]
   );
 
+  // ── Tagging event roll-up (shifts grouped by shared eventId) ──────────────
+  const eventGroups = useMemo(() => {
+    const map = new Map<string, { eventId: string; title: string; location: string; gameDate: string; shifts: ConcessionSlot[] }>();
+    sortedSlots.forEach(s => {
+      if (!s.eventId) return;
+      const g = map.get(s.eventId) ?? {
+        eventId: s.eventId,
+        title: s.title || 'Tagging Event',
+        location: s.description || '',
+        gameDate: s.gameDate,
+        shifts: [] as ConcessionSlot[],
+      };
+      g.shifts.push(s);
+      map.set(s.eventId, g);
+    });
+    return Array.from(map.values())
+      .map(g => ({ ...g, shifts: [...g.shifts].sort((a, b) => a.startTime.localeCompare(b.startTime)) }))
+      .sort((a, b) => a.gameDate.localeCompare(b.gameDate));
+  }, [sortedSlots]);
+
   // ── Slot CRUD ─────────────────────────────────────────────────────────────
   const handleAddSlot = async () => {
     if (!formData.gameDate || !db) return;
@@ -308,6 +391,70 @@ export default function ConcessionsAdminPage() {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // ── Tagging event CRUD ─────────────────────────────────────────────────────
+  const eventShiftPreview = useMemo(
+    () => generateShiftWindows(eventForm.startTime, eventForm.endTime, Number(eventForm.shiftLengthHours)),
+    [eventForm.startTime, eventForm.endTime, eventForm.shiftLengthHours]
+  );
+
+  const handleCreateEvent = async () => {
+    if (!db || !eventForm.gameDate || !eventForm.title.trim()) return;
+    const windows = eventShiftPreview;
+    if (windows.length === 0) {
+      toast({ title: 'Check the times', description: 'End time must be after start time, and shift length must be greater than zero.', variant: 'destructive' });
+      return;
+    }
+    setEventSaving(true);
+    try {
+      const eventId = crypto.randomUUID();
+      const batch = writeBatch(db);
+      windows.forEach(w => {
+        batch.set(doc(collection(db, 'concessionSlots')), {
+          title: eventForm.title.trim(),
+          type: 'tagging' as VolunteerShiftType,
+          eventId,
+          gameDate: eventForm.gameDate,
+          startTime: w.startTime,
+          endTime: w.endTime,
+          capacity: Number(eventForm.capacity),
+          cancelCutoffHours: Number(eventForm.cancelCutoffHours),
+          description: eventForm.location.trim(),
+          signups: [],
+          claimedCount: 0,
+          isStandalone: true,
+          status: 'active',
+          sport: activeSport,
+          createdAt: new Date().toISOString(),
+        });
+      });
+      await batch.commit();
+      toast({ title: 'Tagging Event Created', description: `${windows.length} shift${windows.length !== 1 ? 's' : ''} created for "${eventForm.title.trim()}".` });
+      setEventDialog(false);
+      setEventForm(emptyEvent);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setEventSaving(false);
+    }
+  };
+
+  const handleDeleteEvent = async () => {
+    if (!db || !deleteEventDialog.eventId) return;
+    setDeletingEvent(true);
+    try {
+      const toRemove = (slots ?? []).filter(s => s.eventId === deleteEventDialog.eventId);
+      const batch = writeBatch(db);
+      toRemove.forEach(s => batch.delete(doc(db, 'concessionSlots', s.id)));
+      await batch.commit();
+      toast({ title: 'Event Deleted', description: `${toRemove.length} shift${toRemove.length !== 1 ? 's' : ''} removed.` });
+      setDeleteEventDialog({ open: false, eventId: '', title: '', count: 0 });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeletingEvent(false);
     }
   };
 
@@ -477,11 +624,17 @@ export default function ConcessionsAdminPage() {
         }),
       ]);
 
-      // Build worked/pending counts from concession slot signups
+      // Build per-type worked/pending counts from concession slot signups.
+      const isFootball = season.sport === 'football';
       const allSlotsSnap = await getDocs(collection(db, 'concessionSlots'));
       const today = format(new Date(), 'yyyy-MM-dd');
-      const workedCountMap = new Map<string, number>();
-      const pendingCountMap = new Map<string, number>();
+      // Keyed by parentUserId; each value tracks the two counting shift types.
+      const counts = new Map<string, { concessionsWorked: number; concessionsPending: number; taggingWorked: number; taggingPending: number }>();
+      const bump = (pid: string, type: 'concessions' | 'tagging', field: 'Worked' | 'Pending') => {
+        const c = counts.get(pid) ?? { concessionsWorked: 0, concessionsPending: 0, taggingWorked: 0, taggingPending: 0 };
+        (c as any)[`${type}${field}`] += 1;
+        counts.set(pid, c);
+      };
 
       allSlotsSnap.docs.forEach(d => {
         const slotData = d.data() as ConcessionSlot;
@@ -489,6 +642,8 @@ export default function ConcessionsAdminPage() {
         // Slots predating the `type` field are treated as 'concessions'.
         const slotType = slotData.type ?? 'concessions';
         if (!VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT.includes(slotType)) return;
+        // Tagging only counts toward the requirement for football.
+        const bucket: 'concessions' | 'tagging' = slotType === 'tagging' ? 'tagging' : 'concessions';
         const gameDate = slotData.gameDate;
         const inRange =
           (!season.registrationOpen || gameDate >= season.registrationOpen) &&
@@ -498,12 +653,10 @@ export default function ConcessionsAdminPage() {
             const pid = signup.parentUserId;
             const att = signup.attendance;
             if (att === 'worked') {
-              workedCountMap.set(pid, (workedCountMap.get(pid) ?? 0) + 1);
+              bump(pid, bucket, 'Worked');
             } else if (!att || att === 'pending') {
               // Count future sign-ups as pending; past unconfirmed slots don't count
-              if (gameDate >= today) {
-                pendingCountMap.set(pid, (pendingCountMap.get(pid) ?? 0) + 1);
-              }
+              if (gameDate >= today) bump(pid, bucket, 'Pending');
             }
             // 'no-show' contributes to neither
           });
@@ -511,16 +664,25 @@ export default function ConcessionsAdminPage() {
       });
 
       const slotsPerPlayer = season.volunteerSlotsRequired ?? 1;
-      const result: FamilyCompliance[] = parentIdArray.map(pid => ({
-        parentUserId: pid,
-        displayName: profileMap.get(pid)?.displayName ?? pid,
-        email: profileMap.get(pid)?.email ?? '',
-        workedCount: workedCountMap.get(pid) ?? 0,
-        pendingCount: pendingCountMap.get(pid) ?? 0,
-        required: (enrollmentCountByParent.get(pid) ?? 1) * slotsPerPlayer,
-        manualCredits: manualCreditsMap.get(pid) ?? 0,
-        playerNames: playerNamesMap.get(pid) ?? [],
-      }));
+      const result: FamilyCompliance[] = parentIdArray.map(pid => {
+        const enrollmentCount = enrollmentCountByParent.get(pid) ?? 1;
+        const c = counts.get(pid) ?? { concessionsWorked: 0, concessionsPending: 0, taggingWorked: 0, taggingPending: 0 };
+        return {
+          parentUserId: pid,
+          displayName: profileMap.get(pid)?.displayName ?? pid,
+          email: profileMap.get(pid)?.email ?? '',
+          manualCredits: manualCreditsMap.get(pid) ?? 0,
+          playerNames: playerNamesMap.get(pid) ?? [],
+          enrollmentCount,
+          isFootball,
+          concessionsWorked: c.concessionsWorked,
+          concessionsPending: c.concessionsPending,
+          taggingWorked: c.taggingWorked,
+          taggingPending: c.taggingPending,
+          perTypeRequired: enrollmentCount * (FOOTBALL_PER_PLAYER_REQUIREMENTS.concessions ?? 1),
+          pooledRequired: enrollmentCount * slotsPerPlayer,
+        };
+      });
 
       result.sort((a, b) => {
         const order = { none: 0, partial: 1, met: 2 };
@@ -589,14 +751,28 @@ export default function ConcessionsAdminPage() {
 
   const handleExportCSV = () => {
     const seasonName = selectedSeason?.name ?? 'season';
-    const rows = [
-      ['Family Name', 'Email', 'Worked Shifts', 'Pending Shifts', 'Required', 'Status'],
-      ...families.map(f => {
-        const status = complianceStatus(f);
-        const label = status === 'met' ? 'Met' : status === 'partial' ? 'Partial' : 'Not Signed Up';
-        return [f.displayName, f.email, String(f.workedCount), String(f.pendingCount), String(f.required), label];
-      }),
-    ];
+    const isFootballSeason = selectedSeason?.sport === 'football';
+    const statusLabel = (f: FamilyCompliance) => {
+      const status = complianceStatus(f);
+      return status === 'met' ? 'Met' : status === 'partial' ? 'Partial' : 'Not Signed Up';
+    };
+    const rows = isFootballSeason
+      ? [
+          ['Family Name', 'Email', 'Concessions Worked', 'Concessions Required', 'Tagging Worked', 'Tagging Required', 'Pending Shifts', 'Status'],
+          ...families.map(f => [
+            f.displayName, f.email,
+            String(f.concessionsWorked + f.manualCredits), String(f.perTypeRequired),
+            String(f.taggingWorked), String(f.perTypeRequired),
+            String(pendingTotal(f)), statusLabel(f),
+          ]),
+        ]
+      : [
+          ['Family Name', 'Email', 'Worked Shifts', 'Pending Shifts', 'Required', 'Status'],
+          ...families.map(f => [
+            f.displayName, f.email,
+            String(workedTotal(f)), String(pendingTotal(f)), String(f.pooledRequired), statusLabel(f),
+          ]),
+        ];
     const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -680,14 +856,27 @@ export default function ConcessionsAdminPage() {
                   </button>
                 </div>
               </div>
-              <Button
-                onClick={() => setAddDialog(true)}
-                className="rounded-full shadow-lg"
-                disabled={!canEditSlots}
-                title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
-              >
-                <Plus className="mr-2 h-4 w-4" /> Add Slot
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {activeSport === 'football' && (
+                  <Button
+                    variant="outline"
+                    onClick={() => { setEventForm(emptyEvent); setEventDialog(true); }}
+                    className="rounded-full"
+                    disabled={!canEditSlots}
+                    title={!canEditSlots ? 'Switch to the active season to add events' : undefined}
+                  >
+                    <Tag className="mr-2 h-4 w-4" /> Create Tagging Event
+                  </Button>
+                )}
+                <Button
+                  onClick={() => setAddDialog(true)}
+                  className="rounded-full shadow-lg"
+                  disabled={!canEditSlots}
+                  title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Add Slot
+                </Button>
+              </div>
             </div>
 
             {slotView === 'calendar' ? (
@@ -720,6 +909,62 @@ export default function ConcessionsAdminPage() {
                   </CardContent>
                 </Card>
               ) : (
+                <>
+                {eventGroups.length > 0 && (
+                  <div className="space-y-3 mb-4">
+                    {eventGroups.map(ev => {
+                      const totalCap = ev.shifts.reduce((n, s) => n + s.capacity, 0);
+                      const totalSign = ev.shifts.reduce((n, s) => n + (s.signups?.length ?? 0), 0);
+                      const totalWorked = ev.shifts.reduce((n, s) => n + (s.signups?.filter(x => x.attendance === 'worked').length ?? 0), 0);
+                      return (
+                        <Card key={ev.eventId} className="border-none shadow-md">
+                          <CardHeader className="pb-3">
+                            <div className="flex justify-between items-start gap-2">
+                              <div>
+                                <Badge variant="secondary" className="mb-1 text-[10px] gap-1">
+                                  <Tag className="h-3 w-3" /> Tagging Event
+                                </Badge>
+                                <CardTitle className="text-base font-headline">{ev.title}</CardTitle>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {ev.gameDate ? format(parseISO(ev.gameDate), 'EEE, MMM d, yyyy') : ev.gameDate}
+                                  {ev.location ? ` · ${ev.location}` : ''}
+                                </p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                                onClick={() => setDeleteEventDialog({ open: true, eventId: ev.eventId, title: ev.title, count: ev.shifts.length })}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                              <span className="flex items-center gap-1.5">
+                                <Clock className="h-4 w-4" />
+                                {ev.shifts.length} shift{ev.shifts.length !== 1 ? 's' : ''} ({formatTime(ev.shifts[0].startTime)}–{formatTime(ev.shifts[ev.shifts.length - 1].endTime)})
+                              </span>
+                              <span className="flex items-center gap-1.5"><Users className="h-4 w-4" />{totalSign} / {totalCap} signed up</span>
+                              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-green-600" />{totalWorked} worked</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {ev.shifts.map(sh => (
+                                <Badge key={sh.id} variant="outline" className="text-[10px] font-normal">
+                                  {formatTime(sh.startTime)}–{formatTime(sh.endTime)} · {sh.signups?.length ?? 0}/{sh.capacity}
+                                </Badge>
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground italic pt-1">
+                              Mark attendance for each shift in the cards below.
+                            </p>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {sortedSlots.map(slot => {
                     const signupCount = slot.signups?.length ?? 0;
@@ -732,6 +977,12 @@ export default function ConcessionsAdminPage() {
                         <CardHeader className="pb-3">
                           <div className="flex justify-between items-start">
                             <div>
+                              {slot.title && (
+                                <p className="text-xs font-semibold text-foreground mb-0.5 flex items-center gap-1">
+                                  {slot.eventId && <Tag className="h-3 w-3 text-muted-foreground shrink-0" />}
+                                  {slot.title}
+                                </p>
+                              )}
                               <div className="flex items-center gap-2 mb-1">
                                 <CalendarDays className="h-4 w-4 text-primary" />
                                 <CardTitle className="text-base font-headline">
@@ -831,6 +1082,7 @@ export default function ConcessionsAdminPage() {
                     );
                   })}
                 </div>
+                </>
               )
             )}
           </TabsContent>
@@ -911,7 +1163,11 @@ export default function ConcessionsAdminPage() {
 
                   {selectedSeason && (
                     <p className="text-sm text-muted-foreground">
-                      Requirement: <strong>{selectedSeason.volunteerSlotsRequired ?? 1} shift{(selectedSeason.volunteerSlotsRequired ?? 1) !== 1 ? 's' : ''} per enrolled player</strong> for the {selectedSeason.name} season. Families with multiple players have a higher total requirement.
+                      {selectedSeason.sport === 'football' ? (
+                        <>Requirement: <strong>1 concession shift + 1 tagging shift per enrolled player</strong> for the {selectedSeason.name} season. Families with multiple players have a higher total requirement.</>
+                      ) : (
+                        <>Requirement: <strong>{selectedSeason.volunteerSlotsRequired ?? 1} shift{(selectedSeason.volunteerSlotsRequired ?? 1) !== 1 ? 's' : ''} per enrolled player</strong> for the {selectedSeason.name} season. Families with multiple players have a higher total requirement.</>
+                      )}
                       <span className="ml-2 text-xs italic">Pending (future) shifts do not count until marked Worked.</span>
                     </p>
                   )}
@@ -956,12 +1212,19 @@ export default function ConcessionsAdminPage() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-4 mt-2 text-sm">
-                              <span className="font-medium">
-                                Worked {family.workedCount + family.manualCredits} / {family.required}
-                              </span>
-                              {family.pendingCount > 0 && (
-                                <span className="text-yellow-600 font-medium">+{family.pendingCount} upcoming</span>
+                            <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
+                              {family.isFootball ? (
+                                <span className="font-medium flex flex-col gap-0.5">
+                                  <span>Concessions {family.concessionsWorked + family.manualCredits} / {family.perTypeRequired}</span>
+                                  <span>Tagging {family.taggingWorked} / {family.perTypeRequired}</span>
+                                </span>
+                              ) : (
+                                <span className="font-medium">
+                                  Worked {workedTotal(family)} / {family.pooledRequired}
+                                </span>
+                              )}
+                              {pendingTotal(family) > 0 && (
+                                <span className="text-yellow-600 font-medium">+{pendingTotal(family)} upcoming</span>
                               )}
                             </div>
                             {(status !== 'met' || family.manualCredits > 0) && (
@@ -1025,11 +1288,18 @@ export default function ConcessionsAdminPage() {
                                 </td>
                                 <td className="px-4 py-3 text-muted-foreground">{family.email}</td>
                                 <td className="px-4 py-3 text-center font-medium">
-                                  {family.workedCount + family.manualCredits} / {family.required}
+                                  {family.isFootball ? (
+                                    <div className="flex flex-col gap-0.5 text-xs">
+                                      <span>Concessions {family.concessionsWorked + family.manualCredits} / {family.perTypeRequired}</span>
+                                      <span>Tagging {family.taggingWorked} / {family.perTypeRequired}</span>
+                                    </div>
+                                  ) : (
+                                    <>{workedTotal(family)} / {family.pooledRequired}</>
+                                  )}
                                 </td>
                                 <td className="px-4 py-3 text-center text-muted-foreground">
-                                  {family.pendingCount > 0
-                                    ? <span className="text-yellow-600 font-medium">+{family.pendingCount} upcoming</span>
+                                  {pendingTotal(family) > 0
+                                    ? <span className="text-yellow-600 font-medium">+{pendingTotal(family)} upcoming</span>
                                     : '—'}
                                 </td>
                                 <td className="px-4 py-3 text-center">
@@ -1155,6 +1425,98 @@ export default function ConcessionsAdminPage() {
             <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>Cancel</Button>
             <Button onClick={handleAddSlot} disabled={saving || !formData.gameDate}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Slot
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Tagging Event Dialog */}
+      <Dialog open={eventDialog} onOpenChange={(open) => !eventSaving && setEventDialog(open)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Tagging Event</DialogTitle>
+            <DialogDescription>
+              Set the day, hours, and shift length. We&apos;ll automatically create back-to-back tagging shifts that families can sign up for.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Event Name</Label>
+              <Input placeholder="e.g. Tagging at Sparkle Market" value={eventForm.title}
+                onChange={e => setEventForm(prev => ({ ...prev, title: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Location</Label>
+              <Input placeholder="e.g. Sparkle Market, Main St" value={eventForm.location}
+                onChange={e => setEventForm(prev => ({ ...prev, location: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <Label>Date *</Label>
+              <Input type="date" value={eventForm.gameDate}
+                onChange={e => setEventForm(prev => ({ ...prev, gameDate: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Event Start</Label>
+                <Input type="time" value={eventForm.startTime}
+                  onChange={e => setEventForm(prev => ({ ...prev, startTime: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Event End</Label>
+                <Input type="time" value={eventForm.endTime}
+                  onChange={e => setEventForm(prev => ({ ...prev, endTime: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label>Shift (hrs)</Label>
+                <Input type="number" min={0.5} max={12} step={0.5} value={eventForm.shiftLengthHours}
+                  onChange={e => setEventForm(prev => ({ ...prev, shiftLengthHours: Number(e.target.value) }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Families/shift</Label>
+                <Input type="number" min={1} max={20} value={eventForm.capacity}
+                  onChange={e => setEventForm(prev => ({ ...prev, capacity: Number(e.target.value) }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Cutoff (hrs)</Label>
+                <Input type="number" min={0} max={168} value={eventForm.cancelCutoffHours}
+                  onChange={e => setEventForm(prev => ({ ...prev, cancelCutoffHours: Number(e.target.value) }))} />
+              </div>
+            </div>
+            <div className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              {eventShiftPreview.length > 0 ? (
+                <>
+                  <span className="font-semibold text-foreground">{eventShiftPreview.length} shift{eventShiftPreview.length !== 1 ? 's' : ''}</span> will be created:{' '}
+                  {eventShiftPreview.map(w => `${formatTime(w.startTime)}–${formatTime(w.endTime)}`).join(', ')}
+                </>
+              ) : (
+                <span className="text-destructive">End time must be after start time, and shift length must be greater than zero.</span>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEventDialog(false)} disabled={eventSaving}>Cancel</Button>
+            <Button onClick={handleCreateEvent} disabled={eventSaving || !eventForm.gameDate || !eventForm.title.trim() || eventShiftPreview.length === 0}>
+              {eventSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Event
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Tagging Event Dialog */}
+      <Dialog open={deleteEventDialog.open} onOpenChange={(open) => !deletingEvent && setDeleteEventDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Tagging Event</DialogTitle>
+            <DialogDescription>
+              Delete <strong>{deleteEventDialog.title}</strong> and all {deleteEventDialog.count} of its shift{deleteEventDialog.count !== 1 ? 's' : ''}? All sign-ups for these shifts will be lost.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteEventDialog({ open: false, eventId: '', title: '', count: 0 })} disabled={deletingEvent}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteEvent} disabled={deletingEvent}>
+              {deletingEvent && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Delete Event
             </Button>
           </DialogFooter>
         </DialogContent>

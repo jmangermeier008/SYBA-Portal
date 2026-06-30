@@ -219,6 +219,16 @@ export const VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT: VolunteerShiftType[] =
   'tagging',
 ];
 
+/**
+ * Football per-player, per-type worked-shift minimums. Football families must
+ * complete BOTH a concession shift AND a tagging shift per enrolled player.
+ * Baseball ignores this and uses the single pooled Season.volunteerSlotsRequired.
+ */
+export const FOOTBALL_PER_PLAYER_REQUIREMENTS: Partial<Record<VolunteerShiftType, number>> = {
+  concessions: 1,
+  tagging: 1,
+};
+
 /** A volunteer concession shift. claimedCount mirrors signups.length — keep in sync via transaction. */
 export interface ConcessionSlot {
   id: string;
@@ -227,6 +237,9 @@ export interface ConcessionSlot {
   title?: string;
   // Kind of shift. Absent = legacy concession shift (treated as 'concessions').
   type?: VolunteerShiftType;
+  // Groups auto-generated tagging-event shifts under one event (shared title +
+  // location). Absent on ordinary standalone and game-linked slots.
+  eventId?: string;
   // --- Linking ---
   // gameId is the "silent link" to a Game document.
   // Null / absent = standalone shift (e.g. tournament day).
