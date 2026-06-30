@@ -33,6 +33,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   ShoppingCart,
   Plus,
@@ -147,17 +148,8 @@ const emptySlot = {
   capacity: 4,
   cancelCutoffHours: 24,
   description: '',
-};
-
-const emptyEvent = {
-  title: '',
-  location: '',
-  gameDate: '',
-  startTime: '09:00',
-  endTime: '17:00',
+  splitIntoShifts: false,
   shiftLengthHours: 2,
-  capacity: 3,
-  cancelCutoffHours: 24,
 };
 
 // Split an event window (start→end) into back-to-back shifts of lengthHours.
@@ -244,10 +236,7 @@ export default function ConcessionsAdminPage() {
   const [saving, setSaving] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
   const [deleting, setDeleting] = useState(false);
-  // Tagging event (multi-shift) creation — football only
-  const [eventDialog, setEventDialog] = useState(false);
-  const [eventForm, setEventForm] = useState(emptyEvent);
-  const [eventSaving, setEventSaving] = useState(false);
+  // Multi-shift event deletion (events are created via the Add Slot dialog's split toggle)
   const [deleteEventDialog, setDeleteEventDialog] = useState<{ open: boolean; eventId: string; title: string; count: number }>({ open: false, eventId: '', title: '', count: 0 });
   const [deletingEvent, setDeletingEvent] = useState(false);
   const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
@@ -329,14 +318,15 @@ export default function ConcessionsAdminPage() {
     [sortedSlots]
   );
 
-  // ── Tagging event roll-up (shifts grouped by shared eventId) ──────────────
+  // ── Multi-shift event roll-up (any-type shifts grouped by shared eventId) ──
   const eventGroups = useMemo(() => {
-    const map = new Map<string, { eventId: string; title: string; location: string; gameDate: string; shifts: ConcessionSlot[] }>();
+    const map = new Map<string, { eventId: string; title: string; type: VolunteerShiftType; location: string; gameDate: string; shifts: ConcessionSlot[] }>();
     sortedSlots.forEach(s => {
       if (!s.eventId) return;
       const g = map.get(s.eventId) ?? {
         eventId: s.eventId,
-        title: s.title || 'Tagging Event',
+        title: s.title || 'Volunteer Event',
+        type: s.type ?? 'concessions',
         location: s.description || '',
         gameDate: s.gameDate,
         shifts: [] as ConcessionSlot[],
@@ -350,27 +340,69 @@ export default function ConcessionsAdminPage() {
   }, [sortedSlots]);
 
   // ── Slot CRUD ─────────────────────────────────────────────────────────────
+  // Live preview of the back-to-back shifts the split toggle will generate.
+  const slotShiftPreview = useMemo(
+    () => generateShiftWindows(formData.startTime, formData.endTime, Number(formData.shiftLengthHours)),
+    [formData.startTime, formData.endTime, formData.shiftLengthHours]
+  );
+
   const handleAddSlot = async () => {
     if (!formData.gameDate || !db) return;
+
+    const baseFields = {
+      title: formData.title.trim(),
+      type: formData.type,
+      capacity: Number(formData.capacity),
+      cancelCutoffHours: Number(formData.cancelCutoffHours),
+      description: formData.description.trim(),
+      signups: [] as ConcessionSignup[],
+      claimedCount: 0,
+      isStandalone: true,
+      status: 'active' as const,
+      sport: activeSport,
+      createdAt: new Date().toISOString(),
+    };
+
     setSaving(true);
     try {
-      await addDoc(collection(db, 'concessionSlots'), {
-        title: formData.title.trim(),
-        type: formData.type,
-        gameDate: formData.gameDate,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        capacity: Number(formData.capacity),
-        cancelCutoffHours: Number(formData.cancelCutoffHours),
-        description: formData.description.trim(),
-        signups: [],
-        claimedCount: 0,
-        isStandalone: true,
-        status: 'active',
-        sport: activeSport,
-        createdAt: new Date().toISOString(),
-      });
-      toast({ title: 'Slot Created', description: `Volunteer slot for ${formData.gameDate} added.` });
+      if (formData.splitIntoShifts) {
+        const windows = slotShiftPreview;
+        if (windows.length === 0) {
+          toast({ title: 'Check the times', description: 'End time must be after start time, and shift length must be greater than zero.', variant: 'destructive' });
+          return;
+        }
+        if (windows.length === 1) {
+          // A single window — no need to group under an event.
+          await addDoc(collection(db, 'concessionSlots'), {
+            ...baseFields,
+            gameDate: formData.gameDate,
+            startTime: windows[0].startTime,
+            endTime: windows[0].endTime,
+          });
+        } else {
+          const eventId = crypto.randomUUID();
+          const batch = writeBatch(db);
+          windows.forEach(w => {
+            batch.set(doc(collection(db, 'concessionSlots')), {
+              ...baseFields,
+              eventId,
+              gameDate: formData.gameDate,
+              startTime: w.startTime,
+              endTime: w.endTime,
+            });
+          });
+          await batch.commit();
+        }
+        toast({ title: 'Shifts Created', description: `${windows.length} back-to-back shift${windows.length !== 1 ? 's' : ''} created for ${formData.gameDate}.` });
+      } else {
+        await addDoc(collection(db, 'concessionSlots'), {
+          ...baseFields,
+          gameDate: formData.gameDate,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+        });
+        toast({ title: 'Slot Created', description: `Volunteer slot for ${formData.gameDate} added.` });
+      }
       setAddDialog(false);
       setFormData(emptySlot);
     } catch (err: any) {
@@ -394,53 +426,7 @@ export default function ConcessionsAdminPage() {
     }
   };
 
-  // ── Tagging event CRUD ─────────────────────────────────────────────────────
-  const eventShiftPreview = useMemo(
-    () => generateShiftWindows(eventForm.startTime, eventForm.endTime, Number(eventForm.shiftLengthHours)),
-    [eventForm.startTime, eventForm.endTime, eventForm.shiftLengthHours]
-  );
-
-  const handleCreateEvent = async () => {
-    if (!db || !eventForm.gameDate || !eventForm.title.trim()) return;
-    const windows = eventShiftPreview;
-    if (windows.length === 0) {
-      toast({ title: 'Check the times', description: 'End time must be after start time, and shift length must be greater than zero.', variant: 'destructive' });
-      return;
-    }
-    setEventSaving(true);
-    try {
-      const eventId = crypto.randomUUID();
-      const batch = writeBatch(db);
-      windows.forEach(w => {
-        batch.set(doc(collection(db, 'concessionSlots')), {
-          title: eventForm.title.trim(),
-          type: 'tagging' as VolunteerShiftType,
-          eventId,
-          gameDate: eventForm.gameDate,
-          startTime: w.startTime,
-          endTime: w.endTime,
-          capacity: Number(eventForm.capacity),
-          cancelCutoffHours: Number(eventForm.cancelCutoffHours),
-          description: eventForm.location.trim(),
-          signups: [],
-          claimedCount: 0,
-          isStandalone: true,
-          status: 'active',
-          sport: activeSport,
-          createdAt: new Date().toISOString(),
-        });
-      });
-      await batch.commit();
-      toast({ title: 'Tagging Event Created', description: `${windows.length} shift${windows.length !== 1 ? 's' : ''} created for "${eventForm.title.trim()}".` });
-      setEventDialog(false);
-      setEventForm(emptyEvent);
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
-    } finally {
-      setEventSaving(false);
-    }
-  };
-
+  // ── Multi-shift event deletion ─────────────────────────────────────────────
   const handleDeleteEvent = async () => {
     if (!db || !deleteEventDialog.eventId) return;
     setDeletingEvent(true);
@@ -856,27 +842,14 @@ export default function ConcessionsAdminPage() {
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {activeSport === 'football' && (
-                  <Button
-                    variant="outline"
-                    onClick={() => { setEventForm(emptyEvent); setEventDialog(true); }}
-                    className="rounded-full"
-                    disabled={!canEditSlots}
-                    title={!canEditSlots ? 'Switch to the active season to add events' : undefined}
-                  >
-                    <Tag className="mr-2 h-4 w-4" /> Create Tagging Event
-                  </Button>
-                )}
-                <Button
-                  onClick={() => setAddDialog(true)}
-                  className="rounded-full shadow-lg"
-                  disabled={!canEditSlots}
-                  title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Add Slot
-                </Button>
-              </div>
+              <Button
+                onClick={() => { setFormData(emptySlot); setAddDialog(true); }}
+                className="rounded-full shadow-lg"
+                disabled={!canEditSlots}
+                title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Add Slot
+              </Button>
             </div>
 
             {slotView === 'calendar' ? (
@@ -922,7 +895,7 @@ export default function ConcessionsAdminPage() {
                             <div className="flex justify-between items-start gap-2">
                               <div>
                                 <Badge variant="secondary" className="mb-1 text-[10px] gap-1">
-                                  <Tag className="h-3 w-3" /> Tagging Event
+                                  <Tag className="h-3 w-3" /> {VOLUNTEER_TYPE_OPTIONS.find(o => o.value === ev.type)?.label ?? 'Volunteer'} Event
                                 </Badge>
                                 <CardTitle className="text-base font-headline">{ev.title}</CardTitle>
                                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -1364,7 +1337,7 @@ export default function ConcessionsAdminPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add Volunteer Slot</DialogTitle>
-            <DialogDescription>Create a standalone volunteer shift on any date.</DialogDescription>
+            <DialogDescription>Create a single shift, or split a longer window into back-to-back shifts.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
@@ -1393,19 +1366,53 @@ export default function ConcessionsAdminPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label>Start Time</Label>
+                <Label>{formData.splitIntoShifts ? 'Window Start' : 'Start Time'}</Label>
                 <Input type="time" value={formData.startTime}
                   onChange={e => setFormData(prev => ({ ...prev, startTime: e.target.value }))} />
               </div>
               <div className="space-y-1">
-                <Label>End Time</Label>
+                <Label>{formData.splitIntoShifts ? 'Window End' : 'End Time'}</Label>
                 <Input type="time" value={formData.endTime}
                   onChange={e => setFormData(prev => ({ ...prev, endTime: e.target.value }))} />
               </div>
             </div>
+
+            {/* Split into back-to-back shifts */}
+            <div className="rounded-lg border px-3 py-2.5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label className="text-sm">Split into back-to-back shifts</Label>
+                  <p className="text-xs text-muted-foreground">For all-day events (e.g. tagging or a long concession day).</p>
+                </div>
+                <Switch
+                  checked={formData.splitIntoShifts}
+                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, splitIntoShifts: checked }))}
+                />
+              </div>
+              {formData.splitIntoShifts && (
+                <>
+                  <div className="space-y-1">
+                    <Label>Shift Length (hours)</Label>
+                    <Input type="number" min={0.5} max={12} step={0.5} value={formData.shiftLengthHours}
+                      onChange={e => setFormData(prev => ({ ...prev, shiftLengthHours: Number(e.target.value) }))} />
+                  </div>
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                    {slotShiftPreview.length > 0 ? (
+                      <>
+                        <span className="font-semibold text-foreground">{slotShiftPreview.length} shift{slotShiftPreview.length !== 1 ? 's' : ''}</span> will be created:{' '}
+                        {slotShiftPreview.map(w => `${formatTime(w.startTime)}–${formatTime(w.endTime)}`).join(', ')}
+                      </>
+                    ) : (
+                      <span className="text-destructive">End time must be after start time, and shift length must be greater than zero.</span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label>Volunteer Capacity</Label>
+                <Label>{formData.splitIntoShifts ? 'Families per Shift' : 'Volunteer Capacity'}</Label>
                 <Input type="number" min={1} max={20} value={formData.capacity}
                   onChange={e => setFormData(prev => ({ ...prev, capacity: Number(e.target.value) }))} />
               </div>
@@ -1416,99 +1423,26 @@ export default function ConcessionsAdminPage() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label>Description (optional)</Label>
-              <Input placeholder="e.g. Snack bar — opening shift" value={formData.description}
+              <Label>{formData.type === 'tagging' ? 'Location / Notes (optional)' : 'Description (optional)'}</Label>
+              <Input placeholder={formData.type === 'tagging' ? 'e.g. Sparkle Market, Main St' : 'e.g. Snack bar — opening shift'} value={formData.description}
                 onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleAddSlot} disabled={saving || !formData.gameDate}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Slot
+            <Button onClick={handleAddSlot} disabled={saving || !formData.gameDate || (formData.splitIntoShifts && slotShiftPreview.length === 0)}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {formData.splitIntoShifts && slotShiftPreview.length > 1 ? `Create ${slotShiftPreview.length} Shifts` : 'Create Slot'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Create Tagging Event Dialog */}
-      <Dialog open={eventDialog} onOpenChange={(open) => !eventSaving && setEventDialog(open)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Create Tagging Event</DialogTitle>
-            <DialogDescription>
-              Set the day, hours, and shift length. We&apos;ll automatically create back-to-back tagging shifts that families can sign up for.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1">
-              <Label>Event Name</Label>
-              <Input placeholder="e.g. Tagging at Sparkle Market" value={eventForm.title}
-                onChange={e => setEventForm(prev => ({ ...prev, title: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Location</Label>
-              <Input placeholder="e.g. Sparkle Market, Main St" value={eventForm.location}
-                onChange={e => setEventForm(prev => ({ ...prev, location: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <Label>Date *</Label>
-              <Input type="date" value={eventForm.gameDate}
-                onChange={e => setEventForm(prev => ({ ...prev, gameDate: e.target.value }))} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Event Start</Label>
-                <Input type="time" value={eventForm.startTime}
-                  onChange={e => setEventForm(prev => ({ ...prev, startTime: e.target.value }))} />
-              </div>
-              <div className="space-y-1">
-                <Label>Event End</Label>
-                <Input type="time" value={eventForm.endTime}
-                  onChange={e => setEventForm(prev => ({ ...prev, endTime: e.target.value }))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label>Shift (hrs)</Label>
-                <Input type="number" min={0.5} max={12} step={0.5} value={eventForm.shiftLengthHours}
-                  onChange={e => setEventForm(prev => ({ ...prev, shiftLengthHours: Number(e.target.value) }))} />
-              </div>
-              <div className="space-y-1">
-                <Label>Families/shift</Label>
-                <Input type="number" min={1} max={20} value={eventForm.capacity}
-                  onChange={e => setEventForm(prev => ({ ...prev, capacity: Number(e.target.value) }))} />
-              </div>
-              <div className="space-y-1">
-                <Label>Cutoff (hrs)</Label>
-                <Input type="number" min={0} max={168} value={eventForm.cancelCutoffHours}
-                  onChange={e => setEventForm(prev => ({ ...prev, cancelCutoffHours: Number(e.target.value) }))} />
-              </div>
-            </div>
-            <div className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              {eventShiftPreview.length > 0 ? (
-                <>
-                  <span className="font-semibold text-foreground">{eventShiftPreview.length} shift{eventShiftPreview.length !== 1 ? 's' : ''}</span> will be created:{' '}
-                  {eventShiftPreview.map(w => `${formatTime(w.startTime)}–${formatTime(w.endTime)}`).join(', ')}
-                </>
-              ) : (
-                <span className="text-destructive">End time must be after start time, and shift length must be greater than zero.</span>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEventDialog(false)} disabled={eventSaving}>Cancel</Button>
-            <Button onClick={handleCreateEvent} disabled={eventSaving || !eventForm.gameDate || !eventForm.title.trim() || eventShiftPreview.length === 0}>
-              {eventSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Event
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Tagging Event Dialog */}
+      {/* Delete Multi-Shift Event Dialog */}
       <Dialog open={deleteEventDialog.open} onOpenChange={(open) => !deletingEvent && setDeleteEventDialog(prev => ({ ...prev, open }))}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Tagging Event</DialogTitle>
+            <DialogTitle>Delete Event</DialogTitle>
             <DialogDescription>
               Delete <strong>{deleteEventDialog.title}</strong> and all {deleteEventDialog.count} of its shift{deleteEventDialog.count !== 1 ? 's' : ''}? All sign-ups for these shifts will be lost.
             </DialogDescription>
