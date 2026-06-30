@@ -16,7 +16,9 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer, FileText } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { PlayerCard } from '@/components/admin/PlayerCard';
+import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer, FileText, LayoutGrid, List } from 'lucide-react';
 import { type WaiverPrintEntry } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import { openPrintTab, type RosterPrintRow } from '@/lib/print-job';
 import { openDocumentPacket, type PlayerDocType } from '@/lib/document-packet';
@@ -52,6 +54,8 @@ interface Enrollment {
   waiver_reason?: string;
   jerseySize: string;
   shirtSize?: string;
+  uniformNumberPreference?: string;
+  assignedJerseyNumber?: string;
   teamId?: string;
   registrationFeeAmount?: number;
   parentWeightEstimate?: number;
@@ -119,6 +123,7 @@ export default function MasterRosterPage() {
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedDivision, setSelectedDivision] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // Import roster state
   const [importOpen, setImportOpen] = useState(false);
@@ -130,9 +135,9 @@ export default function MasterRosterPage() {
     open: boolean;
     enrollment: Enrollment | null;
     player: Player | null;
-    form: { firstName: string; lastName: string; dateOfBirth: string; medicalNotes: string };
+    form: { firstName: string; lastName: string; dateOfBirth: string; medicalNotes: string; assignedJerseyNumber: string };
     loading: boolean;
-  }>({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
+  }>({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '', assignedJerseyNumber: '' }, loading: false });
 
   // Document viewer dialog state (admin-only — birth certs & physicals).
   // Stores the id, not a player snapshot, so the open dialog picks up the new
@@ -463,8 +468,16 @@ export default function MasterRosterPage() {
         medicalNotes: form.medicalNotes.trim(),
         updatedAt: new Date().toISOString(),
       });
+      // Jersey number lives on the enrollment (per-season), not the player doc.
+      const newJersey = form.assignedJerseyNumber.trim();
+      if (newJersey !== (enrollment.assignedJerseyNumber ?? '')) {
+        await updateDoc(
+          doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id),
+          { assignedJerseyNumber: newJersey },
+        );
+      }
       toast({ title: "Player Updated" });
-      setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false });
+      setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '', assignedJerseyNumber: '' }, loading: false });
     } catch (error: any) {
       toast({ title: "Update Failed", description: error.message, variant: 'destructive' });
       setEditPlayerDialog(prev => ({ ...prev, loading: false }));
@@ -600,6 +613,75 @@ export default function MasterRosterPage() {
       });
   };
 
+  const handleAssignJersey = async (enrollment: Enrollment, value: string) => {
+    if (!db) return;
+    try {
+      await updateDoc(
+        doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id),
+        { assignedJerseyNumber: value },
+      );
+      toast({ title: 'Jersey Updated', description: value ? `Assigned #${value}.` : 'Jersey number cleared.' });
+    } catch (error: any) {
+      toast({ title: 'Update Failed', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  // Footer for the card view — mirrors the table's division-override and
+  // team-assignment (or football division/weight) controls.
+  const renderCardFooter = (e: Enrollment) => (
+    <div className="pt-4 border-t space-y-3">
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold uppercase text-muted-foreground">Division</label>
+        {isAdmin && divisionsForSeason && divisionsForSeason.length > 0 && e.seasonId === selectedSeason ? (
+          <Select value={e.divisionId} onValueChange={(newDivId) => handleDivisionOverride(e, newDivId)}>
+            <SelectTrigger className="h-8 rounded-lg text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {divisionsForSeason.map(d => (
+                <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Badge variant="outline" className="text-[10px] uppercase font-bold bg-secondary/30">
+            {activeSport === 'football'
+              ? (divisionsForSeason?.find(d => d.id === e.divisionId)?.name ?? e.divisionId)
+              : e.divisionId}
+          </Badge>
+        )}
+      </div>
+      {activeSport === 'football' ? (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[10px] font-bold uppercase text-muted-foreground">Weight</span>
+          {e.footballEquipment?.verifiedWeight ? (
+            <span className="font-medium text-green-700">{e.footballEquipment.verifiedWeight} lbs</span>
+          ) : e.parentWeightEstimate ? (
+            <span className="text-muted-foreground">{e.parentWeightEstimate} lbs est.</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold uppercase text-muted-foreground">Team</label>
+          <Select
+            value={e.teamId || 'unassigned'}
+            onValueChange={(val) => handleAssignTeam(e.parentUserId, e.id, e.playerId, val, e.teamId)}
+          >
+            <SelectTrigger className={cn('h-8 rounded-lg text-xs', !e.teamId && 'border-dashed border-primary')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unassigned">-- Unassigned --</SelectItem>
+              {teams?.filter(t => t.divisionId === e.divisionId && t.seasonId === e.seasonId).map(t => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </div>
+  );
+
   // Shared between the desktop table row and the mobile card. Hover-reveal
   // styling only applies on desktop — touch has no hover, so the buttons
   // stay fully visible on mobile.
@@ -622,6 +704,7 @@ export default function MasterRosterPage() {
                 lastName: p?.lastName ?? '',
                 dateOfBirth: p?.dateOfBirth ?? '',
                 medicalNotes: p?.medicalNotes ?? '',
+                assignedJerseyNumber: e.assignedJerseyNumber ?? '',
               },
               loading: false,
             }), 0)}
@@ -853,14 +936,36 @@ export default function MasterRosterPage() {
 
         <Card className="border-none shadow-xl overflow-hidden">
           <CardHeader className="bg-primary text-primary-foreground">
-            <CardTitle className="text-xl font-headline">
-              {activeSport === 'football' ? 'Football Roster' : 'Team Assignments'}
-            </CardTitle>
-            <CardDescription className="text-primary-foreground/80">
-              {activeSport === 'football'
-                ? 'Players grouped by division.'
-                : 'Assign each registered player to a team.'}
-            </CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-xl font-headline">
+                  {activeSport === 'football' ? 'Football Roster' : 'Team Assignments'}
+                </CardTitle>
+                <CardDescription className="text-primary-foreground/80">
+                  {activeSport === 'football'
+                    ? 'Players grouped by division.'
+                    : 'Assign each registered player to a team.'}
+                </CardDescription>
+              </div>
+              {!isMobile && (
+                <div className="flex rounded-full bg-primary-foreground/10 p-1 shrink-0">
+                  <button
+                    onClick={() => setViewMode('cards')}
+                    className={cn('flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+                      viewMode === 'cards' ? 'bg-white text-primary shadow-sm' : 'text-primary-foreground/80 hover:text-primary-foreground')}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" /> Cards
+                  </button>
+                  <button
+                    onClick={() => setViewMode('table')}
+                    className={cn('flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
+                      viewMode === 'table' ? 'bg-white text-primary shadow-sm' : 'text-primary-foreground/80 hover:text-primary-foreground')}
+                  >
+                    <List className="h-3.5 w-3.5" /> Table
+                  </button>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {/* Football division tabs */}
@@ -890,9 +995,27 @@ export default function MasterRosterPage() {
               <div className="text-center py-12 text-muted-foreground">
                 No matching registrations found.
               </div>
+            ) : (viewMode === 'cards' || isMobile) ? (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 p-4">
+                {displayEnrollments.map((e) => {
+                  const p = players?.find(pl => pl.id === e.playerId);
+                  const parent = profileMap.get(e.parentUserId);
+                  if (!p) return null;
+                  return (
+                    <PlayerCard
+                      key={e.id}
+                      player={p}
+                      enrollment={e}
+                      parent={parent}
+                      emergencyContacts={e.emergencyContacts}
+                      onAssignJersey={(value) => handleAssignJersey(e, value)}
+                      actionsSlot={renderRowActions(e, p)}
+                      footerContent={renderCardFooter(e)}
+                    />
+                  );
+                })}
+              </div>
             ) : (
-              <>
-              {!isMobile && (
               <div className="overflow-x-auto w-full">
               <Table>
                 <TableHeader>
@@ -1131,7 +1254,7 @@ export default function MasterRosterPage() {
       </AlertDialog>
 
       {/* Edit Player Dialog */}
-      <Dialog open={editPlayerDialog.open} onOpenChange={(open) => { if (!open && !editPlayerDialog.loading) setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false }); }}>
+      <Dialog open={editPlayerDialog.open} onOpenChange={(open) => { if (!open && !editPlayerDialog.loading) setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '', assignedJerseyNumber: '' }, loading: false }); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Player</DialogTitle>
@@ -1160,15 +1283,28 @@ export default function MasterRosterPage() {
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="edit-dob">Date of Birth</Label>
-              <Input
-                id="edit-dob"
-                type="date"
-                className="rounded-xl"
-                value={editPlayerDialog.form.dateOfBirth}
-                onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, dateOfBirth: e.target.value } }))}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="edit-dob">Date of Birth</Label>
+                <Input
+                  id="edit-dob"
+                  type="date"
+                  className="rounded-xl"
+                  value={editPlayerDialog.form.dateOfBirth}
+                  onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, dateOfBirth: e.target.value } }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-jersey">Jersey Number</Label>
+                <Input
+                  id="edit-jersey"
+                  inputMode="numeric"
+                  className="rounded-xl"
+                  placeholder={editPlayerDialog.enrollment?.uniformNumberPreference ? `Requested #${editPlayerDialog.enrollment.uniformNumberPreference}` : 'e.g. 12'}
+                  value={editPlayerDialog.form.assignedJerseyNumber}
+                  onChange={e => setEditPlayerDialog(prev => ({ ...prev, form: { ...prev.form, assignedJerseyNumber: e.target.value } }))}
+                />
+              </div>
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-medical">Medical Notes</Label>
@@ -1185,7 +1321,7 @@ export default function MasterRosterPage() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '' }, loading: false })}
+              onClick={() => setEditPlayerDialog({ open: false, enrollment: null, player: null, form: { firstName: '', lastName: '', dateOfBirth: '', medicalNotes: '', assignedJerseyNumber: '' }, loading: false })}
               disabled={editPlayerDialog.loading}
             >
               Cancel
