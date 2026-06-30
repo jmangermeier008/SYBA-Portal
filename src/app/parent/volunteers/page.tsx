@@ -10,6 +10,12 @@ import { FOOTBALL_PER_PLAYER_REQUIREMENTS } from '@/types/scheduling';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
   Loader2,
   CheckCircle2,
   AlertCircle,
@@ -18,7 +24,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO, isAfter, differenceInHours } from 'date-fns';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface ConcessionSignup {
   signupId?: string;
@@ -59,6 +65,119 @@ function getSlotStartDateTime(slot: ConcessionSlot): Date {
   return d;
 }
 
+// Display labels for shift types. Missing type = legacy concession shift.
+const TYPE_LABELS: Record<VolunteerShiftType, string> = {
+  concessions: 'Concessions',
+  tagging: 'Tagging',
+  fundraiser: 'Fundraiser',
+  chains: 'Chains',
+  maintenance: 'Maintenance',
+};
+const slotType = (s: ConcessionSlot): VolunteerShiftType => s.type ?? 'concessions';
+
+// A single volunteer shift row: date/time, capacity bar, and the sign-up /
+// add-another-spot / cancel / full controls. Extracted verbatim from the old
+// flat list so signup behavior stays identical — just reusable inside day
+// sections. Mobile-first: full-width 44px-tall tappable buttons.
+function ShiftCard({
+  slot,
+  profileId,
+  maxSpotsPerShift,
+  actioningSlotId,
+  onSignUp,
+  onCancel,
+}: {
+  slot: ConcessionSlot;
+  profileId: string | undefined;
+  maxSpotsPerShift: number;
+  actioningSlotId: string | null;
+  onSignUp: (slot: ConcessionSlot) => void;
+  onCancel: (slot: ConcessionSlot) => void;
+}) {
+  const claimed = slot.signups?.length ?? 0;
+  const isFull = claimed >= slot.capacity;
+  const mySpots = slot.signups?.filter(s => s.parentUserId === profileId).length ?? 0;
+  const isSigned = mySpots > 0;
+  const canAddMore = mySpots > 0 && mySpots < maxSpotsPerShift && !isFull;
+  const hoursUntil = differenceInHours(getSlotStartDateTime(slot), new Date());
+  const pastCutoff = isSigned && (slot.cancelCutoffHours ?? 0) > 0 && hoursUntil < slot.cancelCutoffHours;
+  const busy = actioningSlotId === slot.id;
+  return (
+    <div className="rounded-xl border px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold">
+          {formatTime(slot.startTime)}–{formatTime(slot.endTime)}
+          <span className="text-muted-foreground font-normal"> · {TYPE_LABELS[slotType(slot)]}</span>
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">{slot.description || 'Volunteer Shift'}</p>
+        <div className="flex items-center gap-2 mt-1.5">
+          <div className="h-1.5 w-24 rounded-full bg-secondary overflow-hidden">
+            <div
+              className={`h-full rounded-full ${isFull ? 'bg-destructive' : 'bg-primary'}`}
+              style={{ width: `${Math.min((claimed / Math.max(slot.capacity, 1)) * 100, 100)}%` }}
+            />
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {claimed} of {slot.capacity} spot{slot.capacity === 1 ? '' : 's'} filled
+          </span>
+        </div>
+      </div>
+      <div className="shrink-0 w-full sm:w-auto flex flex-col items-stretch sm:items-end gap-1.5">
+        {isSigned && (
+          <span className="text-xs font-medium text-primary flex items-center gap-1 sm:justify-end">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            You have {mySpots} spot{mySpots !== 1 ? 's' : ''}
+          </span>
+        )}
+        {isSigned ? (
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            {canAddMore && (
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto min-h-[44px] rounded-full"
+                onClick={() => onSignUp(slot)}
+                disabled={busy}
+              >
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Add another spot
+              </Button>
+            )}
+            {pastCutoff ? (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5" />
+                Too close to the shift to cancel online
+              </p>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto min-h-[44px] rounded-full border-destructive/40 text-destructive hover:bg-destructive/5"
+                onClick={() => onCancel(slot)}
+                disabled={busy}
+              >
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Cancel{mySpots > 1 ? ' a spot' : ' Sign-Up'}
+              </Button>
+            )}
+          </div>
+        ) : isFull ? (
+          <span className="inline-flex items-center rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+            Full
+          </span>
+        ) : (
+          <Button
+            className="w-full sm:w-auto min-h-[44px] rounded-full"
+            onClick={() => onSignUp(slot)}
+            disabled={busy}
+          >
+            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Sign Up
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // A single labeled progress bar toward a volunteer requirement. "Worked" counts
 // toward the requirement (matching the admin compliance report); shifts signed
 // up but not yet marked worked show as a pending note.
@@ -88,6 +207,13 @@ export default function ParentVolunteersPage() {
   const { toast } = useToast();
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
   const [actioningSlotId, setActioningSlotId] = useState<string | null>(null);
+  // List filters: which shifts to show (default: open ones) and, when more than
+  // one shift type exists, narrow to a single type. 'all' type = no narrowing.
+  const [viewFilter, setViewFilter] = useState<'open' | 'mine' | 'all'>('open');
+  const [typeFilter, setTypeFilter] = useState<VolunteerShiftType | 'all'>('all');
+  // Controlled accordion: which day sections are expanded (by gameDate).
+  const [openDays, setOpenDays] = useState<string[]>([]);
+  const seededDays = useRef(false);
 
   const activeSeasonsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
@@ -140,6 +266,64 @@ export default function ParentVolunteersPage() {
   // How many spots a family may hold in a single shift: their number of enrolled
   // players, with a floor of 1 so co-parents/helpers keep their single spot.
   const maxSpotsPerShift = useMemo(() => Math.max(1, enrollments?.length ?? 0), [enrollments]);
+
+  // Distinct shift types present in upcoming slots. The type filter chips only
+  // appear when there's more than one — baseball/concessions-only leagues don't
+  // need them.
+  const availableTypes = useMemo(() => {
+    const set = new Set<VolunteerShiftType>();
+    upcomingSlots.forEach(s => set.add(slotType(s)));
+    return [...set];
+  }, [upcomingSlots]);
+
+  // Apply the view + type filters. The full upcomingSlots set still feeds the
+  // calendar below, so this only narrows the list view.
+  const filteredSlots = useMemo(() => {
+    return upcomingSlots.filter(s => {
+      if (typeFilter !== 'all' && slotType(s) !== typeFilter) return false;
+      const claimed = s.signups?.length ?? 0;
+      const isFull = claimed >= s.capacity;
+      const mySpots = s.signups?.filter(su => su.parentUserId === profile?.id).length ?? 0;
+      if (viewFilter === 'mine') return mySpots > 0;
+      if (viewFilter === 'open') {
+        // Open = a spot I could still take: not full, or I can add another spot.
+        return !isFull || (mySpots > 0 && mySpots < maxSpotsPerShift);
+      }
+      return true; // 'all'
+    });
+  }, [upcomingSlots, typeFilter, viewFilter, profile?.id, maxSpotsPerShift]);
+
+  // Bucket filtered slots into day sections, sorted by date; shifts within a day
+  // sorted by start time. Mirrors the admin page's standaloneByDay grouping.
+  const slotsByDay = useMemo(() => {
+    const byDate = new Map<string, ConcessionSlot[]>();
+    for (const s of filteredSlots) {
+      const arr = byDate.get(s.gameDate) ?? [];
+      arr.push(s);
+      byDate.set(s.gameDate, arr);
+    }
+    return [...byDate.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, shifts]) => {
+        const sorted = [...shifts].sort((a, b) => a.startTime.localeCompare(b.startTime));
+        const openSpots = sorted.reduce((n, s) => n + Math.max(0, s.capacity - (s.signups?.length ?? 0)), 0);
+        const mySpots = sorted.reduce((n, s) => n + (s.signups?.filter(su => su.parentUserId === profile?.id).length ?? 0), 0);
+        return { date, shifts: sorted, openSpots, mySpots };
+      });
+  }, [filteredSlots, profile?.id]);
+
+  // Seed expanded days once, after slots first load: open any day where the
+  // family already has a signup so they can find/cancel it. After that the
+  // parent controls the accordion freely.
+  useEffect(() => {
+    if (seededDays.current || !slots) return;
+    seededDays.current = true;
+    const mine = new Set<string>();
+    upcomingSlots.forEach(s => {
+      if (s.signups?.some(su => su.parentUserId === profile?.id)) mine.add(s.gameDate);
+    });
+    setOpenDays([...mine]);
+  }, [slots, upcomingSlots, profile?.id]);
 
   const requiredSlots = useMemo(() => {
     if (!activeSeason) return 0;
@@ -387,92 +571,93 @@ export default function ParentVolunteersPage() {
                 No upcoming shifts yet — check back once the league posts volunteer slots.
               </p>
             ) : (
-              <div className="space-y-3">
-                {upcomingSlots.map(slot => {
-                  const claimed = slot.signups?.length ?? 0;
-                  const isFull = claimed >= slot.capacity;
-                  const mySpots = slot.signups?.filter(s => s.parentUserId === profile?.id).length ?? 0;
-                  const isSigned = mySpots > 0;
-                  const canAddMore = mySpots > 0 && mySpots < maxSpotsPerShift && !isFull;
-                  const hoursUntil = differenceInHours(getSlotStartDateTime(slot), new Date());
-                  const pastCutoff = isSigned && (slot.cancelCutoffHours ?? 0) > 0 && hoursUntil < slot.cancelCutoffHours;
-                  const busy = actioningSlotId === slot.id;
-                  return (
-                    <div key={slot.id} className="rounded-xl border px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold">
-                          {format(parseISO(slot.gameDate), 'EEE, MMM d')}
-                          <span className="text-muted-foreground font-normal"> · {formatTime(slot.startTime)}–{formatTime(slot.endTime)}</span>
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{slot.description || 'Volunteer Shift'}</p>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <div className="h-1.5 w-24 rounded-full bg-secondary overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${isFull ? 'bg-destructive' : 'bg-primary'}`}
-                              style={{ width: `${Math.min((claimed / Math.max(slot.capacity, 1)) * 100, 100)}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {claimed} of {slot.capacity} spot{slot.capacity === 1 ? '' : 's'} filled
-                          </span>
-                        </div>
-                      </div>
-                      <div className="shrink-0 w-full sm:w-auto flex flex-col items-stretch sm:items-end gap-1.5">
-                        {isSigned && (
-                          <span className="text-xs font-medium text-primary flex items-center gap-1 sm:justify-end">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            You have {mySpots} spot{mySpots !== 1 ? 's' : ''}
-                          </span>
-                        )}
-                        {isSigned ? (
-                          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                            {canAddMore && (
-                              <Button
-                                variant="outline"
-                                className="w-full sm:w-auto min-h-[44px] rounded-full"
-                                onClick={() => handleSignUp(slot)}
-                                disabled={busy}
-                              >
-                                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Add another spot
-                              </Button>
-                            )}
-                            {pastCutoff ? (
-                              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                                <Clock className="h-3.5 w-3.5" />
-                                Too close to the shift to cancel online
-                              </p>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                className="w-full sm:w-auto min-h-[44px] rounded-full border-destructive/40 text-destructive hover:bg-destructive/5"
-                                onClick={() => handleCancel(slot)}
-                                disabled={busy}
-                              >
-                                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Cancel{mySpots > 1 ? ' a spot' : ' Sign-Up'}
-                              </Button>
-                            )}
-                          </div>
-                        ) : isFull ? (
-                          <span className="inline-flex items-center rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">
-                            Full
-                          </span>
-                        ) : (
-                          <Button
-                            className="w-full sm:w-auto min-h-[44px] rounded-full"
-                            onClick={() => handleSignUp(slot)}
-                            disabled={busy}
-                          >
-                            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Sign Up
-                          </Button>
-                        )}
-                      </div>
+              <>
+                {/* Filter bar — tappable chips. View narrows by availability; the
+                    type row only shows when more than one shift type exists. */}
+                <div className="space-y-2 mb-4">
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { key: 'open', label: 'Open' },
+                      { key: 'mine', label: 'My shifts' },
+                      { key: 'all', label: 'All' },
+                    ] as const).map(opt => (
+                      <Button
+                        key={opt.key}
+                        size="sm"
+                        variant={viewFilter === opt.key ? 'default' : 'outline'}
+                        className="min-h-[40px] rounded-full"
+                        onClick={() => setViewFilter(opt.key)}
+                      >
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {availableTypes.length > 1 && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant={typeFilter === 'all' ? 'default' : 'outline'}
+                        className="min-h-[40px] rounded-full"
+                        onClick={() => setTypeFilter('all')}
+                      >
+                        All types
+                      </Button>
+                      {availableTypes.map(t => (
+                        <Button
+                          key={t}
+                          size="sm"
+                          variant={typeFilter === t ? 'default' : 'outline'}
+                          className="min-h-[40px] rounded-full"
+                          onClick={() => setTypeFilter(t)}
+                        >
+                          {TYPE_LABELS[t]}
+                        </Button>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
+                  )}
+                </div>
+
+                {slotsByDay.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    {viewFilter === 'mine'
+                      ? "You haven't signed up for any shifts yet."
+                      : viewFilter === 'open'
+                      ? 'No open shifts match your filter — try All.'
+                      : 'No shifts match your filter.'}
+                  </p>
+                ) : (
+                  <Accordion type="multiple" value={openDays} onValueChange={setOpenDays} className="border-t">
+                    {slotsByDay.map(day => (
+                      <AccordionItem key={day.date} value={day.date}>
+                        <AccordionTrigger className="hover:no-underline">
+                          <div className="flex items-center gap-2 text-left">
+                            {day.mySpots > 0 && <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />}
+                            <span className="text-sm font-semibold">{format(parseISO(day.date), 'EEE, MMM d')}</span>
+                            <span className="text-xs text-muted-foreground font-normal">
+                              {day.shifts.length} shift{day.shifts.length === 1 ? '' : 's'} · {day.openSpots > 0 ? `${day.openSpots} open` : 'full'}
+                            </span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <div className="space-y-3">
+                            {day.shifts.map(slot => (
+                              <ShiftCard
+                                key={slot.id}
+                                slot={slot}
+                                profileId={profile?.id}
+                                maxSpotsPerShift={maxSpotsPerShift}
+                                actioningSlotId={actioningSlotId}
+                                onSignUp={handleSignUp}
+                                onCancel={handleCancel}
+                              />
+                            ))}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
