@@ -116,6 +116,9 @@ interface FamilyRoster {
   enrollmentCount: number;
   manualCredits: number;
   playerNames: string[];
+  // The registering parent + every co-parent linked to their enrolled players.
+  // A volunteer signup by ANY of these UIDs counts toward this household.
+  linkedParentIds: string[];
 }
 
 // One of a family's signed-up shifts, shown in the expandable compliance detail.
@@ -126,6 +129,8 @@ interface FamilyShift {
   endTime: string;
   type: VolunteerShiftType;
   attendance?: AttendanceStatus;
+  signerUid: string;      // which parent signed up (may be a co-parent)
+  signerName: string;
 }
 
 interface FamilyCompliance extends FamilyRoster {
@@ -670,6 +675,8 @@ export default function ConcessionsAdminPage() {
       const parentIdArray = Array.from(parentIds);
       const profileMap = new Map<string, { displayName: string; email: string }>();
       const playerNamesMap = new Map<string, string[]>();
+      // Co-parents linked to each household's enrolled players.
+      const linkedParentsMap = new Map<string, Set<string>>();
       await Promise.all([
         ...parentIdArray.map(async pid => {
           const profileDoc = await getDoc(doc(db, 'userProfiles', pid));
@@ -681,17 +688,23 @@ export default function ConcessionsAdminPage() {
           }
         }),
         ...Array.from(playerIdsByParent.entries()).map(async ([pid, playerIds]) => {
+          const linked = new Set<string>([pid]); // registering parent always counts
           const names = await Promise.all(
             playerIds.map(async playerId => {
               const playerDoc = await getDoc(doc(db, 'userProfiles', pid, 'players', playerId));
               if (playerDoc.exists()) {
                 const d = playerDoc.data();
+                // Collect every parent/guardian UID on the player (co-parents included).
+                (d.parentIds as string[] | undefined)?.forEach(uid => uid && linked.add(uid));
+                if (d.primaryParentId) linked.add(d.primaryParentId as string);
+                if (d.secondaryParentId) linked.add(d.secondaryParentId as string);
                 return `${d.firstName || ''} ${d.lastName || ''}`.trim();
               }
               return '';
             })
           );
           playerNamesMap.set(pid, names.filter(Boolean));
+          linkedParentsMap.set(pid, linked);
         }),
       ]);
 
@@ -702,6 +715,7 @@ export default function ConcessionsAdminPage() {
         enrollmentCount: enrollmentCountByParent.get(pid) ?? 1,
         manualCredits: manualCreditsMap.get(pid) ?? 0,
         playerNames: playerNamesMap.get(pid) ?? [],
+        linkedParentIds: Array.from(linkedParentsMap.get(pid) ?? new Set([pid])),
       })));
     } catch (err: any) {
       toast({ title: 'Error loading report', description: err.message, variant: 'destructive' });
@@ -722,27 +736,41 @@ export default function ConcessionsAdminPage() {
     const isFootball = selectedSeason.sport === 'football';
     const today = format(new Date(), 'yyyy-MM-dd');
     type Acc = { cW: number; cP: number; tW: number; tP: number; shifts: FamilyShift[] };
-    const byParent = new Map<string, Acc>();
-    const get = (pid: string) => {
-      let a = byParent.get(pid);
-      if (!a) { a = { cW: 0, cP: 0, tW: 0, tP: 0, shifts: [] }; byParent.set(pid, a); }
+    const byFamily = new Map<string, Acc>();
+    const get = (familyKey: string) => {
+      let a = byFamily.get(familyKey);
+      if (!a) { a = { cW: 0, cP: 0, tW: 0, tP: 0, shifts: [] }; byFamily.set(familyKey, a); }
       return a;
     };
+    // Reverse lookup: any linked parent UID → the household(s) it belongs to.
+    // A signup by a co-parent therefore credits the registering parent's family.
+    const parentToFamilies = new Map<string, string[]>();
+    roster.forEach(r => {
+      r.linkedParentIds.forEach(uid => {
+        const arr = parentToFamilies.get(uid) ?? [];
+        if (!arr.includes(r.parentUserId)) arr.push(r.parentUserId);
+        parentToFamilies.set(uid, arr);
+      });
+    });
     (slots ?? []).forEach(slot => {
       const slotType = slot.type ?? 'concessions';
       if (!VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT.includes(slotType)) return;
       const isTagging = slotType === 'tagging';
       (slot.signups ?? []).forEach(su => {
-        const a = get(su.parentUserId);
-        a.shifts.push({ slotId: slot.id, gameDate: slot.gameDate, startTime: slot.startTime, endTime: slot.endTime, type: slotType, attendance: su.attendance });
+        const familyKeys = parentToFamilies.get(su.parentUserId);
+        if (!familyKeys) return; // signer not part of any enrolled household
         const att = su.attendance;
-        if (att === 'worked') { isTagging ? a.tW++ : a.cW++; }
-        else if (att !== 'no-show' && slot.gameDate >= today) { isTagging ? a.tP++ : a.cP++; }
+        familyKeys.forEach(familyKey => {
+          const a = get(familyKey);
+          a.shifts.push({ slotId: slot.id, gameDate: slot.gameDate, startTime: slot.startTime, endTime: slot.endTime, type: slotType, attendance: att, signerUid: su.parentUserId, signerName: su.displayName });
+          if (att === 'worked') { isTagging ? a.tW++ : a.cW++; }
+          else if (att !== 'no-show' && slot.gameDate >= today) { isTagging ? a.tP++ : a.cP++; }
+        });
       });
     });
     const slotsPerPlayer = selectedSeason.volunteerSlotsRequired ?? 1;
     return roster.map(r => {
-      const a = byParent.get(r.parentUserId) ?? { cW: 0, cP: 0, tW: 0, tP: 0, shifts: [] };
+      const a = byFamily.get(r.parentUserId) ?? { cW: 0, cP: 0, tW: 0, tP: 0, shifts: [] };
       return {
         ...r,
         isFootball,
@@ -993,6 +1021,9 @@ export default function ConcessionsAdminPage() {
               <div className="min-w-0 text-xs">
                 <span className="font-medium">{sh.gameDate ? format(parseISO(sh.gameDate), 'EEE, MMM d') : sh.gameDate}</span>
                 <span className="text-muted-foreground"> · {formatTime(sh.startTime)}–{formatTime(sh.endTime)} · {typeLabel}</span>
+                {sh.signerUid !== family.parentUserId && (
+                  <span className="text-muted-foreground"> · by {sh.signerName}</span>
+                )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {isSaving ? (
