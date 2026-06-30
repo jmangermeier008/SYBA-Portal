@@ -27,7 +27,7 @@ import {
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 import { MaintenanceCard } from '@/components/admin/MaintenanceCard';
-import { clearUserNotifications } from '@/lib/maintenance-actions';
+import { clearUserNotifications, clearAllNotifications } from '@/lib/maintenance-actions';
 import type { LeagueOfficer, Game, InquiryDeliveryConfig, Sport } from '@/types/scheduling';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EXECUTIVE_TITLES, getCoordinators } from '@/data/officers';
@@ -522,6 +522,23 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const handleClearAllNotifications = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      toast({ variant: 'destructive', title: 'Not authenticated', description: 'Please sign in and try again.' });
+      return;
+    }
+    try {
+      const { deleted } = await clearAllNotifications(token);
+      toast({
+        title: 'All notifications cleared',
+        description: `Deleted ${deleted} notification${deleted !== 1 ? 's' : ''} across all users.`,
+      });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Action failed', description: err.message });
+    }
+  };
+
   const handleProcessRainout = async () => {
     if (!db || selectedGameIds.size === 0) return;
     setProcessingRainout(true);
@@ -854,6 +871,15 @@ export default function AdminSettingsPage() {
                   confirmMessage="Warning: This will permanently delete all notifications for this user. This action cannot be undone. Are you sure you want to proceed?"
                   onExecute={handleClearNotifications}
                   disabled={!notifEmail.trim()}
+                />
+
+                <MaintenanceCard
+                  title="Clear ALL Notifications"
+                  description="Permanently delete every notification for every user across the entire system. Intended for removing test/junk data before launch."
+                  buttonLabel="Clear All Notifications"
+                  buttonVariant="destructive"
+                  confirmMessage="Warning: This permanently deletes ALL notifications for EVERY user. This cannot be undone. Are you sure?"
+                  onExecute={handleClearAllNotifications}
                 />
 
                 {/* Rain-out Batch Action */}
