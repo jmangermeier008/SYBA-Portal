@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
@@ -51,6 +52,9 @@ import {
   CalendarIcon,
   UserPlus,
   Tag,
+  ChevronDown,
+  ChevronRight,
+  CheckCheck,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
@@ -103,13 +107,28 @@ interface Season {
   sport?: string;
 }
 
-interface FamilyCompliance {
+// Roster of enrolled families for a season — fetched once, then combined with
+// the live `slots` collection to compute compliance reactively.
+interface FamilyRoster {
   parentUserId: string;
   displayName: string;
   email: string;
+  enrollmentCount: number;
   manualCredits: number;
   playerNames: string[];
-  enrollmentCount: number;
+}
+
+// One of a family's signed-up shifts, shown in the expandable compliance detail.
+interface FamilyShift {
+  slotId: string;
+  gameDate: string;
+  startTime: string;
+  endTime: string;
+  type: VolunteerShiftType;
+  attendance?: AttendanceStatus;
+}
+
+interface FamilyCompliance extends FamilyRoster {
   // Football enforces a split requirement (concessions + tagging), so worked/
   // pending counts are tracked per type. Baseball pools both into one total.
   isFootball: boolean;
@@ -119,6 +138,7 @@ interface FamilyCompliance {
   taggingPending: number;
   perTypeRequired: number; // football: required worked shifts of EACH type
   pooledRequired: number;  // baseball: required worked shifts total
+  shifts: FamilyShift[];   // this family's signups, for the expandable detail
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -248,6 +268,11 @@ export default function ConcessionsAdminPage() {
 
   // Attendance toggle saving
   const [attendanceSaving, setAttendanceSaving] = useState<Set<string>>(new Set());
+  // Bulk "mark all worked" saving — keyed by slotId or `event_<eventId>`
+  const [bulkSaving, setBulkSaving] = useState<Set<string>>(new Set());
+  // Collapsible list state: events open iff in set; days open iff NOT in set
+  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
 
   // Manual assign dialog
   const [assignDialog, setAssignDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
@@ -260,9 +285,10 @@ export default function ConcessionsAdminPage() {
   // ── Family Compliance state ───────────────────────────────────────────────
   const [selectedSeasonId, setSelectedSeasonId] = useState<string>('');
   const [complianceLoading, setComplianceLoading] = useState(false);
-  const [families, setFamilies] = useState<FamilyCompliance[]>([]);
+  const [roster, setRoster] = useState<FamilyRoster[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
 
   // ── Firestore queries (all before any early return) ───────────────────────
   const slotsQuery = useMemoFirebase(() => {
@@ -338,6 +364,27 @@ export default function ConcessionsAdminPage() {
       .map(g => ({ ...g, shifts: [...g.shifts].sort((a, b) => a.startTime.localeCompare(b.startTime)) }))
       .sort((a, b) => a.gameDate.localeCompare(b.gameDate));
   }, [sortedSlots]);
+
+  // Standalone (non-event) shifts grouped by day for collapsible day sections.
+  const standaloneByDay = useMemo(() => {
+    const map = new Map<string, ConcessionSlot[]>();
+    sortedSlots.forEach(s => {
+      if (s.eventId) return;
+      const arr = map.get(s.gameDate) ?? [];
+      arr.push(s);
+      map.set(s.gameDate, arr);
+    });
+    return Array.from(map.entries())
+      .map(([date, list]) => ({ date, shifts: [...list].sort((a, b) => a.startTime.localeCompare(b.startTime)) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [sortedSlots]);
+
+  const toggleSet = (setter: Dispatch<SetStateAction<Set<string>>>, key: string) =>
+    setter(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
 
   // ── Slot CRUD ─────────────────────────────────────────────────────────────
   // Live preview of the back-to-back shifts the split toggle will generate.
@@ -444,24 +491,20 @@ export default function ConcessionsAdminPage() {
     }
   };
 
-  // ── Attendance toggle ─────────────────────────────────────────────────────
-  async function handleAttendanceChange(
-    slot: ConcessionSlot,
-    signup: ConcessionSignup,
-    newStatus: AttendanceStatus
-  ) {
+  // ── Attendance ─────────────────────────────────────────────────────────────
+  // Set one family's attendance on one shift. Works off the live `slots` data,
+  // so it can be called from both the shift cards and the compliance detail.
+  async function setAttendance(slotId: string, parentUserId: string, newStatus: AttendanceStatus) {
     if (!db) return;
-    const key = `${slot.id}_${signup.parentUserId}`;
+    const slot = (slots ?? []).find(s => s.id === slotId);
+    const signup = slot?.signups?.find(s => s.parentUserId === parentUserId);
+    if (!slot || !signup) return;
+    const key = `${slotId}_${parentUserId}`;
     setAttendanceSaving(prev => new Set(prev).add(key));
     try {
-      const slotRef = doc(db, 'concessionSlots', slot.id);
-      const updatedSignup: ConcessionSignup = { ...signup, attendance: newStatus };
-      await updateDoc(slotRef, {
-        signups: arrayRemove(signup),
-      });
-      await updateDoc(slotRef, {
-        signups: arrayUnion(updatedSignup),
-      });
+      const slotRef = doc(db, 'concessionSlots', slotId);
+      await updateDoc(slotRef, { signups: arrayRemove(signup) });
+      await updateDoc(slotRef, { signups: arrayUnion({ ...signup, attendance: newStatus }) });
       toast({ title: 'Attendance updated' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -471,6 +514,46 @@ export default function ConcessionsAdminPage() {
         next.delete(key);
         return next;
       });
+    }
+  }
+
+  // True when a shift has at least one signup not yet marked worked/no-show.
+  const hasUnmarked = (slot: ConcessionSlot) =>
+    (slot.signups ?? []).some(s => s.attendance !== 'worked' && s.attendance !== 'no-show');
+
+  const markedWorked = (signups: ConcessionSignup[]) =>
+    signups.map(s => (s.attendance === 'worked' || s.attendance === 'no-show') ? s : { ...s, attendance: 'worked' as AttendanceStatus });
+
+  // Bulk: mark every not-yet-recorded signup on one shift as Worked.
+  async function markShiftWorked(slot: ConcessionSlot) {
+    if (!db || !hasUnmarked(slot)) return;
+    setBulkSaving(prev => new Set(prev).add(slot.id));
+    try {
+      await updateDoc(doc(db, 'concessionSlots', slot.id), { signups: markedWorked(slot.signups ?? []) });
+      toast({ title: 'Marked worked', description: 'Everyone signed up for this shift was marked as worked.' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBulkSaving(prev => { const next = new Set(prev); next.delete(slot.id); return next; });
+    }
+  }
+
+  // Bulk: mark every not-yet-recorded signup across all shifts of an event.
+  async function markEventWorked(eventId: string) {
+    if (!db) return;
+    const evShifts = (slots ?? []).filter(s => s.eventId === eventId && hasUnmarked(s));
+    if (evShifts.length === 0) return;
+    const key = `event_${eventId}`;
+    setBulkSaving(prev => new Set(prev).add(key));
+    try {
+      const batch = writeBatch(db);
+      evShifts.forEach(slot => batch.update(doc(db, 'concessionSlots', slot.id), { signups: markedWorked(slot.signups ?? []) }));
+      await batch.commit();
+      toast({ title: 'Marked worked', description: `Everyone signed up across ${evShifts.length} shift${evShifts.length !== 1 ? 's' : ''} was marked as worked.` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBulkSaving(prev => { const next = new Set(prev); next.delete(key); return next; });
     }
   }
 
@@ -546,17 +629,19 @@ export default function ConcessionsAdminPage() {
   }
 
   // ── Family Compliance ─────────────────────────────────────────────────────
-  const loadComplianceReport = useCallback(async (seasonId: string) => {
+  // Fetch the season's enrolled-family roster ONCE (enrollments rarely change).
+  // Worked/pending counts are derived reactively from live `slots` below, so a
+  // new signup or attendance change shows immediately without a reload.
+  const loadFamilyRoster = useCallback(async (seasonId: string) => {
     if (!db || !seasonId) return;
     setComplianceLoading(true);
-    setFamilies([]);
+    setRoster([]);
     try {
       const seasonDoc = await getDoc(doc(db, 'seasons', seasonId));
       if (!seasonDoc.exists()) return;
       const season = { id: seasonDoc.id, ...seasonDoc.data() } as Season;
       setSelectedSeason(season);
 
-      // Unique parent IDs from enrollments; also count enrollments per parent for per-player requirement
       const enrollmentsSnap = await getDocs(
         query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
       );
@@ -580,7 +665,7 @@ export default function ConcessionsAdminPage() {
         }
       });
 
-      if (parentIds.size === 0) { setFamilies([]); return; }
+      if (parentIds.size === 0) { setRoster([]); return; }
 
       const parentIdArray = Array.from(parentIds);
       const profileMap = new Map<string, { displayName: string; email: string }>();
@@ -610,72 +695,14 @@ export default function ConcessionsAdminPage() {
         }),
       ]);
 
-      // Build per-type worked/pending counts from concession slot signups.
-      const isFootball = season.sport === 'football';
-      const allSlotsSnap = await getDocs(collection(db, 'concessionSlots'));
-      const today = format(new Date(), 'yyyy-MM-dd');
-      // Keyed by parentUserId; each value tracks the two counting shift types.
-      const counts = new Map<string, { concessionsWorked: number; concessionsPending: number; taggingWorked: number; taggingPending: number }>();
-      const bump = (pid: string, type: 'concessions' | 'tagging', field: 'Worked' | 'Pending') => {
-        const c = counts.get(pid) ?? { concessionsWorked: 0, concessionsPending: 0, taggingWorked: 0, taggingPending: 0 };
-        (c as any)[`${type}${field}`] += 1;
-        counts.set(pid, c);
-      };
-
-      allSlotsSnap.docs.forEach(d => {
-        const slotData = d.data() as ConcessionSlot;
-        // Only certain shift types count toward a family's volunteer requirement.
-        // Slots predating the `type` field are treated as 'concessions'.
-        const slotType = slotData.type ?? 'concessions';
-        if (!VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT.includes(slotType)) return;
-        // Tagging only counts toward the requirement for football.
-        const bucket: 'concessions' | 'tagging' = slotType === 'tagging' ? 'tagging' : 'concessions';
-        const gameDate = slotData.gameDate;
-        const inRange =
-          (!season.registrationOpen || gameDate >= season.registrationOpen) &&
-          (!season.registrationClose || gameDate <= season.registrationClose);
-        if (inRange && slotData.signups) {
-          slotData.signups.forEach(signup => {
-            const pid = signup.parentUserId;
-            const att = signup.attendance;
-            if (att === 'worked') {
-              bump(pid, bucket, 'Worked');
-            } else if (!att || att === 'pending') {
-              // Count future sign-ups as pending; past unconfirmed slots don't count
-              if (gameDate >= today) bump(pid, bucket, 'Pending');
-            }
-            // 'no-show' contributes to neither
-          });
-        }
-      });
-
-      const slotsPerPlayer = season.volunteerSlotsRequired ?? 1;
-      const result: FamilyCompliance[] = parentIdArray.map(pid => {
-        const enrollmentCount = enrollmentCountByParent.get(pid) ?? 1;
-        const c = counts.get(pid) ?? { concessionsWorked: 0, concessionsPending: 0, taggingWorked: 0, taggingPending: 0 };
-        return {
-          parentUserId: pid,
-          displayName: profileMap.get(pid)?.displayName ?? pid,
-          email: profileMap.get(pid)?.email ?? '',
-          manualCredits: manualCreditsMap.get(pid) ?? 0,
-          playerNames: playerNamesMap.get(pid) ?? [],
-          enrollmentCount,
-          isFootball,
-          concessionsWorked: c.concessionsWorked,
-          concessionsPending: c.concessionsPending,
-          taggingWorked: c.taggingWorked,
-          taggingPending: c.taggingPending,
-          perTypeRequired: enrollmentCount * (FOOTBALL_PER_PLAYER_REQUIREMENTS.concessions ?? 1),
-          pooledRequired: enrollmentCount * slotsPerPlayer,
-        };
-      });
-
-      result.sort((a, b) => {
-        const order = { none: 0, partial: 1, met: 2 };
-        return order[complianceStatus(a)] - order[complianceStatus(b)];
-      });
-
-      setFamilies(result);
+      setRoster(parentIdArray.map(pid => ({
+        parentUserId: pid,
+        displayName: profileMap.get(pid)?.displayName ?? pid,
+        email: profileMap.get(pid)?.email ?? '',
+        enrollmentCount: enrollmentCountByParent.get(pid) ?? 1,
+        manualCredits: manualCreditsMap.get(pid) ?? 0,
+        playerNames: playerNamesMap.get(pid) ?? [],
+      })));
     } catch (err: any) {
       toast({ title: 'Error loading report', description: err.message, variant: 'destructive' });
     } finally {
@@ -684,8 +711,54 @@ export default function ConcessionsAdminPage() {
   }, [db, toast]);
 
   useEffect(() => {
-    if (selectedSeasonId) loadComplianceReport(selectedSeasonId);
-  }, [selectedSeasonId, loadComplianceReport]);
+    if (selectedSeasonId) loadFamilyRoster(selectedSeasonId);
+  }, [selectedSeasonId, loadFamilyRoster]);
+
+  // Combine the roster with the LIVE slots collection to compute compliance.
+  // Scope is the season's sport (slots are already sport-filtered) — NOT the
+  // registration window, since volunteer shifts happen after registration closes.
+  const families = useMemo<FamilyCompliance[]>(() => {
+    if (!selectedSeason || roster.length === 0) return [];
+    const isFootball = selectedSeason.sport === 'football';
+    const today = format(new Date(), 'yyyy-MM-dd');
+    type Acc = { cW: number; cP: number; tW: number; tP: number; shifts: FamilyShift[] };
+    const byParent = new Map<string, Acc>();
+    const get = (pid: string) => {
+      let a = byParent.get(pid);
+      if (!a) { a = { cW: 0, cP: 0, tW: 0, tP: 0, shifts: [] }; byParent.set(pid, a); }
+      return a;
+    };
+    (slots ?? []).forEach(slot => {
+      const slotType = slot.type ?? 'concessions';
+      if (!VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT.includes(slotType)) return;
+      const isTagging = slotType === 'tagging';
+      (slot.signups ?? []).forEach(su => {
+        const a = get(su.parentUserId);
+        a.shifts.push({ slotId: slot.id, gameDate: slot.gameDate, startTime: slot.startTime, endTime: slot.endTime, type: slotType, attendance: su.attendance });
+        const att = su.attendance;
+        if (att === 'worked') { isTagging ? a.tW++ : a.cW++; }
+        else if (att !== 'no-show' && slot.gameDate >= today) { isTagging ? a.tP++ : a.cP++; }
+      });
+    });
+    const slotsPerPlayer = selectedSeason.volunteerSlotsRequired ?? 1;
+    return roster.map(r => {
+      const a = byParent.get(r.parentUserId) ?? { cW: 0, cP: 0, tW: 0, tP: 0, shifts: [] };
+      return {
+        ...r,
+        isFootball,
+        concessionsWorked: a.cW,
+        concessionsPending: a.cP,
+        taggingWorked: a.tW,
+        taggingPending: a.tP,
+        perTypeRequired: r.enrollmentCount * (FOOTBALL_PER_PLAYER_REQUIREMENTS.concessions ?? 1),
+        pooledRequired: r.enrollmentCount * slotsPerPlayer,
+        shifts: [...a.shifts].sort((x, y) => x.gameDate.localeCompare(y.gameDate) || x.startTime.localeCompare(y.startTime)),
+      };
+    }).sort((x, y) => {
+      const order = { none: 0, partial: 1, met: 2 };
+      return order[complianceStatus(x)] - order[complianceStatus(y)];
+    });
+  }, [roster, slots, selectedSeason]);
 
   async function handleAddManualCredits(parentUserId: string, credits: number) {
     if (!db || !selectedSeasonId) return;
@@ -701,7 +774,7 @@ export default function ConcessionsAdminPage() {
       await updateDoc(snap.docs[0].ref, { manualConcessionCredits: credits });
       toast({ title: 'Credits applied', description: `${credits} manual credit(s) applied.` });
       setCreditDialog({ open: false, parentId: '', currentCredits: 0 });
-      loadComplianceReport(selectedSeasonId);
+      loadFamilyRoster(selectedSeasonId);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -718,7 +791,7 @@ export default function ConcessionsAdminPage() {
       );
       await Promise.all(snap.docs.map(d => updateDoc(d.ref, { manualConcessionCredits: 0 })));
       toast({ title: 'Credits reset', description: 'Manual credits cleared for this family.' });
-      loadComplianceReport(selectedSeasonId);
+      loadFamilyRoster(selectedSeasonId);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -767,6 +840,183 @@ export default function ConcessionsAdminPage() {
     a.download = `volunteer-compliance-${seasonName.replace(/\s+/g, '-').toLowerCase()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // ── Shift card (shared by event sections and day sections) ─────────────────
+  const renderShiftCard = (slot: ConcessionSlot, opts?: { hideDate?: boolean; hideTitle?: boolean }) => {
+    const signupCount = slot.signups?.length ?? 0;
+    const spotsLeft = slot.capacity - signupCount;
+    const isFull = spotsLeft <= 0;
+    const isPast = isPastSlot(slot.gameDate);
+    const showBulk = isPast && signupCount > 0 && hasUnmarked(slot);
+    return (
+      <Card key={slot.id} className="border shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-start">
+            <div>
+              {slot.title && !opts?.hideTitle && (
+                <p className="text-xs font-semibold text-foreground mb-0.5 flex items-center gap-1">
+                  {slot.eventId && <Tag className="h-3 w-3 text-muted-foreground shrink-0" />}
+                  {slot.title}
+                </p>
+              )}
+              {opts?.hideDate ? (
+                <CardTitle className="text-sm font-headline flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                  {formatTime(slot.startTime)} – {formatTime(slot.endTime)}
+                </CardTitle>
+              ) : (
+                <div className="flex items-center gap-2 mb-1">
+                  <CalendarDays className="h-4 w-4 text-primary" />
+                  <CardTitle className="text-base font-headline">
+                    {slot.gameDate ? format(parseISO(slot.gameDate), 'EEE, MMM d, yyyy') : slot.gameDate}
+                  </CardTitle>
+                </div>
+              )}
+              {slot.description && !opts?.hideDate && (
+                <p className="text-xs text-muted-foreground">{slot.description}</p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+              onClick={() => setDeleteDialog({ open: true, slot })}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!opts?.hideDate && (
+            <div className="flex items-center gap-2 text-sm">
+              <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span>{formatTime(slot.startTime)} – {formatTime(slot.endTime)}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              <span>{signupCount} / {slot.capacity} volunteers</span>
+            </div>
+            <Badge variant={isFull ? 'destructive' : 'secondary'} className="text-xs">
+              {isFull ? 'Full' : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
+            </Badge>
+          </div>
+
+          {/* Volunteers list with attendance toggles (past slots) + bulk mark */}
+          {signupCount > 0 && (
+            <div className="space-y-2 pt-1 border-t">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-bold uppercase text-muted-foreground">Volunteers</p>
+                {showBulk && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 rounded-full text-[11px] gap-1 text-green-700 hover:text-green-700 hover:bg-green-50"
+                    disabled={bulkSaving.has(slot.id)}
+                    onClick={() => markShiftWorked(slot)}
+                  >
+                    {bulkSaving.has(slot.id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
+                    Mark all worked
+                  </Button>
+                )}
+              </div>
+              {slot.signups.map((s, i) => {
+                const key = `${slot.id}_${s.parentUserId}`;
+                const isSaving = attendanceSaving.has(key);
+                const current = s.attendance ?? 'pending';
+                return (
+                  <div key={i} className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-foreground truncate">{s.displayName}</span>
+                    {isPast ? (
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isSaving ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                        ) : (
+                          (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
+                            <button
+                              key={status}
+                              onClick={() => setAttendance(slot.id, s.parentUserId, status)}
+                              className={cn(
+                                'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
+                                current === status
+                                  ? ATTENDANCE_CONFIG[status].className
+                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                              )}
+                            >
+                              {ATTENDANCE_CONFIG[status].label}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : (
+                      <Badge variant="secondary" className="text-[10px] shrink-0">Signed Up</Badge>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Manual Assign — only for past slots */}
+          {isPast && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full rounded-full text-xs gap-1.5 mt-1"
+              onClick={() => openAssignDialog(slot)}
+            >
+              <UserPlus className="h-3.5 w-3.5" /> Manual Assign
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // ── Family's signed-up shifts (expandable compliance detail) ───────────────
+  const renderFamilyShifts = (family: FamilyCompliance) => {
+    if (family.shifts.length === 0) {
+      return <p className="text-xs text-muted-foreground py-1">No volunteer shifts signed up for yet.</p>;
+    }
+    return (
+      <div className="space-y-2">
+        {family.shifts.map(sh => {
+          const key = `${sh.slotId}_${family.parentUserId}`;
+          const isSaving = attendanceSaving.has(key);
+          const current = sh.attendance ?? 'pending';
+          const typeLabel = VOLUNTEER_TYPE_OPTIONS.find(o => o.value === sh.type)?.label ?? 'Volunteer';
+          return (
+            <div key={sh.slotId} className="flex items-center justify-between gap-3 flex-wrap rounded-lg border bg-card px-3 py-2">
+              <div className="min-w-0 text-xs">
+                <span className="font-medium">{sh.gameDate ? format(parseISO(sh.gameDate), 'EEE, MMM d') : sh.gameDate}</span>
+                <span className="text-muted-foreground"> · {formatTime(sh.startTime)}–{formatTime(sh.endTime)} · {typeLabel}</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {isSaving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : (
+                  (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
+                    <button
+                      key={status}
+                      onClick={() => setAttendance(sh.slotId, family.parentUserId, status)}
+                      className={cn(
+                        'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
+                        current === status ? ATTENDANCE_CONFIG[status].className : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                      )}
+                    >
+                      {ATTENDANCE_CONFIG[status].label}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   // ── Guards ────────────────────────────────────────────────────────────────
@@ -882,18 +1132,30 @@ export default function ConcessionsAdminPage() {
                   </CardContent>
                 </Card>
               ) : (
-                <>
-                {eventGroups.length > 0 && (
-                  <div className="space-y-3 mb-4">
-                    {eventGroups.map(ev => {
-                      const totalCap = ev.shifts.reduce((n, s) => n + s.capacity, 0);
-                      const totalSign = ev.shifts.reduce((n, s) => n + (s.signups?.length ?? 0), 0);
-                      const totalWorked = ev.shifts.reduce((n, s) => n + (s.signups?.filter(x => x.attendance === 'worked').length ?? 0), 0);
-                      return (
-                        <Card key={ev.eventId} className="border-none shadow-md">
-                          <CardHeader className="pb-3">
-                            <div className="flex justify-between items-start gap-2">
-                              <div>
+                <div className="space-y-4">
+                  {/* Multi-shift events — one collapsible card each */}
+                  {eventGroups.map(ev => {
+                    const isOpen = expandedEvents.has(ev.eventId);
+                    const totalCap = ev.shifts.reduce((n, s) => n + s.capacity, 0);
+                    const totalSign = ev.shifts.reduce((n, s) => n + (s.signups?.length ?? 0), 0);
+                    const totalWorked = ev.shifts.reduce((n, s) => n + (s.signups?.filter(x => x.attendance === 'worked').length ?? 0), 0);
+                    const eventHasUnmarked = ev.shifts.some(s => isPastSlot(s.gameDate) && (s.signups?.length ?? 0) > 0 && hasUnmarked(s));
+                    const evKey = `event_${ev.eventId}`;
+                    return (
+                      <Card key={ev.eventId} className="border-none shadow-md">
+                        <CardHeader className="pb-3">
+                          <div className="flex justify-between items-start gap-2">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => toggleSet(setExpandedEvents, ev.eventId)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSet(setExpandedEvents, ev.eventId); } }}
+                              className="flex items-start gap-2 text-left min-w-0 cursor-pointer"
+                            >
+                              {isOpen
+                                ? <ChevronDown className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />
+                                : <ChevronRight className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />}
+                              <div className="min-w-0">
                                 <Badge variant="secondary" className="mb-1 text-[10px] gap-1">
                                   <Tag className="h-3 w-3" /> {VOLUNTEER_TYPE_OPTIONS.find(o => o.value === ev.type)?.label ?? 'Volunteer'} Event
                                 </Badge>
@@ -902,160 +1164,76 @@ export default function ConcessionsAdminPage() {
                                   {ev.gameDate ? format(parseISO(ev.gameDate), 'EEE, MMM d, yyyy') : ev.gameDate}
                                   {ev.location ? ` · ${ev.location}` : ''}
                                 </p>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1.5">
+                                  <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{ev.shifts.length} shift{ev.shifts.length !== 1 ? 's' : ''}</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" />{totalSign}/{totalCap} signed up</span>
+                                  <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-600" />{totalWorked} worked</span>
+                                </div>
                               </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {eventHasUnmarked && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 rounded-full text-[11px] gap-1 text-green-700 hover:text-green-700 hover:bg-green-50"
+                                  disabled={bulkSaving.has(evKey)}
+                                  onClick={() => markEventWorked(ev.eventId)}
+                                >
+                                  {bulkSaving.has(evKey) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="h-3.5 w-3.5" />}
+                                  Mark all worked
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                 onClick={() => setDeleteEventDialog({ open: true, eventId: ev.eventId, title: ev.title, count: ev.shifts.length })}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
-                          </CardHeader>
-                          <CardContent className="space-y-2">
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                              <span className="flex items-center gap-1.5">
-                                <Clock className="h-4 w-4" />
-                                {ev.shifts.length} shift{ev.shifts.length !== 1 ? 's' : ''} ({formatTime(ev.shifts[0].startTime)}–{formatTime(ev.shifts[ev.shifts.length - 1].endTime)})
-                              </span>
-                              <span className="flex items-center gap-1.5"><Users className="h-4 w-4" />{totalSign} / {totalCap} signed up</span>
-                              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-green-600" />{totalWorked} worked</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {ev.shifts.map(sh => (
-                                <Badge key={sh.id} variant="outline" className="text-[10px] font-normal">
-                                  {formatTime(sh.startTime)}–{formatTime(sh.endTime)} · {sh.signups?.length ?? 0}/{sh.capacity}
-                                </Badge>
-                              ))}
-                            </div>
-                            <p className="text-[11px] text-muted-foreground italic pt-1">
-                              Mark attendance for each shift in the cards below.
-                            </p>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {sortedSlots.map(slot => {
-                    const signupCount = slot.signups?.length ?? 0;
-                    const spotsLeft = slot.capacity - signupCount;
-                    const isFull = spotsLeft <= 0;
-                    const isPast = isPastSlot(slot.gameDate);
-
-                    return (
-                      <Card key={slot.id} className="border-none shadow-md">
-                        <CardHeader className="pb-3">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              {slot.title && (
-                                <p className="text-xs font-semibold text-foreground mb-0.5 flex items-center gap-1">
-                                  {slot.eventId && <Tag className="h-3 w-3 text-muted-foreground shrink-0" />}
-                                  {slot.title}
-                                </p>
-                              )}
-                              <div className="flex items-center gap-2 mb-1">
-                                <CalendarDays className="h-4 w-4 text-primary" />
-                                <CardTitle className="text-base font-headline">
-                                  {slot.gameDate ? format(parseISO(slot.gameDate), 'EEE, MMM d, yyyy') : slot.gameDate}
-                                </CardTitle>
-                              </div>
-                              {slot.description && (
-                                <p className="text-xs text-muted-foreground">{slot.description}</p>
-                              )}
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-                              onClick={() => setDeleteDialog({ open: true, slot })}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
                           </div>
                         </CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="flex items-center gap-2 text-sm">
-                            <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span>{formatTime(slot.startTime)} – {formatTime(slot.endTime)}</span>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 text-sm">
-                              <Users className="h-4 w-4 text-muted-foreground" />
-                              <span>{signupCount} / {slot.capacity} volunteers</span>
+                        {isOpen && (
+                          <CardContent>
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {ev.shifts.map(sh => renderShiftCard(sh, { hideDate: true, hideTitle: true }))}
                             </div>
-                            <Badge variant={isFull ? 'destructive' : 'secondary'} className="text-xs">
-                              {isFull ? 'Full' : `${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left`}
-                            </Badge>
-                          </div>
-
-                          <p className="text-xs text-muted-foreground">
-                            Cancel cutoff: {slot.cancelCutoffHours}h before start
-                          </p>
-
-                          {/* Volunteers list with attendance toggles (past slots only) */}
-                          {slot.signups?.length > 0 && (
-                            <div className="space-y-2 pt-1 border-t">
-                              <p className="text-xs font-bold uppercase text-muted-foreground">Volunteers</p>
-                              {slot.signups.map((s, i) => {
-                                const key = `${slot.id}_${s.parentUserId}`;
-                                const isSaving = attendanceSaving.has(key);
-                                const current = s.attendance ?? (isPast ? 'pending' : 'pending');
-                                return (
-                                  <div key={i} className="flex items-center justify-between gap-2">
-                                    <span className="text-xs text-foreground truncate">{s.displayName}</span>
-                                    {isPast ? (
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        {isSaving ? (
-                                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                                        ) : (
-                                          (['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => (
-                                            <button
-                                              key={status}
-                                              onClick={() => handleAttendanceChange(slot, s, status)}
-                                              className={cn(
-                                                'text-[10px] font-semibold px-2 py-1 rounded-full transition-colors min-h-[28px]',
-                                                current === status
-                                                  ? ATTENDANCE_CONFIG[status].className
-                                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                                              )}
-                                            >
-                                              {ATTENDANCE_CONFIG[status].label}
-                                            </button>
-                                          ))
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <Badge variant="secondary" className="text-[10px] shrink-0">
-                                        Signed Up
-                                      </Badge>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* Manual Assign — only for past slots */}
-                          {isPast && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full rounded-full text-xs gap-1.5 mt-1"
-                              onClick={() => openAssignDialog(slot)}
-                            >
-                              <UserPlus className="h-3.5 w-3.5" /> Manual Assign
-                            </Button>
-                          )}
-                        </CardContent>
+                          </CardContent>
+                        )}
                       </Card>
                     );
                   })}
+
+                  {/* Standalone shifts — collapsible day sections */}
+                  {standaloneByDay.map(day => {
+                    const isOpen = !collapsedDays.has(day.date);
+                    return (
+                      <div key={day.date} className="rounded-xl border bg-card shadow-sm overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => toggleSet(setCollapsedDays, day.date)}
+                          className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/30"
+                        >
+                          <span className="flex items-center gap-2 font-semibold text-sm">
+                            {isOpen
+                              ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                            <CalendarDays className="h-4 w-4 text-primary" />
+                            {day.date ? format(parseISO(day.date), 'EEE, MMM d, yyyy') : day.date}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{day.shifts.length} shift{day.shifts.length !== 1 ? 's' : ''}</span>
+                        </button>
+                        {isOpen && (
+                          <div className="px-4 pb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            {day.shifts.map(s => renderShiftCard(s, { hideDate: true }))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                </>
               )
             )}
           </TabsContent>
@@ -1157,6 +1335,7 @@ export default function ConcessionsAdminPage() {
                   <div className="sm:hidden space-y-2">
                     {filteredFamilies.map(family => {
                       const status = complianceStatus(family);
+                      const isExpanded = expandedFamilies.has(family.parentUserId);
                       return (
                         <Card key={family.parentUserId} className="border shadow-sm">
                           <div className="p-4">
@@ -1200,6 +1379,15 @@ export default function ConcessionsAdminPage() {
                                 <span className="text-yellow-600 font-medium">+{pendingTotal(family)} upcoming</span>
                               )}
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => toggleSet(setExpandedFamilies, family.parentUserId)}
+                              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary"
+                            >
+                              {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              {isExpanded ? 'Hide shifts' : `View ${family.shifts.length} signed-up shift${family.shifts.length !== 1 ? 's' : ''}`}
+                            </button>
+                            {isExpanded && <div className="mt-2">{renderFamilyShifts(family)}</div>}
                             {(status !== 'met' || family.manualCredits > 0) && (
                               <div className="flex gap-2 mt-3">
                                 {status !== 'met' && (
@@ -1251,13 +1439,26 @@ export default function ConcessionsAdminPage() {
                         <tbody>
                           {filteredFamilies.map(family => {
                             const status = complianceStatus(family);
+                            const isExpanded = expandedFamilies.has(family.parentUserId);
                             return (
-                              <tr key={family.parentUserId} className="border-b last:border-0 hover:bg-muted/20">
+                              <Fragment key={family.parentUserId}>
+                              <tr className="border-b last:border-0 hover:bg-muted/20">
                                 <td className="px-4 py-3">
-                                  <span className="font-medium block">{family.displayName}</span>
-                                  {family.playerNames.length > 0 && (
-                                    <span className="text-xs text-muted-foreground">{family.playerNames.join(' · ')}</span>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSet(setExpandedFamilies, family.parentUserId)}
+                                    className="flex items-start gap-1.5 text-left"
+                                  >
+                                    {isExpanded
+                                      ? <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                                      : <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />}
+                                    <span>
+                                      <span className="font-medium block">{family.displayName}</span>
+                                      {family.playerNames.length > 0 && (
+                                        <span className="text-xs text-muted-foreground">{family.playerNames.join(' · ')}</span>
+                                      )}
+                                    </span>
+                                  </button>
                                 </td>
                                 <td className="px-4 py-3 text-muted-foreground">{family.email}</td>
                                 <td className="px-4 py-3 text-center font-medium">
@@ -1319,6 +1520,15 @@ export default function ConcessionsAdminPage() {
                                   )}
                                 </td>
                               </tr>
+                              {isExpanded && (
+                                <tr className="bg-muted/10">
+                                  <td colSpan={6} className="px-4 py-3">
+                                    <p className="text-xs font-bold uppercase text-muted-foreground mb-2">Signed-up shifts</p>
+                                    {renderFamilyShifts(family)}
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                             );
                           })}
                         </tbody>
