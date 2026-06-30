@@ -279,7 +279,7 @@ export function downloadRosterTemplate() {
   downloadCSV(csv, 'roster_assignment_template.csv');
 }
 
-function downloadCSV(content: string, filename: string) {
+export function downloadCSV(content: string, filename: string) {
   const blob = new Blob([content], { type: 'text/csv' });
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');

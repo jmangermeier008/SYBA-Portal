@@ -30,7 +30,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
-import { parseRosterCSV, downloadRosterTemplate, type ParsedRosterRow } from '@/lib/csv-import';
+import { parseRosterCSV, downloadRosterTemplate, downloadCSV, type ParsedRosterRow } from '@/lib/csv-import';
 
 interface FootballEquipment {
   verifiedWeight?: number;
@@ -590,6 +590,44 @@ export default function MasterRosterPage() {
     document.body.removeChild(a);
   };
 
+  const exportContactsCSV = () => {
+    if (!displayEnrollments || displayEnrollments.length === 0) return;
+    const isFootball = activeSport === 'football';
+
+    const esc = (val: unknown) => {
+      const s = val == null ? '' : String(val);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const headers = [
+      'First Name', 'Last Name', isFootball ? 'Division' : 'Team',
+      'Parent Name', 'Parent Phone', 'Parent Email',
+      'Emergency Contact Name', 'Emergency Contact Phone',
+    ];
+
+    const rows = displayEnrollments.map(e => {
+      const p = players?.find(pl => pl.id === e.playerId);
+      const parent = profileMap.get(e.parentUserId);
+      const ec = e.emergencyContacts?.[0];
+      const assignment = isFootball
+        ? (divisionsForSeason?.find(d => d.id === e.divisionId)?.name ?? e.divisionId)
+        : (teams?.find(t => t.id === e.teamId)?.name ?? 'Unassigned');
+      return [
+        p?.firstName ?? '',
+        p?.lastName ?? '',
+        assignment,
+        parent?.displayName || parent?.email || '',
+        parent?.phoneNumber ?? '',
+        parent?.email ?? '',
+        ec?.name ?? '',
+        ec?.phone ?? '',
+      ].map(esc).join(',');
+    });
+
+    const csvContent = [headers.map(esc).join(','), ...rows].join('\n');
+    downloadCSV(csvContent, `roster_contacts_${selectedSeason || 'all'}.csv`);
+  };
+
   // Builds one combined, labeled PDF of every displayed player's document via
   // the server packet endpoint. Must run synchronously in the click handler —
   // openDocumentPacket opens its tab before awaiting anything.
@@ -838,6 +876,9 @@ export default function MasterRosterPage() {
                 <DropdownMenuItem onClick={exportRosterCSV} disabled={!displayEnrollments?.length}>
                   <Download className="mr-2 h-4 w-4" /> Export for Uniforms
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={exportContactsCSV} disabled={!displayEnrollments?.length}>
+                  <Download className="mr-2 h-4 w-4" /> Export Contacts
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
@@ -873,6 +914,9 @@ export default function MasterRosterPage() {
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
+              <Button variant="outline" onClick={exportContactsCSV} className="rounded-full" disabled={!displayEnrollments?.length}>
+                <Download className="mr-2 h-4 w-4" /> Export Contacts
+              </Button>
               <Button onClick={exportRosterCSV} className="rounded-full shadow-lg" disabled={!displayEnrollments?.length}>
                 <Download className="mr-2 h-4 w-4" /> Export for Uniforms
               </Button>
@@ -947,8 +991,7 @@ export default function MasterRosterPage() {
                     : 'Assign each registered player to a team.'}
                 </CardDescription>
               </div>
-              {!isMobile && (
-                <div className="flex rounded-full bg-primary-foreground/10 p-1 shrink-0">
+              <div className="flex rounded-full bg-primary-foreground/10 p-1 shrink-0">
                   <button
                     onClick={() => setViewMode('cards')}
                     className={cn('flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors',
@@ -964,7 +1007,6 @@ export default function MasterRosterPage() {
                     <List className="h-3.5 w-3.5" /> Table
                   </button>
                 </div>
-              )}
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -995,7 +1037,7 @@ export default function MasterRosterPage() {
               <div className="text-center py-12 text-muted-foreground">
                 No matching registrations found.
               </div>
-            ) : (viewMode === 'cards' || isMobile) ? (
+            ) : viewMode === 'cards' ? (
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 p-4">
                 {displayEnrollments.map((e) => {
                   const p = players?.find(pl => pl.id === e.playerId);

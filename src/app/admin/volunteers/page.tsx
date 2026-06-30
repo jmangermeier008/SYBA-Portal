@@ -55,6 +55,7 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCheck,
+  Pencil,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
@@ -118,6 +119,8 @@ interface FamilyRoster {
   enrollmentCount: number;
   manualCredits: number;
   playerNames: string[];
+  divisionIds: string[];   // every division this family has a player enrolled in
+  divisionNames: string[]; // resolved names for display / CSV
   // The registering parent + every co-parent linked to their enrolled players.
   // A volunteer signup by ANY of these UIDs counts toward this household.
   linkedParentIds: string[];
@@ -306,7 +309,9 @@ export default function ConcessionsAdminPage() {
   const { toast } = useToast();
 
   // ── Manage Slots state ────────────────────────────────────────────────────
-  const [addDialog, setAddDialog] = useState(false);
+  const [slotDialog, setSlotDialog] = useState<
+    { mode: 'create' | 'edit-slot' | 'edit-event'; slotId?: string; eventId?: string } | null
+  >(null);
   const [formData, setFormData] = useState(emptySlot);
   const [saving, setSaving] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
@@ -344,6 +349,11 @@ export default function ConcessionsAdminPage() {
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
+  // Compliance filters
+  const [seasonDivisions, setSeasonDivisions] = useState<{ id: string; name: string }[]>([]);
+  const [divisionFilter, setDivisionFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'met' | 'partial' | 'none'>('all');
+  const [onlyUpcoming, setOnlyUpcoming] = useState(false);
 
   // ── Firestore queries (all before any early return) ───────────────────────
   const slotsQuery = useMemoFirebase(() => {
@@ -505,7 +515,80 @@ export default function ConcessionsAdminPage() {
         });
         toast({ title: 'Slot Created', description: `Volunteer slot for ${formData.gameDate} added.` });
       }
-      setAddDialog(false);
+      setSlotDialog(null);
+      setFormData(emptySlot);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Open the dialog pre-filled to edit a single shift (standalone or one shift in an event).
+  const openEditSlot = (slot: ConcessionSlot) => {
+    setFormData({
+      title: slot.title ?? '',
+      type: slot.type ?? 'concessions',
+      gameDate: slot.gameDate,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      capacity: slot.capacity,
+      cancelCutoffHours: slot.cancelCutoffHours,
+      description: slot.description ?? '',
+      splitIntoShifts: false,
+      shiftLengthHours: 2,
+    });
+    setSlotDialog({ mode: 'edit-slot', slotId: slot.id });
+  };
+
+  // Open the dialog pre-filled to edit the shared fields of a whole stacked event.
+  const openEditEvent = (ev: { eventId: string; title: string; type: VolunteerShiftType; location: string; gameDate: string }) => {
+    setFormData({
+      ...emptySlot,
+      title: ev.title,
+      type: ev.type,
+      gameDate: ev.gameDate,
+      description: ev.location,
+    });
+    setSlotDialog({ mode: 'edit-event', eventId: ev.eventId });
+  };
+
+  // Save edits to an existing shift, or shared fields across a whole event.
+  const handleSaveSlot = async () => {
+    if (!db || !slotDialog || !formData.gameDate) return;
+    setSaving(true);
+    try {
+      if (slotDialog.mode === 'edit-slot' && slotDialog.slotId) {
+        const live = (slots ?? []).find(s => s.id === slotDialog.slotId);
+        const signupCount = live?.signups?.length ?? 0;
+        if (Number(formData.capacity) < signupCount) {
+          toast({ title: 'Capacity too low', description: `This shift already has ${signupCount} sign-up${signupCount !== 1 ? 's' : ''}. Set capacity to at least ${signupCount}.`, variant: 'destructive' });
+          return;
+        }
+        await updateDoc(doc(db, 'concessionSlots', slotDialog.slotId), {
+          title: formData.title.trim(),
+          type: formData.type,
+          gameDate: formData.gameDate,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          capacity: Number(formData.capacity),
+          cancelCutoffHours: Number(formData.cancelCutoffHours),
+          description: formData.description.trim(),
+        });
+        toast({ title: 'Shift updated' });
+      } else if (slotDialog.mode === 'edit-event' && slotDialog.eventId) {
+        const eventShifts = (slots ?? []).filter(s => s.eventId === slotDialog.eventId);
+        const batch = writeBatch(db);
+        eventShifts.forEach(s => batch.update(doc(db, 'concessionSlots', s.id), {
+          title: formData.title.trim(),
+          type: formData.type,
+          gameDate: formData.gameDate,
+          description: formData.description.trim(),
+        }));
+        await batch.commit();
+        toast({ title: 'Event updated', description: `${eventShifts.length} shift${eventShifts.length !== 1 ? 's' : ''} updated.` });
+      }
+      setSlotDialog(null);
       setFormData(emptySlot);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -699,6 +782,16 @@ export default function ConcessionsAdminPage() {
       const season = { id: seasonDoc.id, ...seasonDoc.data() } as Season;
       setSelectedSeason(season);
 
+      // Division names for the filter dropdown + per-family display.
+      const divisionsSnap = await getDocs(collection(db, 'seasons', seasonId, 'divisions'));
+      const divisionNameById = new Map<string, string>();
+      divisionsSnap.docs.forEach(d => divisionNameById.set(d.id, (d.data().name as string) || 'Division'));
+      setSeasonDivisions(
+        divisionsSnap.docs
+          .map(d => ({ id: d.id, name: (d.data().name as string) || 'Division' }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+
       const enrollmentsSnap = await getDocs(
         query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
       );
@@ -706,10 +799,12 @@ export default function ConcessionsAdminPage() {
       const enrollmentCountByParent = new Map<string, number>();
       const manualCreditsMap = new Map<string, number>();
       const playerIdsByParent = new Map<string, string[]>();
+      const divisionIdsByParent = new Map<string, Set<string>>();
       enrollmentsSnap.docs.forEach(d => {
         const data = d.data();
         const pid = data.parentUserId as string;
         const playerId = data.playerId as string;
+        const divisionId = data.divisionId as string | undefined;
         if (pid) {
           parentIds.add(pid);
           enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
@@ -718,6 +813,11 @@ export default function ConcessionsAdminPage() {
           if (playerId) {
             const existing = playerIdsByParent.get(pid) ?? [];
             if (!existing.includes(playerId)) playerIdsByParent.set(pid, [...existing, playerId]);
+          }
+          if (divisionId) {
+            const set = divisionIdsByParent.get(pid) ?? new Set<string>();
+            set.add(divisionId);
+            divisionIdsByParent.set(pid, set);
           }
         }
       });
@@ -760,15 +860,20 @@ export default function ConcessionsAdminPage() {
         }),
       ]);
 
-      setRoster(parentIdArray.map(pid => ({
-        parentUserId: pid,
-        displayName: profileMap.get(pid)?.displayName ?? pid,
-        email: profileMap.get(pid)?.email ?? '',
-        enrollmentCount: enrollmentCountByParent.get(pid) ?? 1,
-        manualCredits: manualCreditsMap.get(pid) ?? 0,
-        playerNames: playerNamesMap.get(pid) ?? [],
-        linkedParentIds: Array.from(linkedParentsMap.get(pid) ?? new Set([pid])),
-      })));
+      setRoster(parentIdArray.map(pid => {
+        const divisionIds = Array.from(divisionIdsByParent.get(pid) ?? new Set<string>());
+        return {
+          parentUserId: pid,
+          displayName: profileMap.get(pid)?.displayName ?? pid,
+          email: profileMap.get(pid)?.email ?? '',
+          enrollmentCount: enrollmentCountByParent.get(pid) ?? 1,
+          manualCredits: manualCreditsMap.get(pid) ?? 0,
+          playerNames: playerNamesMap.get(pid) ?? [],
+          linkedParentIds: Array.from(linkedParentsMap.get(pid) ?? new Set([pid])),
+          divisionIds,
+          divisionNames: divisionIds.map(id => divisionNameById.get(id) ?? 'Division'),
+        };
+      }));
     } catch (err: any) {
       toast({ title: 'Error loading report', description: err.message, variant: 'destructive' });
     } finally {
@@ -879,10 +984,14 @@ export default function ConcessionsAdminPage() {
     }
   }
 
-  const filteredFamilies = families.filter(f =>
-    f.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    f.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredFamilies = families.filter(f => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q || f.displayName.toLowerCase().includes(q) || f.email.toLowerCase().includes(q);
+    const matchesDivision = divisionFilter === 'all' || f.divisionIds.includes(divisionFilter);
+    const matchesStatus = statusFilter === 'all' || complianceStatus(f) === statusFilter;
+    const matchesUpcoming = !onlyUpcoming || pendingTotal(f) > 0;
+    return matchesSearch && matchesDivision && matchesStatus && matchesUpcoming;
+  });
 
   const metCount = families.filter(f => complianceStatus(f) === 'met').length;
   const partialCount = families.filter(f => complianceStatus(f) === 'partial').length;
@@ -897,18 +1006,18 @@ export default function ConcessionsAdminPage() {
     };
     const rows = isFootballSeason
       ? [
-          ['Family Name', 'Email', 'Concessions Worked', 'Concessions Required', 'Tagging Worked', 'Tagging Required', 'Pending Shifts', 'Status'],
-          ...families.map(f => [
-            f.displayName, f.email,
+          ['Family Name', 'Email', 'Division', 'Concessions Worked', 'Concessions Required', 'Tagging Worked', 'Tagging Required', 'Pending Shifts', 'Status'],
+          ...filteredFamilies.map(f => [
+            f.displayName, f.email, f.divisionNames.join('; '),
             String(f.concessionsWorked + f.manualCredits), String(f.perTypeRequired),
             String(f.taggingWorked), String(f.perTypeRequired),
             String(pendingTotal(f)), statusLabel(f),
           ]),
         ]
       : [
-          ['Family Name', 'Email', 'Worked Shifts', 'Pending Shifts', 'Required', 'Status'],
-          ...families.map(f => [
-            f.displayName, f.email,
+          ['Family Name', 'Email', 'Division', 'Worked Shifts', 'Pending Shifts', 'Required', 'Status'],
+          ...filteredFamilies.map(f => [
+            f.displayName, f.email, f.divisionNames.join('; '),
             String(workedTotal(f)), String(pendingTotal(f)), String(f.pooledRequired), statusLabel(f),
           ]),
         ];
@@ -957,14 +1066,26 @@ export default function ConcessionsAdminPage() {
                 <p className="text-xs text-muted-foreground">{slot.description}</p>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-              onClick={() => setDeleteDialog({ open: true, slot })}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                onClick={() => openEditSlot(slot)}
+                title="Edit shift"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                onClick={() => setDeleteDialog({ open: true, slot })}
+                title="Delete shift"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1086,6 +1207,9 @@ export default function ConcessionsAdminPage() {
               <p className="font-semibold text-sm leading-tight">{family.displayName}</p>
               {family.playerNames.length > 0 && (
                 <p className="text-xs text-muted-foreground mt-0.5">{family.playerNames.join(' · ')}</p>
+              )}
+              {family.divisionNames.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-0.5">{family.divisionNames.join(' · ')}</p>
               )}
               <p className="text-xs text-muted-foreground mt-0.5 truncate">{family.email}</p>
             </div>
@@ -1238,7 +1362,7 @@ export default function ConcessionsAdminPage() {
                 </div>
               </div>
               <Button
-                onClick={() => { setFormData(emptySlot); setAddDialog(true); }}
+                onClick={() => { setFormData(emptySlot); setSlotDialog({ mode: 'create' }); }}
                 className="rounded-full shadow-lg"
                 disabled={!canEditSlots}
                 title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
@@ -1267,7 +1391,7 @@ export default function ConcessionsAdminPage() {
                     <p className="text-muted-foreground font-medium">No volunteer slots yet</p>
                     <p className="text-sm text-muted-foreground mb-4">Add your first volunteer slot to get started.</p>
                     <Button
-                      onClick={() => setAddDialog(true)}
+                      onClick={() => { setFormData(emptySlot); setSlotDialog({ mode: 'create' }); }}
                       className="rounded-full"
                       disabled={!canEditSlots}
                       title={!canEditSlots ? 'Switch to the active season to add slots' : undefined}
@@ -1332,8 +1456,18 @@ export default function ConcessionsAdminPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => openEditEvent(ev)}
+                                title="Edit event"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                 onClick={() => setDeleteEventDialog({ open: true, eventId: ev.eventId, title: ev.title, count: ev.shifts.length })}
+                                title="Delete event"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1468,17 +1602,47 @@ export default function ConcessionsAdminPage() {
                     </p>
                   )}
 
-                  {/* Search */}
-                  <Input
-                    placeholder="Search by name or email…"
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="max-w-sm"
-                  />
+                  {/* Search + filters */}
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                    <Input
+                      placeholder="Search by name or email…"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className="w-full sm:max-w-xs"
+                    />
+                    {seasonDivisions.length > 0 && (
+                      <Select value={divisionFilter} onValueChange={setDivisionFilter}>
+                        <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Division" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All divisions</SelectItem>
+                          {seasonDivisions.map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+                      <SelectTrigger className="w-full sm:w-44"><SelectValue placeholder="Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All statuses</SelectItem>
+                        <SelectItem value="met">Met</SelectItem>
+                        <SelectItem value="partial">Partial</SelectItem>
+                        <SelectItem value="none">Not signed up</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="flex items-center gap-2">
+                      <Switch id="only-upcoming" checked={onlyUpcoming} onCheckedChange={setOnlyUpcoming} />
+                      <Label htmlFor="only-upcoming" className="text-sm font-normal cursor-pointer">Only upcoming shifts</Label>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Showing {filteredFamilies.length} of {families.length} famil{families.length !== 1 ? 'ies' : 'y'}
+                  </p>
 
                   {/* Family cards — one consistent layout for mobile + desktop */}
                   {filteredFamilies.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-6 text-center">No families match your search.</p>
+                    <p className="text-sm text-muted-foreground py-6 text-center">No families match your filters.</p>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                       {filteredFamilies.map(family => renderFamilyCard(family))}
@@ -1492,11 +1656,19 @@ export default function ConcessionsAdminPage() {
       </main>
 
       {/* Add Slot Dialog */}
-      <Dialog open={addDialog} onOpenChange={setAddDialog}>
+      <Dialog open={!!slotDialog} onOpenChange={(open) => { if (!open && !saving) { setSlotDialog(null); setFormData(emptySlot); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Volunteer Slot</DialogTitle>
-            <DialogDescription>Create a single shift, or split a longer window into back-to-back shifts.</DialogDescription>
+            <DialogTitle>
+              {slotDialog?.mode === 'edit-slot' ? 'Edit Shift' : slotDialog?.mode === 'edit-event' ? 'Edit Event' : 'Add Volunteer Slot'}
+            </DialogTitle>
+            <DialogDescription>
+              {slotDialog?.mode === 'edit-slot'
+                ? 'Update this shift’s details. Existing sign-ups are kept.'
+                : slotDialog?.mode === 'edit-event'
+                ? 'These changes apply to every shift in this event. Each shift’s own time and capacity are unchanged.'
+                : 'Create a single shift, or split a longer window into back-to-back shifts.'}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
@@ -1523,6 +1695,7 @@ export default function ConcessionsAdminPage() {
                   onChange={e => setFormData(prev => ({ ...prev, gameDate: e.target.value }))} />
               </div>
             </div>
+            {slotDialog?.mode !== 'edit-event' && (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>{formData.splitIntoShifts ? 'Window Start' : 'Start Time'}</Label>
@@ -1535,8 +1708,10 @@ export default function ConcessionsAdminPage() {
                   onChange={e => setFormData(prev => ({ ...prev, endTime: e.target.value }))} />
               </div>
             </div>
+            )}
 
-            {/* Split into back-to-back shifts */}
+            {/* Split into back-to-back shifts — creation only */}
+            {slotDialog?.mode === 'create' && (
             <div className="rounded-lg border px-3 py-2.5 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1568,7 +1743,9 @@ export default function ConcessionsAdminPage() {
                 </>
               )}
             </div>
+            )}
 
+            {slotDialog?.mode !== 'edit-event' && (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>{formData.splitIntoShifts ? 'Families per Shift' : 'Volunteer Capacity'}</Label>
@@ -1581,6 +1758,7 @@ export default function ConcessionsAdminPage() {
                   onChange={e => setFormData(prev => ({ ...prev, cancelCutoffHours: Number(e.target.value) }))} />
               </div>
             </div>
+            )}
             <div className="space-y-1">
               <Label>{formData.type === 'tagging' ? 'Location / Notes (optional)' : 'Description (optional)'}</Label>
               <Input placeholder={formData.type === 'tagging' ? 'e.g. Sparkle Market, Main St' : 'e.g. Snack bar — opening shift'} value={formData.description}
@@ -1588,11 +1766,18 @@ export default function ConcessionsAdminPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddDialog(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleAddSlot} disabled={saving || !formData.gameDate || (formData.splitIntoShifts && slotShiftPreview.length === 0)}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {formData.splitIntoShifts && slotShiftPreview.length > 1 ? `Create ${slotShiftPreview.length} Shifts` : 'Create Slot'}
-            </Button>
+            <Button variant="outline" onClick={() => { setSlotDialog(null); setFormData(emptySlot); }} disabled={saving}>Cancel</Button>
+            {slotDialog?.mode === 'create' ? (
+              <Button onClick={handleAddSlot} disabled={saving || !formData.gameDate || (formData.splitIntoShifts && slotShiftPreview.length === 0)}>
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {formData.splitIntoShifts && slotShiftPreview.length > 1 ? `Create ${slotShiftPreview.length} Shifts` : 'Create Slot'}
+              </Button>
+            ) : (
+              <Button onClick={handleSaveSlot} disabled={saving || !formData.gameDate}>
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Changes
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
