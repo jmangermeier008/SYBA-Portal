@@ -87,6 +87,7 @@ interface Player {
   waiverSignedName?: string;
   compliance?: { parentalAgreementSigned?: boolean };
   medicalNotes?: string;
+  emergencyContacts?: { name: string; phone: string; relationship: string }[];
   birthCertificateUrl?: string;
   physicalFormUrl?: string;
   _refPath?: string;
@@ -599,16 +600,29 @@ export default function MasterRosterPage() {
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
+    // Emergency contacts live on the enrollment (snapshot from enroll time); fall
+    // back to the live player record when the enrollment copy is empty (e.g. admin
+    // manual registrations). Export ALL of them, matching what the card shows.
+    const contactsByRow = displayEnrollments.map(e => {
+      const p = players?.find(pl => pl.id === e.playerId);
+      return (e.emergencyContacts?.length ? e.emergencyContacts : p?.emergencyContacts) ?? [];
+    });
+    const maxContacts = Math.max(1, ...contactsByRow.map(c => c.length));
+
     const headers = [
       'First Name', 'Last Name', isFootball ? 'Division' : 'Team',
       'Parent Name', 'Parent Phone', 'Parent Email',
-      'Emergency Contact Name', 'Emergency Contact Phone',
+      ...Array.from({ length: maxContacts }, (_, i) => [
+        `Emergency Contact ${i + 1} Name`,
+        `Emergency Contact ${i + 1} Phone`,
+        `Emergency Contact ${i + 1} Relationship`,
+      ]).flat(),
     ];
 
-    const rows = displayEnrollments.map(e => {
+    const rows = displayEnrollments.map((e, idx) => {
       const p = players?.find(pl => pl.id === e.playerId);
       const parent = profileMap.get(e.parentUserId);
-      const ec = e.emergencyContacts?.[0];
+      const contacts = contactsByRow[idx];
       const assignment = isFootball
         ? (divisionsForSeason?.find(d => d.id === e.divisionId)?.name ?? e.divisionId)
         : (teams?.find(t => t.id === e.teamId)?.name ?? 'Unassigned');
@@ -619,8 +633,11 @@ export default function MasterRosterPage() {
         parent?.displayName || parent?.email || '',
         parent?.phoneNumber ?? '',
         parent?.email ?? '',
-        ec?.name ?? '',
-        ec?.phone ?? '',
+        ...Array.from({ length: maxContacts }, (_, i) => [
+          contacts[i]?.name ?? '',
+          contacts[i]?.phone ?? '',
+          contacts[i]?.relationship ?? '',
+        ]).flat(),
       ].map(esc).join(',');
     });
 
