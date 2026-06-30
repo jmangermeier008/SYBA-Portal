@@ -600,12 +600,12 @@ export default function MasterRosterPage() {
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
-    // Emergency contacts live on the enrollment (snapshot from enroll time); fall
-    // back to the live player record when the enrollment copy is empty (e.g. admin
-    // manual registrations). Export ALL of them, matching what the card shows.
+    // The live player record is the source of truth (edited via the Family page,
+    // incl. by co-parents); the enrollment copy is a stale snapshot from enroll time.
+    // Prefer the player record, fall back to the enrollment. Export ALL of them.
     const contactsByRow = displayEnrollments.map(e => {
       const p = players?.find(pl => pl.id === e.playerId);
-      return (e.emergencyContacts?.length ? e.emergencyContacts : p?.emergencyContacts) ?? [];
+      return (p?.emergencyContacts?.length ? p.emergencyContacts : e.emergencyContacts) ?? [];
     });
     const maxContacts = Math.max(1, ...contactsByRow.map(c => c.length));
 
@@ -1066,7 +1066,7 @@ export default function MasterRosterPage() {
                       player={p}
                       enrollment={e}
                       parent={parent}
-                      emergencyContacts={e.emergencyContacts}
+                      emergencyContacts={p.emergencyContacts ?? e.emergencyContacts}
                       onAssignJersey={(value) => handleAssignJersey(e, value)}
                       actionsSlot={renderRowActions(e, p)}
                       footerContent={renderCardFooter(e)}

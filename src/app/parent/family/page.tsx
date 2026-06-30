@@ -114,7 +114,10 @@ export default function FamilyPage() {
     Promise.all(
       approved.map(r =>
         getDoc(doc(db, 'userProfiles', r.primaryParentUid, 'players', r.playerId))
-          .then(snap => snap.exists() ? { ...(snap.data() as Player), id: snap.id } : null)
+          .then(snap => snap.exists()
+            ? { ...(snap.data() as Player), id: snap.id,
+                primaryParentId: (snap.data() as Player).primaryParentId ?? r.primaryParentUid }
+            : null)
       )
     ).then(results => setSharedPlayers(results.filter(Boolean) as Player[]));
   }, [outgoingRequests, db]);
@@ -152,7 +155,10 @@ export default function FamilyPage() {
     if (!user || !db || !editingPlayer) return;
     setSaving(true);
 
-    const playerRef = doc(db, 'userProfiles', user.uid, 'players', editingPlayer.id);
+    // Co-parented children live under the PRIMARY parent's subcollection, not the
+    // signed-in user's. Write to the owning path so the secondary-parent rule applies.
+    const ownerUid = editingPlayer.primaryParentId || user.uid;
+    const playerRef = doc(db, 'userProfiles', ownerUid, 'players', editingPlayer.id);
     updateDoc(playerRef, {
       ...formData,
       emergencyContacts: emergencyContacts.filter(c => c.name && c.phone),
