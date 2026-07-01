@@ -24,6 +24,7 @@ import {
   Trash2,
   Download,
   Upload,
+  Clock,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -243,7 +244,7 @@ function ClearanceAuditList({
 function getStatusIcon(status?: string) {
   switch (status) {
     case 'Approved': return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-    case 'Pending': return <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />;
+    case 'Pending': return <Clock className="h-4 w-4 text-amber-500" aria-label="Pending review" />;
     case 'Rejected': return <XCircle className="h-4 w-4 text-destructive" />;
     default: return <AlertTriangle className="h-4 w-4 text-muted-foreground opacity-20" />;
   }
@@ -464,58 +465,13 @@ export function CoachComplianceTable({
                                 <p className="text-xs text-muted-foreground mt-0.5">{u.email}</p>
                               </DialogHeader>
                               <ScrollArea className="flex-1 p-6">
-                                <div className="space-y-4">
-                                  {[ca, cr].filter(Boolean).map((c) => (
-                                    <Card key={c!.id} className="border bg-secondary/10">
-                                      <CardContent className="p-4 space-y-4">
-                                        <div className="flex items-center justify-between">
-                                          <div className="flex items-center gap-3">
-                                            <FileText className="h-5 w-5 text-primary" />
-                                            <div>
-                                              <p className="font-bold text-sm">{c!.type}</p>
-                                              <p className="text-[10px] text-muted-foreground">Expires: {c!.expirationDate}</p>
-                                            </div>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            {getStatusIcon(c!.status)}
-                                            <Badge variant="outline" className="text-[10px]">{c!.status}</Badge>
-                                          </div>
-                                        </div>
-                                        {c!.verifiedBy && c!.verifiedAt && (
-                                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-white/50 p-2 rounded">
-                                            <History className="h-3 w-3" />
-                                            <span>
-                                              Verified by {c!.verifiedByName} on {format(new Date(c!.verifiedAt), 'MMM d, h:mm a')}
-                                            </span>
-                                          </div>
-                                        )}
-                                        <div className="flex gap-2">
-                                          <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
-                                            <a href={c!.fileUrl} target="_blank" rel="noreferrer">
-                                              <Eye className="h-4 w-4 mr-2" /> View
-                                            </a>
-                                          </Button>
-                                          <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
-                                            <a href={c!.fileUrl} download target="_blank" rel="noreferrer">
-                                              <Download className="h-4 w-4 mr-2" /> Download
-                                            </a>
-                                          </Button>
-                                          <Button
-                                            variant="default"
-                                            size="sm"
-                                            className="flex-1 rounded-lg"
-                                            onClick={() => setReviewingClearance({ userId: u.id, clearance: c! })}
-                                          >
-                                            Review Decision
-                                          </Button>
-                                        </div>
-                                      </CardContent>
-                                    </Card>
-                                  ))}
-                                  {[ca, cr].filter(Boolean).length === 0 && (
-                                    <p className="text-sm text-muted-foreground text-center py-6">No clearance documents on file.</p>
-                                  )}
-                                </div>
+                                <ClearanceAuditList
+                                  u={u}
+                                  ca={ca}
+                                  cr={cr}
+                                  onUploadClearance={onUploadClearance}
+                                  onReview={c => setReviewingClearance({ userId: u.id, clearance: c })}
+                                />
                               </ScrollArea>
                             </div>
                           </DialogContent>
