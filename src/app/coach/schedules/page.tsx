@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { AddEventDialog } from '@/components/calendar/AddEventDialog';
 import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
+import { normalizeTeamGame } from '@/lib/game-shape';
 import type { CalendarEvent, CustomEvent } from '@/types/scheduling';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -32,24 +33,7 @@ interface Team {
   seasonId?: string;
 }
 
-// ─── Normalizer ────────────────────────────────────────────────────────────────
-
-function normalizeTeamGame(g: GameEvent, teamId: string): CalendarEvent {
-  const dateTime = g.dateTime ?? '';
-  return {
-    id: g.id,
-    eventType: g.type === 'Game' ? 'game' : 'practice',
-    date: dateTime.slice(0, 10),
-    startTime: dateTime.slice(11, 16),
-    title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
-    status: g.cancelled ? 'cancelled' : 'scheduled',
-    fieldName: g.location,
-    sourceType: 'team-game',
-    sourceId: g.id,
-    teamId,
-    notes: g.cancellationReason,
-  };
-}
+// normalizeTeamGame is shared from @/lib/game-shape.
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 

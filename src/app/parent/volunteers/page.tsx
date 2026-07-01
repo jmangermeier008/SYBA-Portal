@@ -6,7 +6,7 @@ import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebas
 import { useSport } from '@/firebase/sport-context';
 import { collection, collectionGroup, doc, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
 import type { Season, VolunteerShiftType } from '@/types/scheduling';
-import { FOOTBALL_PER_PLAYER_REQUIREMENTS } from '@/types/scheduling';
+import { computeFamilyFootballCompliance } from '@/lib/volunteer-compliance';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -334,30 +334,15 @@ export default function ParentVolunteersPage() {
   }, [enrollments, activeSeason]);
 
   // Football enforces a split requirement: 1 worked concession shift + 1 worked
-  // tagging shift per enrolled player. "Worked" (admin-confirmed) attendance is
-  // what counts; signed-up-but-unconfirmed shifts surface as pending.
+  // tagging shift per enrolled player. Compliance math is shared with the parent
+  // dashboard tracker via computeFamilyFootballCompliance.
   const isFootball = activeSport === 'football';
-  const perTypeRequired = useMemo(
-    () => (enrollments?.length ?? 0) * (FOOTBALL_PER_PLAYER_REQUIREMENTS.concessions ?? 1),
-    [enrollments]
+  const compliance = useMemo(
+    () => computeFamilyFootballCompliance(slots, enrollments?.length ?? 0, profile?.id),
+    [slots, enrollments, profile?.id]
   );
-  const myProgress = useMemo(() => {
-    const countFor = (type: 'concessions' | 'tagging') => {
-      let worked = 0, pending = 0;
-      (slots ?? []).forEach(s => {
-        const st = (s.type ?? 'concessions') === 'tagging' ? 'tagging' : (s.type ?? 'concessions') === 'concessions' ? 'concessions' : null;
-        if (st !== type) return;
-        // Every spot this parent holds in the slot counts separately.
-        (s.signups ?? []).forEach(su => {
-          if (su.parentUserId !== profile?.id) return;
-          if (su.attendance === 'worked') worked++;
-          else if (su.attendance !== 'no-show') pending++;
-        });
-      });
-      return { worked, pending };
-    };
-    return { concessions: countFor('concessions'), tagging: countFor('tagging') };
-  }, [slots, profile?.id]);
+  const myProgress = compliance;
+  const perTypeRequired = compliance.concessions.required;
 
   // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
   // concession stand; football volunteering spans chain gangs, clock, and gate

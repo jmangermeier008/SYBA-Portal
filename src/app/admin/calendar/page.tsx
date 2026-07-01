@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { AddEventDialog } from '@/components/calendar/AddEventDialog';
 import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
+import { normalizeGame } from '@/lib/game-shape';
 import type { CalendarEvent, Game, PracticeSlot, ConcessionSlot, Field, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, Team, CustomEvent } from '@/types/scheduling';
 
 // Fixed palette — assigned to divisions by index
@@ -25,29 +26,7 @@ const DIVISION_COLOR_PALETTE = [
 ];
 
 // ─── Normalizers ───────────────────────────────────────────────────────────────
-
-function normalizeGame(g: Game): CalendarEvent {
-  return {
-    id: g.id,
-    eventType: 'game',
-    date: g.date,
-    startTime: g.time,
-    title:
-      g.homeTeamName && g.awayTeamName
-        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
-        : g.teamName ?? 'Game',
-    status: g.status,
-    fieldName: g.fieldName,
-    sourceType: 'global-game',
-    sourceId: g.id,
-    homeTeamName: g.homeTeamName,
-    awayTeamName: g.awayTeamName,
-    teamId: g.teamId,
-    division: g.division,
-    divisionId: g.divisionId,
-    notes: g.notes,
-  };
-}
+// normalizeGame is shared from @/lib/game-shape.
 
 function normalizePracticeSlot(s: PracticeSlot, teams: Team[]): CalendarEvent {
   // Look up the claiming team's divisionId for accurate division color

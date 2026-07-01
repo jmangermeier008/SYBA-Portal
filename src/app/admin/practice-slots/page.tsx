@@ -30,6 +30,7 @@ import {
   isBefore, startOfDay, startOfWeek, endOfWeek,
 } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { toDateTime } from '@/lib/game-shape';
 import type { PracticeSlot } from '@/types/scheduling';
 import { BulkApproveDialog } from '@/components/admin/practice-slots/bulk-approve-dialog';
 
@@ -512,7 +513,7 @@ export default function PracticeSlotsAdminPage() {
           throw new Error('This request is no longer pending.');
         }
 
-        const dateTime = `${slot.date}T${slot.startTime}:00`;
+        const dateTime = toDateTime(slot.date, slot.startTime);
         const teamId = slot.pendingTeamId!;
         const teamGameRef = doc(db, 'teams', teamId, 'games', teamGameId);
 

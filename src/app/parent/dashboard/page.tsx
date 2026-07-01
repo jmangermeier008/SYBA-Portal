@@ -5,9 +5,11 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { Users, Calendar, Trophy, Bell, Loader2, Check, X, HelpCircle, CheckCircle2, AlertCircle, ChevronRight, Printer } from 'lucide-react';
+import { Users, Calendar, Bell, Loader2, Check, X, HelpCircle, Printer } from 'lucide-react';
 import { openPrintTab } from '@/lib/print-job';
 import { TaskCenter } from '@/components/parent/task-center';
+import { FamilyComplianceTracker } from '@/components/parent/family-compliance-tracker';
+import { UrgentAnnouncementBanner } from '@/components/parent/urgent-announcement-banner';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -57,7 +59,7 @@ export default function ParentDashboard() {
     if (!db || !user) return null;
     return collection(db, 'userProfiles', user.uid, 'players');
   }, [db, user?.uid]);
-  const { data: players, isLoading: loadingPlayers } = useCollection<{
+  const { data: players } = useCollection<{
     id: string;
     firstName?: string;
     lastName?: string;
@@ -114,7 +116,6 @@ export default function ParentDashboard() {
   }, [selectedPlayerId, enrollments]);
 
   // Enrollment status logic
-  const hasEnrollments = (enrollments?.length ?? 0) > 0;
   const pendingEnrollment = enrollments?.find(e =>
     ['pending', 'pending_payment'].includes(e.paymentStatus ?? e.payment_status ?? '')
   );
@@ -409,6 +410,12 @@ export default function ParentDashboard() {
             </div>
           )}
 
+          {/* Urgent announcement alert — dismissible, directly below the sub-header */}
+          <UrgentAnnouncementBanner />
+
+          {/* Family Compliance & Volunteer Tracker — top of the workspace (football) */}
+          <FamilyComplianceTracker />
+
           {/* Action Required — single task center consolidating payment, document, and access tasks */}
           <TaskCenter
             pendingPayment={hasPendingPayment ? {
@@ -573,72 +580,6 @@ export default function ParentDashboard() {
               )}
             </CardContent>
           </Card>
-
-          <div className="grid gap-4 md:grid-cols-2 mb-4">
-            {/* Players stat */}
-            <Card className="border shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Players</CardTitle>
-                <Users className="h-4 w-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                {loadingPlayers ? (
-                  <><Skeleton className="h-8 w-12 mb-1" /><Skeleton className="h-3 w-28" /></>
-                ) : (
-                  <>
-                    <div className="text-2xl font-bold">{players?.length ?? 0}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {players?.length === 1 ? 'Player registered' : 'Players registered'}
-                    </p>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Enrollment status */}
-            {hasEnrollments && !hasPendingPayment ? (
-              <Card className="border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Enrollment</CardTitle>
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">Enrolled</div>
-                  <p className="text-xs text-muted-foreground">Payment confirmed</p>
-                  <Button asChild variant="ghost" size="sm" className="mt-2 h-7 px-0 text-xs text-primary">
-                    <Link href="/parent/teams">View teams <ChevronRight className="h-3 w-3 ml-0.5" /></Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : hasPendingPayment ? (
-              <Card className="border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Enrollment</CardTitle>
-                  <AlertCircle className="h-4 w-4 text-amber-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-amber-600">Payment pending</div>
-                  <p className="text-xs text-muted-foreground">
-                    Finish up in the Action Required list above.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="border shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Enrollment</CardTitle>
-                  <Trophy className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">Open</div>
-                  <p className="text-xs text-muted-foreground mb-2">Register for the upcoming season</p>
-                  <Button asChild variant="outline" size="sm" className="h-7 rounded-full text-xs">
-                    <Link href="/parent/enroll">Enroll Now</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-          </div>
 
           {/* Announcements */}
           <Card className="border shadow-sm mb-4">

@@ -682,6 +682,10 @@ export interface Announcement {
   body: string;
   publishedAt: string; // ISO datetime string
   pinned?: boolean;
+  /** When true, surfaces as a dismissible alert banner on parent dashboards. */
+  isUrgent?: boolean;
+  /** Association-wide (all sports) — when set, `sport` is omitted. */
+  isGlobal?: boolean;
   publishedBy?: string;
   sport?: Sport;
 }

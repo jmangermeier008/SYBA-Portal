@@ -40,6 +40,7 @@ import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType, CustomEvent } from '@/types/scheduling';
 import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
+import { normalizeGame } from '@/lib/game-shape';
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -123,30 +124,8 @@ function formatTime(t: string) {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-// ─── Calendar event normalizers (mirrors /admin/calendar/page.tsx) ──────────────
-
-function normalizeGame(g: Game): CalendarEvent {
-  return {
-    id: g.id,
-    eventType: g.type === 'practice' ? 'practice' : 'game',
-    date: g.date,
-    startTime: g.time,
-    title:
-      g.homeTeamName && g.awayTeamName
-        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
-        : g.teamName ?? 'Game',
-    status: g.status ?? 'scheduled',
-    fieldName: g.fieldName,
-    sourceType: 'global-game',
-    sourceId: g.id,
-    homeTeamName: g.homeTeamName,
-    awayTeamName: g.awayTeamName,
-    division: g.division,
-    notes: g.notes,
-    umpireName: g.umpireName,
-    umpireNotified: g.umpireNotified,
-  };
-}
+// ─── Calendar event normalizers ─────────────────────────────────────────────
+// normalizeGame is shared from @/lib/game-shape.
 
 function normalizePracticeSlot(s: PracticeSlot): CalendarEvent {
   return {

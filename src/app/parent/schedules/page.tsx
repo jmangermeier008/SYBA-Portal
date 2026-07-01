@@ -23,6 +23,7 @@ import { FirestorePermissionError } from '@/firebase/errors';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
+import { normalizeTeamGame } from '@/lib/game-shape';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
@@ -48,23 +49,7 @@ interface Enrollment {
   teamId: string;
 }
 
-// ─── Normalizers ───────────────────────────────────────────────────────────────
-
-function normalizeTeamGame(g: TeamGame, teamId: string): CalendarEvent {
-  const dateTime = g.dateTime ?? '';
-  return {
-    id: g.id,
-    eventType: g.type === 'Game' ? 'game' : 'practice',
-    date: dateTime.slice(0, 10),
-    startTime: dateTime.slice(11, 16),
-    title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
-    status: (g.cancelled === true) ? 'cancelled' : 'scheduled',
-    fieldName: g.location,
-    sourceType: 'team-game',
-    sourceId: g.id,
-    teamId,
-  };
-}
+// normalizeTeamGame is shared from @/lib/game-shape.
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 

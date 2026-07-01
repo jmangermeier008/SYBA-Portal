@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { collection, query, orderBy, doc, addDoc, deleteDoc, getDocs, writeBatch, where, Timestamp } from 'firebase/firestore';
-import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin } from 'lucide-react';
+import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
@@ -25,7 +25,7 @@ export default function AdminAnnouncementsPage() {
   const { toast } = useToast();
 
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ title: '', body: '', pinned: false, isGlobal: false });
+  const [form, setForm] = useState({ title: '', body: '', pinned: false, isGlobal: false, isUrgent: false });
   const [saving, setSaving] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);
@@ -47,6 +47,7 @@ export default function AdminAnnouncementsPage() {
         body: form.body.trim(),
         pinned: form.pinned,
         isGlobal: form.isGlobal,
+        isUrgent: form.isUrgent,
         ...(form.isGlobal ? {} : { sport: activeSport }),
         publishedAt: new Date().toISOString(),
         publishedBy: profile?.displayName || 'Admin',
@@ -78,7 +79,7 @@ export default function AdminAnnouncementsPage() {
 
       toast({ title: 'Announcement Published' });
       setAddOpen(false);
-      setForm({ title: '', body: '', pinned: false, isGlobal: false });
+      setForm({ title: '', body: '', pinned: false, isGlobal: false, isUrgent: false });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -160,11 +161,16 @@ export default function AdminAnnouncementsPage() {
         ) : (
           <div className="space-y-4">
             {sorted.map((ann) => (
-              <Card key={ann.id} className={`border-none shadow-md ${ann.pinned ? 'border-l-4 border-l-primary' : ''}`}>
+              <Card key={ann.id} className={`border-none shadow-md ${ann.isUrgent ? 'border-l-4 border-l-destructive' : ann.pinned ? 'border-l-4 border-l-primary' : ''}`}>
                 <CardContent className="p-3">
                   <div className="flex justify-between items-start gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
+                        {ann.isUrgent && (
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0 rounded-full">
+                            <AlertTriangle className="h-2.5 w-2.5 mr-1" /> Urgent
+                          </Badge>
+                        )}
                         {ann.pinned && (
                           <Badge variant="default" className="text-[10px] px-1.5 py-0 rounded-full">
                             <Pin className="h-2.5 w-2.5 mr-1" /> Pinned
@@ -244,6 +250,19 @@ export default function AdminAnnouncementsPage() {
                   Association-Wide Alert
                 </Label>
                 <p className="text-xs text-muted-foreground">Show this notification in all sport workspaces (Baseball &amp; Football).</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="isUrgent"
+                checked={form.isUrgent}
+                onCheckedChange={(v) => setForm(f => ({ ...f, isUrgent: v }))}
+              />
+              <div>
+                <Label htmlFor="isUrgent" className="cursor-pointer">
+                  Mark as urgent
+                </Label>
+                <p className="text-xs text-muted-foreground">Shows as an attention-grabbing banner on parent dashboards until dismissed.</p>
               </div>
             </div>
           </div>

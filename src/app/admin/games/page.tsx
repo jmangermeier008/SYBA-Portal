@@ -22,6 +22,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { format, parseISO, startOfDay, eachWeekOfInterval, addDays, isBefore, isAfter } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { normalizeGame, toDateTime } from '@/lib/game-shape';
 import {
   parseGameScheduleCSV, validateGameRows, downloadGameTemplate,
   type ParsedGame, type ValidationError,
@@ -205,26 +206,7 @@ export default function AdminGamesPage() {
     const scoped = selectedSeasonId && selectedSeasonId !== 'all-seasons'
       ? allGames.filter(g => g.seasonId === selectedSeasonId)
       : allGames;
-    return scoped.map(g => ({
-      id: g.id,
-      eventType: g.type === 'game' ? 'game' as const : 'practice' as const,
-      date: g.date,
-      startTime: g.time,
-      title: g.type === 'game'
-        ? (g.opponentName && g.teamName
-            ? `${g.teamName} vs. ${g.opponentName}`
-            : g.homeTeamName && g.awayTeamName
-              ? `${g.homeTeamName} vs. ${g.awayTeamName}`
-              : 'Game')
-        : g.teamName ? `${g.teamName} Practice` : 'Practice',
-      status: g.status ?? 'scheduled',
-      fieldName: g.fieldName,
-      notes: g.scrimmageNote || g.notes,
-      division: g.division,
-      divisionId: g.divisionId,
-      sourceType: 'global-game' as const,
-      sourceId: g.id,
-    }));
+    return scoped.map(normalizeGame);
   }, [allGames, selectedSeasonId]);
 
   const teamsQuery = useMemoFirebase(() => {
@@ -349,7 +331,7 @@ export default function AdminGamesPage() {
       id: game.id,
       seasonId: game.seasonId ?? activeSeason?.id ?? '',
       type: form.type === 'game' ? 'Game' : 'Practice',
-      dateTime: `${form.date}T${form.time}:00`,
+      dateTime: toDateTime(form.date, form.time),
       location: isFootballAway ? form.awayLocation : fieldMap[form.fieldId] ?? '',
       fieldId: isFootballAway ? '' : form.fieldId,
       cancelled: game.status === 'cancelled',
@@ -440,7 +422,7 @@ export default function AdminGamesPage() {
           if (form.teamId) {
             batch.set(doc(db, 'teams', form.teamId, 'games', practiceId), {
               id: practiceId, seasonId: activeSeason.id, teamId: form.teamId,
-              type: 'Practice', dateTime: `${date}T${form.time}:00`,
+              type: 'Practice', dateTime: toDateTime(date, form.time),
               location: fieldMap[form.fieldId] ?? '', fieldId: form.fieldId,
               cancelled: false, isRecurring: true, recurrenceId, createdAt: Timestamp.now(),
             });
@@ -945,7 +927,7 @@ export default function AdminGamesPage() {
           // coaches and parents can see imported games — same shapes as create mode.
           const mirrorBase = {
             id, seasonId: activeSeason?.id ?? '',
-            dateTime: `${row.date}T${row.time}:00`,
+            dateTime: toDateTime(row.date, row.time),
             location: isAwayGame ? (row.field ?? '') : (matchedField?.name ?? row.field ?? ''),
             fieldId: isAwayGame ? '' : (matchedField?.id ?? ''),
             cancelled: false, createdAt: Timestamp.now(),
