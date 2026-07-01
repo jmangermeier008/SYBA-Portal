@@ -167,16 +167,23 @@ export function PlayerCard({
                           <LifeBuoy className="h-4 w-4" /> Emergency Contacts
                         </h4>
                         {emergencyContacts.map((contact, i) => (
-                          <div key={i} className="bg-secondary/20 p-4 rounded-xl flex justify-between items-center border">
+                          <div key={i} className="bg-secondary/20 p-4 rounded-xl flex justify-between items-center gap-2 border">
                             <div>
                               <p className="font-bold text-sm">{contact.name}</p>
                               <p className="text-xs text-muted-foreground">{contact.relationship}</p>
                             </div>
-                            <Button size="sm" variant="outline" className="rounded-full shadow-sm bg-white" asChild>
-                              <a href={`tel:${contact.phone}`}>
-                                <Phone className="h-3 w-3 mr-2 text-primary" /> {contact.phone}
-                              </a>
-                            </Button>
+                            <div className="flex gap-2 shrink-0">
+                              <Button size="sm" variant="outline" className="rounded-full shadow-sm bg-white" asChild>
+                                <a href={`tel:${contact.phone}`}>
+                                  <Phone className="h-3 w-3 mr-2 text-primary" /> {contact.phone}
+                                </a>
+                              </Button>
+                              <Button size="sm" variant="outline" className="rounded-full shadow-sm bg-white" asChild disabled={!contact.phone}>
+                                <a href={`sms:${contact.phone}`}>
+                                  <MessageSquare className="h-3 w-3 mr-2 text-primary" /> Text
+                                </a>
+                              </Button>
+                            </div>
                           </div>
                         ))}
                       </div>
