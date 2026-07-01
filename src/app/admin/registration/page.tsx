@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, getDoc, getDocs, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -120,9 +120,13 @@ export default function RegistrationDashboardPage() {
     return collectionGroup(db, 'players');
   }, [db, isAdmin, isBoardMember]);
 
+  // Coaches are surfaced from userProfiles. Roles now live in the per-sport
+  // `sportRoles` map (legacy `roles`/`role` fields are no longer written), so we
+  // fetch all profiles and filter for coach-ness in memory below — Firestore
+  // can't OR across the new sportRoles map and the legacy fields in one query.
   const coachQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
-    return query(collection(db, 'userProfiles'), where('roles', 'array-contains-any', ['Coach', 'Board Member', 'Admin']));
+    return collection(db, 'userProfiles');
   }, [db, isAdmin, isBoardMember]);
 
   const clearancesQuery = useMemoFirebase(() => {
@@ -137,7 +141,23 @@ export default function RegistrationDashboardPage() {
 
   const { data: allEnrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<PlayerWithDocs>(playersQuery);
-  const { data: coaches, isLoading: loadingCoaches } = useCollection<CoachProfile>(coachQuery);
+  const { data: allProfiles, isLoading: loadingCoaches } = useCollection<CoachProfile>(coachQuery);
+
+  // Keep only profiles that hold a staff role (Coach / Board Member / Admin) for
+  // the active sport, plus Site Admins and any legacy-role holders not yet migrated.
+  const coaches = useMemo(() => {
+    if (!allProfiles) return [] as CoachProfile[];
+    const STAFF_ROLES = ['Coach', 'Board Member', 'Admin'];
+    return allProfiles.filter(p => {
+      const prof = p as any;
+      if (prof.isSiteAdmin === true) return true;
+      const sportRoles: string[] = (activeSport && prof.sportRoles?.[activeSport]) || [];
+      if (sportRoles.some((r: string) => STAFF_ROLES.includes(r))) return true;
+      // Legacy fallback for profiles that predate the sportRoles migration.
+      const legacyRoles: string[] = prof.roles ?? (prof.role ? [prof.role] : []);
+      return legacyRoles.some((r: string) => STAFF_ROLES.includes(r));
+    });
+  }, [allProfiles, activeSport]);
   const { data: allClearances } = useCollection<any>(clearancesQuery);
   const { data: allDivisions } = useCollection<Division>(divisionsQuery);
 
@@ -384,6 +404,52 @@ export default function RegistrationDashboardPage() {
       } else {
         toast({ variant: 'destructive', title: 'Update Failed', description: error.message });
       }
+      return false;
+    }
+  };
+
+  // Admin uploads a clearance document on behalf of a coach who hasn't submitted
+  // one. The doc is auto-approved (the admin is the verifier). Uploads route
+  // through /api/upload with the admin's ID token — the route allows staff to
+  // write to another user's compliance path.
+  const handleUploadClearance = async (
+    coachUserId: string,
+    type: string,
+    expirationDate: string,
+    file: File
+  ): Promise<boolean> => {
+    if (!db || !user || !expirationDate) return false;
+    try {
+      const idToken = await user.getIdToken();
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', `compliance/${coachUserId}/${type}_${Date.now()}`);
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+      const now = new Date().toISOString();
+      const clearanceRef = doc(db, 'userProfiles', coachUserId, 'clearances', type);
+      await setDoc(clearanceRef, {
+        id: type,
+        userId: coachUserId,
+        type,
+        status: 'Approved',
+        fileUrl: data.url as string,
+        expirationDate,
+        verifiedBy: user.uid,
+        verifiedByName: profile?.displayName || 'Admin',
+        verifiedAt: now,
+        updatedAt: now,
+      });
+      toast({ title: 'Clearance Uploaded', description: 'Document saved and approved for this volunteer.' });
+      return true;
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Upload Failed', description: error.message });
       return false;
     }
   };
@@ -727,6 +793,7 @@ export default function RegistrationDashboardPage() {
               isLoading={loadingCoaches}
               isSiteAdmin={isSiteAdmin}
               onUpdateStatus={handleUpdateClearanceStatus}
+              onUploadClearance={handleUploadClearance}
               onDeleteCoach={handleDeleteCoach}
             />
           </TabsContent>

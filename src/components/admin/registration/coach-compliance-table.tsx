@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/hooks/use-toast';
 import {
   CheckCircle2,
   XCircle,
@@ -21,6 +23,7 @@ import {
   ShieldCheck,
   Trash2,
   Download,
+  Upload,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -63,7 +66,178 @@ interface CoachComplianceTableProps {
     status: 'Approved' | 'Rejected',
     reason?: string
   ) => Promise<boolean>;
+  onUploadClearance: (
+    coachUserId: string,
+    type: string,
+    expirationDate: string,
+    file: File
+  ) => Promise<boolean>;
   onDeleteCoach: (coach: CoachProfile) => Promise<boolean>;
+}
+
+const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+
+const CLEARANCE_SLOTS: { type: string; label: string }[] = [
+  { type: 'ChildAbuse', label: 'PA Child Abuse History Clearance' },
+  { type: 'CriminalRecord', label: 'PA State Police Criminal Record Check' },
+];
+
+/** Admin-side upload of a clearance on behalf of a coach who hasn't submitted one. */
+function ManualClearanceUpload({
+  coachUserId,
+  type,
+  hasFile,
+  onUpload,
+}: {
+  coachUserId: string;
+  type: string;
+  hasFile: boolean;
+  onUpload: (coachUserId: string, type: string, expirationDate: string, file: File) => Promise<boolean>;
+}) {
+  const { toast } = useToast();
+  const [expiration, setExpiration] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const inputId = `admin-upload-${coachUserId}-${type}`;
+
+  const handleFile = async (file: File) => {
+    if (!expiration) return;
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast({ variant: 'destructive', title: 'Invalid File Type', description: 'Please upload a PDF, JPEG, or PNG.' });
+      return;
+    }
+    if (file.size > MAX_SIZE) {
+      toast({ variant: 'destructive', title: 'File Too Large', description: 'Maximum file size is 5MB.' });
+      return;
+    }
+    setUploading(true);
+    const ok = await onUpload(coachUserId, type, expiration, file);
+    setUploading(false);
+    if (ok) setExpiration('');
+  };
+
+  return (
+    <div className="rounded-lg border border-dashed p-3 space-y-2 bg-white/60">
+      <p className="text-xs font-semibold">
+        {hasFile ? 'Replace document (admin upload)' : 'Upload document on behalf of coach'}
+      </p>
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+        <div className="flex-1 space-y-1">
+          <Label className="text-[10px] uppercase text-muted-foreground">Expiration Date</Label>
+          <Input
+            type="date"
+            value={expiration}
+            onChange={e => setExpiration(e.target.value)}
+            className="rounded-lg h-9"
+          />
+        </div>
+        <Button
+          size="sm"
+          className="rounded-lg h-9"
+          disabled={!expiration || uploading}
+          onClick={() => document.getElementById(inputId)?.click()}
+        >
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+          Upload & Approve
+        </Button>
+        <input
+          id={inputId}
+          type="file"
+          className="hidden"
+          accept=".pdf,.jpg,.jpeg,.png"
+          onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.currentTarget.value = '';
+          }}
+        />
+      </div>
+      {!expiration && (
+        <p className="text-[10px] text-muted-foreground">Enter an expiration date to enable upload.</p>
+      )}
+    </div>
+  );
+}
+
+/** Renders both clearance slots for one coach, with view/review actions and admin upload. */
+function ClearanceAuditList({
+  u,
+  ca,
+  cr,
+  onUploadClearance,
+  onReview,
+}: {
+  u: CoachProfile;
+  ca?: ClearanceRecord;
+  cr?: ClearanceRecord;
+  onUploadClearance: (coachUserId: string, type: string, expirationDate: string, file: File) => Promise<boolean>;
+  onReview: (clearance: ClearanceRecord) => void;
+}) {
+  const slots = CLEARANCE_SLOTS.map(s => ({
+    ...s,
+    record: s.type === 'ChildAbuse' ? ca : cr,
+  }));
+  return (
+    <div className="space-y-4">
+      {slots.map(({ type, label, record: c }) => (
+        <Card key={type} className="border bg-secondary/10">
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FileText className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-bold text-sm">{label}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {c ? `Expires: ${c.expirationDate}` : 'Not submitted'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {getStatusIcon(c?.status)}
+                <Badge variant="outline" className="text-[10px]">{c?.status ?? 'Missing'}</Badge>
+              </div>
+            </div>
+            {c?.verifiedBy && c?.verifiedAt && (
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-white/50 p-2 rounded">
+                <History className="h-3 w-3" />
+                <span>
+                  Verified by {c.verifiedByName} on {format(new Date(c.verifiedAt), 'MMM d, h:mm a')}
+                </span>
+              </div>
+            )}
+            {c?.fileUrl && (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
+                  <a href={c.fileUrl} target="_blank" rel="noreferrer">
+                    <Eye className="h-4 w-4 mr-2" /> View
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
+                  <a href={c.fileUrl} download target="_blank" rel="noreferrer">
+                    <Download className="h-4 w-4 mr-2" /> Download
+                  </a>
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="flex-1 rounded-lg"
+                  onClick={() => onReview(c)}
+                >
+                  Review Decision
+                </Button>
+              </div>
+            )}
+            <ManualClearanceUpload
+              coachUserId={u.id}
+              type={type}
+              hasFile={!!c?.fileUrl}
+              onUpload={onUploadClearance}
+            />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
 }
 
 function getStatusIcon(status?: string) {
@@ -81,6 +255,7 @@ export function CoachComplianceTable({
   isLoading,
   isSiteAdmin,
   onUpdateStatus,
+  onUploadClearance,
   onDeleteCoach,
 }: CoachComplianceTableProps) {
   const isMobile = useIsMobile();
@@ -215,58 +390,13 @@ export function CoachComplianceTable({
                               <p className="text-xs text-muted-foreground mt-0.5">{u.email}</p>
                             </DialogHeader>
                             <ScrollArea className="flex-1 p-6">
-                              <div className="space-y-4">
-                                {[ca, cr].filter(Boolean).map((c) => (
-                                  <Card key={c!.id} className="border bg-secondary/10">
-                                    <CardContent className="p-4 space-y-4">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                          <FileText className="h-5 w-5 text-primary" />
-                                          <div>
-                                            <p className="font-bold text-sm">{c!.type}</p>
-                                            <p className="text-[10px] text-muted-foreground">Expires: {c!.expirationDate}</p>
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          {getStatusIcon(c!.status)}
-                                          <Badge variant="outline" className="text-[10px]">{c!.status}</Badge>
-                                        </div>
-                                      </div>
-                                      {c!.verifiedBy && c!.verifiedAt && (
-                                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-white/50 p-2 rounded">
-                                          <History className="h-3 w-3" />
-                                          <span>
-                                            Verified by {c!.verifiedByName} on {format(new Date(c!.verifiedAt), 'MMM d, h:mm a')}
-                                          </span>
-                                        </div>
-                                      )}
-                                      <div className="flex gap-2">
-                                        <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
-                                          <a href={c!.fileUrl} target="_blank" rel="noreferrer">
-                                            <Eye className="h-4 w-4 mr-2" /> View
-                                          </a>
-                                        </Button>
-                                        <Button variant="outline" size="sm" className="flex-1 rounded-lg" asChild>
-                                          <a href={c!.fileUrl} download target="_blank" rel="noreferrer">
-                                            <Download className="h-4 w-4 mr-2" /> Download
-                                          </a>
-                                        </Button>
-                                        <Button
-                                          variant="default"
-                                          size="sm"
-                                          className="flex-1 rounded-lg"
-                                          onClick={() => setReviewingClearance({ userId: u.id, clearance: c! })}
-                                        >
-                                          Review Decision
-                                        </Button>
-                                      </div>
-                                    </CardContent>
-                                  </Card>
-                                ))}
-                                {[ca, cr].filter(Boolean).length === 0 && (
-                                  <p className="text-sm text-muted-foreground text-center py-6">No clearance documents on file.</p>
-                                )}
-                              </div>
+                              <ClearanceAuditList
+                                u={u}
+                                ca={ca}
+                                cr={cr}
+                                onUploadClearance={onUploadClearance}
+                                onReview={c => setReviewingClearance({ userId: u.id, clearance: c })}
+                              />
                             </ScrollArea>
                           </div>
                         </DialogContent>

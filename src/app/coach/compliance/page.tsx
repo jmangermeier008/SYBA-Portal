@@ -29,6 +29,10 @@ export default function CoachCompliancePage() {
   const { toast } = useToast();
   
   const [uploading, setUploading] = useState<string | null>(null);
+  // Expiration date per clearance type — controlled so we can gate the upload
+  // button until a date is entered (avoids the "picked a file, nothing happened"
+  // confusion when the date was left blank).
+  const [expDates, setExpDates] = useState<Record<string, string>>({});
 
   const clearancesQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -192,39 +196,50 @@ export default function CoachCompliancePage() {
                           )}
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase font-bold text-muted-foreground">Document Expiration Date</Label>
-                              <Input 
-                                type="date" 
-                                className="rounded-xl"
-                                id={`exp-${clearanceType.id}`}
-                                defaultValue={clearance?.expirationDate || ''}
-                              />
-                            </div>
-                            <div className="relative">
-                              <Button 
-                                className="w-full rounded-xl" 
-                                disabled={uploading === clearanceType.id}
-                                onClick={() => {
-                                  const fileInput = document.getElementById(`file-${clearanceType.id}`) as HTMLInputElement;
-                                  fileInput.click();
-                                }}
-                              >
-                                {uploading === clearanceType.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                                {clearance ? "Update / Replace Document" : "Upload Document"}
-                              </Button>
-                              <input 
-                                type="file" 
-                                id={`file-${clearanceType.id}`}
-                                className="hidden"
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={(e) => {
-                                  const expInput = document.getElementById(`exp-${clearanceType.id}`) as HTMLInputElement;
-                                  const file = e.target.files?.[0];
-                                  if (file) handleFileUpload(clearanceType.id, expInput.value, file);
-                                }}
-                              />
-                            </div>
+                            {(() => {
+                              const expValue = expDates[clearanceType.id] ?? clearance?.expirationDate ?? '';
+                              return (
+                                <>
+                                  <div className="space-y-2">
+                                    <Label className="text-xs uppercase font-bold text-muted-foreground">Document Expiration Date</Label>
+                                    <Input
+                                      type="date"
+                                      className="rounded-xl"
+                                      id={`exp-${clearanceType.id}`}
+                                      value={expValue}
+                                      onChange={(e) => setExpDates(prev => ({ ...prev, [clearanceType.id]: e.target.value }))}
+                                    />
+                                  </div>
+                                  <div className="relative">
+                                    <Button
+                                      className="w-full rounded-xl"
+                                      disabled={uploading === clearanceType.id || !expValue}
+                                      onClick={() => {
+                                        const fileInput = document.getElementById(`file-${clearanceType.id}`) as HTMLInputElement;
+                                        fileInput.click();
+                                      }}
+                                    >
+                                      {uploading === clearanceType.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                                      {clearance ? "Update / Replace Document" : "Upload Document"}
+                                    </Button>
+                                    {!expValue && (
+                                      <p className="text-[11px] text-muted-foreground mt-1">Enter the document's expiration date to enable upload.</p>
+                                    )}
+                                    <input
+                                      type="file"
+                                      id={`file-${clearanceType.id}`}
+                                      className="hidden"
+                                      accept=".pdf,.jpg,.jpeg,.png"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleFileUpload(clearanceType.id, expValue, file);
+                                        e.currentTarget.value = '';
+                                      }}
+                                    />
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
