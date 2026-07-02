@@ -21,7 +21,7 @@ function ComplianceBar({ label, worked, pending, required }: { label: string; wo
         <span className="text-muted-foreground">{label}</span>
         <span className="font-semibold">
           {worked} / {required}
-          {pending > 0 && <span className="text-amber-600 font-normal"> (+{pending} pending)</span>}
+          {pending > 0 && <span className="text-amber-600 font-normal"> (+{pending} scheduled)</span>}
         </span>
       </div>
       <div className="h-2 w-full rounded-full bg-secondary overflow-hidden mt-1">
@@ -145,6 +145,11 @@ export function FamilyComplianceTracker() {
         <div className="space-y-2.5">
           <ComplianceBar label="Concessions" worked={compliance.concessions.worked} pending={compliance.concessions.pending} required={concessionTarget} />
           <ComplianceBar label="Tagging" worked={compliance.tagging.worked} pending={compliance.tagging.pending} required={taggingTarget} />
+          {(compliance.concessions.pending > 0 || compliance.tagging.pending > 0) && (
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Scheduled shifts count toward your total after you work them.
+            </p>
+          )}
         </div>
 
         {!compliance.isComplete && (

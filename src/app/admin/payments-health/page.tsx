@@ -1,10 +1,20 @@
 "use client";
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collection, collectionGroup, query, orderBy, limit } from 'firebase/firestore';
+import { collection, collectionGroup, query, orderBy, limit, doc, updateDoc, increment } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 import {
   Loader2,
   Lock,
@@ -13,6 +23,8 @@ import {
   Clock,
   CreditCard,
   TrendingUp,
+  BadgeCheck,
+  X,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -40,12 +52,16 @@ interface PaymentEvent {
   failedEnrollmentIds?: string[];
   amountTotal?: number;
   createdAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 interface PendingEnrollment {
   id: string;
   playerId?: string;
   parentUserId?: string;
+  seasonId?: string;
+  divisionId?: string;
   paymentStatus?: string;
   payment_status?: string;
   registrationFeeAmount?: number;
@@ -53,6 +69,7 @@ interface PendingEnrollment {
   registered_at?: string;
   updatedAt?: string;
   sport?: string;
+  _refPath?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,10 +126,14 @@ function statusDot(status: string) {
 
 export default function PaymentsHealthPage() {
   const db = useFirestore();
-  const { isSiteAdmin, loading: loadingUser } = useUser();
+  const { user, isSiteAdmin, loading: loadingUser } = useUser();
   const { isAdmin } = useSport();
+  const { toast } = useToast();
 
   const canView = isAdmin || isSiteAdmin;
+
+  const [markPaidTarget, setMarkPaidTarget] = useState<PendingEnrollment | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   // ── Queries — ALL before any early returns ─────────────────────────────────
 
@@ -132,7 +153,7 @@ export default function PaymentsHealthPage() {
   // ── Derived data ───────────────────────────────────────────────────────────
 
   const needsAttention = useMemo(
-    () => (events ?? []).filter(e => e.status === 'error' || e.status === 'needs-attention'),
+    () => (events ?? []).filter(e => (e.status === 'error' || e.status === 'needs-attention') && !e.resolvedAt),
     [events]
   );
 
@@ -149,6 +170,60 @@ export default function PaymentsHealthPage() {
     () => pending.filter(e => ageInMs(enrollmentTimestamp(e)) > STALE_PENDING_MS).length,
     [pending]
   );
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  // Money collected outside Stripe (cash/check) — mark the enrollment paid
+  // using the same offline_<id> convention as admin manual registration, and
+  // count the roster spot toward division capacity like the webhook would.
+  const handleMarkPaidOffline = async (e: PendingEnrollment) => {
+    if (!db) return;
+    const refPath = e._refPath ?? (e.parentUserId ? `userProfiles/${e.parentUserId}/enrollments/${e.id}` : null);
+    if (!refPath) {
+      toast({ variant: 'destructive', title: 'Cannot update', description: 'This enrollment record has no parent reference.' });
+      return;
+    }
+    setActionBusy(e.id);
+    try {
+      await updateDoc(doc(db, refPath), {
+        paymentStatus: 'paid',
+        payment_status: 'paid',
+        stripe_payment_id: `offline_${e.id}`,
+        markedPaidOfflineBy: user?.uid ?? '',
+        updatedAt: new Date().toISOString(),
+      });
+      if (e.seasonId && e.divisionId) {
+        try {
+          await updateDoc(doc(db, 'seasons', e.seasonId, 'divisions', e.divisionId), { registeredCount: increment(1) });
+        } catch (err) {
+          // Division may have been deleted — the recount tool reconciles any drift
+          console.warn('[payments-health] capacity increment skipped:', err);
+        }
+      }
+      toast({ title: 'Marked Paid (Offline)', description: 'The registration is now recorded as paid.' });
+      setMarkPaidTarget(null);
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Update Failed', description: err.message });
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const handleDismissEvent = async (e: PaymentEvent) => {
+    if (!db) return;
+    setActionBusy(e.id);
+    try {
+      await updateDoc(doc(db, 'paymentEvents', e.id), {
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: user?.uid ?? '',
+      });
+      toast({ title: 'Dismissed', description: 'The event is marked as resolved.' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Dismiss Failed', description: err.message });
+    } finally {
+      setActionBusy(null);
+    }
+  };
 
   // ── Guards AFTER all hooks ───────────────────────────────────────────────────
 
@@ -267,6 +342,18 @@ export default function PaymentsHealthPage() {
                             failed enrollments: {e.failedEnrollmentIds.join(', ')}
                           </p>
                         )}
+                        <div className="pt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="min-h-[36px]"
+                            disabled={actionBusy === e.id}
+                            onClick={() => handleDismissEvent(e)}
+                          >
+                            {actionBusy === e.id ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <X className="h-3.5 w-3.5 mr-1.5" />}
+                            Dismiss as resolved
+                          </Button>
+                        </div>
                       </CardContent>
                     </Card>
                   ))}
@@ -302,9 +389,21 @@ export default function PaymentsHealthPage() {
                               <p className="text-xs font-mono text-muted-foreground break-all">player: {e.playerId ?? '—'}</p>
                               <p className="text-xs font-mono text-muted-foreground break-all">parent: {e.parentUserId ?? '—'}</p>
                             </div>
-                            <span className="text-sm text-muted-foreground shrink-0">
-                              {relativeTime(enrollmentTimestamp(e))}
-                            </span>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="text-sm text-muted-foreground">
+                                {relativeTime(enrollmentTimestamp(e))}
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="min-h-[36px]"
+                                disabled={actionBusy === e.id}
+                                onClick={() => setMarkPaidTarget(e)}
+                              >
+                                <BadgeCheck className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+                                Mark paid (offline)
+                              </Button>
+                            </div>
                           </CardContent>
                         </Card>
                       );
@@ -350,6 +449,33 @@ export default function PaymentsHealthPage() {
             </section>
           </div>
         )}
+
+        <Dialog open={!!markPaidTarget} onOpenChange={(open) => { if (!open && !actionBusy) setMarkPaidTarget(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Mark as Paid (Offline)?</DialogTitle>
+              <DialogDescription>
+                Only use this when the family paid outside Stripe — cash, check, or a payment you
+                confirmed in the Stripe Dashboard that never synced. This records
+                {markPaidTarget ? ` ${formatCents(markPaidTarget.registrationFeeAmount)}` : ' the registration'} as
+                paid and takes a roster spot in the division.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setMarkPaidTarget(null)} disabled={!!actionBusy}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700"
+                disabled={!!actionBusy}
+                onClick={() => markPaidTarget && handleMarkPaidOffline(markPaidTarget)}
+              >
+                {actionBusy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
+                Mark Paid
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

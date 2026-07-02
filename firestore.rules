@@ -127,11 +127,16 @@ service cloud.firestore {
         request.resource.data.get('isSiteAdmin', false) == false &&
         !('sportRoles' in request.resource.data)
       );
-      // Users can update their own profile but cannot change their own roles.
-      // Role/permission changes require Admin or Site Admin.
+      // Users can update their own profile but cannot change their own roles
+      // or grant themselves coach access (complianceStatus gates the coach
+      // portal). Role/permission changes require Admin or Site Admin.
       allow update: if (isUser(userId) &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles', 'isSiteAdmin', 'sportRoles'])
-        ) || isAdmin() || isSiteAdmin();
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles', 'isSiteAdmin', 'sportRoles', 'complianceStatus', 'manualComplianceOverride'])
+        ) ||
+        // Board Members review clearances, so they may sync the compliance
+        // gate on other profiles — but touch nothing else.
+        (isBoardMember() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['complianceStatus', 'updatedAt'])) ||
+        isAdmin() || isSiteAdmin();
       allow delete: if isAdmin() || isSiteAdmin();
 
       match /clearances/{clearanceId} {
@@ -466,7 +471,12 @@ service cloud.firestore {
 
     match /paymentEvents/{eventId} {
       allow read: if isAdmin() || isBoardMember();
-      allow write: if false;
+      // Events are written exclusively by the Stripe webhook (Admin SDK).
+      // Admins may only mark an event as resolved/dismissed from the
+      // payments-health page — never alter the event itself.
+      allow create, delete: if false;
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolvedAt', 'resolvedBy']);
     }
   }
 }

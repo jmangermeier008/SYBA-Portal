@@ -6,7 +6,7 @@ import { useSport } from '@/firebase/sport-context';
 import { collection, doc, query, orderBy, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, Megaphone, Trash2 } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, Megaphone, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
@@ -18,7 +18,8 @@ import type { Notification, NotificationType, NotificationRelatedDocType } from 
 function NotifIcon({ type }: { type: NotificationType }) {
   const base = 'h-5 w-5 shrink-0';
   if (type === 'shiftMoved' || type === 'shiftCancelled' ||
-      type === 'concessionSignupConfirmed' || type === 'concessionSignupCancelled') {
+      type === 'concessionSignupConfirmed' || type === 'concessionSignupCancelled' ||
+      type === 'concessionShiftReminder') {
     return <ShoppingCart className={cn(base, 'text-amber-500')} />;
   }
   if (type === 'practiceSlotCancelled' || type === 'practiceSlotChanged') {
@@ -26,6 +27,12 @@ function NotifIcon({ type }: { type: NotificationType }) {
   }
   if (type === 'announcement') {
     return <Megaphone className={cn(base, 'text-primary')} />;
+  }
+  if (type === 'clearanceApproved') {
+    return <ShieldCheck className={cn(base, 'text-green-600')} />;
+  }
+  if (type === 'clearanceRejected') {
+    return <ShieldAlert className={cn(base, 'text-destructive')} />;
   }
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }
@@ -37,6 +44,7 @@ function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, i
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
   if (relatedDocType === 'game') return isCoach ? '/coach/schedules' : '/parent/schedules';
   if (relatedDocType === 'announcement') return isCoach ? '/coach/announcements' : '/parent/announcements';
+  if (relatedDocType === 'clearance') return '/coach/compliance';
   return null;
 }
 

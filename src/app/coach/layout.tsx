@@ -27,8 +27,10 @@ export default function CoachLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // Hard lock: coach role present but no compliance clearance and no admin/board bypass
-  if (isCoach && !hasCoachAccess) {
+  // Hard lock: coach role present but no compliance clearance and no admin/board
+  // bypass. The compliance page itself must stay reachable — it's where the
+  // coach uploads the documents that unlock everything else.
+  if (isCoach && !hasCoachAccess && pathname !== '/coach/compliance') {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 text-center bg-background">
         <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">

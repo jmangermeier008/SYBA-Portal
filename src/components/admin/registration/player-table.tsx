@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { BadgeCheck, CheckCircle2, Circle, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
+import { ArrowUpCircle, BadgeCheck, CheckCircle2, Circle, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
 import { openPrintTab } from '@/lib/print-job';
 import { openDocumentPacket } from '@/lib/document-packet';
@@ -98,6 +98,8 @@ interface PlayerTableProps {
   onDeletePlayer: (player: PlayerWithDocs) => Promise<boolean>;
   /** When provided, unpaid rows get a "Mark as Fee Waived" action */
   onWaiveFee?: (player: PlayerWithDocs, enrollment: EnrollmentRecord) => void;
+  /** When provided, waitlisted rows get a "Promote from Waitlist" action */
+  onPromoteWaitlist?: (player: PlayerWithDocs, enrollment: EnrollmentRecord) => void;
 }
 
 function getPaymentStatus(e?: EnrollmentRecord): string | null {
@@ -137,6 +139,7 @@ export function PlayerTable({
   onAuditSubmit,
   onDeletePlayer,
   onWaiveFee,
+  onPromoteWaitlist,
 }: PlayerTableProps) {
   const isMobile = useIsMobile();
   const { user } = useUser();
@@ -263,7 +266,8 @@ export function PlayerTable({
   // One labeled menu per row, shared by the desktop table and mobile cards.
   const renderRowMenu = (player: PlayerWithDocs, enrollment: EnrollmentRecord | undefined) => {
     const canWaive = !!onWaiveFee && !!enrollment && !['paid', 'fee_waived'].includes(getPaymentStatus(enrollment) ?? '');
-    if (!showLeagueForm && !canWaive && !isSiteAdmin) return null;
+    const canPromote = !!onPromoteWaitlist && !!enrollment && getPaymentStatus(enrollment) === 'waitlisted';
+    if (!showLeagueForm && !canWaive && !canPromote && !isSiteAdmin) return null;
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -278,6 +282,14 @@ export function PlayerTable({
               <Printer className="mr-2 h-4 w-4" /> Print League Forms
             </DropdownMenuItem>
           )}
+          {canPromote && (
+            <DropdownMenuItem
+              disabled={busy}
+              onClick={() => setTimeout(() => onPromoteWaitlist!(player, enrollment!), 0)}
+            >
+              <ArrowUpCircle className="mr-2 h-4 w-4 text-primary" /> Promote from Waitlist
+            </DropdownMenuItem>
+          )}
           {canWaive && (
             <DropdownMenuItem
               disabled={busy}
@@ -288,7 +300,7 @@ export function PlayerTable({
           )}
           {isSiteAdmin && (
             <>
-              {(showLeagueForm || canWaive) && <DropdownMenuSeparator />}
+              {(showLeagueForm || canWaive || canPromote) && <DropdownMenuSeparator />}
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 disabled={busy}

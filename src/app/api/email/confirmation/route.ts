@@ -10,7 +10,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, sport } = await req.json();
+    const { toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, waitlistPromoted, sport } = await req.json();
 
     if (!toEmail) {
       return NextResponse.json({ error: 'Missing toEmail' }, { status: 400 });
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     }
 
     const result = await sendConfirmationEmail({
-      toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, sport,
+      toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, waitlistPromoted, sport,
     });
 
     if (!result.ok) {

@@ -12,6 +12,16 @@ import { collection, doc, setDoc } from 'firebase/firestore';
 import { Loader2, Upload, AlertCircle, Clock, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { format, isBefore, addMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +43,8 @@ export default function CoachCompliancePage() {
   // button until a date is entered (avoids the "picked a file, nothing happened"
   // confusion when the date was left blank).
   const [expDates, setExpDates] = useState<Record<string, string>>({});
+  // Replacing an Approved document resets it to Pending review — confirm first
+  const [confirmReplaceType, setConfirmReplaceType] = useState<string | null>(null);
 
   const clearancesQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -44,6 +56,13 @@ export default function CoachCompliancePage() {
   const handleFileUpload = async (type: string, expirationDate: string, file: File) => {
     if (!user || !db || !expirationDate) {
       toast({ variant: "destructive", title: "Error", description: "Please provide an expiration date." });
+      return;
+    }
+
+    // A clearance that's already expired can't be accepted — catch the typo
+    // before the upload instead of after an admin rejection.
+    if (isBefore(new Date(`${expirationDate}T23:59:59`), new Date())) {
+      toast({ variant: "destructive", title: "Document Already Expired", description: "The expiration date is in the past. Please double-check the date on your document." });
       return;
     }
 
@@ -89,7 +108,19 @@ export default function CoachCompliancePage() {
 
       try {
         await setDoc(clearanceRef, clearanceData);
-        toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
+        // Season-end rule (June 30) is a warning, not a hard block — the board
+        // decides whether a short-dated document is acceptable.
+        const seasonEnd = new Date();
+        seasonEnd.setMonth(5, 30); // June 30 of this year…
+        if (isBefore(seasonEnd, new Date())) seasonEnd.setFullYear(seasonEnd.getFullYear() + 1); // …or next year if already past
+        if (isBefore(new Date(`${expirationDate}T23:59:59`), seasonEnd)) {
+          toast({
+            title: "Uploaded — Expires Before Season End",
+            description: `This document expires before June 30. The board may ask for a renewed copy.`,
+          });
+        } else {
+          toast({ title: "Document Uploaded", description: "Your clearance has been submitted for review." });
+        }
       } catch (firestoreError: any) {
         toast({ variant: "destructive", title: "Upload Failed", description: firestoreError.message || "Could not save clearance record." });
       }
@@ -215,6 +246,10 @@ export default function CoachCompliancePage() {
                                       className="w-full rounded-xl"
                                       disabled={uploading === clearanceType.id || !expValue}
                                       onClick={() => {
+                                        if (clearance?.status === 'Approved') {
+                                          setConfirmReplaceType(clearanceType.id);
+                                          return;
+                                        }
                                         const fileInput = document.getElementById(`file-${clearanceType.id}`) as HTMLInputElement;
                                         fileInput.click();
                                       }}
@@ -250,6 +285,33 @@ export default function CoachCompliancePage() {
             </>
           )}
         </div>
+
+        <AlertDialog open={!!confirmReplaceType} onOpenChange={(open) => { if (!open) setConfirmReplaceType(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Replace an approved document?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This document is already approved. Uploading a new copy sends it back for board
+                review — do this when renewing an expiring clearance.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep Current Document</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const type = confirmReplaceType;
+                  setConfirmReplaceType(null);
+                  if (type) {
+                    const fileInput = document.getElementById(`file-${type}`) as HTMLInputElement;
+                    fileInput?.click();
+                  }
+                }}
+              >
+                Continue to Upload
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );

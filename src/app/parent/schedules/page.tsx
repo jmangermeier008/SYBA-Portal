@@ -64,7 +64,7 @@ export default function ParentSchedulesPage() {
 
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('');
   const [activeTeamId, setActiveTeamId] = useState<string>('');
-  const [filters, setFilters] = useState({ games: true, practices: false, concessions: true, events: true });
+  const [filters, setFilters] = useState({ games: true, practices: true, concessions: true, events: true });
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [allTeamGames, setAllTeamGames] = useState<(TeamGame & { _teamId: string })[]>([]);
   const [loadingAllTeams, setLoadingAllTeams] = useState(false);
@@ -279,7 +279,7 @@ export default function ParentSchedulesPage() {
           isLoading={isLoading}
           filters={filters}
           onFilterChange={handleFilterChange}
-          visibleFilters={['games', 'concessions', 'events']}
+          visibleFilters={['games', 'practices', 'concessions', 'events']}
           onRsvp={selectedPlayerId !== 'all' ? handleRSVP : undefined}
           onConcessionViewDetails={() => router.push('/parent/volunteers')}
           childSelector={childSelector}

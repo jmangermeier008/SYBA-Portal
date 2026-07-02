@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, increment, Timestamp } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -61,6 +61,13 @@ interface CoachProfile {
   email: string;
 }
 
+// The two PA Act 153 clearance docs every coach/volunteer must hold. Labels
+// mirror src/app/coach/compliance/page.tsx so notifications read the same.
+const CLEARANCE_DOCS = [
+  { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance' },
+  { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check' },
+];
+
 function getEnrollmentStatus(e: Enrollment) {
   if (e.fee_waived) return 'fee_waived';
   return e.payment_status ?? e.paymentStatus ?? 'pending';
@@ -90,6 +97,14 @@ export default function RegistrationDashboardPage() {
     reason: string;
     loading: boolean;
   }>({ open: false, player: null, enrollment: null, reason: '', loading: false });
+
+  // Waitlist promotion dialog — opened from the PlayerTable promote action
+  const [promoteDialog, setPromoteDialog] = useState<{
+    open: boolean;
+    player: PlayerWithDocs | null;
+    enrollment: EnrollmentRecord | null;
+    loading: boolean;
+  }>({ open: false, player: null, enrollment: null, loading: false });
 
   // ── Queries — ALL before any early returns ─────────────────────────────────
 
@@ -374,6 +389,54 @@ export default function RegistrationDashboardPage() {
     }
   };
 
+  // Coach portal access is gated on userProfiles.complianceStatus (see
+  // hasCoachAccess in sport-context). Re-derive it from the pair of clearance
+  // docs after every review so approvals actually unlock the coach pages.
+  const syncCoachComplianceStatus = async (
+    userId: string
+  ): Promise<'approved' | 'pending' | 'action_required'> => {
+    if (!db) return 'pending';
+    const snaps = await Promise.all(
+      CLEARANCE_DOCS.map(c => getDoc(doc(db, 'userProfiles', userId, 'clearances', c.id)))
+    );
+    const statuses = snaps.map(s => (s.exists() ? (s.data() as any).status : undefined));
+    const overall = statuses.every(s => s === 'Approved')
+      ? 'approved'
+      : statuses.some(s => s === 'Rejected')
+        ? 'action_required'
+        : 'pending';
+    await updateDoc(doc(db, 'userProfiles', userId), {
+      complianceStatus: overall,
+      updatedAt: new Date().toISOString(),
+    });
+    return overall;
+  };
+
+  const notifyClearanceDecision = async (
+    userId: string,
+    clearanceId: string,
+    status: 'Approved' | 'Rejected',
+    overall: 'approved' | 'pending' | 'action_required',
+    reason?: string
+  ) => {
+    if (!db) return;
+    const label = CLEARANCE_DOCS.find(c => c.id === clearanceId)?.label ?? clearanceId;
+    await setDoc(doc(db, 'notifications', crypto.randomUUID()), {
+      userId,
+      type: status === 'Approved' ? 'clearanceApproved' : 'clearanceRejected',
+      title: status === 'Approved' ? 'Clearance Approved' : 'Clearance Needs Attention',
+      body: status === 'Approved'
+        ? overall === 'approved'
+          ? `Your ${label} was approved. All clearances are complete — your coach tools are now unlocked.`
+          : `Your ${label} was approved. Coach tools unlock once your remaining clearance is approved.`
+        : `Your ${label} was not approved: ${reason?.trim() || 'see the Compliance page for details'}. Please upload a corrected document from the Compliance page.`,
+      relatedDocId: clearanceId,
+      relatedDocType: 'clearance',
+      read: false,
+      createdAt: Timestamp.now(),
+    });
+  };
+
   const handleUpdateClearanceStatus = async (
     userId: string,
     clearanceId: string,
@@ -396,8 +459,6 @@ export default function RegistrationDashboardPage() {
     };
     try {
       await updateDoc(clearanceRef, updateData);
-      toast({ title: `Clearance ${status}`, description: 'The volunteer profile has been updated.' });
-      return true;
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({ path: clearanceRef.path, operation: 'update', requestResourceData: updateData }));
@@ -406,6 +467,20 @@ export default function RegistrationDashboardPage() {
       }
       return false;
     }
+    // The clearance itself is saved — gate sync / notification failures must not
+    // read as a failed review, so they get their own error surface.
+    try {
+      const overall = await syncCoachComplianceStatus(userId);
+      await notifyClearanceDecision(userId, clearanceId, status, overall, reason);
+      toast({ title: `Clearance ${status}`, description: 'The volunteer has been notified.' });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({ path: `userProfiles/${userId}`, operation: 'update', requestResourceData: { complianceStatus: '(derived)' } }));
+      } else {
+        toast({ variant: 'destructive', title: `Clearance ${status}, but access sync failed`, description: error.message });
+      }
+    }
+    return true;
   };
 
   // Admin uploads a clearance document on behalf of a coach who hasn't submitted
@@ -446,6 +521,8 @@ export default function RegistrationDashboardPage() {
         verifiedAt: now,
         updatedAt: now,
       });
+      const overall = await syncCoachComplianceStatus(coachUserId);
+      await notifyClearanceDecision(coachUserId, type, 'Approved', overall);
       toast({ title: 'Clearance Uploaded', description: 'Document saved and approved for this volunteer.' });
       return true;
     } catch (error: any) {
@@ -521,6 +598,81 @@ export default function RegistrationDashboardPage() {
       console.error('[registration] Fee waiver error:', error);
       toast({ title: "Error", description: error.message, variant: 'destructive' });
       setFeeWaiverDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  // Move a waitlisted enrollment to pending_payment and tell the parent a spot
+  // opened. The parent then pays through the normal resume-payment flow on
+  // their dashboard, which is what finalizes the roster spot.
+  const handleConfirmPromote = async () => {
+    const { enrollment, player } = promoteDialog;
+    if (!enrollment?.parentUserId || !db) return;
+    setPromoteDialog(prev => ({ ...prev, loading: true }));
+
+    try {
+      const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
+      // Both status fields exist on enrollments (legacy + current) — set both
+      // so every reader agrees the player is off the waitlist.
+      await updateDoc(enrollmentRef, {
+        paymentStatus: 'pending_payment',
+        payment_status: 'pending_payment',
+        promotedFromWaitlistAt: new Date().toISOString(),
+        promotedByAdminUid: user?.uid ?? '',
+        updatedAt: new Date().toISOString(),
+      });
+
+      const playerName = player ? `${player.firstName} ${player.lastName}` : 'your player';
+      const seasonName = (seasons ?? []).find((s: any) => s.id === enrollment.seasonId)?.name ?? enrollment.seasonId;
+      const divisionName = sportFilteredDivisions.find(d => d.id === enrollment.divisionId)?.name ?? enrollment.divisionId;
+
+      await setDoc(doc(db, 'notifications', crypto.randomUUID()), {
+        userId: enrollment.parentUserId,
+        type: 'announcement',
+        title: 'A Spot Opened Up!',
+        body: `${playerName} has been moved off the waitlist for ${divisionName} (${seasonName}). Complete the registration payment from your dashboard to lock in the spot.`,
+        read: false,
+        createdAt: Timestamp.now(),
+      });
+
+      let emailOk = false;
+      try {
+        const profileSnap = await getDoc(doc(db, 'userProfiles', enrollment.parentUserId));
+        const parentEmail = profileSnap.data()?.email || '';
+        if (parentEmail) {
+          const idToken = await user?.getIdToken();
+          const emailRes = await fetch('/api/email/confirmation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({
+              toEmail: parentEmail,
+              playerName,
+              seasonName,
+              divisionName,
+              waitlistPromoted: true,
+              sport: activeSport,
+            }),
+          });
+          emailOk = emailRes.ok;
+        }
+      } catch (err) {
+        console.warn('[registration] promote email failed:', err);
+      }
+
+      toast({
+        title: 'Promoted from Waitlist',
+        description: emailOk
+          ? 'The family has been emailed to complete payment.'
+          : 'Promoted, but the email could not be sent — please contact the family directly.',
+        ...(emailOk ? {} : { variant: 'destructive' as const }),
+      });
+      setPromoteDialog({ open: false, player: null, enrollment: null, loading: false });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({ path: `userProfiles/${enrollment.parentUserId}/enrollments/${enrollment.id}`, operation: 'update', requestResourceData: { paymentStatus: 'pending_payment' } }));
+      } else {
+        toast({ title: 'Promotion Failed', description: error.message, variant: 'destructive' });
+      }
+      setPromoteDialog(prev => ({ ...prev, loading: false }));
     }
   };
 
@@ -653,6 +805,7 @@ export default function RegistrationDashboardPage() {
                 onAuditSubmit={handleAuditSubmit}
                 onDeletePlayer={handleDeletePlayer}
                 onWaiveFee={(player, enrollment) => setFeeWaiverDialog({ open: true, player, enrollment, reason: '', loading: false })}
+                onPromoteWaitlist={(player, enrollment) => setPromoteDialog({ open: true, player, enrollment, loading: false })}
               />
             )}
           </TabsContent>
@@ -833,6 +986,32 @@ export default function RegistrationDashboardPage() {
             <Button onClick={handleConfirmFeeWaiver} disabled={feeWaiverDialog.loading} className="bg-emerald-600 hover:bg-emerald-700">
               {feeWaiverDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <BadgeCheck className="h-4 w-4 mr-2" />}
               Confirm Waiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={promoteDialog.open} onOpenChange={(open) => { if (!open && !promoteDialog.loading) setPromoteDialog({ open: false, player: null, enrollment: null, loading: false }); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Promote from Waitlist</DialogTitle>
+            <DialogDescription>
+              {promoteDialog.player
+                ? `Move ${promoteDialog.player.firstName} ${promoteDialog.player.lastName} off the waitlist. The family will be emailed to complete the registration payment — the spot is theirs once they pay.`
+                : 'Move this registration off the waitlist.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPromoteDialog({ open: false, player: null, enrollment: null, loading: false })}
+              disabled={promoteDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmPromote} disabled={promoteDialog.loading}>
+              {promoteDialog.loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserCheck className="h-4 w-4 mr-2" />}
+              Promote & Notify
             </Button>
           </DialogFooter>
         </DialogContent>

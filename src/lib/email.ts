@@ -9,6 +9,8 @@ export interface ConfirmationEmailParams {
   divisionName: string;
   isWaitlisted?: boolean;
   feeWaived?: boolean;
+  /** A spot opened and an admin moved this player off the waitlist — payment now due. */
+  waitlistPromoted?: boolean;
   sport?: string;
 }
 
@@ -19,18 +21,22 @@ function sportPrefix(sport?: string): string {
 }
 
 export async function sendConfirmationEmail(params: ConfirmationEmailParams): Promise<{ ok: boolean; error?: string }> {
-  const { toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, sport } = params;
+  const { toEmail, playerName, seasonName, divisionName, isWaitlisted, feeWaived, waitlistPromoted, sport } = params;
 
   if (!toEmail) {
     return { ok: false, error: 'Missing toEmail' };
   }
 
   const prefix = sportPrefix(sport);
-  const subject = isWaitlisted
+  const subject = waitlistPromoted
+    ? `${prefix}A Spot Opened Up — ${seasonName} ${divisionName}`
+    : isWaitlisted
     ? `${prefix}Waitlist Confirmation — ${seasonName} ${divisionName}`
     : `${prefix}Registration Confirmed — ${seasonName} ${divisionName}`;
 
-  const body = isWaitlisted
+  const body = waitlistPromoted
+    ? `Great news! A spot opened up in ${divisionName} for ${seasonName}, and ${playerName} has been moved off the waitlist. Please log in to the portal and complete the registration payment to lock in the spot.`
+    : isWaitlisted
     ? `Hi! You've been added to the waitlist for ${divisionName} in ${seasonName} for ${playerName}. We'll reach out when a spot opens up.`
     : feeWaived
     ? `Hi! ${playerName}'s registration for ${divisionName} in ${seasonName} is complete. Your registration fee has been waived.`

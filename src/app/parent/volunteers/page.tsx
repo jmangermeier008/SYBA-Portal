@@ -16,6 +16,17 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import Link from 'next/link';
+import {
   Loader2,
   CheckCircle2,
   AlertCircle,
@@ -146,7 +157,12 @@ function ShiftCard({
             {pastCutoff ? (
               <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5" />
-                Too close to the shift to cancel online
+                <span>
+                  Too close to the shift to cancel online —{' '}
+                  <Link href="/parent/contact" className="underline font-medium text-primary">
+                    contact the board
+                  </Link>
+                </span>
               </p>
             ) : (
               <Button
@@ -191,7 +207,7 @@ function CommitmentBar({ label, worked, pending, required }: { label: string; wo
         <span className="text-muted-foreground">{label}</span>
         <span className="font-semibold">
           {worked} / {required}
-          {pending > 0 && <span className="text-amber-600 font-normal"> (+{pending} pending)</span>}
+          {pending > 0 && <span className="text-amber-600 font-normal"> (+{pending} scheduled)</span>}
         </span>
       </div>
       <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden mt-1">
@@ -208,6 +224,7 @@ export default function ParentVolunteersPage() {
   const { toast } = useToast();
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
   const [actioningSlotId, setActioningSlotId] = useState<string | null>(null);
+  const [confirmCancelSlot, setConfirmCancelSlot] = useState<ConcessionSlot | null>(null);
   // List filters: which shifts to show (default: open ones) and, when more than
   // one shift type exists, narrow to a single type. 'all' type = no narrowing.
   const [viewFilter, setViewFilter] = useState<'open' | 'mine' | 'all'>('open');
@@ -398,7 +415,7 @@ export default function ParentVolunteersPage() {
         read: false,
         createdAt: Timestamp.now(),
       });
-      toast({ title: 'Signed Up!', description: `You're volunteering for the ${slot.gameDate} shift.` });
+      toast({ title: 'Signed Up!', description: `You're volunteering on ${format(parseISO(slot.gameDate), 'EEEE, MMM d')} from ${formatTime(slot.startTime)} to ${formatTime(slot.endTime)}.` });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -406,7 +423,9 @@ export default function ParentVolunteersPage() {
     }
   };
 
-  const handleCancel = async (slot: ConcessionSlot) => {
+  // Cancel is confirm-gated: handleCancel validates the cutoff and opens the
+  // dialog; performCancel does the actual removal after the parent confirms.
+  const handleCancel = (slot: ConcessionSlot) => {
     if (!db || !profile) return;
     // Enforce the cancellation cutoff here, not just in the list-view UI — the
     // calendar popover's cancel button doesn't get hidden past the cutoff.
@@ -419,6 +438,11 @@ export default function ParentVolunteersPage() {
       });
       return;
     }
+    setConfirmCancelSlot(slot);
+  };
+
+  const performCancel = async (slot: ConcessionSlot) => {
+    if (!db || !profile) return;
     setActioningSlotId(slot.id);
     try {
       const slotRef = doc(db, 'concessionSlots', slot.id);
@@ -481,6 +505,9 @@ export default function ParentVolunteersPage() {
                     <p className="text-xs text-muted-foreground">Volunteer Commitment</p>
                     <CommitmentBar label="Concessions" worked={myProgress.concessions.worked} pending={myProgress.concessions.pending} required={perTypeRequired} />
                     <CommitmentBar label="Tagging" worked={myProgress.tagging.worked} pending={myProgress.tagging.pending} required={perTypeRequired} />
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      Scheduled shifts count toward your total after you work them.
+                    </p>
                   </div>
                 )
               ) : (
@@ -651,6 +678,32 @@ export default function ParentVolunteersPage() {
           }}
         />
         </div>
+
+        <AlertDialog open={!!confirmCancelSlot} onOpenChange={(open) => { if (!open) setConfirmCancelSlot(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Cancel this volunteer spot?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmCancelSlot && (
+                  <>This removes one of your spots on the {format(parseISO(confirmCancelSlot.gameDate), 'EEEE, MMM d')} shift
+                  ({formatTime(confirmCancelSlot.startTime)}–{formatTime(confirmCancelSlot.endTime)}). The spot opens back up for other families.</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep My Spot</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  if (confirmCancelSlot) performCancel(confirmCancelSlot);
+                  setConfirmCancelSlot(null);
+                }}
+              >
+                Cancel Spot
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );
