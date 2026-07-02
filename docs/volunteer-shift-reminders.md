@@ -3,83 +3,45 @@
 Parents who signed up for a concession or tagging shift automatically get a
 reminder **the day before** their shift: an email plus an in-app notification.
 
-This works in two parts:
+How it works:
 
-1. **The portal has a reminder endpoint** (`POST /api/reminders`). Each time it
-   is called, it finds every active shift happening *tomorrow* and sends the
-   reminders. It is safe to call more than once per day — shifts that already
+1. **The portal has a reminder endpoint** (`/api/reminders`). Each time it is
+   called, it finds every active shift happening *tomorrow* and sends the
+   reminders. It's safe to call more than once per day — shifts that already
    got reminders are skipped.
-2. **Google Cloud Scheduler calls that endpoint once a day** (recommended:
-   5:00 PM Eastern). This is a one-time setup, described below.
-
----
+2. **Vercel calls that endpoint once a day automatically** via the cron job
+   defined in `vercel.json` (daily at 21:00 UTC — 5:00 PM Eastern during
+   daylight saving, 4:00 PM in winter).
 
 ## One-time setup
 
-### Step 1 — Create the shared secret
+### Step 1 — Create the secret
 
-The endpoint is protected by a password (a "secret") so only our scheduler can
-trigger it. Generate one long random value, for example by running this in a
-terminal:
+Vercel authenticates its scheduled calls with an environment variable that
+**must be named `CRON_SECRET`**. Generate a long random value:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Copy the output — you'll paste it in the next two steps. Treat it like a
-password.
+### Step 2 — Add it to Vercel
 
-### Step 2 — Add the secret to the live site
+Vercel Dashboard → your project → **Settings → Environment Variables** →
+Add: name `CRON_SECRET`, paste the value, environment **Production** → Save.
 
-The production site needs to know the secret as the environment variable
-`REMINDERS_SECRET` (same place the Stripe keys live):
+> ⚠️ Same class of gotcha as the Stripe webhook secret: if `CRON_SECRET` is
+> missing in Production, the endpoint answers "Not configured" and no
+> reminders go out. A redeploy is needed after adding it.
 
-```bash
-firebase apphosting:secrets:set REMINDERS_SECRET
-# paste the value when prompted
-```
+### Step 3 — Deploy
 
-Then add this to `apphosting.yaml` and deploy:
-
-```yaml
-env:
-  - variable: REMINDERS_SECRET
-    secret: REMINDERS_SECRET
-```
-
-> ⚠️ Same gotcha as the Stripe webhook secret: if the variable isn't present in
-> the **production** environment, the endpoint returns "Not configured" and no
-> reminders go out. Also add `REMINDERS_SECRET` to your local `.env.local` if
-> you want to test locally.
-
-### Step 3 — Create the daily Cloud Scheduler job
-
-Run this once (replace `YOUR_PROJECT_ID`, `YOUR_SITE_URL`, and
-`PASTE_SECRET_HERE`):
-
-```bash
-gcloud scheduler jobs create http volunteer-shift-reminders \
-  --project=YOUR_PROJECT_ID \
-  --location=us-central1 \
-  --schedule="0 17 * * *" \
-  --time-zone="America/New_York" \
-  --uri="https://YOUR_SITE_URL/api/reminders" \
-  --http-method=POST \
-  --headers="Authorization=Bearer PASTE_SECRET_HERE,Content-Type=application/json" \
-  --message-body="{}"
-```
-
-`0 17 * * *` means "every day at 5:00 PM Eastern." Reminders describe shifts
-happening the following day.
-
-You can also create/edit the job in the web console: Google Cloud Console →
-Cloud Scheduler → Create Job.
-
----
+Commit and push. Vercel picks up `vercel.json`, registers the cron job, and
+starts calling the endpoint daily. You can see runs (and trigger a manual one)
+under the project's **Settings → Cron Jobs** in the Vercel dashboard.
 
 ## Testing it
 
-Send reminders for a specific date (instead of tomorrow) with:
+Send reminders for a specific date (instead of tomorrow):
 
 ```bash
 curl -X POST https://YOUR_SITE_URL/api/reminders \
@@ -108,7 +70,8 @@ delete the `remindersSentAt` field from that shift's document in Firestore.
 
 | Symptom | Likely cause |
 |---|---|
-| Response is `401 Unauthorized` | The secret in the scheduler job doesn't match `REMINDERS_SECRET` on the site |
-| Response is `500 Not configured` | `REMINDERS_SECRET` isn't set in the production environment |
+| Response is `401 Unauthorized` | The secret in the request doesn't match `CRON_SECRET` |
+| Response is `500 Not configured` | `CRON_SECRET` isn't set in Production (or wasn't redeployed after adding) |
 | `ok: true` but `emailsSent: 0` | No shifts tomorrow, reminders already sent today, or signed-up parents have email notifications turned off |
 | Emails not arriving | Check `RESEND_API_KEY` / Resend dashboard for bounces |
+| No cron runs listed in Vercel | `vercel.json` not deployed yet, or the plan's cron limit was hit |

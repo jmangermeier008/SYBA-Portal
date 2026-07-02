@@ -3,15 +3,17 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 
 /**
- * POST /api/reminders
+ * GET/POST /api/reminders
  *
  * Sends volunteer shift reminders (email + in-app notification) to every
  * parent signed up for a concession/tagging shift happening tomorrow.
- * Designed to be hit once a day by Google Cloud Scheduler — see
+ * Triggered once a day by a Vercel cron job (vercel.json) — see
  * docs/volunteer-shift-reminders.md for the setup.
  *
- * Auth: Authorization: Bearer <REMINDERS_SECRET>
- * Body (optional): { date?: 'YYYY-MM-DD' }  — override the target date (testing)
+ * Auth: Authorization: Bearer <CRON_SECRET> — Vercel attaches this header to
+ * cron invocations automatically when the CRON_SECRET env var is set.
+ * (REMINDERS_SECRET is honored as a fallback name for manual/non-Vercel use.)
+ * POST body (optional): { date?: 'YYYY-MM-DD' } — override the target date (testing)
  *
  * Idempotent: each slot is stamped with remindersSentAt after its reminders go
  * out, so re-running the same day is a no-op.
@@ -70,11 +72,11 @@ async function sendEmail(to: string, subject: string, text: string): Promise<boo
   return res.ok;
 }
 
-export async function POST(req: Request) {
+async function runReminders(req: Request) {
   try {
-    const secret = process.env.REMINDERS_SECRET;
+    const secret = process.env.CRON_SECRET ?? process.env.REMINDERS_SECRET;
     if (!secret) {
-      console.error('[reminders] REMINDERS_SECRET is not configured');
+      console.error('[reminders] CRON_SECRET is not configured');
       return NextResponse.json({ error: 'Not configured' }, { status: 500 });
     }
     const auth = req.headers.get('authorization') ?? '';
@@ -83,13 +85,15 @@ export async function POST(req: Request) {
     }
 
     let targetDate = tomorrowEastern();
-    try {
-      const body = await req.json();
-      if (typeof body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
-        targetDate = body.date;
+    if (req.method === 'POST') {
+      try {
+        const body = await req.json();
+        if (typeof body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+          targetDate = body.date;
+        }
+      } catch {
+        // empty body is fine — use tomorrow
       }
-    } catch {
-      // empty body is fine — use tomorrow
     }
 
     const db = getAdminFirestore();
@@ -164,4 +168,13 @@ export async function POST(req: Request) {
     console.error('[reminders] Error:', error.message);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
+}
+
+// Vercel cron invokes with GET; POST is kept for manual runs and testing.
+export async function GET(req: Request) {
+  return runReminders(req);
+}
+
+export async function POST(req: Request) {
+  return runReminders(req);
 }
