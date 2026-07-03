@@ -47,7 +47,7 @@ export default function PrintPage() {
       return;
     }
     document.title =
-      payload.kind === 'roster' ? payload.title : 'Shenango Valley League Forms';
+      payload.kind === 'waivers' ? 'Shenango Valley League Forms' : payload.title;
     // One signature image on the Player Agreement per signed player, plus one
     // on each of the two Parental Agreement pages only when the combined flag
     // is set — this count must mirror exactly what the sheets render below,
@@ -98,7 +98,7 @@ export default function PrintPage() {
         <div className="flex items-center justify-between gap-3 px-4 py-3 max-w-[8in] mx-auto">
           <div className="min-w-0">
             <p className="font-semibold text-sm truncate">
-              {job.kind === 'roster' ? job.title : 'League Forms'}
+              {job.kind === 'waivers' ? 'League Forms' : job.title}
             </p>
             <p className="text-xs text-muted-foreground">
               {job.kind === 'waivers'
@@ -138,6 +138,48 @@ export default function PrintPage() {
               </div>
             ));
           })
+        ) : job.kind === 'equipment-chase' ? (
+          <div className="w-[7.5in] mx-auto bg-white text-black p-8 shadow-lg print:shadow-none print:p-0">
+            <div className="text-center space-y-1 pb-4">
+              <h1 className="text-xl font-bold tracking-wide">{job.title}</h1>
+              {job.subtitle && <p className="text-sm text-neutral-600">{job.subtitle}</p>}
+            </div>
+            <table className="w-full border border-black border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="border border-black px-2 py-1 text-left">Player</th>
+                  <th className="border border-black px-2 py-1 text-left">Division</th>
+                  <th className="border border-black px-2 py-1 text-left">Outstanding Items</th>
+                  <th className="border border-black px-2 py-1 text-left">Parent</th>
+                  <th className="border border-black px-2 py-1 text-left">Phone</th>
+                  <th className="border border-black px-2 py-1 text-left">Email</th>
+                  <th className="border border-black px-2 py-1 text-center whitespace-nowrap">All Returned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {job.rows.map((row, i) => (
+                  <tr key={i}>
+                    <td className="border border-black px-2 py-1 align-top font-medium whitespace-nowrap">{row.playerName}</td>
+                    <td className="border border-black px-2 py-1 align-top">{row.division}</td>
+                    <td className="border border-black px-2 py-1 align-top">
+                      {row.items.map((it, j) => (
+                        <span key={j} className="block whitespace-nowrap">{it}</span>
+                      ))}
+                    </td>
+                    <td className="border border-black px-2 py-1 align-top">{row.parentName}</td>
+                    <td className="border border-black px-2 py-1 align-top whitespace-nowrap">{row.parentPhone}</td>
+                    <td className="border border-black px-2 py-1 align-top break-all">{row.parentEmail}</td>
+                    <td className="border border-black px-2 py-1 align-top text-center">
+                      <span className="inline-block w-4 h-4 border border-black align-middle" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs pt-3">
+              {job.rows.length} player{job.rows.length === 1 ? '' : 's'} with outstanding equipment — check off each family as gear comes back.
+            </p>
+          </div>
         ) : (
           <div className="w-[7.5in] mx-auto bg-white text-black p-8 shadow-lg print:shadow-none print:p-0">
             <div className="text-center space-y-1 pb-4">

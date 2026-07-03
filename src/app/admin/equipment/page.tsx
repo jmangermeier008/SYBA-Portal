@@ -57,11 +57,17 @@ import {
   AlertCircle,
   CheckCircle2,
   AlertTriangle,
+  Pencil,
+  Archive,
+  ArchiveRestore,
+  Printer,
+  Filter,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 
 type EquipmentStatus = 'not_issued' | 'issued' | 'returned';
 
@@ -87,23 +93,30 @@ interface FootballEquipment {
   helmetSize?: string;
   helmetStatus?: EquipmentStatus;
   helmetInventoryId?: string;
+  helmetTagNumber?: string;
   shoulderPadSize?: string;
   padStatus?: EquipmentStatus;
   padInventoryId?: string;
+  padTagNumber?: string;
   jerseySize?: string;
   jerseyNumber?: string;
   gameJerseyStatus?: EquipmentStatus;
   gameJerseyInventoryId?: string;
+  gameJerseyTagNumber?: string;
   scrimmageJerseyStatus?: EquipmentStatus;
   scrimmageJerseyInventoryId?: string;
+  scrimmageJerseyTagNumber?: string;
   practiceJerseyStatus?: EquipmentStatus;
   practiceJerseyInventoryId?: string;
+  practiceJerseyTagNumber?: string;
   gamePantsSize?: string;
   gamePantsStatus?: EquipmentStatus;
   gamePantsInventoryId?: string;
+  gamePantsTagNumber?: string;
   practicePantsSize?: string;
   practicePantsStatus?: EquipmentStatus;
   practicePantsInventoryId?: string;
+  practicePantsTagNumber?: string;
   issuedAt?: string;
   verifiedWeight?: number;
 }
@@ -143,13 +156,46 @@ interface ShedItem {
   // Custom types are inventory-only: no assignment column, no EQUIP_FIELD_MAP entry.
   type: string;
   size: string;
-  status: 'available' | 'issued';
+  status: 'available' | 'issued' | 'retired';
   issuedToPlayerId?: string;
   issuedToParentUserId?: string;
   issuedToEnrollmentId?: string;
   issuedAt?: string;
+  issuedByUid?: string;
+  issuedByName?: string;
   returnedAt?: string;
+  retiredAt?: string;
+  purchaseYear?: number;        // year the item was bought — drives 10-yr service-life flag
+  lastRecertDate?: string;      // YYYY-MM-DD — drives 2-yr recert cycle flag
+  condition?: ItemCondition;    // captured at return time
   notes?: string;
+}
+
+type ItemCondition = 'new' | 'good' | 'fair' | 'poor';
+
+const CONDITION_LABELS: Record<ItemCondition, string> = {
+  new: 'New', good: 'Good', fair: 'Fair', poor: 'Poor',
+};
+
+/** Helmets and shoulder pads carry NOCSAE-style recert obligations. */
+const RECERT_TYPES = new Set<string>(['helmet', 'shoulder_pads']);
+const RECERT_CYCLE_YEARS = 2;
+const MAX_SERVICE_YEARS = 10;
+
+type RecertState = 'retire' | 'due' | 'no-record' | 'ok';
+
+function recertState(item: ShedItem): RecertState | null {
+  if (!RECERT_TYPES.has(item.type)) return null;
+  const now = new Date();
+  if (item.purchaseYear && now.getFullYear() - item.purchaseYear >= MAX_SERVICE_YEARS) return 'retire';
+  const baseline = item.lastRecertDate
+    ? new Date(item.lastRecertDate)
+    : item.purchaseYear
+      ? new Date(item.purchaseYear, 0, 1)
+      : null;
+  if (!baseline) return 'no-record';
+  const cutoff = new Date(now.getFullYear() - RECERT_CYCLE_YEARS, now.getMonth(), now.getDate());
+  return baseline <= cutoff ? 'due' : 'ok';
 }
 
 const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
@@ -173,10 +219,44 @@ function normalizeTypeSlug(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, '_');
 }
 
+function RecertBadge({ item }: { item: ShedItem }) {
+  const state = recertState(item);
+  if (state === null) return <span className="text-muted-foreground">—</span>;
+  switch (state) {
+    case 'retire':
+      return <Badge className="bg-red-100 text-red-700 border-red-200 hover:bg-red-100 whitespace-nowrap">Retire (10+ yrs)</Badge>;
+    case 'due':
+      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100 whitespace-nowrap">Recert due</Badge>;
+    case 'no-record':
+      return <Badge variant="outline" className="text-muted-foreground whitespace-nowrap">No recert record</Badge>;
+    case 'ok':
+      return (
+        <span className="text-xs text-green-700 whitespace-nowrap">
+          OK{item.lastRecertDate ? ` · ${item.lastRecertDate}` : ''}
+        </span>
+      );
+  }
+}
+
+function ShedStatusPill({ status }: { status: ShedItem['status'] }) {
+  return (
+    <span className={cn(
+      'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap',
+      status === 'available' && 'bg-green-100 text-green-700',
+      status === 'issued' && 'bg-blue-100 text-blue-700',
+      status === 'retired' && 'bg-muted text-muted-foreground'
+    )}>
+      {status === 'available' ? 'Available' : status === 'issued' ? 'Issued' : 'Retired'}
+    </span>
+  );
+}
+
 interface ImportRow {
   tagNumber: string;
   type: string;
   size: string;
+  purchaseYear?: number;
+  lastRecertDate?: string;
   notes?: string;
 }
 
@@ -206,18 +286,29 @@ const ALL_INVENTORY_ID_FIELDS: (keyof FootballEquipment)[] = [
   'practicePantsInventoryId',
 ];
 
+const ALL_TAG_FIELDS: (keyof FootballEquipment)[] = [
+  'helmetTagNumber',
+  'padTagNumber',
+  'gameJerseyTagNumber',
+  'scrimmageJerseyTagNumber',
+  'practiceJerseyTagNumber',
+  'gamePantsTagNumber',
+  'practicePantsTagNumber',
+];
+
 const EQUIP_FIELD_MAP: Record<ShedItemType, {
   statusField: keyof FootballEquipment;
   sizeField: keyof FootballEquipment | null;
   inventoryIdField: keyof FootballEquipment;
+  tagField: keyof FootballEquipment;
 }> = {
-  helmet:           { statusField: 'helmetStatus',           sizeField: 'helmetSize',       inventoryIdField: 'helmetInventoryId' },
-  shoulder_pads:    { statusField: 'padStatus',              sizeField: 'shoulderPadSize',  inventoryIdField: 'padInventoryId' },
-  game_jersey:      { statusField: 'gameJerseyStatus',       sizeField: 'jerseySize',       inventoryIdField: 'gameJerseyInventoryId' },
-  scrimmage_jersey: { statusField: 'scrimmageJerseyStatus',  sizeField: null,               inventoryIdField: 'scrimmageJerseyInventoryId' },
-  practice_jersey:  { statusField: 'practiceJerseyStatus',   sizeField: null,               inventoryIdField: 'practiceJerseyInventoryId' },
-  game_pants:       { statusField: 'gamePantsStatus',        sizeField: 'gamePantsSize',    inventoryIdField: 'gamePantsInventoryId' },
-  practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId' },
+  helmet:           { statusField: 'helmetStatus',           sizeField: 'helmetSize',       inventoryIdField: 'helmetInventoryId',          tagField: 'helmetTagNumber' },
+  shoulder_pads:    { statusField: 'padStatus',              sizeField: 'shoulderPadSize',  inventoryIdField: 'padInventoryId',             tagField: 'padTagNumber' },
+  game_jersey:      { statusField: 'gameJerseyStatus',       sizeField: 'jerseySize',       inventoryIdField: 'gameJerseyInventoryId',      tagField: 'gameJerseyTagNumber' },
+  scrimmage_jersey: { statusField: 'scrimmageJerseyStatus',  sizeField: null,               inventoryIdField: 'scrimmageJerseyInventoryId', tagField: 'scrimmageJerseyTagNumber' },
+  practice_jersey:  { statusField: 'practiceJerseyStatus',   sizeField: null,               inventoryIdField: 'practiceJerseyInventoryId',  tagField: 'practiceJerseyTagNumber' },
+  game_pants:       { statusField: 'gamePantsStatus',        sizeField: 'gamePantsSize',    inventoryIdField: 'gamePantsInventoryId',       tagField: 'gamePantsTagNumber' },
+  practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId',   tagField: 'practicePantsTagNumber' },
 };
 
 function getEquippedStatus(enrollment: EnrollmentRow) {
@@ -226,16 +317,22 @@ function getEquippedStatus(enrollment: EnrollmentRow) {
   return { count, total: ALL_INVENTORY_ID_FIELDS.length, isComplete: count === ALL_INVENTORY_ID_FIELDS.length };
 }
 
+function hasOutstandingGear(enrollment: EnrollmentRow): boolean {
+  const fe = enrollment.footballEquipment ?? {};
+  return ALL_STATUS_FIELDS.some((f) => fe[f] === 'issued');
+}
+
 export default function EquipmentPage() {
   const db = useFirestore();
   const isMobile = useIsMobile();
-  const { loading: loadingUser } = useUser();
+  const { user, profile, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'assignments' | 'shed'>('assignments');
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [outstandingOnly, setOutstandingOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [bulkSaving, setBulkSaving] = useState(false);
@@ -255,6 +352,12 @@ export default function EquipmentPage() {
   const [checkOutPlayerId, setCheckOutPlayerId] = useState('');
   const [checkOutSaving, setCheckOutSaving] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
+  const [retireDialog, setRetireDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
+  const [editDialog, setEditDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
+  const [editForm, setEditForm] = useState({ size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
+  const [editSaving, setEditSaving] = useState(false);
+  const [conditionDialog, setConditionDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
+  const [showRetired, setShowRetired] = useState(false);
   const [importDialog, setImportDialog] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
   const [importErrors, setImportErrors] = useState<ImportError[]>([]);
@@ -318,6 +421,20 @@ export default function EquipmentPage() {
 
   const { data: shedItems } = useCollection<ShedItem>(shedQuery);
 
+  // Parent contact info for the printable chase list (same pattern as admin/roster)
+  const profilesQuery = useMemoFirebase(() => {
+    if (!db || (!isAdmin && !isBoardMember)) return null;
+    return collection(db, 'userProfiles');
+  }, [db, isAdmin, isBoardMember]);
+
+  const { data: profiles } = useCollection<{ id: string; displayName?: string; email?: string; phoneNumber?: string }>(profilesQuery);
+
+  const profileMap = useMemo(() => {
+    const map = new Map<string, { displayName?: string; email?: string; phoneNumber?: string }>();
+    (profiles ?? []).forEach((p) => map.set(p.id, p));
+    return map;
+  }, [profiles]);
+
   useEffect(() => {
     if (!db || !enrollments || enrollments.length === 0) return;
     const missing = enrollments.filter((e) => e.playerId && !playerNameMap.has(e.playerId));
@@ -362,13 +479,39 @@ export default function EquipmentPage() {
     if (!enrollments) return [];
     const q = searchQuery.toLowerCase();
     return enrollments.filter((e) => {
+      if (outstandingOnly && !hasOutstandingGear(e)) return false;
       if (!q) return true;
       const name = (playerNameMap.get(e.playerId) ?? e.playerId).toLowerCase();
       const div = (divisionMap.get(e.divisionId) ?? '').toLowerCase();
       const team = (e.teamId ? teamMap.get(e.teamId) ?? '' : '').toLowerCase();
       return name.includes(q) || div.includes(q) || team.includes(q);
     });
-  }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap]);
+  }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap, outstandingOnly]);
+
+  const outstandingCount = useMemo(
+    () => (enrollments ?? []).filter(hasOutstandingGear).length,
+    [enrollments]
+  );
+
+  // Duplicate jersey numbers within a division (football team == division).
+  // Map of enrollmentId → names of the other players wearing the same number.
+  const duplicateJerseys = useMemo(() => {
+    const byDivisionNumber = new Map<string, EnrollmentRow[]>();
+    (enrollments ?? []).forEach((e) => {
+      const num = (e.footballEquipment?.jerseyNumber ?? '').trim();
+      if (!num) return;
+      const key = `${e.divisionId}|${num}`;
+      byDivisionNumber.set(key, [...(byDivisionNumber.get(key) ?? []), e]);
+    });
+    const dupes = new Map<string, string[]>();
+    byDivisionNumber.forEach((list) => {
+      if (list.length < 2) return;
+      list.forEach((e) => {
+        dupes.set(e.id, list.filter((o) => o.id !== e.id).map((o) => playerNameMap.get(o.playerId) ?? o.playerId));
+      });
+    });
+    return dupes;
+  }, [enrollments, playerNameMap]);
 
   // Pre-build combobox options per type from the live shed subscription
   const inventoryOptionsByType = useMemo(() => {
@@ -376,7 +519,7 @@ export default function EquipmentPage() {
     const types = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
     for (const type of types) {
       result[type] = (shedItems ?? [])
-        .filter((item) => item.type === type)
+        .filter((item) => item.type === type && item.status !== 'retired')
         .sort((a, b) => a.tagNumber.localeCompare(b.tagNumber))
         .map((item) => ({
           value: item.id,
@@ -459,7 +602,7 @@ export default function EquipmentPage() {
       return;
     }
 
-    const { statusField, sizeField, inventoryIdField } = EQUIP_FIELD_MAP[equipType];
+    const { statusField, sizeField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
     const fe = enrollment.footballEquipment ?? {};
     const prevInventoryId = fe[inventoryIdField] as string | undefined;
 
@@ -471,6 +614,7 @@ export default function EquipmentPage() {
       const enrollmentUpdates: Record<string, any> = {
         [`footballEquipment.${String(statusField)}`]: 'issued',
         [`footballEquipment.${String(inventoryIdField)}`]: item.id,
+        [`footballEquipment.${String(tagField)}`]: item.tagNumber,
         'footballEquipment.issuedAt': now,
       };
       if (sizeField) {
@@ -484,6 +628,8 @@ export default function EquipmentPage() {
         issuedToParentUserId: parentUserId,
         issuedToEnrollmentId: enrollmentId,
         issuedAt: now,
+        issuedByUid: user?.uid ?? '',
+        issuedByName: profile?.displayName || profile?.email || '',
         returnedAt: '',
       });
 
@@ -516,7 +662,7 @@ export default function EquipmentPage() {
     const { parentUserId, id: enrollmentId } = enrollment;
     if (!parentUserId || !enrollmentId) return;
 
-    const { statusField, inventoryIdField } = EQUIP_FIELD_MAP[equipType];
+    const { statusField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
 
     setSavingIds((prev) => new Set(prev).add(enrollmentId));
     try {
@@ -526,6 +672,7 @@ export default function EquipmentPage() {
       batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId), {
         [`footballEquipment.${String(statusField)}`]: 'returned',
         [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
+        [`footballEquipment.${String(tagField)}`]: deleteField(),
       });
 
       batch.update(doc(db, 'equipmentInventory', item.id), {
@@ -565,6 +712,7 @@ export default function EquipmentPage() {
       const enrollmentUpdates: Record<string, any> = {};
       ALL_STATUS_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = 'returned'; });
       ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
+      ALL_TAG_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
       batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', id), enrollmentUpdates);
 
       // Return each linked shed item
@@ -606,6 +754,7 @@ export default function EquipmentPage() {
       const enrollmentUpdates: Record<string, any> = {};
       ALL_STATUS_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = 'returned'; });
       ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
+      ALL_TAG_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
 
       const allLinkedItemIds: string[] = [];
 
@@ -652,6 +801,7 @@ export default function EquipmentPage() {
     if (!shedItems) return [];
     const q = shedSearchQuery.toLowerCase();
     return shedItems.filter(item => {
+      if (item.status === 'retired' && !showRetired) return false;
       if (shedTypeFilter !== 'all' && item.type !== shedTypeFilter) return false;
       if (!q) return true;
       return (
@@ -661,7 +811,7 @@ export default function EquipmentPage() {
         (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
       );
     });
-  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap]);
+  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap, showRetired]);
 
   async function handleAddShedItem() {
     if (!db || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()) return;
@@ -702,16 +852,19 @@ export default function EquipmentPage() {
         issuedToParentUserId: enrollment?.parentUserId ?? '',
         issuedToEnrollmentId: enrollment?.id ?? '',
         issuedAt: now,
+        issuedByUid: user?.uid ?? '',
+        issuedByName: profile?.displayName || profile?.email || '',
         returnedAt: '',
       });
 
       // Custom types have no enrollment slot — only the shed item tracks the assignment
       const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
       if (enrollment?.parentUserId && enrollment?.id && fieldMap) {
-        const { statusField, sizeField, inventoryIdField } = fieldMap;
+        const { statusField, sizeField, inventoryIdField, tagField } = fieldMap;
         const enrollmentUpdates: Record<string, any> = {
           [`footballEquipment.${String(statusField)}`]: 'issued',
           [`footballEquipment.${String(inventoryIdField)}`]: item.id,
+          [`footballEquipment.${String(tagField)}`]: item.tagNumber,
           'footballEquipment.issuedAt': now,
         };
         if (sizeField) {
@@ -750,20 +903,95 @@ export default function EquipmentPage() {
 
       const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
       if (item.issuedToParentUserId && item.issuedToEnrollmentId && fieldMap) {
-        const { statusField, inventoryIdField } = fieldMap;
+        const { statusField, inventoryIdField, tagField } = fieldMap;
         batch.update(
           doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId),
           {
             [`footballEquipment.${String(statusField)}`]: 'returned',
             [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
+            [`footballEquipment.${String(tagField)}`]: deleteField(),
           }
         );
       }
 
       await batch.commit();
       toast({ title: 'Item returned', description: `Tag #${item.tagNumber} is now available.` });
+      setConditionDialog({ open: true, item });
     } catch (err: any) {
       toast({ title: 'Return failed', description: err.message, variant: 'destructive' });
+    }
+  }
+
+  async function handleSetCondition(item: ShedItem, condition: ItemCondition) {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'equipmentInventory', item.id), { condition });
+      toast({ title: 'Condition saved', description: `Tag #${item.tagNumber} marked ${CONDITION_LABELS[condition]}.` });
+    } catch (err: any) {
+      toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setConditionDialog({ open: false, item: null });
+    }
+  }
+
+  function openEditDialog(item: ShedItem) {
+    setEditForm({
+      size: item.size,
+      notes: item.notes ?? '',
+      purchaseYear: item.purchaseYear ? String(item.purchaseYear) : '',
+      lastRecertDate: item.lastRecertDate ?? '',
+      condition: item.condition ?? '',
+    });
+    setEditDialog({ open: true, item });
+  }
+
+  async function handleEditSave() {
+    if (!db || !editDialog.item || !editForm.size.trim()) return;
+    const year = editForm.purchaseYear.trim();
+    if (year && !/^\d{4}$/.test(year)) {
+      toast({ title: 'Invalid purchase year', description: 'Enter a 4-digit year, e.g. 2024.', variant: 'destructive' });
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await updateDoc(doc(db, 'equipmentInventory', editDialog.item.id), {
+        size: editForm.size.trim(),
+        notes: editForm.notes.trim(),
+        purchaseYear: year ? Number(year) : deleteField(),
+        lastRecertDate: editForm.lastRecertDate || deleteField(),
+        condition: editForm.condition || deleteField(),
+      });
+      toast({ title: 'Item updated', description: `Tag #${editDialog.item.tagNumber} saved.` });
+      setEditDialog({ open: false, item: null });
+    } catch (err: any) {
+      toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleRetire(item: ShedItem) {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'equipmentInventory', item.id), {
+        status: 'retired',
+        retiredAt: new Date().toISOString(),
+      });
+      toast({ title: 'Item retired', description: `Tag #${item.tagNumber} removed from circulation; history preserved.` });
+    } catch (err: any) {
+      toast({ title: 'Retire failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setRetireDialog({ open: false, item: null });
+    }
+  }
+
+  async function handleRestore(item: ShedItem) {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'equipmentInventory', item.id), { status: 'available', retiredAt: '' });
+      toast({ title: 'Item restored', description: `Tag #${item.tagNumber} is available again.` });
+    } catch (err: any) {
+      toast({ title: 'Restore failed', description: err.message, variant: 'destructive' });
     }
   }
 
@@ -779,20 +1007,54 @@ export default function EquipmentPage() {
     }
   }
 
+  function handlePrintChaseList() {
+    const rows: EquipmentChaseRow[] = filteredEnrollments
+      .filter(hasOutstandingGear)
+      .map((e) => {
+        const fe = e.footballEquipment ?? {};
+        const items: string[] = [];
+        (Object.keys(EQUIP_FIELD_MAP) as ShedItemType[]).forEach((type) => {
+          const { statusField, tagField } = EQUIP_FIELD_MAP[type];
+          if (fe[statusField] === 'issued') {
+            const tag = fe[tagField] as string | undefined;
+            items.push(`${SHED_ITEM_TYPES[type]}${tag ? ` #${tag}` : ''}`);
+          }
+        });
+        const parent = e.parentUserId ? profileMap.get(e.parentUserId) : undefined;
+        return {
+          playerName: playerNameMap.get(e.playerId) ?? e.playerId,
+          division: divisionMap.get(e.divisionId) ?? '',
+          items,
+          parentName: parent?.displayName || '',
+          parentPhone: parent?.phoneNumber || '',
+          parentEmail: parent?.email || '',
+        };
+      })
+      .sort((a, b) => a.division.localeCompare(b.division) || a.playerName.localeCompare(b.playerName));
+
+    const seasonName = seasons?.find((s) => s.id === selectedSeasonId)?.name ?? '';
+    openPrintTab({
+      kind: 'equipment-chase',
+      title: 'Outstanding Equipment — Chase List',
+      subtitle: `${seasonName ? `${seasonName} · ` : ''}${rows.length} player${rows.length === 1 ? '' : 's'} · printed ${new Date().toLocaleDateString()}`,
+      rows,
+    });
+  }
+
   function downloadTemplate() {
     const wb = XLSX.utils.book_new();
     const data = [
-      ['Tag Number', 'Type', 'Size', 'Notes'],
-      ['H-001', 'helmet', 'YM', 'Example row — replace with your real inventory'],
-      ['SP-001', 'shoulder_pads', 'YM', ''],
-      ['GJ-001', 'game_jersey', 'YL', ''],
-      ['SJ-001', 'scrimmage_jersey', 'YL', ''],
-      ['PJ-001', 'practice_jersey', 'YL', ''],
-      ['GP-001', 'game_pants', 'YM', ''],
-      ['PP-001', 'practice_pants', 'YM', ''],
+      ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Date', 'Notes'],
+      ['H-001', 'helmet', 'YM', '2024', '2025-06-01', 'Example row — replace with your real inventory'],
+      ['SP-001', 'shoulder_pads', 'YM', '2024', '2025-06-01', ''],
+      ['GJ-001', 'game_jersey', 'YL', '', '', ''],
+      ['SJ-001', 'scrimmage_jersey', 'YL', '', '', ''],
+      ['PJ-001', 'practice_jersey', 'YL', '', '', ''],
+      ['GP-001', 'game_pants', 'YM', '', '', ''],
+      ['PP-001', 'practice_pants', 'YM', '', '', ''],
     ];
     const ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 44 }];
+    ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 44 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
 
     const standardTypes = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
@@ -807,6 +1069,7 @@ export default function EquipmentPage() {
       ]),
       [''],
       ['Custom types (e.g. "mouth_guard") are also accepted. They are tracked in Shed Inventory but do not appear as Player Assignment columns.'],
+      ['Purchase Year (e.g. 2024) and Last Recert Date (YYYY-MM-DD) are optional but recommended for helmets and shoulder pads — they drive the 2-year recert and 10-year service-life flags.'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(valuesData);
     ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
@@ -832,6 +1095,8 @@ export default function EquipmentPage() {
       // Custom types are accepted — normalized to a slug (e.g. "Mouth Guard" → mouth_guard)
       const type = normalizeTypeSlug(String(row['Type'] ?? ''));
       const size = String(row['Size'] ?? '').trim();
+      const purchaseYearRaw = String(row['Purchase Year'] ?? '').trim();
+      const lastRecertRaw = String(row['Last Recert Date'] ?? '').trim();
       const notes = String(row['Notes'] ?? '').trim();
 
       if (!tagNumber) { errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row }); return; }
@@ -839,9 +1104,19 @@ export default function EquipmentPage() {
       if (seenTags.has(tagNumber.toLowerCase())) { errors.push({ row: rowNum, reason: `Duplicate Tag #${tagNumber} in this file`, rawData: row }); return; }
       if (!type) { errors.push({ row: rowNum, reason: 'Type is required', rawData: row }); return; }
       if (!size) { errors.push({ row: rowNum, reason: 'Size is required', rawData: row }); return; }
+      if (purchaseYearRaw && !/^\d{4}$/.test(purchaseYearRaw)) { errors.push({ row: rowNum, reason: `Purchase Year "${purchaseYearRaw}" must be a 4-digit year`, rawData: row }); return; }
+      // Excel may hand back a date cell in other formats; accept YYYY-MM-DD only for determinism
+      if (lastRecertRaw && !/^\d{4}-\d{2}-\d{2}$/.test(lastRecertRaw)) { errors.push({ row: rowNum, reason: `Last Recert Date "${lastRecertRaw}" must be YYYY-MM-DD`, rawData: row }); return; }
 
       seenTags.add(tagNumber.toLowerCase());
-      valid.push({ tagNumber, type, size, notes: notes || undefined });
+      valid.push({
+        tagNumber,
+        type,
+        size,
+        purchaseYear: purchaseYearRaw ? Number(purchaseYearRaw) : undefined,
+        lastRecertDate: lastRecertRaw || undefined,
+        notes: notes || undefined,
+      });
     });
 
     return { valid, errors };
@@ -859,6 +1134,8 @@ export default function EquipmentPage() {
           type: row.type,
           size: row.size,
           status: 'available',
+          ...(row.purchaseYear ? { purchaseYear: row.purchaseYear } : {}),
+          ...(row.lastRecertDate ? { lastRecertDate: row.lastRecertDate } : {}),
           notes: row.notes ?? '',
         });
       });
@@ -970,6 +1247,30 @@ export default function EquipmentPage() {
                   />
                 </div>
               )}
+
+              {selectedSeasonId && (
+                <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                  <Button
+                    variant={outstandingOnly ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setOutstandingOnly((v) => !v)}
+                    className="rounded-full gap-1.5 h-9"
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                    Outstanding gear only
+                    <Badge variant={outstandingOnly ? 'secondary' : 'outline'} className="ml-1">{outstandingCount}</Badge>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePrintChaseList}
+                    disabled={outstandingCount === 0}
+                    className="rounded-full gap-1.5 h-9"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Print Chase List
+                  </Button>
+                </div>
+              )}
             </div>
 
             {!selectedSeasonId && (
@@ -1030,24 +1331,25 @@ export default function EquipmentPage() {
 
                 {/* ── Desktop table (md and up) ─────────────────── */}
                 {!isMobile && <Card className="border-none shadow-md overflow-hidden">
-                  <div className="overflow-x-auto">
+                  {/* max-h + overflow-auto makes this the vertical scroller too, so the sticky header works */}
+                  <div className="overflow-auto max-h-[70vh]">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b bg-muted/30">
-                          <th className="px-3 py-3 w-10 sticky left-0 z-10 bg-muted/30">
+                        <tr className="border-b">
+                          <th className="px-3 py-3 w-10 sticky top-0 left-0 z-30 bg-muted">
                             <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
                           </th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky left-10 z-10 bg-muted/30 border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">Player</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Division</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Helmet Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Pads Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Jersey #</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Jersey</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Scrimmage</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Jersey</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Tag</th>
-                          <th className="px-4 py-3 sticky right-0 z-10 bg-muted/30 border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]" />
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 left-10 z-30 bg-muted border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">Player</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Division</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Helmet Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Pads Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Jersey #</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Game Jersey</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Scrimmage</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Practice Jersey</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Game Pants Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Practice Pants Tag</th>
+                          <th className="px-4 py-3 sticky top-0 right-0 z-30 bg-muted border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]" />
                         </tr>
                       </thead>
                       <tbody>
@@ -1123,17 +1425,31 @@ export default function EquipmentPage() {
                               </td>
                               {/* Jersey # */}
                               <td className="px-4 py-2">
-                                <Input
-                                  defaultValue={fe.jerseyNumber ?? ''}
-                                  placeholder="—"
-                                  className="w-16 h-9 text-center"
-                                  disabled={isSaving}
-                                  onBlur={(e) => {
-                                    const val = e.target.value.trim();
-                                    if (val !== (fe.jerseyNumber ?? ''))
-                                      saveField(enrollment, 'footballEquipment.jerseyNumber', val);
-                                  }}
-                                />
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    defaultValue={fe.jerseyNumber ?? ''}
+                                    placeholder="—"
+                                    className={cn('w-16 h-9 text-center', duplicateJerseys.has(enrollment.id) && 'ring-2 ring-destructive border-destructive')}
+                                    disabled={isSaving}
+                                    onBlur={(e) => {
+                                      const val = e.target.value.trim();
+                                      if (val !== (fe.jerseyNumber ?? ''))
+                                        saveField(enrollment, 'footballEquipment.jerseyNumber', val);
+                                    }}
+                                  />
+                                  {duplicateJerseys.has(enrollment.id) && (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          Duplicate #{fe.jerseyNumber} in {divisionName}: also {duplicateJerseys.get(enrollment.id)!.join(', ')}
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  )}
+                                </div>
                               </td>
 
                               {/* Game Jersey Tag */}
@@ -1317,7 +1633,7 @@ export default function EquipmentPage() {
                                 <Input
                                   defaultValue={fe.jerseyNumber ?? ''}
                                   placeholder="—"
-                                  className="w-20 h-9 text-center text-xs"
+                                  className={cn('w-20 h-9 text-center text-xs', duplicateJerseys.has(liveEnrollment.id) && 'ring-2 ring-destructive border-destructive')}
                                   disabled={isSaving}
                                   onBlur={(e) => {
                                     const val = e.target.value.trim();
@@ -1326,6 +1642,12 @@ export default function EquipmentPage() {
                                   }}
                                 />
                               </div>
+                              {duplicateJerseys.has(liveEnrollment.id) && (
+                                <p className="text-xs text-destructive flex items-center gap-1.5">
+                                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                  Duplicate #{fe.jerseyNumber} in this division: also {duplicateJerseys.get(liveEnrollment.id)!.join(', ')}
+                                </p>
+                              )}
 
                               {/* Helmet */}
                               <div className="space-y-1.5">
@@ -1499,19 +1821,19 @@ export default function EquipmentPage() {
 
           {/* ── Shed Inventory Tab ──────────────────────────────────── */}
           <TabsContent value="shed" className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end justify-between">
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+            <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-end justify-between">
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Search tag, size, player…"
                     value={shedSearchQuery}
                     onChange={(e) => setShedSearchQuery(e.target.value)}
-                    className="pl-9 w-64"
+                    className="pl-9 w-full sm:w-64"
                   />
                 </div>
                 <Select value={shedTypeFilter} onValueChange={setShedTypeFilter}>
-                  <SelectTrigger className="w-48 rounded-xl">
+                  <SelectTrigger className="w-full sm:w-48 rounded-xl">
                     <SelectValue placeholder="All Types" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1524,19 +1846,23 @@ export default function EquipmentPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer whitespace-nowrap">
+                  <Checkbox checked={showRetired} onCheckedChange={(v) => setShowRetired(v === true)} />
+                  Show retired
+                </label>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" onClick={downloadTemplate} className="rounded-xl gap-1.5">
+                <Button variant="outline" onClick={downloadTemplate} className="rounded-xl gap-1.5 flex-1 sm:flex-initial">
                   <Download className="h-4 w-4" /> Download Template
                 </Button>
                 <Button
                   variant="outline"
                   onClick={() => { setImportRows([]); setImportErrors([]); setImportDialog(true); }}
-                  className="rounded-xl gap-1.5"
+                  className="rounded-xl gap-1.5 flex-1 sm:flex-initial"
                 >
                   <Upload className="h-4 w-4" /> Import from Excel
                 </Button>
-                <Button onClick={() => setAddItemDialog(true)} className="rounded-xl gap-1.5">
+                <Button onClick={() => setAddItemDialog(true)} className="rounded-xl gap-1.5 flex-1 sm:flex-initial">
                   <Plus className="h-4 w-4" /> Add Item
                 </Button>
               </div>
@@ -1552,16 +1878,17 @@ export default function EquipmentPage() {
               </Card>
             )}
 
-            {filteredShedItems.length === 0 && (shedSearchQuery || shedTypeFilter !== 'all') && (
+            {filteredShedItems.length === 0 && (shedItems?.length ?? 0) > 0 && (
               <Card className="border-none shadow-md">
                 <CardContent className="flex flex-col items-center justify-center py-10 text-center">
                   <Package className="h-12 w-12 text-muted-foreground/40 mb-4" />
-                  <p className="text-muted-foreground font-medium">No items match your search</p>
+                  <p className="text-muted-foreground font-medium">No items match your filters</p>
                 </CardContent>
               </Card>
             )}
 
-            {filteredShedItems.length > 0 && (
+            {/* ── Desktop table ─────────────────────────────── */}
+            {filteredShedItems.length > 0 && !isMobile && (
               <Card className="border-none shadow-md overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -1571,6 +1898,7 @@ export default function EquipmentPage() {
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Type</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Size</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Status</th>
+                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Recert</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden sm:table-cell">Issued To</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden md:table-cell">Issued At</th>
                         <th className="px-4 py-3" />
@@ -1578,7 +1906,7 @@ export default function EquipmentPage() {
                     </thead>
                     <tbody>
                       {filteredShedItems.map((item) => (
-                        <tr key={item.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
+                        <tr key={item.id} className={cn('border-b last:border-0 hover:bg-muted/20 transition-colors', item.status === 'retired' && 'opacity-60')}>
                           <td className="px-4 py-2 font-medium">
                             <span className="flex items-center gap-1.5">
                               <Tag className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1587,23 +1915,20 @@ export default function EquipmentPage() {
                           </td>
                           <td className="px-4 py-2">{typeLabel(item.type)}</td>
                           <td className="px-4 py-2">{item.size}</td>
-                          <td className="px-4 py-2">
-                            <span className={cn(
-                              'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                              item.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                            )}>
-                              {item.status === 'available' ? 'Available' : 'Issued'}
-                            </span>
-                          </td>
+                          <td className="px-4 py-2"><ShedStatusPill status={item.status} /></td>
+                          <td className="px-4 py-2"><RecertBadge item={item} /></td>
                           <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">
                             {item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? item.issuedToPlayerId) : '—'}
+                            {item.status === 'issued' && item.issuedByName && (
+                              <span className="block text-[11px] text-muted-foreground/70">by {item.issuedByName}</span>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-muted-foreground hidden md:table-cell">
                             {item.issuedAt ? new Date(item.issuedAt).toLocaleDateString() : '—'}
                           </td>
                           <td className="px-4 py-2 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              {item.status === 'available' ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              {item.status === 'available' && (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1612,7 +1937,8 @@ export default function EquipmentPage() {
                                 >
                                   Check Out
                                 </Button>
-                              ) : (
+                              )}
+                              {item.status === 'issued' && (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1622,7 +1948,37 @@ export default function EquipmentPage() {
                                   <RotateCcw className="h-3.5 w-3.5" /> Return
                                 </Button>
                               )}
+                              {item.status === 'retired' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-full h-8 text-xs gap-1.5"
+                                  onClick={() => handleRestore(item)}
+                                >
+                                  <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="rounded-full h-8 w-8 p-0 text-muted-foreground"
+                                onClick={() => openEditDialog(item)}
+                                aria-label={`Edit tag #${item.tagNumber}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
                               {item.status === 'available' && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="rounded-full h-8 w-8 p-0 text-muted-foreground"
+                                  onClick={() => setRetireDialog({ open: true, item })}
+                                  aria-label={`Retire tag #${item.tagNumber}`}
+                                >
+                                  <Archive className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                              {item.status !== 'issued' && (
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -1643,10 +1999,72 @@ export default function EquipmentPage() {
               </Card>
             )}
 
+            {/* ── Mobile cards ──────────────────────────────── */}
+            {filteredShedItems.length > 0 && isMobile && (
+              <div className="space-y-3">
+                {filteredShedItems.map((item) => (
+                  <Card key={item.id} className={cn('border-none shadow-md', item.status === 'retired' && 'opacity-70')}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 font-semibold text-sm">
+                          <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+                          {item.tagNumber}
+                        </span>
+                        <ShedStatusPill status={item.status} />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span>{typeLabel(item.type)} · {item.size}</span>
+                        <RecertBadge item={item} />
+                      </div>
+                      {item.status === 'issued' && item.issuedToPlayerId && (
+                        <p className="text-xs text-muted-foreground">
+                          Issued to {playerNameMap.get(item.issuedToPlayerId) ?? item.issuedToPlayerId}
+                          {item.issuedAt ? ` on ${new Date(item.issuedAt).toLocaleDateString()}` : ''}
+                          {item.issuedByName ? ` by ${item.issuedByName}` : ''}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 pt-1">
+                        {item.status === 'available' && (
+                          <Button size="sm" variant="outline" className="rounded-full h-8 text-xs flex-1"
+                            onClick={() => { setCheckOutDialog({ open: true, item }); setCheckOutPlayerId(''); }}>
+                            Check Out
+                          </Button>
+                        )}
+                        {item.status === 'issued' && (
+                          <Button size="sm" variant="outline" className="rounded-full h-8 text-xs gap-1.5 flex-1"
+                            onClick={() => handleReturnShedItem(item)}>
+                            <RotateCcw className="h-3.5 w-3.5" /> Return
+                          </Button>
+                        )}
+                        {item.status === 'retired' && (
+                          <Button size="sm" variant="outline" className="rounded-full h-8 text-xs gap-1.5 flex-1"
+                            onClick={() => handleRestore(item)}>
+                            <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" className="rounded-full h-8 w-8 p-0 text-muted-foreground"
+                          onClick={() => openEditDialog(item)} aria-label={`Edit tag #${item.tagNumber}`}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        {item.status === 'available' && (
+                          <Button size="sm" variant="ghost" className="rounded-full h-8 w-8 p-0 text-muted-foreground"
+                            onClick={() => setRetireDialog({ open: true, item })} aria-label={`Retire tag #${item.tagNumber}`}>
+                            <Archive className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
               {shedItems?.length ?? 0} item{(shedItems?.length ?? 0) !== 1 ? 's' : ''} in inventory
               {' · '}{shedItems?.filter(i => i.status === 'available').length ?? 0} available
               {' · '}{shedItems?.filter(i => i.status === 'issued').length ?? 0} issued
+              {' · '}{shedItems?.filter(i => recertState(i) === 'due' || recertState(i) === 'retire').length ?? 0} due for recert
+              {' · '}{shedItems?.filter(i => i.status === 'retired').length ?? 0} retired
             </p>
           </TabsContent>
         </Tabs>
@@ -1717,6 +2135,128 @@ export default function EquipmentPage() {
                 {addItemSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Add Item
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Item Dialog */}
+        <Dialog open={editDialog.open} onOpenChange={(open) => setEditDialog(d => ({ ...d, open }))}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Pencil className="h-5 w-5 text-primary" /> Edit — Tag #{editDialog.item?.tagNumber}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                {editDialog.item && typeLabel(editDialog.item.type)}
+              </p>
+              <div className="space-y-1">
+                <Label>Size <span className="text-destructive">*</span></Label>
+                <Input value={editForm.size} onChange={(e) => setEditForm(f => ({ ...f, size: e.target.value }))} />
+              </div>
+              {editDialog.item && RECERT_TYPES.has(editDialog.item.type) && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Purchase Year</Label>
+                      <Input placeholder="e.g. 2024" inputMode="numeric" value={editForm.purchaseYear}
+                        onChange={(e) => setEditForm(f => ({ ...f, purchaseYear: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Last Recert Date</Label>
+                      <Input type="date" value={editForm.lastRecertDate}
+                        onChange={(e) => setEditForm(f => ({ ...f, lastRecertDate: e.target.value }))} />
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full h-8 text-xs gap-1.5"
+                    onClick={() => setEditForm(f => ({ ...f, lastRecertDate: new Date().toISOString().slice(0, 10) }))}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Recertified today
+                  </Button>
+                </>
+              )}
+              <div className="space-y-1">
+                <Label>Condition</Label>
+                <Select value={editForm.condition || 'unset'} onValueChange={(v) => setEditForm(f => ({ ...f, condition: v === 'unset' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="Not recorded" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">Not recorded</SelectItem>
+                    {(Object.entries(CONDITION_LABELS) as [ItemCondition, string][]).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <Input value={editForm.notes} onChange={(e) => setEditForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
+              {editDialog.item && editDialog.item.status !== 'issued' && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5 px-2"
+                  onClick={() => { const item = editDialog.item; setEditDialog({ open: false, item: null }); if (item) setDeleteDialog({ open: true, item }); }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete this item…
+                </Button>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditDialog({ open: false, item: null })}>Cancel</Button>
+              <Button onClick={handleEditSave} disabled={editSaving || !editForm.size.trim()}>
+                {editSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Retire Confirmation Dialog */}
+        <AlertDialog open={retireDialog.open} onOpenChange={(open) => setRetireDialog(d => ({ ...d, open }))}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Retire Tag #{retireDialog.item?.tagNumber}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {retireDialog.item && `${typeLabel(retireDialog.item.type)} (Size ${retireDialog.item.size})`} will be
+                taken out of circulation — it can no longer be assigned or checked out, but its record and history are
+                preserved. You can restore it later if needed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => retireDialog.item && handleRetire(retireDialog.item)}>
+                Retire Item
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Condition-at-return Dialog */}
+        <Dialog open={conditionDialog.open} onOpenChange={(open) => { if (!open) setConditionDialog({ open: false, item: null }); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Condition of Tag #{conditionDialog.item?.tagNumber}?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Quick check while it&apos;s in your hands — this feeds the recert and replacement planning.
+            </p>
+            <div className="grid grid-cols-4 gap-2 py-2">
+              {(Object.entries(CONDITION_LABELS) as [ItemCondition, string][]).map(([k, v]) => (
+                <Button key={k} variant="outline" className="rounded-xl"
+                  onClick={() => conditionDialog.item && handleSetCondition(conditionDialog.item, k)}>
+                  {v}
+                </Button>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setConditionDialog({ open: false, item: null })}>Skip</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

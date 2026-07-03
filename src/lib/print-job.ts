@@ -9,9 +9,19 @@ export interface RosterPrintRow {
   assignment: string;
 }
 
+export interface EquipmentChaseRow {
+  playerName: string;
+  division: string;
+  items: string[];       // e.g. ["Helmet #H-014", "Shoulder Pads #SP-022"]
+  parentName: string;
+  parentPhone: string;
+  parentEmail: string;
+}
+
 export type PrintJobPayload =
   | { kind: 'waivers'; entries: WaiverPrintEntry[] }
-  | { kind: 'roster'; title: string; subtitle?: string; rows: RosterPrintRow[]; showWeight: boolean };
+  | { kind: 'roster'; title: string; subtitle?: string; rows: RosterPrintRow[]; showWeight: boolean }
+  | { kind: 'equipment-chase'; title: string; subtitle?: string; rows: EquipmentChaseRow[] };
 
 const KEY_PREFIX = 'syba:print:';
 

@@ -537,33 +537,42 @@ export interface Enrollment {
   // Football equipment — admin-managed after registration
   footballEquipment?: {
     verifiedWeight?: number;   // Official weigh-in result (lbs)
+    // Tag numbers are denormalized from equipmentInventory at issue time so
+    // parents (who cannot read equipmentInventory) can see what they hold.
     // Helmet
     helmetSize?: string;
     helmetStatus?: 'not_issued' | 'issued' | 'returned';
     helmetInventoryId?: string;          // equipmentInventory doc ID of assigned item
+    helmetTagNumber?: string;
     // Shoulder pads
     shoulderPadSize?: string;
     padStatus?: 'not_issued' | 'issued' | 'returned';
     padInventoryId?: string;             // equipmentInventory doc ID of assigned item
+    padTagNumber?: string;
     // Game jersey
     jerseySize?: string;
     jerseyNumber?: string;
     gameJerseyStatus?: 'not_issued' | 'issued' | 'returned';
     gameJerseyInventoryId?: string;      // equipmentInventory doc ID of assigned item
+    gameJerseyTagNumber?: string;
     // Scrimmage jersey
     scrimmageJerseyStatus?: 'not_issued' | 'issued' | 'returned';
     scrimmageJerseyInventoryId?: string; // equipmentInventory doc ID of assigned item
+    scrimmageJerseyTagNumber?: string;
     // Practice jersey
     practiceJerseyStatus?: 'not_issued' | 'issued' | 'returned';
     practiceJerseyInventoryId?: string;  // equipmentInventory doc ID of assigned item
+    practiceJerseyTagNumber?: string;
     // Game pants
     gamePantsSize?: string;
     gamePantsStatus?: 'not_issued' | 'issued' | 'returned';
     gamePantsInventoryId?: string;       // equipmentInventory doc ID of assigned item
+    gamePantsTagNumber?: string;
     // Practice pants
     practicePantsSize?: string;
     practicePantsStatus?: 'not_issued' | 'issued' | 'returned';
     practicePantsInventoryId?: string;   // equipmentInventory doc ID of assigned item
+    practicePantsTagNumber?: string;
     issuedAt?: string;
   };
   // Admin-assigned jersey number (both sports) — distinct from parent-entered uniformNumberPreference

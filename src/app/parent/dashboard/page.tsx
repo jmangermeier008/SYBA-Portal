@@ -86,17 +86,40 @@ export default function ParentDashboard() {
     if (!db || !user) return null;
     return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
   }, [db, user?.uid]);
-  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string; emergencyContacts?: { name: string; phone: string; relationship: string }[] }>(enrollmentsQuery);
+  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string; emergencyContacts?: { name: string; phone: string; relationship: string }[]; footballEquipment?: Record<string, string | number | undefined> }>(enrollmentsQuery);
 
   // Most recent football enrollment per player — drives the league waiver print action
   const footballEnrollmentByPlayer = useMemo(() => {
-    const map = new Map<string, { parentWeightEstimate?: number; emergencyContacts?: { name: string; phone: string; relationship: string }[] }>();
+    const map = new Map<string, { parentWeightEstimate?: number; emergencyContacts?: { name: string; phone: string; relationship: string }[]; footballEquipment?: Record<string, string | number | undefined> }>();
     (enrollments ?? [])
       .filter(e => e.sport === 'football')
       .sort((a, b) => (a.registered_at ?? '').localeCompare(b.registered_at ?? ''))
       .forEach(e => map.set(e.playerId, e)); // last write wins = most recent
     return map;
   }, [enrollments]);
+
+  // Gear currently checked out to each player — tag numbers are denormalized
+  // onto the enrollment at issue time (admins write them; parents read-only)
+  const issuedEquipmentByPlayer = useMemo(() => {
+    const slots: { label: string; statusField: string; tagField: string }[] = [
+      { label: 'Helmet', statusField: 'helmetStatus', tagField: 'helmetTagNumber' },
+      { label: 'Shoulder Pads', statusField: 'padStatus', tagField: 'padTagNumber' },
+      { label: 'Game Jersey', statusField: 'gameJerseyStatus', tagField: 'gameJerseyTagNumber' },
+      { label: 'Scrimmage Jersey', statusField: 'scrimmageJerseyStatus', tagField: 'scrimmageJerseyTagNumber' },
+      { label: 'Practice Jersey', statusField: 'practiceJerseyStatus', tagField: 'practiceJerseyTagNumber' },
+      { label: 'Game Pants', statusField: 'gamePantsStatus', tagField: 'gamePantsTagNumber' },
+      { label: 'Practice Pants', statusField: 'practicePantsStatus', tagField: 'practicePantsTagNumber' },
+    ];
+    const map = new Map<string, { label: string; tag?: string }[]>();
+    footballEnrollmentByPlayer.forEach((enrollment, playerId) => {
+      const fe = enrollment.footballEquipment ?? {};
+      const items = slots
+        .filter((s) => fe[s.statusField] === 'issued')
+        .map((s) => ({ label: s.label, tag: fe[s.tagField] as string | undefined }));
+      if (items.length > 0) map.set(playerId, items);
+    });
+    return map;
+  }, [footballEnrollmentByPlayer]);
 
 
   // Set initial selected player when players load
@@ -479,6 +502,31 @@ export default function ParentDashboard() {
                     <Printer className="h-3.5 w-3.5 mr-1.5" />
                     Print League Forms — {p.firstName}
                   </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Issued equipment — what the league has checked out to each player */}
+          {activeSport === 'football' && issuedEquipmentByPlayer.size > 0 && (
+            <div className="rounded-xl border px-4 py-3 mb-4">
+              <p className="text-sm font-semibold">Issued Equipment</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                League gear checked out to your player{issuedEquipmentByPlayer.size > 1 ? 's' : ''}. Please bring
+                every item back at the end-of-season equipment return — the tag numbers below identify what you have.
+              </p>
+              <div className="mt-2 space-y-2">
+                {players?.filter(p => issuedEquipmentByPlayer.has(p.id)).map(p => (
+                  <div key={p.id}>
+                    <p className="text-xs font-medium">{p.firstName} {p.lastName}</p>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {issuedEquipmentByPlayer.get(p.id)!.map((item, i) => (
+                        <span key={i} className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs">
+                          {item.label}{item.tag ? ` · #${item.tag}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
