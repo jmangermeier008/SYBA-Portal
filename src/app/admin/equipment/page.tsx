@@ -139,7 +139,9 @@ type ShedItemType = 'helmet' | 'shoulder_pads' | 'game_jersey' | 'scrimmage_jers
 interface ShedItem {
   id: string;
   tagNumber: string;
-  type: ShedItemType;
+  // Standard ShedItemType or a custom type slug introduced via import/Add Item.
+  // Custom types are inventory-only: no assignment column, no EQUIP_FIELD_MAP entry.
+  type: string;
   size: string;
   status: 'available' | 'issued';
   issuedToPlayerId?: string;
@@ -160,9 +162,20 @@ const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
   practice_pants: 'Practice Pants',
 };
 
+function typeLabel(type: string): string {
+  return (
+    SHED_ITEM_TYPES[type as ShedItemType] ??
+    type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
+
+function normalizeTypeSlug(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
 interface ImportRow {
   tagNumber: string;
-  type: ShedItemType;
+  type: string;
   size: string;
   notes?: string;
 }
@@ -233,9 +246,10 @@ export default function EquipmentPage() {
 
   // Shed Inventory state
   const [shedSearchQuery, setShedSearchQuery] = useState('');
-  const [shedTypeFilter, setShedTypeFilter] = useState<'all' | ShedItemType>('all');
+  const [shedTypeFilter, setShedTypeFilter] = useState<string>('all');
   const [addItemDialog, setAddItemDialog] = useState(false);
-  const [addItemForm, setAddItemForm] = useState({ tagNumber: '', type: 'helmet' as ShedItemType, size: '', notes: '' });
+  const [addItemForm, setAddItemForm] = useState({ tagNumber: '', type: 'helmet' as string, size: '', notes: '' });
+  const [addItemCustomType, setAddItemCustomType] = useState('');
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [checkOutDialog, setCheckOutDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
   const [checkOutPlayerId, setCheckOutPlayerId] = useState('');
@@ -625,6 +639,15 @@ export default function EquipmentPage() {
     }
   }
 
+  // Custom types present in inventory (anything outside the 7 standard types)
+  const customTypes = useMemo(() => {
+    const custom = new Set<string>();
+    (shedItems ?? []).forEach((item) => {
+      if (!(item.type in SHED_ITEM_TYPES)) custom.add(item.type);
+    });
+    return [...custom].sort();
+  }, [shedItems]);
+
   const filteredShedItems = useMemo(() => {
     if (!shedItems) return [];
     const q = shedSearchQuery.toLowerCase();
@@ -633,7 +656,7 @@ export default function EquipmentPage() {
       if (!q) return true;
       return (
         item.tagNumber.toLowerCase().includes(q) ||
-        SHED_ITEM_TYPES[item.type].toLowerCase().includes(q) ||
+        typeLabel(item.type).toLowerCase().includes(q) ||
         item.size.toLowerCase().includes(q) ||
         (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
       );
@@ -642,17 +665,20 @@ export default function EquipmentPage() {
 
   async function handleAddShedItem() {
     if (!db || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()) return;
+    const type = addItemForm.type === '__other__' ? normalizeTypeSlug(addItemCustomType) : addItemForm.type;
+    if (!type) return;
     setAddItemSaving(true);
     try {
       await addDoc(collection(db, 'equipmentInventory'), {
         tagNumber: addItemForm.tagNumber.trim(),
-        type: addItemForm.type,
+        type,
         size: addItemForm.size.trim(),
         status: 'available',
         notes: addItemForm.notes.trim() || '',
       });
       toast({ title: 'Item added', description: `Tag #${addItemForm.tagNumber} added to Shed.` });
       setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '' });
+      setAddItemCustomType('');
       setAddItemDialog(false);
     } catch (err: any) {
       toast({ title: 'Failed to add item', description: err.message, variant: 'destructive' });
@@ -679,8 +705,10 @@ export default function EquipmentPage() {
         returnedAt: '',
       });
 
-      if (enrollment?.parentUserId && enrollment?.id) {
-        const { statusField, sizeField, inventoryIdField } = EQUIP_FIELD_MAP[item.type];
+      // Custom types have no enrollment slot — only the shed item tracks the assignment
+      const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
+      if (enrollment?.parentUserId && enrollment?.id && fieldMap) {
+        const { statusField, sizeField, inventoryIdField } = fieldMap;
         const enrollmentUpdates: Record<string, any> = {
           [`footballEquipment.${String(statusField)}`]: 'issued',
           [`footballEquipment.${String(inventoryIdField)}`]: item.id,
@@ -720,8 +748,9 @@ export default function EquipmentPage() {
         returnedAt: now,
       });
 
-      if (item.issuedToParentUserId && item.issuedToEnrollmentId) {
-        const { statusField, inventoryIdField } = EQUIP_FIELD_MAP[item.type];
+      const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
+      if (item.issuedToParentUserId && item.issuedToEnrollmentId && fieldMap) {
+        const { statusField, inventoryIdField } = fieldMap;
         batch.update(
           doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId),
           {
@@ -754,22 +783,30 @@ export default function EquipmentPage() {
     const wb = XLSX.utils.book_new();
     const data = [
       ['Tag Number', 'Type', 'Size', 'Notes'],
-      ['H-001', 'helmet', 'YM', 'Blue stripe'],
+      ['H-001', 'helmet', 'YM', 'Example row — replace with your real inventory'],
+      ['SP-001', 'shoulder_pads', 'YM', ''],
+      ['GJ-001', 'game_jersey', 'YL', ''],
+      ['SJ-001', 'scrimmage_jersey', 'YL', ''],
+      ['PJ-001', 'practice_jersey', 'YL', ''],
+      ['GP-001', 'game_pants', 'YM', ''],
+      ['PP-001', 'practice_pants', 'YM', ''],
     ];
     const ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 30 }];
+    ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 44 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
 
-    const validTypes = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
+    const standardTypes = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
     const valuesData: (string | string[])[][] = [
-      ['Valid Types', '', 'Valid Sizes (Helmets)', '', 'Valid Sizes (All Others)'],
-      ...Array.from({ length: Math.max(validTypes.length, HELMET_SIZES.length, PAD_SIZES.length) }, (_, i) => [
-        validTypes[i] ?? '',
+      ['Standard Types', '', 'Valid Sizes (Helmets)', '', 'Valid Sizes (All Others)'],
+      ...Array.from({ length: Math.max(standardTypes.length, HELMET_SIZES.length, PAD_SIZES.length) }, (_, i) => [
+        standardTypes[i] ?? '',
         '',
         HELMET_SIZES[i] ?? '',
         '',
         PAD_SIZES[i] ?? '',
       ]),
+      [''],
+      ['Custom types (e.g. "mouth_guard") are also accepted. They are tracked in Shed Inventory but do not appear as Player Assignment columns.'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(valuesData);
     ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
@@ -785,7 +822,6 @@ export default function EquipmentPage() {
 
     const existingTags = new Set((shedItems ?? []).map((i) => i.tagNumber.toLowerCase()));
     const seenTags = new Set<string>();
-    const validTypes = new Set(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]);
 
     const valid: ImportRow[] = [];
     const errors: ImportError[] = [];
@@ -793,18 +829,19 @@ export default function EquipmentPage() {
     rows.forEach((row, idx) => {
       const rowNum = idx + 2;
       const tagNumber = String(row['Tag Number'] ?? '').trim();
-      const type = String(row['Type'] ?? '').trim().toLowerCase();
+      // Custom types are accepted — normalized to a slug (e.g. "Mouth Guard" → mouth_guard)
+      const type = normalizeTypeSlug(String(row['Type'] ?? ''));
       const size = String(row['Size'] ?? '').trim();
       const notes = String(row['Notes'] ?? '').trim();
 
       if (!tagNumber) { errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row }); return; }
       if (existingTags.has(tagNumber.toLowerCase())) { errors.push({ row: rowNum, reason: `Tag #${tagNumber} already exists in inventory`, rawData: row }); return; }
       if (seenTags.has(tagNumber.toLowerCase())) { errors.push({ row: rowNum, reason: `Duplicate Tag #${tagNumber} in this file`, rawData: row }); return; }
-      if (!validTypes.has(type as ShedItemType)) { errors.push({ row: rowNum, reason: `Unknown type "${type}" — must be one of: ${[...validTypes].join(', ')}`, rawData: row }); return; }
+      if (!type) { errors.push({ row: rowNum, reason: 'Type is required', rawData: row }); return; }
       if (!size) { errors.push({ row: rowNum, reason: 'Size is required', rawData: row }); return; }
 
       seenTags.add(tagNumber.toLowerCase());
-      valid.push({ tagNumber, type: type as ShedItemType, size, notes: notes || undefined });
+      valid.push({ tagNumber, type, size, notes: notes || undefined });
     });
 
     return { valid, errors };
@@ -883,7 +920,8 @@ export default function EquipmentPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+      {/* min-w-0 lets the wide assignments table scroll inside its card instead of stretching the page */}
+      <main className="flex-1 min-w-0 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
         <header className="mb-4 md:mb-6">
           <h1 className="text-xl md:text-2xl font-bold font-headline flex items-center gap-2">
             <ShieldCheck className="h-6 w-6 text-primary" />
@@ -1009,7 +1047,7 @@ export default function EquipmentPage() {
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Jersey</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Game Pants Tag</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Practice Pants Tag</th>
-                          <th className="px-4 py-3" />
+                          <th className="px-4 py-3 sticky right-0 z-10 bg-muted/30 border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]" />
                         </tr>
                       </thead>
                       <tbody>
@@ -1181,8 +1219,8 @@ export default function EquipmentPage() {
                                   disabled={isSaving}
                                 />
                               </td>
-                              {/* Return All */}
-                              <td className="px-4 py-2">
+                              {/* Return All — pinned to the right edge so it's reachable without horizontal scroll */}
+                              <td className={cn('px-4 py-2 sticky right-0 z-10 border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]', isSelected ? 'bg-primary/5' : 'bg-background')}>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1257,7 +1295,7 @@ export default function EquipmentPage() {
 
                   {/* ── Equipment detail Sheet ─────────────────── */}
                   <Sheet open={!!drawerEnrollment} onOpenChange={(open) => { if (!open) setDrawerEnrollment(null); }}>
-                    <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
+                    <SheetContent side="right" className="w-full sm:max-w-md flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
                       {drawerEnrollment && (() => {
                         const liveEnrollment = filteredEnrollments.find(e => e.id === drawerEnrollment.id) ?? drawerEnrollment;
                         const isSaving = savingIds.has(liveEnrollment.id);
@@ -1272,7 +1310,7 @@ export default function EquipmentPage() {
                               <SheetDescription>{divisionMap.get(liveEnrollment.divisionId) ?? ''}</SheetDescription>
                             </SheetHeader>
 
-                            <div className="space-y-4">
+                            <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-4">
                               {/* Jersey # */}
                               <div className="flex items-center gap-3">
                                 <span className="text-xs font-medium w-32 shrink-0">Jersey #</span>
@@ -1430,12 +1468,16 @@ export default function EquipmentPage() {
                                 </div>
                               </div>
 
+                            </div>
+
+                            {/* Pinned footer — always reachable without scrolling the equipment list */}
+                            <div className="border-t bg-background pt-3 mt-3">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 disabled={isSaving}
                                 onClick={() => returnAll(liveEnrollment)}
-                                className="rounded-full h-8 gap-1.5 text-xs w-full mt-2"
+                                className="rounded-full h-8 gap-1.5 text-xs w-full"
                               >
                                 <RotateCcw className="h-3.5 w-3.5" />
                                 Return All Equipment
@@ -1468,7 +1510,7 @@ export default function EquipmentPage() {
                     className="pl-9 w-64"
                   />
                 </div>
-                <Select value={shedTypeFilter} onValueChange={(v) => setShedTypeFilter(v as 'all' | ShedItemType)}>
+                <Select value={shedTypeFilter} onValueChange={setShedTypeFilter}>
                   <SelectTrigger className="w-48 rounded-xl">
                     <SelectValue placeholder="All Types" />
                   </SelectTrigger>
@@ -1476,6 +1518,9 @@ export default function EquipmentPage() {
                     <SelectItem value="all">All Types</SelectItem>
                     {(Object.entries(SHED_ITEM_TYPES) as [ShedItemType, string][]).map(([value, label]) => (
                       <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                    {customTypes.map((value) => (
+                      <SelectItem key={value} value={value}>{typeLabel(value)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1540,7 +1585,7 @@ export default function EquipmentPage() {
                               {item.tagNumber}
                             </span>
                           </td>
-                          <td className="px-4 py-2">{SHED_ITEM_TYPES[item.type]}</td>
+                          <td className="px-4 py-2">{typeLabel(item.type)}</td>
                           <td className="px-4 py-2">{item.size}</td>
                           <td className="px-4 py-2">
                             <span className={cn(
@@ -1607,7 +1652,7 @@ export default function EquipmentPage() {
         </Tabs>
 
         {/* Add Item Dialog */}
-        <Dialog open={addItemDialog} onOpenChange={setAddItemDialog}>
+        <Dialog open={addItemDialog} onOpenChange={(open) => { setAddItemDialog(open); if (!open) { setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '' }); setAddItemCustomType(''); } }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -1625,14 +1670,26 @@ export default function EquipmentPage() {
               </div>
               <div className="space-y-1">
                 <Label>Item Type <span className="text-destructive">*</span></Label>
-                <Select value={addItemForm.type} onValueChange={(v) => setAddItemForm(f => ({ ...f, type: v as ShedItemType }))}>
+                <Select value={addItemForm.type} onValueChange={(v) => setAddItemForm(f => ({ ...f, type: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(Object.entries(SHED_ITEM_TYPES) as [ShedItemType, string][]).map(([k, v]) => (
                       <SelectItem key={k} value={k}>{v}</SelectItem>
                     ))}
+                    {customTypes.map((value) => (
+                      <SelectItem key={value} value={value}>{typeLabel(value)}</SelectItem>
+                    ))}
+                    <SelectItem value="__other__">Other…</SelectItem>
                   </SelectContent>
                 </Select>
+                {addItemForm.type === '__other__' && (
+                  <Input
+                    placeholder="New type, e.g. Mouth Guard"
+                    value={addItemCustomType}
+                    onChange={(e) => setAddItemCustomType(e.target.value)}
+                    className="mt-2"
+                  />
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Size <span className="text-destructive">*</span></Label>
@@ -1655,7 +1712,7 @@ export default function EquipmentPage() {
               <Button variant="outline" onClick={() => setAddItemDialog(false)}>Cancel</Button>
               <Button
                 onClick={handleAddShedItem}
-                disabled={addItemSaving || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()}
+                disabled={addItemSaving || !addItemForm.tagNumber.trim() || !addItemForm.size.trim() || (addItemForm.type === '__other__' && !addItemCustomType.trim())}
               >
                 {addItemSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Add Item
@@ -1675,7 +1732,7 @@ export default function EquipmentPage() {
             </DialogHeader>
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                {checkOutDialog.item && `${SHED_ITEM_TYPES[checkOutDialog.item.type]} · Size ${checkOutDialog.item.size}`}
+                {checkOutDialog.item && `${typeLabel(checkOutDialog.item.type)} · Size ${checkOutDialog.item.size}`}
               </p>
               <div className="space-y-1">
                 <Label>Assign to Player <span className="text-destructive">*</span></Label>
@@ -1713,7 +1770,7 @@ export default function EquipmentPage() {
               <AlertDialogTitle>Delete Tag #{deleteDialog.item?.tagNumber}?</AlertDialogTitle>
               <AlertDialogDescription>
                 This will permanently remove{' '}
-                {deleteDialog.item && `${SHED_ITEM_TYPES[deleteDialog.item.type]} (Size ${deleteDialog.item.size})`}{' '}
+                {deleteDialog.item && `${typeLabel(deleteDialog.item.type)} (Size ${deleteDialog.item.size})`}{' '}
                 from the shed inventory. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -1741,7 +1798,7 @@ export default function EquipmentPage() {
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
                 Upload a <strong>.xlsx</strong> or <strong>.csv</strong> file with columns: <code className="bg-muted px-1 rounded text-xs">Tag Number</code>, <code className="bg-muted px-1 rounded text-xs">Type</code>, <code className="bg-muted px-1 rounded text-xs">Size</code>, and optionally <code className="bg-muted px-1 rounded text-xs">Notes</code>.
-                Use the Download Template button to get a pre-formatted file.
+                The template lists every standard type on its example rows — replace them with your real inventory. New custom types are accepted too; they&apos;re tracked in Shed Inventory but won&apos;t show as Player Assignment columns.
               </p>
 
               <div>
@@ -1790,7 +1847,7 @@ export default function EquipmentPage() {
                             {importRows.map((row, i) => (
                               <tr key={i} className="border-b last:border-0">
                                 <td className="px-3 py-1.5 font-medium">{row.tagNumber}</td>
-                                <td className="px-3 py-1.5">{SHED_ITEM_TYPES[row.type]}</td>
+                                <td className="px-3 py-1.5">{typeLabel(row.type)}</td>
                                 <td className="px-3 py-1.5">{row.size}</td>
                                 <td className="px-3 py-1.5 text-muted-foreground">{row.notes ?? '—'}</td>
                               </tr>
