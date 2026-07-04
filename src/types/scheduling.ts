@@ -701,6 +701,17 @@ export interface Announcement {
   isGlobal?: boolean;
   publishedBy?: string;
   sport?: Sport;
+  /** ISO datetime of the most recent edit — absent until first edited. */
+  updatedAt?: string;
+  /** Optional "show until" date (YYYY-MM-DD, inclusive). After this date the
+   *  announcement stops displaying everywhere except the admin manage page. */
+  expiresAt?: string;
+}
+
+/** True when an announcement should still be displayed to non-admin audiences.
+ *  `todayISO` is a local YYYY-MM-DD string — `expiresAt` is inclusive. */
+export function isAnnouncementActive(a: { expiresAt?: string }, todayISO: string): boolean {
+  return !a.expiresAt || a.expiresAt >= todayISO;
 }
 
 // ---------------------------------------------------------------------------

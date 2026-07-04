@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent, LinkRequest } from '@/types/scheduling';
+import { isAnnouncementActive, type CalendarEvent, type LinkRequest } from '@/types/scheduling';
 
 function useCountdown(targetDate: string | undefined) {
   const [label, setLabel] = useState('');
@@ -294,12 +294,19 @@ export default function ParentDashboard() {
     handleDashboardRSVP(status, gameId, teamId);
   };
 
-  // Latest announcements — scoped to active sport
+  // Latest announcements — scoped to active sport. Fetch a few extra so expired
+  // ones can be filtered out client-side while still showing two.
   const announcementsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
-    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(2));
+    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(5));
   }, [db, activeSport]);
-  const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string }>(announcementsQuery);
+  const { data: rawAnnouncements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string; expiresAt?: string }>(announcementsQuery);
+  const announcements = useMemo(() => {
+    if (!rawAnnouncements) return rawAnnouncements;
+    const d = new Date();
+    const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return rawAnnouncements.filter(a => isAnnouncementActive(a, todayISO)).slice(0, 2);
+  }, [rawAnnouncements]);
 
   // Incoming link requests — another parent requesting access to a player this parent owns
   const incomingLinkRequestsQuery = useMemoFirebase(() => {

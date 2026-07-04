@@ -9,7 +9,7 @@ import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { collection, query, orderBy, where } from 'firebase/firestore';
 import { Megaphone, Loader2, Clock, Pin, Search } from 'lucide-react';
 import { format } from 'date-fns';
-import type { Announcement } from '@/types/scheduling';
+import { isAnnouncementActive, type Announcement } from '@/types/scheduling';
 import { useSport } from '@/firebase/sport-context';
 
 export default function CoachAnnouncementsPage() {
@@ -32,8 +32,9 @@ export default function CoachAnnouncementsPage() {
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 
+  const todayISO = format(new Date(), 'yyyy-MM-dd');
   const sorted = announcements
-    ? [...announcements].sort((a, b) => {
+    ? [...announcements].filter(a => isAnnouncementActive(a, todayISO)).sort((a, b) => {
         if (b.pinned !== a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
         return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
       })

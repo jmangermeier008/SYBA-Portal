@@ -10,7 +10,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { AlertTriangle, Loader2, Megaphone, Calendar, Pin, Users } from 'lucide-react';
 import { collection, query, where, limit, orderBy, doc } from 'firebase/firestore';
-import type { Announcement, ComplexClosuresDocument, Game, LeagueOfficer, Sport } from '@/types/scheduling';
+import { isAnnouncementActive, type Announcement, type ComplexClosuresDocument, type Game, type LeagueOfficer, type Sport } from '@/types/scheduling';
 import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_TITLES } from '@/data/officers';
@@ -192,13 +192,24 @@ export default function Home() {
     );
   }, [officers]);
 
-  // Derived: pinned announcements first, max 3
+  // Derived: active (non-expired) announcements, pinned first
   const announcements = useMemo(() => {
     if (!rawAnnouncements) return [];
     return [...rawAnnouncements]
+      .filter(a => isAnnouncementActive(a, todayISO))
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
-      .slice(0, 3);
-  }, [rawAnnouncements]);
+      .slice(0, 8);
+  }, [rawAnnouncements, todayISO]);
+
+  // Tap-to-expand state for announcement cards (body is clamped to 2 lines when collapsed)
+  const [expandedAnnouncements, setExpandedAnnouncements] = useState<Set<string>>(new Set());
+  const toggleAnnouncement = (id: string) => {
+    setExpandedAnnouncements(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     // Wait for sport selection before redirecting — prevents an infinite loop where
@@ -344,8 +355,16 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── Main content — desktop: games left, announcements + leadership right; mobile: stacked ── */}
+      <div className={cn(
+        'mt-10 w-full',
+        (announcements.length > 0 || filteredOfficers.length > 0)
+          ? 'max-w-6xl grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-x-12 gap-y-10 lg:items-start'
+          : 'max-w-2xl',
+      )}>
+
       {/* ── This Week's Games ── */}
-      <div className="mt-10 w-full max-w-2xl">
+      <div className="w-full">
         <div className="flex items-center gap-2 mb-3">
           <Calendar className="h-4 w-4 text-muted-foreground" />
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
@@ -412,9 +431,13 @@ export default function Home() {
         )}
       </div>
 
+      {/* ── Right column: announcements + leadership ── */}
+      {(announcements.length > 0 || filteredOfficers.length > 0) && (
+      <div className="w-full space-y-10">
+
       {/* ── Announcements ── */}
       {announcements.length > 0 && (
-        <div className="mt-10 w-full max-w-xl">
+        <div className="w-full">
           <div className="flex items-center gap-2 mb-3">
             <Megaphone className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
@@ -422,20 +445,45 @@ export default function Home() {
             </p>
           </div>
           <div className="flex flex-col gap-2">
-            {announcements.map(a => (
-              <div key={a.id} className="rounded-xl border bg-white/80 px-4 py-3">
-                <div className="flex items-start gap-2">
-                  {a.pinned && <Pin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />}
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm">{a.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{a.body}</p>
-                    <p className="text-xs text-muted-foreground/70 mt-1">
-                      {formatDate(a.publishedAt.slice(0, 10))}
-                    </p>
+            {announcements.map(a => {
+              const expanded = expandedAnnouncements.has(a.id);
+              const isLong = a.body.length > 120 || a.body.includes('\n');
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => isLong && toggleAnnouncement(a.id)}
+                  aria-expanded={expanded}
+                  className={cn(
+                    'rounded-xl border bg-white/80 px-4 py-3 text-left w-full',
+                    isLong && 'cursor-pointer hover:border-primary/40 transition-colors',
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    {a.pinned && <Pin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm">{a.title}</p>
+                      <p className={cn(
+                        'text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap',
+                        !expanded && 'line-clamp-2',
+                      )}>
+                        {a.body}
+                      </p>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <p className="text-xs text-muted-foreground/70">
+                          {formatDate(a.publishedAt.slice(0, 10))}
+                        </p>
+                        {isLong && (
+                          <span className="text-xs text-primary font-medium shrink-0">
+                            {expanded ? 'Show less' : 'Read more'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            ))}
+                </button>
+              );
+            })}
           </div>
           <p className="text-center mt-3">
             <Link href="/login" className="text-xs text-primary hover:underline">
@@ -447,7 +495,7 @@ export default function Home() {
 
       {/* ── League Leadership ── */}
       {filteredOfficers.length > 0 && (
-        <div className="mt-10 w-full max-w-xl">
+        <div className="w-full">
           <div className="flex items-center gap-2 mb-3">
             <Users className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
@@ -503,6 +551,11 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      </div>
+      )}
+
+      </div>
 
       {/* ── Sponsors ── */}
       {SPONSOR_IMAGES.length > 0 && (

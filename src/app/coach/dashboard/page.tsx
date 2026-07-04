@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent } from '@/types/scheduling';
+import { isAnnouncementActive, type CalendarEvent } from '@/types/scheduling';
 
 interface Team {
   id: string;
@@ -125,12 +125,19 @@ export default function CoachDashboard() {
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
   }, [nextGame]);
 
-  // Latest announcements — scoped to active sport
+  // Latest announcements — scoped to active sport. Fetch a few extra so expired
+  // ones can be filtered out client-side while still showing two.
   const announcementsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
-    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(2));
+    return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(5));
   }, [db, activeSport]);
-  const { data: announcements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string }>(announcementsQuery);
+  const { data: rawAnnouncements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; expiresAt?: string }>(announcementsQuery);
+  const announcements = useMemo(() => {
+    if (!rawAnnouncements) return rawAnnouncements;
+    const d = new Date();
+    const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return rawAnnouncements.filter(a => isAnnouncementActive(a, todayISO)).slice(0, 2);
+  }, [rawAnnouncements]);
 
   // Surface expiring/expired clearances here — the compliance page computes the
   // same thresholds, but coaches only see it if they happen to open that page.

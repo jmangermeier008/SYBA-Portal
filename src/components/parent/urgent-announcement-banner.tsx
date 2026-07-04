@@ -6,7 +6,7 @@ import { AlertTriangle, X } from 'lucide-react';
 import { useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import type { Announcement } from '@/types/scheduling';
+import { isAnnouncementActive, type Announcement } from '@/types/scheduling';
 
 const DISMISSED_KEY = 'syba_urgent_dismissed';
 
@@ -56,9 +56,12 @@ export function UrgentAnnouncementBanner() {
   }, []);
 
   const visible = useMemo(() => {
+    const d = new Date();
+    const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     return (urgent ?? [])
       .filter(a => a.isGlobal || a.sport === activeSport)
       .filter(a => !dismissed.has(a.id))
+      .filter(a => isAnnouncementActive(a, todayISO))
       .sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? ''));
   }, [urgent, activeSport, dismissed]);
 
