@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy, where, writeBatch } from 'firebase/firestore';
 import { useSport } from '@/firebase/sport-context';
-import { Settings, Save, Bell, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain, Trash2, Plus, Mail } from 'lucide-react';
+import { Settings, Save, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain, Trash2, Plus, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
@@ -217,6 +217,7 @@ export default function AdminSettingsPage() {
   const [stripeKeys, setStripeKeys] = useState<{ test: boolean; live: boolean }>({ test: false, live: false });
   const [stripeAudit, setStripeAudit] = useState<{ updatedAt: string; updatedByName: string }>({ updatedAt: '', updatedByName: '' });
   const [confirmSandboxOpen, setConfirmSandboxOpen] = useState(false);
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState<{ id: string; title: string } | null>(null);
   const [switchingMode, setSwitchingMode] = useState(false);
 
   const loadStripeStatus = async () => {
@@ -495,12 +496,17 @@ export default function AdminSettingsPage() {
   };
 
   const handleDeleteRole = async (id: string, title: string) => {
-    if (!db) return;
-    if (!confirm(`Delete the "${title}" role? Inquiries that route to it will fall back to your master/fallback inbox until reassigned.`)) return;
+    setDeleteRoleTarget({ id, title });
+  };
+
+  const confirmDeleteRole = async () => {
+    if (!db || !deleteRoleTarget) return;
     try {
-      await deleteDoc(doc(db, 'officers', id));
+      await deleteDoc(doc(db, 'officers', deleteRoleTarget.id));
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Delete failed', description: err.message });
+    } finally {
+      setDeleteRoleTarget(null);
     }
   };
 
@@ -713,28 +719,6 @@ export default function AdminSettingsPage() {
                 </Card>
               )}
 
-              {/* Notifications (read-only preview) */}
-              <Card className="border-none shadow-md opacity-60">
-                <CardHeader className="flex flex-row items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                    <Bell className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle>Notifications</CardTitle>
-                    <CardDescription>Automated broadcast settings — coming soon</CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Email Alerts</Label>
-                      <p className="text-xs text-muted-foreground">Send automated emails for game rainouts</p>
-                    </div>
-                    <Switch defaultChecked disabled />
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Payments */}
               <Card className="border-none shadow-md">
                 <CardHeader className="flex flex-row items-center gap-4">
@@ -829,6 +813,27 @@ export default function AdminSettingsPage() {
                       className="bg-amber-600 hover:bg-amber-700"
                     >
                       {switchingMode ? 'Switching…' : 'Switch to Test mode'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <AlertDialog open={!!deleteRoleTarget} onOpenChange={(o) => { if (!o) setDeleteRoleTarget(null); }}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete the &quot;{deleteRoleTarget?.title}&quot; role?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Inquiries that route to this role will fall back to your master/fallback inbox
+                      until they are reassigned.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={confirmDeleteRole}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete Role
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

@@ -5,10 +5,13 @@ import { getAdminFirestore } from '@/lib/firebase-admin';
 /**
  * GET/POST /api/reminders
  *
- * Sends volunteer shift reminders (email + in-app notification) to every
- * parent signed up for a concession/tagging shift happening tomorrow.
- * Triggered once a day by a Vercel cron job (vercel.json) — see
- * docs/volunteer-shift-reminders.md for the setup.
+ * Daily reminder run, triggered by a Vercel cron job (vercel.json):
+ *  1. Volunteer shift reminders (email + in-app) to every parent signed up
+ *     for a concession/tagging shift happening tomorrow — see
+ *     docs/volunteer-shift-reminders.md for the setup.
+ *  2. Game-day reminders for team games happening tomorrow: in-app
+ *     notification to every parent on the team, email only to parents who
+ *     haven't RSVP'd (keeps email volume inside the Resend free tier).
  *
  * Auth: Authorization: Bearer <CRON_SECRET> — Vercel attaches this header to
  * cron invocations automatically when the CRON_SECRET env var is set.
@@ -162,8 +165,126 @@ async function runReminders(req: Request) {
       slotsProcessed++;
     }
 
-    console.log(`[reminders] date=${targetDate} slots=${slotsProcessed} emails=${emailsSent} notifications=${notificationsWritten}`);
-    return NextResponse.json({ ok: true, date: targetDate, slotsProcessed, emailsSent, notificationsWritten });
+    // ── Game-day reminders ──────────────────────────────────────────────────
+    // In-app to every parent on the team; email only to parents whose player
+    // hasn't RSVP'd yet. Emails across the whole run are budgeted so a busy
+    // Saturday can't blow through the Resend free-tier daily cap.
+    const EMAIL_BUDGET = 90;
+    let gamesProcessed = 0;
+    let gameEmailsSent = 0;
+    let gameEmailsSkipped = 0;
+
+    const seasonsSnap = await db.collection('seasons').get();
+    const activeSeasons = new Map<string, any>();
+    for (const s of seasonsSnap.docs) {
+      const data = s.data();
+      if (data.isActive === true || data.status === 'active') activeSeasons.set(s.id, data);
+    }
+
+    const teamsSnap = await db.collection('teams').get();
+    const activeTeams = teamsSnap.docs.filter(t => activeSeasons.has(t.data().seasonId));
+
+    // Parent profiles repeat across games/teams — cache reads.
+    const profileCache = new Map<string, any>();
+    const getProfile = async (userId: string) => {
+      if (!profileCache.has(userId)) {
+        const snap = await db.doc(`userProfiles/${userId}`).get();
+        profileCache.set(userId, snap.data() ?? null);
+      }
+      return profileCache.get(userId);
+    };
+
+    for (const teamDoc of activeTeams) {
+      const team = teamDoc.data();
+      // Naive-local dateTime strings sort lexicographically, so a string range
+      // selects tomorrow's games without any timezone conversion.
+      const gamesSnap = await db
+        .collection('teams').doc(teamDoc.id).collection('games')
+        .where('dateTime', '>=', `${targetDate}T00:00:00`)
+        .where('dateTime', '<=', `${targetDate}T23:59:59`)
+        .get();
+
+      for (const gameDoc of gamesSnap.docs) {
+        const game = gameDoc.data();
+        if (game.type !== 'Game' || game.cancelled === true) continue;
+        if (game.gameReminderSentAt) continue; // idempotent re-run
+
+        const [enrollSnap, rsvpSnap] = await Promise.all([
+          db.collectionGroup('enrollments').where('teamId', '==', teamDoc.id).get(),
+          gameDoc.ref.collection('rsvps').get(),
+        ]);
+        const respondedPlayerIds = new Set(rsvpSnap.docs.map(r => r.data().playerId));
+
+        // parent → do any of their players on this team still need to RSVP?
+        const parentNeedsRsvp = new Map<string, boolean>();
+        for (const e of enrollSnap.docs) {
+          const { parentUserId, playerId } = e.data();
+          if (!parentUserId) continue;
+          const needs = !respondedPlayerIds.has(playerId);
+          parentNeedsRsvp.set(parentUserId, (parentNeedsRsvp.get(parentUserId) ?? false) || needs);
+        }
+        if (parentNeedsRsvp.size === 0) continue;
+
+        const sport = team.sport ?? activeSeasons.get(team.seasonId)?.sport;
+        const prefix = sportPrefix(sport);
+        const gameLabel = game.opponentName ? `vs ${game.opponentName}` : 'game';
+        const time = formatTime((game.dateTime as string).slice(11, 16));
+        const when = `tomorrow, ${formatDate(targetDate)}, at ${time}`;
+        const whereNote = game.location ? ` at ${game.location}` : '';
+
+        for (const [parentId, needsRsvp] of parentNeedsRsvp) {
+          const profile = await getProfile(parentId);
+          if (!profile) continue;
+          const prefs = profile.notificationPrefs ?? {};
+
+          if (prefs.inApp !== false) {
+            await db.collection('notifications').doc().set({
+              userId: parentId,
+              type: 'gameReminder',
+              title: 'Game Tomorrow',
+              body: `${team.name ?? 'Your team'} plays ${gameLabel} ${when}${whereNote}.${needsRsvp ? ' Please RSVP so your coach can plan.' : ''}`,
+              relatedDocId: gameDoc.id,
+              relatedDocType: 'game',
+              read: false,
+              createdAt: Timestamp.now(),
+              ...(sport ? { sport } : {}),
+            });
+            notificationsWritten++;
+          }
+
+          if (needsRsvp && prefs.email !== false && profile.email) {
+            if (emailsSent + gameEmailsSent >= EMAIL_BUDGET) {
+              gameEmailsSkipped++;
+              continue;
+            }
+            const ok = await sendEmail(
+              profile.email,
+              `${prefix}Game Tomorrow — Please RSVP`,
+              `Hi ${profile.displayName ?? ''},\n\n${team.name ?? 'Your team'} plays ${gameLabel} ${when}${whereNote}.\n\nYou haven't RSVP'd yet — please log in to the portal and let your coach know if your player will be there.\n\nSee you at the field!`
+            );
+            if (ok) gameEmailsSent++;
+          }
+        }
+
+        await gameDoc.ref.update({ gameReminderSentAt: new Date().toISOString() });
+        gamesProcessed++;
+      }
+    }
+
+    if (gameEmailsSkipped > 0) {
+      console.warn(`[reminders] email budget reached — skipped ${gameEmailsSkipped} game-reminder emails (in-app still sent)`);
+    }
+    console.log(`[reminders] date=${targetDate} slots=${slotsProcessed} games=${gamesProcessed} emails=${emailsSent + gameEmailsSent} notifications=${notificationsWritten}`);
+    return NextResponse.json({
+      ok: true,
+      date: targetDate,
+      slotsProcessed,
+      gamesProcessed,
+      emailsSent,
+      gameEmailsSent,
+      gameEmailsSkipped,
+      notificationsWritten,
+    });
   } catch (error: any) {
     console.error('[reminders] Error:', error.message);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

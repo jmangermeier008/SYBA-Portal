@@ -25,6 +25,8 @@ import {
   LifeBuoy,
   Users,
   Scale,
+  Mail,
+  Copy,
 } from 'lucide-react';
 import Link from 'next/link';
 import { calculateLeagueAge } from '@/lib/utils';
@@ -137,6 +139,32 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
     return m;
   }, [enrollments]);
 
+  // Deduped parent emails for the whole roster — powers the $0 "Email Team"
+  // mailto and its clipboard fallback.
+  const parentEmails = useMemo(() => {
+    if (!enrollments || !allUsers) return [];
+    const byId = new Map(allUsers.map(u => [u.id, u]));
+    return [...new Set(
+      enrollments
+        .map(e => byId.get(e.parentUserId)?.email)
+        .filter((email): email is string => !!email)
+    )];
+  }, [enrollments, allUsers]);
+
+  // mailto URLs beyond ~2000 chars silently fail in some browsers; fall back
+  // to copy-only for unusually large rosters.
+  const mailtoHref = `mailto:?bcc=${parentEmails.join(',')}`;
+  const mailtoUsable = parentEmails.length > 0 && mailtoHref.length <= 1900;
+
+  const handleCopyEmails = async () => {
+    try {
+      await navigator.clipboard.writeText(parentEmails.join(', '));
+      toast({ title: 'Emails copied', description: `${parentEmails.length} parent email${parentEmails.length === 1 ? '' : 's'} on your clipboard — paste into BCC.` });
+    } catch {
+      toast({ variant: 'destructive', title: 'Copy failed', description: 'Your browser blocked clipboard access.' });
+    }
+  };
+
   const handleAddWeight = async (enrollment: Enrollment) => {
     const weightStr = weightInputs[enrollment.id];
     const weight = parseFloat(weightStr);
@@ -203,8 +231,26 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
           <Button variant="ghost" asChild className="mb-4 -ml-2">
             <Link href="/coach/teams"><ChevronLeft className="mr-2 h-4 w-4" /> Back to My Teams</Link>
           </Button>
-          <h1 className="text-4xl font-bold font-headline">Team Roster</h1>
-          <p className="text-muted-foreground mt-2">Detailed player profiles and parent contact hub.</p>
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+            <div>
+              <h1 className="text-4xl font-bold font-headline">Team Roster</h1>
+              <p className="text-muted-foreground mt-2">Detailed player profiles and parent contact hub.</p>
+            </div>
+            {parentEmails.length > 0 && (
+              <div className="flex gap-2 shrink-0">
+                {mailtoUsable && (
+                  <Button className="min-h-[44px]" asChild>
+                    <a href={mailtoHref}>
+                      <Mail className="mr-2 h-4 w-4" /> Email Team
+                    </a>
+                  </Button>
+                )}
+                <Button variant="outline" className="min-h-[44px]" onClick={handleCopyEmails}>
+                  <Copy className="mr-2 h-4 w-4" /> Copy Emails
+                </Button>
+              </div>
+            )}
+          </div>
         </header>
 
         <Tabs defaultValue="roster" className="w-full">

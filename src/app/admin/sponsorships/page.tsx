@@ -400,6 +400,53 @@ export default function SponsorshipsPage() {
                   <div className="text-center py-16 text-muted-foreground">
                     No sponsors yet. Add your first sponsor above.
                   </div>
+                ) : isMobile ? (
+                  /* ── Mobile: card list (7-column table cramps on phones) ── */
+                  <div className="divide-y">
+                    {sponsors.map(sp => {
+                      const outstanding = (sp.pledgedAmount ?? 0) - (sp.receivedAmount ?? 0);
+                      return (
+                        <div key={sp.id} className="p-4 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm truncate">{sp.name}</p>
+                              {sp.contactName && (
+                                <p className="text-xs text-muted-foreground truncate">{sp.contactName}</p>
+                              )}
+                            </div>
+                            <div className="flex gap-1 shrink-0">
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(sp)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => setDeleteDialog({ open: true, sponsor: sp })}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${TIER_COLORS[sp.tier]}`}>
+                              {sp.tier}
+                            </span>
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${STATUS_COLORS[sp.status]}`}>
+                              {sp.status}
+                            </span>
+                          </div>
+                          <p className="text-sm">
+                            <span className="text-green-600 font-medium">{formatCents(sp.receivedAmount ?? 0)}</span>
+                            <span className="text-muted-foreground"> of {formatCents(sp.pledgedAmount ?? 0)} pledged</span>
+                            {outstanding > 0 && (
+                              <span className="text-amber-600 font-medium"> · {formatCents(outstanding)} outstanding</span>
+                            )}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <div className="overflow-x-auto w-full">
                   <Table>

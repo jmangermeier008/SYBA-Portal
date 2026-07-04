@@ -11,17 +11,17 @@ import { Badge } from '@/components/ui/badge';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { collection, query, orderBy, doc, addDoc, updateDoc, deleteDoc, deleteField, getDocs, writeBatch, where, Timestamp } from 'firebase/firestore';
-import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin, AlertTriangle, Pencil, CalendarClock } from 'lucide-react';
+import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin, AlertTriangle, Pencil, CalendarClock, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import type { Announcement } from '@/types/scheduling';
 
-const EMPTY_FORM = { title: '', body: '', pinned: false, isGlobal: false, isUrgent: false, expiresAt: '', notify: true };
+const EMPTY_FORM = { title: '', body: '', pinned: false, isGlobal: false, isUrgent: false, expiresAt: '', notify: true, sendEmail: false };
 
 export default function AdminAnnouncementsPage() {
-  const { profile, loading: loadingUser } = useUser();
+  const { user, profile, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
@@ -57,6 +57,7 @@ export default function AdminAnnouncementsPage() {
       isUrgent: ann.isUrgent ?? false,
       expiresAt: ann.expiresAt ?? '',
       notify: false, // editing is silent unless the admin opts in
+      sendEmail: false,
     });
     setDialogOpen(true);
   };
@@ -87,6 +88,38 @@ export default function AdminAnnouncementsPage() {
     await notifBatch.commit();
   };
 
+  // Emails the announcement to every opted-in family via the server route.
+  // Failure here shouldn't roll back the published announcement — surface a
+  // toast and let the admin retry from an edit instead.
+  const sendAnnouncementEmail = async (title: string, body: string) => {
+    if (!user) return;
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/email/announcement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ title, body, sport: activeSport, isGlobal: form.isGlobal }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Email send failed');
+      if (data.failedChunks > 0 || data.sent < data.audienceSize) {
+        toast({
+          title: `Emailed ${data.sent} of ${data.audienceSize} families`,
+          description: 'Some emails could not be sent (this can happen near the daily email limit). The announcement is still visible in the portal.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: `Emailed ${data.sent} families` });
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Announcement published, but email failed',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleSave = async () => {
     if (!form.title.trim() || !form.body.trim() || !db) return;
     setSaving(true);
@@ -106,6 +139,7 @@ export default function AdminAnnouncementsPage() {
         });
         if (form.notify) await fanOutNotifications(editTarget.id, title, body, form.isGlobal);
         toast({ title: form.notify ? 'Announcement Updated & Everyone Re-Notified' : 'Announcement Updated' });
+        if (form.sendEmail) await sendAnnouncementEmail(title, body);
       } else {
         const newDocRef = await addDoc(collection(db, 'announcements'), {
           title,
@@ -120,6 +154,7 @@ export default function AdminAnnouncementsPage() {
         });
         if (form.notify) await fanOutNotifications(newDocRef.id, title, body, form.isGlobal);
         toast({ title: form.notify ? 'Announcement Published' : 'Announcement Published Quietly' });
+        if (form.sendEmail) await sendAnnouncementEmail(title, body);
       }
       setDialogOpen(false);
       setEditTarget(null);
@@ -360,6 +395,22 @@ export default function AdminAnnouncementsPage() {
                   {editTarget
                     ? 'Off by default — small fixes shouldn’t ping every family. Turn on for substantive changes.'
                     : 'Turn off to publish quietly (e.g. while testing) — the announcement still appears on the portal.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="sendEmail"
+                checked={form.sendEmail}
+                onCheckedChange={(v) => setForm(f => ({ ...f, sendEmail: v }))}
+              />
+              <div>
+                <Label htmlFor="sendEmail" className="cursor-pointer flex items-center gap-1.5">
+                  <Mail className="h-3.5 w-3.5" /> Also send as email
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Emails this announcement to every family that hasn&apos;t turned off email updates.
+                  Best for things families must see even if they don&apos;t open the portal.
                 </p>
               </div>
             </div>

@@ -7,12 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star, Pencil } from 'lucide-react';
+import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star, Pencil, Copy } from 'lucide-react';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { SPORT_CONFIG } from '@/config/sports';
 import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch, updateDoc } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -59,6 +60,8 @@ export default function SeasonsAdminPage() {
     ageCutoffDate: '',
     siblingFee: '50', // dollars in the input; stored in cents
   });
+  // Season to copy divisions/fees/settings from ('' = start blank from sport defaults)
+  const [cloneFromId, setCloneFromId] = useState('');
 
   const seasonsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -66,6 +69,37 @@ export default function SeasonsAdminPage() {
   }, [db, isAdmin, isBoardMember, activeSport]);
 
   const { data: seasons, isLoading } = useCollection<Season>(seasonsQuery);
+
+  /** "2026-03-01" → "2027-03-01" (leaves malformed values untouched — still editable). */
+  const shiftYear = (iso?: string) => {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso ?? '';
+    return `${Number(iso.slice(0, 4)) + 1}${iso.slice(4)}`;
+  };
+
+  /** "Fall 2026 Football" → "Fall 2027 Football"; '' when no year to bump (name must be unique). */
+  const bumpYearInName = (name: string) => {
+    const bumped = name.replace(/\b(20\d{2})\b/, y => String(Number(y) + 1));
+    return bumped === name ? '' : bumped;
+  };
+
+  /** Prefills the create form from a source season with dates shifted +1 year. */
+  const applyCloneSource = (sourceId: string, prefillName = false) => {
+    const src = seasons?.find(s => s.id === sourceId);
+    if (!src) {
+      setCloneFromId('');
+      return;
+    }
+    setCloneFromId(sourceId);
+    setFormData(f => ({
+      ...f,
+      name: prefillName ? bumpYearInName(src.name) : f.name,
+      registrationOpen: shiftYear(src.registrationOpen),
+      registrationClose: shiftYear(src.registrationClose),
+      volunteerSlotsRequired: src.volunteerSlotsRequired ?? 1,
+      ageCutoffDate: src.ageCutoffDate ? shiftYear(src.ageCutoffDate) : '',
+      siblingFee: src.siblingFee != null ? String(src.siblingFee / 100) : '50',
+    }));
+  };
 
   const handleCreateSeason = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,40 +131,60 @@ export default function SeasonsAdminPage() {
       // dropdowns with no divisions. Subcollection writes don't require the parent
       // season doc to pre-exist, so this ordering is safe.
       const sportConfig = SPORT_CONFIG[activeSport!];
-      const divisions = sportConfig.defaultDivisions.map(d => ({
-        ...d,
-        waitlistEnabled: true,
-        registeredCount: 0,
-        reservedCount: 0,
-      }));
 
-      await Promise.all(
-        divisions.map(div =>
-          setDoc(doc(db, 'seasons', seasonId, 'divisions', div.id), div)
-        )
-      );
-
-      if (!sportConfig.hasTeams) {
-        await Promise.all(
-          divisions.map(div =>
-            setDoc(doc(db, 'teams', `${seasonId}-${div.id}`), {
-              id: `${seasonId}-${div.id}`,
-              name: div.name,
-              seasonId,
-              divisionId: div.id,
-              sport: activeSport,
-              coachIds: [],
-            })
-          )
-        );
+      // Cloning copies the source season's divisions (same doc IDs, fees,
+      // capacities) with enrollment counters reset; otherwise start from the
+      // sport's default division set.
+      let divisions: Array<Record<string, any> & { id: string; name: string }>;
+      if (cloneFromId) {
+        const srcSnap = await getDocs(collection(db, 'seasons', cloneFromId, 'divisions'));
+        divisions = srcSnap.docs.map(d => ({
+          ...(d.data() as Record<string, any>),
+          id: d.id,
+          name: (d.data().name as string) ?? d.id,
+          waitlistEnabled: d.data().waitlistEnabled ?? true,
+          registeredCount: 0,
+          reservedCount: 0,
+        }));
+        if (divisions.length === 0) {
+          toast({ variant: "destructive", title: "Nothing to Clone", description: "The selected season has no divisions." });
+          setIsAdding(false);
+          return;
+        }
+      } else {
+        divisions = sportConfig.defaultDivisions.map(d => ({
+          ...d,
+          waitlistEnabled: true,
+          registeredCount: 0,
+          reservedCount: 0,
+        }));
       }
+
+      const batch = writeBatch(db);
+      divisions.forEach(div => {
+        batch.set(doc(db, 'seasons', seasonId, 'divisions', div.id), div);
+      });
+      if (!sportConfig.hasTeams) {
+        divisions.forEach(div => {
+          batch.set(doc(db, 'teams', `${seasonId}-${div.id}`), {
+            id: `${seasonId}-${div.id}`,
+            name: div.name,
+            seasonId,
+            divisionId: div.id,
+            sport: activeSport,
+            coachIds: [],
+          });
+        });
+      }
+      await batch.commit();
 
       // Season doc last — only now does the season become visible to enrollment.
       await setDoc(seasonRef, seasonData);
 
-      toast({ title: "Season Created", description: `${formData.name} is now active.` });
+      toast({ title: "Season Created", description: cloneFromId ? `${formData.name} created with divisions copied over.` : `${formData.name} is now active.` });
       setOpen(false);
       setFormData({ name: '', registrationOpen: '', registrationClose: '', volunteerSlotsRequired: 1, ageCutoffDate: '', siblingFee: '50' });
+      setCloneFromId('');
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -283,19 +337,42 @@ export default function SeasonsAdminPage() {
             <p className="text-sm text-muted-foreground">Define seasons, registration periods, and division fees.</p>
           </div>
           
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setCloneFromId(''); }}>
             <DialogTrigger asChild>
               <Button className="rounded-full shadow-lg shadow-primary/20">
                 <Plus className="mr-2 h-4 w-4" /> Create Season
               </Button>
             </DialogTrigger>
-            <DialogContent className="rounded-2xl">
+            <DialogContent className="rounded-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="font-headline text-2xl">New Playing Season</DialogTitle>
                 <DialogDescription>Setup a new season for Sharpsville players.</DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreateSeason}>
                 <div className="space-y-4 py-4">
+                  {seasons && seasons.length > 0 && (
+                    <div className="space-y-2">
+                      <Label htmlFor="cloneFrom">Start from</Label>
+                      <Select
+                        value={cloneFromId || 'blank'}
+                        onValueChange={(v) => v === 'blank' ? setCloneFromId('') : applyCloneSource(v)}
+                      >
+                        <SelectTrigger id="cloneFrom">
+                          <SelectValue placeholder="Blank (sport defaults)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="blank">Blank (sport defaults)</SelectItem>
+                          {seasons.map(s => (
+                            <SelectItem key={s.id} value={s.id}>Copy of {s.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Copying brings over the season&apos;s divisions, fees, capacities, and settings.
+                        Dates below shift forward one year — adjust as needed.
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="name">Season Name</Label>
                     <Input 
@@ -421,6 +498,18 @@ export default function SeasonsAdminPage() {
                           Set as Active
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:bg-muted/20"
+                        title={`Clone ${season.name} into a new season`}
+                        onClick={() => {
+                          applyCloneSource(season.id, true);
+                          setOpen(true);
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"

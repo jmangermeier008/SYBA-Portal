@@ -478,5 +478,15 @@ service cloud.firestore {
       allow update: if isAdmin() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolvedAt', 'resolvedBy']);
     }
+
+    // ---------------------------------------------------------------------------
+    // Calendar Tokens — the doc ID is the secret credential for a user's
+    // subscribable ICS feed. Admin SDK only; any client read would leak every
+    // family's feed URL.
+    // ---------------------------------------------------------------------------
+
+    match /calendarTokens/{token} {
+      allow read, write: if false;
+    }
   }
 }

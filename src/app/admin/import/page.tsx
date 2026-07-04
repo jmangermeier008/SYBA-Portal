@@ -7,12 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { useFirestore, useUser, useMemoFirebase, useCollection } from '@/firebase';
 import {
-  doc, deleteDoc, updateDoc, collection, query, orderBy,
+  doc, deleteDoc, collection, query, orderBy,
   collectionGroup, where, getDocs,
 } from 'firebase/firestore';
 import {
-  Loader2, CheckCircle2, Trash2, Users,
-  ShieldCheck, User as UserIcon, UserCheck, Activity, Calendar, Megaphone,
+  Loader2, Trash2, Users,
+  Activity, Calendar, Megaphone,
   BookOpen,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -39,7 +39,7 @@ interface BoardMeeting {
 
 export default function DataManagementPage() {
   const db = useFirestore();
-  const { user, profile, isSiteAdmin, loading: loadingUser } = useUser();
+  const { user, isSiteAdmin, loading: loadingUser } = useUser();
   const { toast } = useToast();
 
   // ── All hooks before early returns (Rules of Hooks) ──────────────────────
@@ -63,9 +63,6 @@ export default function DataManagementPage() {
   const { data: announcements } = useCollection<Announcement>(announcementsQuery);
   const { data: boardMeetings } = useCollection<BoardMeeting>(boardMeetingsQuery);
   const { data: players } = useCollection<{ id: string }>(playersQuery);
-
-  // Role switcher state
-  const [roleLoading, setRoleLoading] = useState(false);
 
   // Delete confirm state (inline — no modals)
   const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState<string | null>(null);
@@ -125,27 +122,6 @@ export default function DataManagementPage() {
       teams: teams?.filter(t => t.divisionId === divId) ?? [],
     }))
     .filter(g => g.teams.length > 0);
-
-  // ── Role Switcher ─────────────────────────────────────────────────────────
-  const handleRoleSwitch = async (newRole: 'Site Admin' | 'Admin' | 'Board Member' | 'Coach' | 'Parent') => {
-    if (!user || !db) return;
-    setRoleLoading(true);
-    try {
-      // Legacy 'role' field only supports Parent/Coach/Admin — map higher roles to Admin
-      const legacyRole = (newRole === 'Site Admin' || newRole === 'Board Member') ? 'Admin' : newRole;
-      await updateDoc(doc(db, 'userProfiles', user.uid), {
-        role: legacyRole,
-        roles: [newRole],
-        updatedAt: new Date().toISOString(),
-      });
-      toast({ title: "Role Updated", description: `Switched to ${newRole}. Reloading…` });
-      setTimeout(() => window.location.reload(), 500);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Update Failed", description: e.message });
-    } finally {
-      setRoleLoading(false);
-    }
-  };
 
   // ── Delete Season ─────────────────────────────────────────────────────────
   const handleDeleteSeason = async (seasonId: string) => {
@@ -225,8 +201,6 @@ export default function DataManagementPage() {
       setDeleteLoadingId(null);
     }
   };
-
-  const currentRole = profile?.roles?.[0] ?? profile?.role ?? '—';
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -515,67 +489,6 @@ export default function DataManagementPage() {
               )}
             </CardContent>
           </Card>
-
-          {/* ── Role Switcher ── */}
-          <Card className="border-none shadow-xl">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-primary" />
-                Role Switcher
-              </CardTitle>
-              <CardDescription>Instantly switch your account's role to preview different dashboards during the demo.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 rounded-xl border bg-primary/5 space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Current role: <span className="font-bold text-primary">{currentRole}</span>
-                </p>
-                <div className="grid grid-cols-1 gap-3">
-                  <Button
-                    variant={currentRole === 'Site Admin' ? 'default' : 'outline'}
-                    className="justify-start h-12 rounded-xl"
-                    onClick={() => handleRoleSwitch('Site Admin')}
-                    disabled={roleLoading}
-                  >
-                    <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Site Admin
-                  </Button>
-                  <Button
-                    variant={currentRole === 'Admin' ? 'default' : 'outline'}
-                    className="justify-start h-12 rounded-xl"
-                    onClick={() => handleRoleSwitch('Admin')}
-                    disabled={roleLoading}
-                  >
-                    <ShieldCheck className="mr-2 h-5 w-5" /> Switch to Admin
-                  </Button>
-                  <Button
-                    variant={currentRole === 'Board Member' ? 'default' : 'outline'}
-                    className="justify-start h-12 rounded-xl"
-                    onClick={() => handleRoleSwitch('Board Member')}
-                    disabled={roleLoading}
-                  >
-                    <UserCheck className="mr-2 h-5 w-5" /> Switch to Board Member
-                  </Button>
-                  <Button
-                    variant={currentRole === 'Coach' ? 'default' : 'outline'}
-                    className="justify-start h-12 rounded-xl"
-                    onClick={() => handleRoleSwitch('Coach')}
-                    disabled={roleLoading}
-                  >
-                    <UserCheck className="mr-2 h-5 w-5" /> Switch to Coach
-                  </Button>
-                  <Button
-                    variant={currentRole === 'Parent' ? 'default' : 'outline'}
-                    className="justify-start h-12 rounded-xl"
-                    onClick={() => handleRoleSwitch('Parent')}
-                    disabled={roleLoading}
-                  >
-                    <UserIcon className="mr-2 h-5 w-5" /> Switch to Parent
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
 
         </div>
       </main>

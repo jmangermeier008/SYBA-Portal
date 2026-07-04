@@ -22,6 +22,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
@@ -265,13 +266,16 @@ export default function ParentSchedulesPage() {
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6 max-w-[1400px]">
-        <header className="mb-4 md:mb-6">
-          <h1 className="text-xl md:text-2xl font-bold font-headline">Schedule</h1>
-          <p className="text-sm text-muted-foreground">
-            {selectedPlayerId === 'all'
-              ? 'Viewing combined league schedule for all your players.'
-              : volunteerTerms.scheduleSubtitle}
-          </p>
+        <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Schedule</h1>
+            <p className="text-sm text-muted-foreground">
+              {selectedPlayerId === 'all'
+                ? 'Viewing combined league schedule for all your players.'
+                : volunteerTerms.scheduleSubtitle}
+            </p>
+          </div>
+          <SubscribeCalendarDialog />
         </header>
 
         <LeagueCalendar

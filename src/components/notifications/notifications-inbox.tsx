@@ -28,6 +28,9 @@ function NotifIcon({ type }: { type: NotificationType }) {
   if (type === 'announcement') {
     return <Megaphone className={cn(base, 'text-primary')} />;
   }
+  if (type === 'gameReminder') {
+    return <CalendarDays className={cn(base, 'text-green-600')} />;
+  }
   if (type === 'clearanceApproved') {
     return <ShieldCheck className={cn(base, 'text-green-600')} />;
   }

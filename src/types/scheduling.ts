@@ -332,6 +332,7 @@ export type NotificationType =
   | 'concessionSignupConfirmed'
   | 'concessionSignupCancelled'
   | 'concessionShiftReminder'
+  | 'gameReminder'
   | 'clearanceApproved'
   | 'clearanceRejected'
   | 'announcement';

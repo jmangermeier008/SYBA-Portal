@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { isAnnouncementActive, type CalendarEvent, type LinkRequest } from '@/types/scheduling';
 
 function useCountdown(targetDate: string | undefined) {
@@ -689,9 +690,12 @@ export default function ParentDashboard() {
           {/* Season Schedule */}
           {selectedTeamId && (
             <Card className="border shadow-sm">
-              <CardHeader>
-                <CardTitle className="font-headline">Season Schedule</CardTitle>
-                <CardDescription>Your team&apos;s full schedule for the season</CardDescription>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 space-y-0">
+                <div>
+                  <CardTitle className="font-headline">Season Schedule</CardTitle>
+                  <CardDescription>Your team&apos;s full schedule for the season</CardDescription>
+                </div>
+                <SubscribeCalendarDialog />
               </CardHeader>
               <CardContent>
                 <LeagueCalendar
