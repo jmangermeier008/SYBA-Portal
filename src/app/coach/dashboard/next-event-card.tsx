@@ -30,12 +30,14 @@ interface NextEventGame {
 
 interface NextEventCardProps {
   teamId: string;
+  /** Shown when the coach is viewing all teams, to identify which team this event belongs to */
+  teamName?: string;
   game: NextEventGame;
   tally: { attending: number; maybe: number; notAttending: number; unreplied: number };
   onWeatherCancel: (gameId: string) => void | Promise<void>;
 }
 
-export function NextEventCard({ teamId, game, tally, onWeatherCancel }: NextEventCardProps) {
+export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }: NextEventCardProps) {
   const isGame = game.type === 'Game';
   const totalRsvps = tally.attending + tally.maybe + tally.notAttending;
 
@@ -48,6 +50,9 @@ export function NextEventCard({ teamId, game, tally, onWeatherCancel }: NextEven
           </Badge>
           {isGame && game.locationType && (
             <Badge variant="outline" className="text-[10px] capitalize">{game.locationType}</Badge>
+          )}
+          {teamName && (
+            <Badge variant="outline" className="text-[10px] max-w-[40%] truncate">{teamName}</Badge>
           )}
           <span className="text-xs text-muted-foreground ml-auto">
             {format(new Date(game.dateTime), 'EEE, MMM d @ h:mm a')}

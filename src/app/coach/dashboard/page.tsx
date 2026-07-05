@@ -1,12 +1,12 @@
 
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, collectionGroup, query, where, orderBy, limit, doc, updateDoc } from 'firebase/firestore';
+import { collection, collectionGroup, query, where, orderBy, limit, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone, ChevronRight, ShieldAlert, Trophy } from 'lucide-react';
 import { isBefore, addMonths } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -40,15 +40,20 @@ interface GameEvent {
   dateTime: string;
   teamId: string;
   cancelled?: boolean;
+  cancellationReason?: string;
   locationType?: 'home' | 'away';
 }
+
+// Games merged across all of the coach's teams, tagged with their source team
+type TeamGameEvent = GameEvent & { _teamId: string };
 
 export default function CoachDashboard() {
   const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
   const { activeSport } = useSport();
 
-  const [selectedTeamIndex, setSelectedTeamIndex] = useState(0);
+  // -1 = "All Teams" combined view (the default for multi-team coaches)
+  const [selectedTeamIndex, setSelectedTeamIndex] = useState(-1);
 
   // Query teams assigned to this coach, scoped to the active sport
   const teamsQuery = useMemoFirebase(() => {
@@ -67,53 +72,78 @@ export default function CoachDashboard() {
 
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
 
-  // Get upcoming games for the selected team (supports multi-team coaches).
   // Team game dateTime strings are naive local (no Z) — compare with a naive-local
   // "now", never toISOString(). useState keeps the floor stable across renders.
   const [nowLocal] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"));
-  const clampedTeamIndex = Math.min(selectedTeamIndex, Math.max(0, (teams?.length ?? 1) - 1));
-  const firstTeamId = teams?.[clampedTeamIndex]?.id;
-  const gamesQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId) return null;
-    return query(
-      collection(db, 'teams', firstTeamId, 'games'),
-      where('dateTime', '>=', nowLocal),
-      orderBy('dateTime', 'asc'),
-      limit(5)
-    );
-  }, [db, firstTeamId, nowLocal]);
 
-  const { data: games, isLoading: loadingGames } = useCollection<GameEvent>(gamesQuery);
+  // Selected scope: single-team coaches are always scoped to their team;
+  // multi-team coaches default to the combined "All Teams" view.
+  const teamCount = teams?.length ?? 0;
+  const selectedTeam = teamCount === 1
+    ? teams?.[0]
+    : selectedTeamIndex >= 0
+      ? teams?.[Math.min(selectedTeamIndex, Math.max(0, teamCount - 1))]
+      : undefined;
+  const selectedTeamId = selectedTeam?.id;
+  const teamNameById = useMemo(() => Object.fromEntries((teams ?? []).map(t => [t.id, t.name])), [teams]);
+  const isAllTeamsView = !selectedTeam && teamCount > 1;
+
+  // Fetch games for every team the coach is on (same pattern as coach/schedules);
+  // the pills then filter client-side so every card stays in sync with the selection.
+  const [allTeamGames, setAllTeamGames] = useState<TeamGameEvent[]>([]);
+  const [loadingGames, setLoadingGames] = useState(true);
+  const teamIdsKey = teamIds.join(',');
+  useEffect(() => {
+    if (!db || teamIds.length === 0) {
+      setAllTeamGames([]);
+      if (!loadingTeams) setLoadingGames(false);
+      return;
+    }
+    setLoadingGames(true);
+    Promise.all(
+      teamIds.map(teamId =>
+        getDocs(collection(db, 'teams', teamId, 'games'))
+          .then(snap => snap.docs.map(d => ({ ...(d.data() as GameEvent), id: d.id, _teamId: teamId })))
+      )
+    ).then(results => {
+      setAllTeamGames(results.flat());
+      setLoadingGames(false);
+    }).catch(() => setLoadingGames(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, teamIdsKey, loadingTeams]);
 
   const [scheduleView, setScheduleView] = useState<'list' | 'calendar'>('list');
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
   const router = useRouter();
 
-  const allGamesQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId || scheduleView !== 'calendar') return null;
-    return query(
-      collection(db, 'teams', firstTeamId, 'games'),
-      orderBy('dateTime', 'asc')
-    );
-  }, [db, firstTeamId, scheduleView]);
-  const { data: allGames, isLoading: loadingAllGames } = useCollection<GameEvent>(allGamesQuery);
+  // Scope to the selected pill (or all teams), sorted chronologically
+  const visibleGames = useMemo(() => {
+    const scoped = selectedTeamId ? allTeamGames.filter(g => g._teamId === selectedTeamId) : allTeamGames;
+    return [...scoped].sort((a, b) => (a.dateTime ?? '').localeCompare(b.dateTime ?? ''));
+  }, [allTeamGames, selectedTeamId]);
+  const upcomingGames = useMemo(
+    () => visibleGames.filter(g => (g.dateTime ?? '') >= nowLocal),
+    [visibleGames, nowLocal]
+  );
 
   // Skip cancelled events so a rained-out game doesn't drive the next-event card
-  const nextGame = games?.find(g => !g.cancelled);
-  const playerCount = enrollments?.length ?? 0;
+  const nextGame = upcomingGames.find(g => !g.cancelled);
+  const playerCount = selectedTeamId
+    ? enrollments?.filter(e => e.teamId === selectedTeamId).length ?? 0
+    : enrollments?.length ?? 0;
 
-  // RSVP attendance rate for the next game
+  // RSVP attendance rate for the next game (keyed to that game's own team)
   const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId || !nextGame?.id) return null;
-    return collection(db, 'teams', firstTeamId, 'games', nextGame.id, 'rsvps');
-  }, [db, firstTeamId, nextGame?.id]);
+    if (!db || !nextGame?.id || !nextGame?._teamId) return null;
+    return collection(db, 'teams', nextGame._teamId, 'games', nextGame.id, 'rsvps');
+  }, [db, nextGame?._teamId, nextGame?.id]);
   const { data: rsvps } = useCollection(rsvpsQuery);
 
   const attendingCount = rsvps?.filter((r: any) => r.status === 'Attending').length ?? 0;
   const maybeCount = rsvps?.filter((r: any) => r.status === 'Maybe').length ?? 0;
   const notAttendingCount = rsvps?.filter((r: any) => r.status === 'Not Attending').length ?? 0;
   const totalRsvpCount = rsvps?.length ?? 0;
-  const unrepliedCount = Math.max(0, (enrollments?.filter(e => e.teamId === firstTeamId).length ?? 0) - totalRsvpCount);
+  const unrepliedCount = Math.max(0, (enrollments?.filter(e => e.teamId === nextGame?._teamId).length ?? 0) - totalRsvpCount);
 
   // Contextual primary action — changes based on when next event is
   const contextualAction = useMemo(() => {
@@ -125,51 +155,82 @@ export default function CoachDashboard() {
       return { label: 'Claim Practice Slot', href: '/coach/practice-slots', icon: ClipboardList };
     }
     if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
-      return { label: 'Take Attendance', href: firstTeamId ? `/coach/teams/${firstTeamId}` : '/coach/teams', icon: UserCheck };
+      return { label: 'Take Attendance', href: `/coach/teams/${nextGame._teamId}`, icon: UserCheck };
     }
     if (nextGame.type === 'Game' && hoursDiff < -2 && hoursDiff > -26) {
       return { label: 'Log Score', href: '/coach/schedules', icon: ClipboardList };
     }
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
-  }, [nextGame, firstTeamId]);
+  }, [nextGame]);
 
   // Season record — scores live only on top-level games (admin-recorded).
   // Baseball teams appear as home or away; football games always store the SYBA
   // team in teamId with our score in homeScore (admin score dialog convention).
   const completedHomeQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId || !activeSport) return null;
+    if (!db || teamIds.length === 0 || !activeSport) return null;
     return activeSport === 'football'
-      ? query(collection(db, 'games'), where('teamId', '==', firstTeamId), where('status', '==', 'completed'))
-      : query(collection(db, 'games'), where('homeTeamId', '==', firstTeamId), where('status', '==', 'completed'));
-  }, [db, firstTeamId, activeSport]);
+      ? query(collection(db, 'games'), where('teamId', 'in', teamIds), where('status', '==', 'completed'))
+      : query(collection(db, 'games'), where('homeTeamId', 'in', teamIds), where('status', '==', 'completed'));
+  }, [db, teamIds, activeSport]);
   const completedAwayQuery = useMemoFirebase(() => {
-    if (!db || !firstTeamId || activeSport !== 'baseball') return null;
-    return query(collection(db, 'games'), where('awayTeamId', '==', firstTeamId), where('status', '==', 'completed'));
-  }, [db, firstTeamId, activeSport]);
+    if (!db || teamIds.length === 0 || activeSport !== 'baseball') return null;
+    return query(collection(db, 'games'), where('awayTeamId', 'in', teamIds), where('status', '==', 'completed'));
+  }, [db, teamIds, activeSport]);
   const { data: completedHomeGames } = useCollection<Game>(completedHomeQuery);
   const { data: completedAwayGames } = useCollection<Game>(completedAwayQuery);
 
   const seasonRecord = useMemo(() => {
-    // Completed games without recorded scores are skipped (graceful degrade)
-    const scored = [...(completedHomeGames ?? []), ...(completedAwayGames ?? [])]
-      .filter(g => g.type === 'game' && g.homeScore != null && g.awayScore != null)
+    // Completed games without recorded scores are skipped (graceful degrade).
+    // Dedupe by id — a game between two of the coach's own teams shows up in both queries.
+    const byId = new Map<string, Game>();
+    for (const g of [...(completedHomeGames ?? []), ...(completedAwayGames ?? [])]) {
+      if (g.type === 'game' && g.homeScore != null && g.awayScore != null) byId.set(g.id, g);
+    }
+    const scored = [...byId.values()]
       .sort((a, b) => `${b.date}${b.time ?? ''}`.localeCompare(`${a.date}${a.time ?? ''}`));
-    let wins = 0, losses = 0, ties = 0;
-    const results = scored.map(g => {
-      const isHome = activeSport === 'football' || g.homeTeamId === firstTeamId;
+
+    const involves = (g: Game, teamId: string) =>
+      activeSport === 'football' ? g.teamId === teamId : g.homeTeamId === teamId || g.awayTeamId === teamId;
+    const outcomeFor = (g: Game, teamId: string) => {
+      const isHome = activeSport === 'football' || g.homeTeamId === teamId;
       const ours = isHome ? g.homeScore! : g.awayScore!;
       const theirs = isHome ? g.awayScore! : g.homeScore!;
       const opponent = activeSport === 'football'
         ? (g.opponentName || 'TBD')
         : ((isHome ? g.awayTeamName : g.homeTeamName) || 'TBD');
-      const outcome = ours > theirs ? 'W' : ours < theirs ? 'L' : 'T';
-      if (outcome === 'W') wins++;
-      else if (outcome === 'L') losses++;
-      else ties++;
-      return { id: g.id, outcome, ours, theirs, opponent };
+      const outcome = ours > theirs ? 'W' as const : ours < theirs ? 'L' as const : 'T' as const;
+      return { outcome, ours, theirs, opponent };
+    };
+
+    // Per-team records — shown in the All Teams view (a combined W-L across
+    // different teams isn't meaningful, so each team gets its own line)
+    const perTeam = (teams ?? []).map(t => {
+      let wins = 0, losses = 0, ties = 0;
+      for (const g of scored) {
+        if (!involves(g, t.id)) continue;
+        const { outcome } = outcomeFor(g, t.id);
+        if (outcome === 'W') wins++;
+        else if (outcome === 'L') losses++;
+        else ties++;
+      }
+      return { id: t.id, name: t.name, wins, losses, ties, played: wins + losses + ties };
     });
-    return { wins, losses, ties, results: results.slice(0, 3) };
-  }, [completedHomeGames, completedAwayGames, activeSport, firstTeamId]);
+
+    // Selected-team record + recent result chips
+    let wins = 0, losses = 0, ties = 0;
+    const results: Array<{ id: string; outcome: 'W' | 'L' | 'T'; ours: number; theirs: number; opponent: string }> = [];
+    if (selectedTeamId) {
+      for (const g of scored) {
+        if (!involves(g, selectedTeamId)) continue;
+        const r = outcomeFor(g, selectedTeamId);
+        if (r.outcome === 'W') wins++;
+        else if (r.outcome === 'L') losses++;
+        else ties++;
+        results.push({ id: g.id, ...r });
+      }
+    }
+    return { wins, losses, ties, results: results.slice(0, 3), perTeam };
+  }, [completedHomeGames, completedAwayGames, activeSport, selectedTeamId, teams]);
 
   const { toast } = useToast();
   const handleWeatherCancel = async (teamId: string, gameId: string) => {
@@ -179,6 +240,10 @@ export default function CoachDashboard() {
         cancelled: true,
         cancellationReason: 'Weather',
       });
+      // Games are fetched one-shot (not a live subscription), so reflect the change locally
+      setAllTeamGames(prev => prev.map(g =>
+        g.id === gameId && g._teamId === teamId ? { ...g, cancelled: true, cancellationReason: 'Weather' } : g
+      ));
       toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather.' });
     } catch {
       toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
@@ -217,8 +282,7 @@ export default function CoachDashboard() {
   }, [clearances]);
 
   const calendarEvents = useMemo((): CalendarEvent[] => {
-    if (!allGames || !firstTeamId) return [];
-    return allGames.map(g => {
+    return visibleGames.map(g => {
       const dateTime = g.dateTime ?? '';
       return {
         id: g.id,
@@ -230,10 +294,10 @@ export default function CoachDashboard() {
         fieldName: g.location,
         sourceType: 'team-game' as const,
         sourceId: g.id,
-        teamId: firstTeamId,
+        teamId: g._teamId,
       };
     });
-  }, [allGames, firstTeamId]);
+  }, [visibleGames]);
 
   if (loadingUser) {
     return (
@@ -250,8 +314,8 @@ export default function CoachDashboard() {
         <header className="mb-4">
           <h1 className="text-2xl font-bold font-headline">
             Coach Dashboard
-            {teams && teams.length > 1 && teams[clampedTeamIndex] && (
-              <span className="ml-2 text-base font-normal text-muted-foreground">· {teams[clampedTeamIndex].name}</span>
+            {teamCount > 1 && (
+              <span className="ml-2 text-base font-normal text-muted-foreground">· {selectedTeam ? selectedTeam.name : 'All Teams'}</span>
             )}
           </h1>
           <p className="text-sm text-muted-foreground">Manage your teams and plan your next practice.</p>
@@ -285,13 +349,24 @@ export default function CoachDashboard() {
         {teams && teams.length > 1 && (
           <div className="mb-4 overflow-x-auto no-scrollbar">
             <div className="flex items-center gap-2 w-max">
+              <button
+                onClick={() => setSelectedTeamIndex(-1)}
+                className={cn(
+                  'px-4 py-2 rounded-full border text-xs font-semibold whitespace-nowrap transition-colors',
+                  !selectedTeam
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-muted text-muted-foreground border-transparent'
+                )}
+              >
+                All Teams
+              </button>
               {teams.map((team, i) => (
                 <button
                   key={team.id}
                   onClick={() => setSelectedTeamIndex(i)}
                   className={cn(
                     'px-4 py-2 rounded-full border text-xs font-semibold whitespace-nowrap transition-colors',
-                    clampedTeamIndex === i
+                    selectedTeam?.id === team.id
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'bg-muted text-muted-foreground border-transparent'
                   )}
@@ -318,7 +393,7 @@ export default function CoachDashboard() {
         {/* Secondary quick actions — Roster follows the selected team; Drills is baseball-only */}
         <div className="grid grid-cols-4 gap-2 mb-5">
           {[
-            { href: firstTeamId ? `/coach/teams/${firstTeamId}` : '/coach/teams', icon: Users, label: 'Roster' },
+            { href: selectedTeamId ? `/coach/teams/${selectedTeamId}` : '/coach/teams', icon: Users, label: 'Roster' },
             activeSport === 'football'
               ? { href: '/coach/announcements', icon: Megaphone, label: 'News' }
               : { href: '/coach/drills', icon: Dumbbell, label: 'Drills' },
@@ -348,12 +423,13 @@ export default function CoachDashboard() {
                 <Skeleton className="h-3 w-32" />
               </CardContent>
             </Card>
-          ) : nextGame && firstTeamId ? (
+          ) : nextGame ? (
             <NextEventCard
-              teamId={firstTeamId}
+              teamId={nextGame._teamId}
+              teamName={isAllTeamsView ? teamNameById[nextGame._teamId] : undefined}
               game={nextGame}
               tally={{ attending: attendingCount, maybe: maybeCount, notAttending: notAttendingCount, unreplied: unrepliedCount }}
-              onWeatherCancel={(gameId) => handleWeatherCancel(firstTeamId, gameId)}
+              onWeatherCancel={(gameId) => handleWeatherCancel(nextGame._teamId, gameId)}
             />
           ) : (
             <Card className="border shadow-sm">
@@ -397,7 +473,9 @@ export default function CoachDashboard() {
             </CardHeader>
             <CardContent className="px-4 pb-3">
               <div className="text-xl font-bold">{playerCount}</div>
-              <p className="text-xs text-muted-foreground">Roster size</p>
+              <p className="text-xs text-muted-foreground">
+                {isAllTeamsView ? 'Across all teams' : selectedTeam ? `${selectedTeam.name} roster` : 'Roster size'}
+              </p>
             </CardContent>
           </Card>
           <Card className="border shadow-sm col-span-2 lg:col-span-1">
@@ -406,7 +484,25 @@ export default function CoachDashboard() {
               <Trophy className="h-3.5 w-3.5 text-accent-foreground" />
             </CardHeader>
             <CardContent className="px-4 pb-3">
-              {seasonRecord.wins + seasonRecord.losses + seasonRecord.ties > 0 ? (
+              {isAllTeamsView ? (
+                seasonRecord.perTeam.some(t => t.played > 0) ? (
+                  <div className="space-y-1">
+                    {seasonRecord.perTeam.map(t => (
+                      <div key={t.id} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate text-muted-foreground">{t.name}</span>
+                        <span className="font-bold shrink-0">
+                          {t.played > 0 ? `${t.wins}-${t.losses}${t.ties > 0 ? `-${t.ties}` : ''}` : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-xl font-bold">—</div>
+                    <p className="text-xs text-muted-foreground">No results yet</p>
+                  </>
+                )
+              ) : seasonRecord.wins + seasonRecord.losses + seasonRecord.ties > 0 ? (
                 <>
                   <div className="text-xl font-bold">
                     {seasonRecord.wins}-{seasonRecord.losses}{seasonRecord.ties > 0 ? `-${seasonRecord.ties}` : ''}
@@ -443,7 +539,7 @@ export default function CoachDashboard() {
               <div>
                 <CardTitle className="font-headline text-base">Team Schedule</CardTitle>
                 <CardDescription className="text-xs">
-                  Upcoming games and practices{teams?.[clampedTeamIndex] ? ` for ${teams[clampedTeamIndex].name}` : ''}
+                  Upcoming games and practices{selectedTeam ? ` for ${selectedTeam.name}` : isAllTeamsView ? ' across all your teams' : ''}
                 </CardDescription>
               </div>
               <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm shrink-0">
@@ -461,7 +557,7 @@ export default function CoachDashboard() {
               {scheduleView === 'calendar' ? (
                 <LeagueCalendar
                   events={calendarEvents}
-                  isLoading={loadingAllGames}
+                  isLoading={loadingGames}
                   filters={calendarFilters}
                   onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
                   visibleFilters={['games', 'practices']}
@@ -471,7 +567,7 @@ export default function CoachDashboard() {
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-7 w-7 animate-spin text-primary" />
                 </div>
-              ) : !games || games.length === 0 ? (
+              ) : upcomingGames.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <Calendar className="h-10 w-10 mx-auto mb-3 opacity-20" />
                   <p className="text-sm">No scheduled events yet.</p>
@@ -481,8 +577,8 @@ export default function CoachDashboard() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {games.map((game) => (
-                    <div key={game.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-secondary/20">
+                  {upcomingGames.slice(0, 5).map((game) => (
+                    <div key={`${game._teamId}-${game.id}`} className="flex items-center justify-between px-3 py-2 rounded-lg bg-secondary/20">
                       <div className="flex items-center gap-3">
                         <div className={cn(
                           "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-sm shrink-0",
@@ -491,11 +587,13 @@ export default function CoachDashboard() {
                           {game.type[0]}
                         </div>
                         <div>
-                          <p className="text-sm font-semibold leading-tight">
+                          <p className={cn("text-sm font-semibold leading-tight", game.cancelled && "line-through text-muted-foreground")}>
                             {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
+                            {game.cancelled ? ' (cancelled)' : ''}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {format(new Date(game.dateTime), 'EEE, MMM d')} · {format(new Date(game.dateTime), 'h:mm a')}
+                            {isAllTeamsView && teamNameById[game._teamId] ? ` · ${teamNameById[game._teamId]}` : ''}
                           </p>
                         </div>
                       </div>
