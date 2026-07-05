@@ -37,6 +37,9 @@ function NotifIcon({ type }: { type: NotificationType }) {
   if (type === 'clearanceRejected') {
     return <ShieldAlert className={cn(base, 'text-destructive')} />;
   }
+  if (type === 'coachActivity') {
+    return <Megaphone className={cn(base, 'text-blue-500')} />;
+  }
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }
 

@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils';
 import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType, CustomEvent } from '@/types/scheduling';
 import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
 import { normalizeGame } from '@/lib/game-shape';
+import { InstallPrompt } from '@/components/pwa/install-prompt';
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -594,6 +595,9 @@ export default function AdminDashboard({
             </Select>
           )}
         </header>
+
+        {/* One-time invite to install the portal as a home-screen app */}
+        <InstallPrompt />
 
         {/* ── Zone 1: Alerts ── */}
         <div className="mb-4">

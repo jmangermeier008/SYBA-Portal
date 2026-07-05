@@ -1,19 +1,20 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { collection, query, orderBy, where } from 'firebase/firestore';
-import { Megaphone, Loader2, Clock, Pin, Search } from 'lucide-react';
+import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
+import { collection, collectionGroup, query, orderBy, where } from 'firebase/firestore';
+import { Megaphone, Loader2, Clock, Pin, Search, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { isAnnouncementActive, type Announcement } from '@/types/scheduling';
 import { useSport } from '@/firebase/sport-context';
 
 export default function ParentAnnouncementsPage() {
   const db = useFirestore();
+  const { user } = useUser();
   const { activeSport } = useSport();
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -33,13 +34,27 @@ export default function ParentAnnouncementsPage() {
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 
+  // The family's teams — coach team announcements are shown only to those families
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
+  }, [db, user?.uid]);
+  const { data: myEnrollments } = useCollection<{ id: string; teamId?: string }>(enrollmentsQuery);
+  const myTeamIds = useMemo(
+    () => new Set((myEnrollments ?? []).map(e => e.teamId).filter(Boolean)),
+    [myEnrollments]
+  );
+
   // M6: Stable sort — pinned first, then by date descending. Expired announcements are hidden.
   const todayISO = format(new Date(), 'yyyy-MM-dd');
   const sorted = announcements
-    ? [...announcements].filter(a => isAnnouncementActive(a, todayISO)).sort((a, b) => {
-        if (b.pinned !== a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
-        return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
-      })
+    ? [...announcements]
+        .filter(a => !a.teamId || myTeamIds.has(a.teamId))
+        .filter(a => isAnnouncementActive(a, todayISO))
+        .sort((a, b) => {
+          if (b.pinned !== a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+          return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+        })
     : [];
 
   const filtered = searchQuery.trim()
@@ -91,6 +106,11 @@ export default function ParentAnnouncementsPage() {
                     {ann.pinned && (
                       <Badge variant="default" className="text-[10px] px-1.5 py-0 rounded-full">
                         <Pin className="h-2.5 w-2.5 mr-1" /> Pinned
+                      </Badge>
+                    )}
+                    {ann.teamId && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full">
+                        <Users className="h-2.5 w-2.5 mr-1" /> {ann.teamName ?? 'Team'}
                       </Badge>
                     )}
                     <h3 className="font-bold font-headline text-lg leading-tight">{ann.title}</h3>

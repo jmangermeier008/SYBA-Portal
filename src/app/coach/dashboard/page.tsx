@@ -18,6 +18,8 @@ import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { isAnnouncementActive, type CalendarEvent, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
+import { LogScoreDialog } from '@/components/coach/LogScoreDialog';
+import { InstallPrompt } from '@/components/pwa/install-prompt';
 
 interface Team {
   id: string;
@@ -50,7 +52,7 @@ type TeamGameEvent = GameEvent & { _teamId: string };
 export default function CoachDashboard() {
   const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
-  const { activeSport } = useSport();
+  const { activeSport, isAdmin } = useSport();
 
   // -1 = "All Teams" combined view (the default for multi-team coaches)
   const [selectedTeamIndex, setSelectedTeamIndex] = useState(-1);
@@ -145,8 +147,32 @@ export default function CoachDashboard() {
   const totalRsvpCount = rsvps?.length ?? 0;
   const unrepliedCount = Math.max(0, (enrollments?.filter(e => e.teamId === nextGame?._teamId).length ?? 0) - totalRsvpCount);
 
+  // Football games that have started but never got a final score — the coach
+  // can log these directly (scores live on top-level games, which standings read)
+  const unscoredGamesQuery = useMemoFirebase(() => {
+    if (!db || teamIds.length === 0 || activeSport !== 'football') return null;
+    return query(collection(db, 'games'), where('teamId', 'in', teamIds), where('status', '==', 'scheduled'));
+  }, [db, teamIds, activeSport]);
+  const { data: scheduledTopGames } = useCollection<Game>(unscoredGamesQuery);
+  const unscoredGames = useMemo(() => {
+    if (!scheduledTopGames) return [];
+    return scheduledTopGames
+      .filter(g => g.type === 'game' && `${g.date}T${g.time || '00:00'}:00` < nowLocal)
+      .sort((a, b) => `${b.date}${b.time ?? ''}`.localeCompare(`${a.date}${a.time ?? ''}`));
+  }, [scheduledTopGames, nowLocal]);
+
+  const [logScoreGame, setLogScoreGame] = useState<Game | null>(null);
+  const [logScoreOpen, setLogScoreOpen] = useState(false);
+  const openLogScore = (game: Game) => {
+    setLogScoreGame(game);
+    setLogScoreOpen(true);
+  };
+
   // Contextual primary action — changes based on when next event is
   const contextualAction = useMemo(() => {
+    if (unscoredGames.length > 0) {
+      return { label: 'Log Score', icon: ClipboardList, logScore: unscoredGames[0] };
+    }
     if (!nextGame) return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
     const now = new Date();
     const eventTime = new Date(nextGame.dateTime);
@@ -157,11 +183,13 @@ export default function CoachDashboard() {
     if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
       return { label: 'Take Attendance', href: `/coach/teams/${nextGame._teamId}`, icon: UserCheck };
     }
-    if (nextGame.type === 'Game' && hoursDiff < -2 && hoursDiff > -26) {
-      return { label: 'Log Score', href: '/coach/schedules', icon: ClipboardList };
-    }
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
-  }, [nextGame]);
+  }, [nextGame, unscoredGames]) as {
+    label: string;
+    icon: typeof Calendar;
+    href?: string;
+    logScore?: Game;
+  };
 
   // Season record — scores live only on top-level games (admin-recorded).
   // Baseball teams appear as home or away; football games always store the SYBA
@@ -256,13 +284,17 @@ export default function CoachDashboard() {
     if (!db || !activeSport) return null;
     return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(5));
   }, [db, activeSport]);
-  const { data: rawAnnouncements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; expiresAt?: string }>(announcementsQuery);
+  const { data: rawAnnouncements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; expiresAt?: string; teamId?: string }>(announcementsQuery);
   const announcements = useMemo(() => {
     if (!rawAnnouncements) return rawAnnouncements;
     const d = new Date();
     const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return rawAnnouncements.filter(a => isAnnouncementActive(a, todayISO)).slice(0, 2);
-  }, [rawAnnouncements]);
+    // Other teams' coach posts stay hidden; league posts and own-team posts show
+    return rawAnnouncements
+      .filter(a => !a.teamId || teamIds.includes(a.teamId))
+      .filter(a => isAnnouncementActive(a, todayISO))
+      .slice(0, 2);
+  }, [rawAnnouncements, teamIds]);
 
   // Surface expiring/expired clearances here — the compliance page computes the
   // same thresholds, but coaches only see it if they happen to open that page.
@@ -320,6 +352,9 @@ export default function CoachDashboard() {
           </h1>
           <p className="text-sm text-muted-foreground">Manage your teams and plan your next practice.</p>
         </header>
+
+        {/* One-time invite to install the portal as a home-screen app */}
+        <InstallPrompt />
 
         {clearanceAlert && (
           <div className={cn(
@@ -379,16 +414,51 @@ export default function CoachDashboard() {
         )}
 
         {/* Contextual primary action — changes based on event timing */}
-        <Link
-          href={contextualAction.href}
-          className="flex items-center justify-between gap-3 rounded-xl bg-primary text-primary-foreground px-4 py-3.5 mb-4 active:scale-[.98] transition-transform shadow-sm"
-        >
-          <div className="flex items-center gap-3">
-            <contextualAction.icon className="h-5 w-5 shrink-0" />
-            <span className="font-semibold text-sm">{contextualAction.label}</span>
-          </div>
-          <ChevronRight className="h-4 w-4 opacity-70" />
-        </Link>
+        {contextualAction.logScore ? (
+          <button
+            onClick={() => openLogScore(contextualAction.logScore!)}
+            className="flex w-full items-center justify-between gap-3 rounded-xl bg-primary text-primary-foreground px-4 py-3.5 mb-4 active:scale-[.98] transition-transform shadow-sm"
+          >
+            <div className="flex items-center gap-3">
+              <contextualAction.icon className="h-5 w-5 shrink-0" />
+              <span className="font-semibold text-sm">{contextualAction.label}</span>
+            </div>
+            <ChevronRight className="h-4 w-4 opacity-70" />
+          </button>
+        ) : (
+          <Link
+            href={contextualAction.href!}
+            className="flex items-center justify-between gap-3 rounded-xl bg-primary text-primary-foreground px-4 py-3.5 mb-4 active:scale-[.98] transition-transform shadow-sm"
+          >
+            <div className="flex items-center gap-3">
+              <contextualAction.icon className="h-5 w-5 shrink-0" />
+              <span className="font-semibold text-sm">{contextualAction.label}</span>
+            </div>
+            <ChevronRight className="h-4 w-4 opacity-70" />
+          </Link>
+        )}
+
+        {/* Football: past games still awaiting a final score */}
+        {unscoredGames.length > 0 && (
+          <Card className="border shadow-sm mb-4 border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20">
+            <CardContent className="p-4 space-y-2">
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Trophy className="h-4 w-4 text-amber-600" />
+                Final score needed
+              </p>
+              {unscoredGames.slice(0, 3).map(g => (
+                <div key={g.id} className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground truncate">
+                    {(isAllTeamsView || !selectedTeam) && g.teamName ? `${g.teamName} ` : ''}vs {g.opponentName || 'TBD'} · {format(new Date(`${g.date}T${g.time || '12:00'}:00`), 'EEE, MMM d')}
+                  </p>
+                  <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => openLogScore(g)}>
+                    Log score
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Secondary quick actions — Roster follows the selected team; Drills is baseball-only */}
         <div className="grid grid-cols-4 gap-2 mb-5">
@@ -412,6 +482,24 @@ export default function CoachDashboard() {
             </Link>
           ))}
         </div>
+
+        {/* Dual-role: quick jumps into admin tools without leaving the coach home base */}
+        {isAdmin && (
+          <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border bg-secondary/20 px-3 py-2">
+            <span className="text-xs font-semibold text-muted-foreground">Admin shortcuts:</span>
+            <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+              <Link href="/admin/games">Add game</Link>
+            </Button>
+            {activeSport === 'football' && (
+              <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+                <Link href="/admin/equipment">Equipment</Link>
+              </Button>
+            )}
+            <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+              <Link href="/admin/roster">Roster</Link>
+            </Button>
+          </div>
+        )}
 
         {/* Next event — opponent, RSVP tally, and one-tap actions in one place */}
         <div className="mb-5">
@@ -656,6 +744,16 @@ export default function CoachDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {db && user && (
+          <LogScoreDialog
+            open={logScoreOpen}
+            onOpenChange={setLogScoreOpen}
+            db={db}
+            game={logScoreGame}
+            actorUid={user.uid}
+          />
+        )}
       </main>
     </div>
   );

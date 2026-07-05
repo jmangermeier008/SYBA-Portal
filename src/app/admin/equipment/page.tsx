@@ -68,8 +68,18 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
-
-type EquipmentStatus = 'not_issued' | 'issued' | 'returned';
+import {
+  EQUIP_FIELD_MAP,
+  SHED_ITEM_TYPES,
+  commitAssignItem,
+  commitReturnItem,
+  typeLabel,
+  type EquipmentStatus,
+  type FootballEquipment,
+  type ItemCondition,
+  type ShedItem,
+  type ShedItemType,
+} from '@/lib/equipment';
 
 const HELMET_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'S', 'M', 'L', 'XL', '2XL'] as const;
 const PAD_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
@@ -88,38 +98,6 @@ const STATUS_LABELS: Record<EquipmentStatus, string> = {
   returned: 'Returned',
 };
 
-
-interface FootballEquipment {
-  helmetSize?: string;
-  helmetStatus?: EquipmentStatus;
-  helmetInventoryId?: string;
-  helmetTagNumber?: string;
-  shoulderPadSize?: string;
-  padStatus?: EquipmentStatus;
-  padInventoryId?: string;
-  padTagNumber?: string;
-  jerseySize?: string;
-  jerseyNumber?: string;
-  gameJerseyStatus?: EquipmentStatus;
-  gameJerseyInventoryId?: string;
-  gameJerseyTagNumber?: string;
-  scrimmageJerseyStatus?: EquipmentStatus;
-  scrimmageJerseyInventoryId?: string;
-  scrimmageJerseyTagNumber?: string;
-  practiceJerseyStatus?: EquipmentStatus;
-  practiceJerseyInventoryId?: string;
-  practiceJerseyTagNumber?: string;
-  gamePantsSize?: string;
-  gamePantsStatus?: EquipmentStatus;
-  gamePantsInventoryId?: string;
-  gamePantsTagNumber?: string;
-  practicePantsSize?: string;
-  practicePantsStatus?: EquipmentStatus;
-  practicePantsInventoryId?: string;
-  practicePantsTagNumber?: string;
-  issuedAt?: string;
-  verifiedWeight?: number;
-}
 
 interface EnrollmentRow {
   id: string;
@@ -147,32 +125,6 @@ interface Team {
   divisionId: string;
 }
 
-type ShedItemType = 'helmet' | 'shoulder_pads' | 'game_jersey' | 'scrimmage_jersey' | 'practice_jersey' | 'game_pants' | 'practice_pants';
-
-interface ShedItem {
-  id: string;
-  tagNumber: string;
-  // Standard ShedItemType or a custom type slug introduced via import/Add Item.
-  // Custom types are inventory-only: no assignment column, no EQUIP_FIELD_MAP entry.
-  type: string;
-  size: string;
-  status: 'available' | 'issued' | 'retired';
-  issuedToPlayerId?: string;
-  issuedToParentUserId?: string;
-  issuedToEnrollmentId?: string;
-  issuedAt?: string;
-  issuedByUid?: string;
-  issuedByName?: string;
-  returnedAt?: string;
-  retiredAt?: string;
-  purchaseYear?: number;        // year the item was bought — drives 10-yr service-life flag
-  lastRecertDate?: string;      // YYYY-MM-DD — drives 2-yr recert cycle flag
-  condition?: ItemCondition;    // captured at return time
-  notes?: string;
-}
-
-type ItemCondition = 'new' | 'good' | 'fair' | 'poor';
-
 const CONDITION_LABELS: Record<ItemCondition, string> = {
   new: 'New', good: 'Good', fair: 'Fair', poor: 'Poor',
 };
@@ -196,23 +148,6 @@ function recertState(item: ShedItem): RecertState | null {
   if (!baseline) return 'no-record';
   const cutoff = new Date(now.getFullYear() - RECERT_CYCLE_YEARS, now.getMonth(), now.getDate());
   return baseline <= cutoff ? 'due' : 'ok';
-}
-
-const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
-  helmet: 'Helmet',
-  shoulder_pads: 'Shoulder Pads',
-  game_jersey: 'Game Jersey',
-  scrimmage_jersey: 'Scrimmage Jersey',
-  practice_jersey: 'Practice Jersey',
-  game_pants: 'Game Pants',
-  practice_pants: 'Practice Pants',
-};
-
-function typeLabel(type: string): string {
-  return (
-    SHED_ITEM_TYPES[type as ShedItemType] ??
-    type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  );
 }
 
 function normalizeTypeSlug(raw: string): string {
@@ -295,21 +230,6 @@ const ALL_TAG_FIELDS: (keyof FootballEquipment)[] = [
   'gamePantsTagNumber',
   'practicePantsTagNumber',
 ];
-
-const EQUIP_FIELD_MAP: Record<ShedItemType, {
-  statusField: keyof FootballEquipment;
-  sizeField: keyof FootballEquipment | null;
-  inventoryIdField: keyof FootballEquipment;
-  tagField: keyof FootballEquipment;
-}> = {
-  helmet:           { statusField: 'helmetStatus',           sizeField: 'helmetSize',       inventoryIdField: 'helmetInventoryId',          tagField: 'helmetTagNumber' },
-  shoulder_pads:    { statusField: 'padStatus',              sizeField: 'shoulderPadSize',  inventoryIdField: 'padInventoryId',             tagField: 'padTagNumber' },
-  game_jersey:      { statusField: 'gameJerseyStatus',       sizeField: 'jerseySize',       inventoryIdField: 'gameJerseyInventoryId',      tagField: 'gameJerseyTagNumber' },
-  scrimmage_jersey: { statusField: 'scrimmageJerseyStatus',  sizeField: null,               inventoryIdField: 'scrimmageJerseyInventoryId', tagField: 'scrimmageJerseyTagNumber' },
-  practice_jersey:  { statusField: 'practiceJerseyStatus',   sizeField: null,               inventoryIdField: 'practiceJerseyInventoryId',  tagField: 'practiceJerseyTagNumber' },
-  game_pants:       { statusField: 'gamePantsStatus',        sizeField: 'gamePantsSize',    inventoryIdField: 'gamePantsInventoryId',       tagField: 'gamePantsTagNumber' },
-  practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId',   tagField: 'practicePantsTagNumber' },
-};
 
 function getEquippedStatus(enrollment: EnrollmentRow) {
   const fe = enrollment.footballEquipment ?? {};
@@ -590,61 +510,15 @@ export default function EquipmentPage() {
       return;
     }
 
-    // Pre-check for race condition: verify item is still free (or already assigned here)
-    const freshSnap = await getDoc(doc(db, 'equipmentInventory', item.id));
-    const freshData = freshSnap.data();
-    if (freshData?.status === 'issued' && freshData?.issuedToEnrollmentId !== enrollmentId) {
-      toast({
-        title: 'Item already issued',
-        description: `Tag #${item.tagNumber} was just assigned to another player. Please try a different item.`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const { statusField, sizeField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
-    const fe = enrollment.footballEquipment ?? {};
-    const prevInventoryId = fe[inventoryIdField] as string | undefined;
-
     setSavingIds((prev) => new Set(prev).add(enrollmentId));
     try {
-      const batch = writeBatch(db);
-      const now = new Date().toISOString();
-
-      const enrollmentUpdates: Record<string, any> = {
-        [`footballEquipment.${String(statusField)}`]: 'issued',
-        [`footballEquipment.${String(inventoryIdField)}`]: item.id,
-        [`footballEquipment.${String(tagField)}`]: item.tagNumber,
-        'footballEquipment.issuedAt': now,
-      };
-      if (sizeField) {
-        enrollmentUpdates[`footballEquipment.${String(sizeField)}`] = item.size;
-      }
-      batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId), enrollmentUpdates);
-
-      batch.update(doc(db, 'equipmentInventory', item.id), {
-        status: 'issued',
-        issuedToPlayerId: enrollment.playerId,
-        issuedToParentUserId: parentUserId,
-        issuedToEnrollmentId: enrollmentId,
-        issuedAt: now,
-        issuedByUid: user?.uid ?? '',
-        issuedByName: profile?.displayName || profile?.email || '',
-        returnedAt: '',
-      });
-
-      // If a different item was previously assigned for this slot, return it to available
-      if (prevInventoryId && prevInventoryId !== item.id) {
-        batch.update(doc(db, 'equipmentInventory', prevInventoryId), {
-          status: 'available',
-          issuedToPlayerId: '',
-          issuedToParentUserId: '',
-          issuedToEnrollmentId: '',
-          returnedAt: now,
-        });
-      }
-
-      await batch.commit();
+      await commitAssignItem(
+        db,
+        { id: enrollmentId, parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
+        item,
+        equipType,
+        { uid: user?.uid ?? '', name: profile?.displayName || profile?.email || '' }
+      );
       toast({ title: 'Assigned', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(enrollment.playerId) ?? 'player'}.` });
     } catch (err: any) {
       toast({ title: 'Assignment failed', description: err.message, variant: 'destructive' });
@@ -662,28 +536,14 @@ export default function EquipmentPage() {
     const { parentUserId, id: enrollmentId } = enrollment;
     if (!parentUserId || !enrollmentId) return;
 
-    const { statusField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
-
     setSavingIds((prev) => new Set(prev).add(enrollmentId));
     try {
-      const batch = writeBatch(db);
-      const now = new Date().toISOString();
-
-      batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId), {
-        [`footballEquipment.${String(statusField)}`]: 'returned',
-        [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
-        [`footballEquipment.${String(tagField)}`]: deleteField(),
-      });
-
-      batch.update(doc(db, 'equipmentInventory', item.id), {
-        status: 'available',
-        issuedToPlayerId: '',
-        issuedToParentUserId: '',
-        issuedToEnrollmentId: '',
-        returnedAt: now,
-      });
-
-      await batch.commit();
+      await commitReturnItem(
+        db,
+        { id: enrollmentId, parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
+        item,
+        equipType
+      );
       toast({ title: 'Returned', description: `Tag #${item.tagNumber} is now available.` });
     } catch (err: any) {
       toast({ title: 'Return failed', description: err.message, variant: 'destructive' });

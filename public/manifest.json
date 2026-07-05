@@ -1,22 +1,35 @@
-
 {
-  "name": "Sharpsville Youth Baseball Association",
-  "short_name": "SYBA",
-  "description": "Official management portal for Sharpsville Youth Baseball Association.",
+  "name": "Sharpsville Youth Athletics Hub",
+  "short_name": "SV Sports",
+  "description": "Official management portal for Sharpsville Youth Athletics. Manage baseball and football teams, players, and registrations.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#2E7ECC",
   "icons": [
     {
-      "src": "https://picsum.photos/seed/syba/192/192",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "https://picsum.photos/seed/syba/512/512",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

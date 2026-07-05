@@ -656,8 +656,11 @@ export function Sidebar() {
         {activeContext === 'coach' && isCoach && (
           <NavSection
             label="Coaching"
-            items={coachItems
-              .filter(item => !(activeSport === 'football' && (item.href === '/coach/practice-slots' || item.href === '/coach/drills')))
+            items={[
+              ...coachItems.filter(item => !(activeSport === 'football' && (item.href === '/coach/practice-slots' || item.href === '/coach/drills'))),
+              // Equipment tracking is football-only (mirrors the admin Equipment gate)
+              ...(activeSport === 'football' ? [{ label: 'Equipment', icon: ShieldCheck, href: '/coach/equipment' }] : []),
+            ]
               .map(item => {
                 if (item.href === '/coach/notifications') return { ...item, badge: hasUnreadNotifs };
                 if (item.href === '/coach/announcements') return { ...item, badge: hasUnreadCoach };

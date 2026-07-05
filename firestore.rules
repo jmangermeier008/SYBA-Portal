@@ -78,20 +78,32 @@ service cloud.firestore {
                     (data.get('role', '') == 'Admin' && data.get('isAlsoCoach', false) == true)))));
     }
 
+    // Team-scoped coach check — the requester must be in the team's coachIds.
+    // Costs one get() per evaluation; only usable where the doc carries a teamId.
+    function isTeamCoach(teamId) {
+      return isSignedIn() && teamId is string && teamId != '' &&
+        get(/databases/$(database)/documents/teams/$(teamId))
+          .data.get('coachIds', []).hasAny([request.auth.uid]);
+    }
+
     // ---------------------------------------------------------------------------
     // Collection group rules — must be at the top level
     // ---------------------------------------------------------------------------
 
     // Players: board members use collectionGroup for compliance; parents use direct path
     // Secondary parents can read players linked to them via secondaryParentId
+    // Coaches read all: their roster pages run an unfiltered collectionGroup query,
+    // which a per-team rule cannot prove
     match /{path=**}/players/{playerId} {
-      allow read: if isBoardMember() ||
+      allow read: if isBoardMember() || isCoach() ||
         (isSignedIn() && resource.data.secondaryParentId == request.auth.uid);
     }
 
     // Enrollments: board members can read all; parents can read their own (filtered by parentUserId)
+    // Coaches read all: roster queries use where('teamId','in',...) which per-team
+    // get()-based rules cannot prove
     match /{path=**}/enrollments/{enrollmentId} {
-      allow read: if isBoardMember() ||
+      allow read: if isBoardMember() || isCoach() ||
         (isSignedIn() && resource.data.parentUserId == request.auth.uid);
     }
 
@@ -180,7 +192,11 @@ service cloud.firestore {
           // Board members (sport-scoped) can update equipment fields only
           (isBoardMemberForSport(resource.data.sport) &&
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['footballEquipment']));
+              .hasOnly(['footballEquipment'])) ||
+          // The player's team coach can record weigh-ins and issue/return equipment
+          (isCoach() && isTeamCoach(resource.data.get('teamId', '')) &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['weightHistory', 'footballEquipment']));
         // Parents may not delete paid/waived enrollments — that would destroy
         // the payment record. Admins and board members handle refunds.
         allow delete: if isAdmin() || isBoardMember() || (
@@ -232,10 +248,23 @@ service cloud.firestore {
 
     match /games/{gameId} {
       allow get, list: if true; // public — home page shows this week's schedule
-      allow create: if isBoardMember() &&
-        request.resource.data.sport is string;
-      allow update: if isBoardMember() &&
-        request.resource.data.sport is string;
+      allow create: if (isBoardMember() &&
+        request.resource.data.sport is string) ||
+        // Football coaches may schedule practices for their own team
+        (isCoach() &&
+         request.resource.data.get('sport', '') == 'football' &&
+         request.resource.data.get('type', '') == 'practice' &&
+         isTeamCoach(request.resource.data.get('teamId', '')));
+      allow update: if (isBoardMember() &&
+        request.resource.data.sport is string) ||
+        // Football coaches may log the final score for their own team's games
+        (isCoach() &&
+         resource.data.get('sport', '') == 'football' &&
+         resource.data.get('type', '') == 'game' &&
+         isTeamCoach(resource.data.get('teamId', '')) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['homeScore', 'awayScore', 'status', 'updatedAt']) &&
+         request.resource.data.status == 'completed');
       allow delete: if isBoardMember();
     }
 
@@ -367,7 +396,10 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow create: if isBoardMember() ||
-        (isSignedIn() && request.resource.data.userId == request.auth.uid);
+        (isSignedIn() && request.resource.data.userId == request.auth.uid) ||
+        // Coaches fan out activity pings (to admins) and team-announcement
+        // notifications (to their team's parents)
+        (isCoach() && request.resource.data.get('type', '') in ['coachActivity', 'announcement']);
       allow delete: if isBoardMember();
     }
 
@@ -376,7 +408,15 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
 
     match /equipmentInventory/{itemId} {
-      allow read, write: if isBoardMember();
+      allow read: if isBoardMember() || isCoach();
+      allow create, delete: if isBoardMember();
+      // Coaches may issue/return items at the field — assignment fields only,
+      // never the item's identity (type, size, tag number)
+      allow update: if isBoardMember() ||
+        (isCoach() && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'issuedToPlayerId', 'issuedToParentUserId',
+                    'issuedToEnrollmentId', 'issuedAt', 'issuedByUid',
+                    'issuedByName', 'returnedAt']));
     }
 
     match /sponsors/{sponsorId} {
@@ -385,7 +425,30 @@ service cloud.firestore {
 
     match /announcements/{announcementId} {
       allow get, list: if true; // public — home page shows league announcements
-      allow create, update, delete: if isBoardMember();
+      // Coaches may post team-scoped announcements only: teamId required, no
+      // league-wide flags, and always attributed to themselves
+      allow create: if isBoardMember() ||
+        (isCoach() &&
+         isTeamCoach(request.resource.data.get('teamId', '')) &&
+         request.resource.data.sport is string &&
+         request.resource.data.get('createdByUid', '') == request.auth.uid &&
+         request.resource.data.get('isGlobal', false) == false &&
+         request.resource.data.get('isUrgent', false) == false &&
+         request.resource.data.get('pinned', false) == false);
+      allow update: if isBoardMember() ||
+        (isCoach() &&
+         resource.data.get('createdByUid', '') == request.auth.uid &&
+         isTeamCoach(resource.data.get('teamId', '')) &&
+         // A team post must stay a team post — no re-scoping or promotion
+         request.resource.data.get('teamId', '') == resource.data.get('teamId', '') &&
+         request.resource.data.get('createdByUid', '') == request.auth.uid &&
+         request.resource.data.get('isGlobal', false) == false &&
+         request.resource.data.get('isUrgent', false) == false &&
+         request.resource.data.get('pinned', false) == false);
+      allow delete: if isBoardMember() ||
+        (isCoach() &&
+         resource.data.get('createdByUid', '') == request.auth.uid &&
+         isTeamCoach(resource.data.get('teamId', '')));
     }
 
     match /boardMeetings/{meetingId} {

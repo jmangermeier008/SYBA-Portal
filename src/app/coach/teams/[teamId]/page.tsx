@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { calculateLeagueAge } from '@/lib/utils';
+import { format } from 'date-fns';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
@@ -177,7 +178,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
       const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
       const entry: WeightEntry = {
         weight,
-        date: new Date().toISOString().split('T')[0],
+        date: format(new Date(), 'yyyy-MM-dd'),
         recordedBy: user.uid,
       };
       await updateDoc(enrollmentRef, { weightHistory: arrayUnion(entry) });
@@ -237,20 +238,27 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
               <h1 className="text-4xl font-bold font-headline">Team Roster</h1>
               <p className="text-muted-foreground mt-2">Detailed player profiles and parent contact hub.</p>
             </div>
-            {parentEmails.length > 0 && (
-              <div className="flex gap-2 shrink-0">
-                {mailtoUsable && (
-                  <Button className="min-h-[44px]" asChild>
-                    <a href={mailtoHref}>
-                      <Mail className="mr-2 h-4 w-4" /> Email Team
-                    </a>
-                  </Button>
-                )}
-                <Button variant="outline" className="min-h-[44px]" onClick={handleCopyEmails}>
-                  <Copy className="mr-2 h-4 w-4" /> Copy Emails
+            <div className="flex flex-wrap gap-2 shrink-0">
+              {isAdmin && (
+                <Button variant="outline" className="min-h-[44px]" asChild>
+                  <Link href="/admin/roster">Admin Roster</Link>
                 </Button>
-              </div>
-            )}
+              )}
+              {parentEmails.length > 0 && (
+                <>
+                  {mailtoUsable && (
+                    <Button className="min-h-[44px]" asChild>
+                      <a href={mailtoHref}>
+                        <Mail className="mr-2 h-4 w-4" /> Email Team
+                      </a>
+                    </Button>
+                  )}
+                  <Button variant="outline" className="min-h-[44px]" onClick={handleCopyEmails}>
+                    <Copy className="mr-2 h-4 w-4" /> Copy Emails
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </header>
 

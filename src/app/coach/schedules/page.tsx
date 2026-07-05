@@ -8,8 +8,11 @@ import { useSport } from '@/firebase/sport-context';
 import { collection, query, doc, updateDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { AddEventDialog } from '@/components/calendar/AddEventDialog';
+import { SchedulePracticeDialog } from '@/components/coach/SchedulePracticeDialog';
 import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
 import type { CalendarEvent, CustomEvent } from '@/types/scheduling';
@@ -46,6 +49,7 @@ export default function CoachSchedulesPage() {
   // ── Filter state ────────────────────────────────────────────────────────────
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: false, events: true });
   const [addEventOpen, setAddEventOpen] = useState(false);
+  const [schedulePracticeOpen, setSchedulePracticeOpen] = useState(false);
   const [allTeamGames, setAllTeamGames] = useState<(GameEvent & { _teamId: string })[]>([]);
   const [loadingGames, setLoadingGames] = useState(false);
 
@@ -141,9 +145,27 @@ export default function CoachSchedulesPage() {
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
-        <header className="mb-4 md:mb-6">
-          <h1 className="text-xl md:text-2xl font-bold font-headline">Team Schedule</h1>
-          <p className="text-sm text-muted-foreground">View your team's practices and games. To add a practice, use the Practice Slots page.</p>
+        <header className="mb-4 md:mb-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold font-headline">Team Schedule</h1>
+            <p className="text-sm text-muted-foreground">
+              {activeSport === 'football'
+                ? "View your team's practices and games, and schedule new practices."
+                : "View your team's practices and games. To add a practice, use the Practice Slots page."}
+            </p>
+          </div>
+          {activeSport === 'football' && activeTeam && (
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/admin/games">Add game (admin)</Link>
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setSchedulePracticeOpen(true)}>
+                Schedule Practice
+              </Button>
+            </div>
+          )}
         </header>
 
         {!activeTeam && !loadingTeams ? (
@@ -179,6 +201,20 @@ export default function CoachSchedulesPage() {
           teams={eventTeams}
           creator={{ uid: user?.uid ?? '', name: profile?.displayName ?? undefined }}
         />
+
+        {activeSport === 'football' && (
+          <SchedulePracticeDialog
+            open={schedulePracticeOpen}
+            onOpenChange={setSchedulePracticeOpen}
+            db={db}
+            teams={userTeams ?? []}
+            actorUid={user?.uid ?? ''}
+            onCreated={mirror => {
+              // Games are fetched one-shot, so reflect the new practice locally
+              setAllTeamGames(prev => [...prev, { ...mirror, _teamId: mirror.teamId } as GameEvent & { _teamId: string }]);
+            }}
+          />
+        )}
       </main>
     </div>
   );

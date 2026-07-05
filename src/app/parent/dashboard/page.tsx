@@ -10,6 +10,7 @@ import { openPrintTab } from '@/lib/print-job';
 import { TaskCenter } from '@/components/parent/task-center';
 import { FamilyComplianceTracker } from '@/components/parent/family-compliance-tracker';
 import { UrgentAnnouncementBanner } from '@/components/parent/urgent-announcement-banner';
+import { InstallPrompt } from '@/components/pwa/install-prompt';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -301,13 +302,18 @@ export default function ParentDashboard() {
     if (!db || !activeSport) return null;
     return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'), limit(5));
   }, [db, activeSport]);
-  const { data: rawAnnouncements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string; expiresAt?: string }>(announcementsQuery);
+  const { data: rawAnnouncements, isLoading: loadingAnnouncements } = useCollection<{ id: string; title: string; body: string; publishedAt?: string; createdAt?: string; expiresAt?: string; teamId?: string }>(announcementsQuery);
   const announcements = useMemo(() => {
     if (!rawAnnouncements) return rawAnnouncements;
     const d = new Date();
     const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return rawAnnouncements.filter(a => isAnnouncementActive(a, todayISO)).slice(0, 2);
-  }, [rawAnnouncements]);
+    // Coach team posts are shown only to families with a player on that team
+    const familyTeamIds = new Set((enrollments ?? []).map(e => e.teamId).filter(Boolean));
+    return rawAnnouncements
+      .filter(a => !a.teamId || familyTeamIds.has(a.teamId))
+      .filter(a => isAnnouncementActive(a, todayISO))
+      .slice(0, 2);
+  }, [rawAnnouncements, enrollments]);
 
   // Incoming link requests — another parent requesting access to a player this parent owns
   const incomingLinkRequestsQuery = useMemoFirebase(() => {
@@ -443,6 +449,9 @@ export default function ParentDashboard() {
 
           {/* Urgent announcement alert — dismissible, directly below the sub-header */}
           <UrgentAnnouncementBanner />
+
+          {/* One-time invite to install the portal as a home-screen app */}
+          <InstallPrompt />
 
           {/* Family Compliance & Volunteer Tracker — top of the workspace (football) */}
           <FamilyComplianceTracker />

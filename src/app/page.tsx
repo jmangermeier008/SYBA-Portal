@@ -192,10 +192,12 @@ export default function Home() {
     );
   }, [officers]);
 
-  // Derived: active (non-expired) announcements, pinned first
+  // Derived: active (non-expired) announcements, pinned first.
+  // Team-scoped coach posts stay off the public homepage.
   const announcements = useMemo(() => {
     if (!rawAnnouncements) return [];
     return [...rawAnnouncements]
+      .filter(a => !a.teamId)
       .filter(a => isAnnouncementActive(a, todayISO))
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
       .slice(0, 8);

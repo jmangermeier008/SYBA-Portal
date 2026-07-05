@@ -335,7 +335,8 @@ export type NotificationType =
   | 'gameReminder'
   | 'clearanceApproved'
   | 'clearanceRejected'
-  | 'announcement';
+  | 'announcement'
+  | 'coachActivity';
 
 export type NotificationRelatedDocType =
   | 'game'
@@ -707,6 +708,12 @@ export interface Announcement {
   /** Optional "show until" date (YYYY-MM-DD, inclusive). After this date the
    *  announcement stops displaying everywhere except the admin manage page. */
   expiresAt?: string;
+  /** Team-scoped announcement posted by a coach — shown only to that team's
+   *  families (league surfaces filter these out client-side). */
+  teamId?: string;
+  teamName?: string;
+  /** UID of the coach who posted a team announcement (rules enforce ownership). */
+  createdByUid?: string;
 }
 
 /** True when an announcement should still be displayed to non-admin audiences.

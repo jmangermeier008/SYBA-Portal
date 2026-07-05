@@ -263,6 +263,11 @@ export default function AdminAnnouncementsPage() {
                             <CalendarClock className="h-2.5 w-2.5 mr-1" /> Expired
                           </Badge>
                         )}
+                        {ann.teamId && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 rounded-full">
+                            Team · {ann.teamName ?? 'Unknown'}
+                          </Badge>
+                        )}
                         <h3 className="font-bold font-headline text-lg leading-tight">{ann.title}</h3>
                       </div>
                       <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{ann.body}</p>
