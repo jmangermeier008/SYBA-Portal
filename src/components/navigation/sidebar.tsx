@@ -119,6 +119,7 @@ const coachItems = [
   { label: 'Clearances', icon: FileCheck, href: '/coach/compliance' },
   { label: 'Schedules', icon: Calendar, href: '/coach/schedules' },
   { label: 'Practice Slots', icon: Dumbbell, href: '/coach/practice-slots' },
+  { label: 'Drills', icon: BookOpen, href: '/coach/drills' },
   { label: 'Announcements', icon: Megaphone, href: '/coach/announcements' },
   { label: 'Notifications', icon: Bell, href: '/coach/notifications' },
   { label: 'Contact Us', icon: MessageSquare, href: '/coach/contact' },
@@ -656,7 +657,7 @@ export function Sidebar() {
           <NavSection
             label="Coaching"
             items={coachItems
-              .filter(item => !(activeSport === 'football' && item.href === '/coach/practice-slots'))
+              .filter(item => !(activeSport === 'football' && (item.href === '/coach/practice-slots' || item.href === '/coach/drills')))
               .map(item => {
                 if (item.href === '/coach/notifications') return { ...item, badge: hasUnreadNotifs };
                 if (item.href === '/coach/announcements') return { ...item, badge: hasUnreadCoach };

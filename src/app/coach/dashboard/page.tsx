@@ -6,16 +6,18 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, collectionGroup, query, where, orderBy, limit } from 'firebase/firestore';
-import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone, ChevronRight, ShieldAlert } from 'lucide-react';
+import { collection, collectionGroup, query, where, orderBy, limit, doc, updateDoc } from 'firebase/firestore';
+import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone, ChevronRight, ShieldAlert, Trophy } from 'lucide-react';
 import { isBefore, addMonths } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import { isAnnouncementActive, type CalendarEvent } from '@/types/scheduling';
+import { isAnnouncementActive, type CalendarEvent, type Game } from '@/types/scheduling';
+import { NextEventCard } from './next-event-card';
 
 interface Team {
   id: string;
@@ -38,6 +40,7 @@ interface GameEvent {
   dateTime: string;
   teamId: string;
   cancelled?: boolean;
+  locationType?: 'home' | 'away';
 }
 
 export default function CoachDashboard() {
@@ -64,17 +67,21 @@ export default function CoachDashboard() {
 
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
 
-  // Get upcoming games for the selected team (supports multi-team coaches)
+  // Get upcoming games for the selected team (supports multi-team coaches).
+  // Team game dateTime strings are naive local (no Z) — compare with a naive-local
+  // "now", never toISOString(). useState keeps the floor stable across renders.
+  const [nowLocal] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"));
   const clampedTeamIndex = Math.min(selectedTeamIndex, Math.max(0, (teams?.length ?? 1) - 1));
   const firstTeamId = teams?.[clampedTeamIndex]?.id;
   const gamesQuery = useMemoFirebase(() => {
     if (!db || !firstTeamId) return null;
     return query(
       collection(db, 'teams', firstTeamId, 'games'),
+      where('dateTime', '>=', nowLocal),
       orderBy('dateTime', 'asc'),
       limit(5)
     );
-  }, [db, firstTeamId]);
+  }, [db, firstTeamId, nowLocal]);
 
   const { data: games, isLoading: loadingGames } = useCollection<GameEvent>(gamesQuery);
 
@@ -91,7 +98,8 @@ export default function CoachDashboard() {
   }, [db, firstTeamId, scheduleView]);
   const { data: allGames, isLoading: loadingAllGames } = useCollection<GameEvent>(allGamesQuery);
 
-  const nextGame = games?.[0];
+  // Skip cancelled events so a rained-out game doesn't drive the next-event card
+  const nextGame = games?.find(g => !g.cancelled);
   const playerCount = enrollments?.length ?? 0;
 
   // RSVP attendance rate for the next game
@@ -117,13 +125,65 @@ export default function CoachDashboard() {
       return { label: 'Claim Practice Slot', href: '/coach/practice-slots', icon: ClipboardList };
     }
     if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
-      return { label: 'Take Attendance', href: '/coach/teams', icon: UserCheck };
+      return { label: 'Take Attendance', href: firstTeamId ? `/coach/teams/${firstTeamId}` : '/coach/teams', icon: UserCheck };
     }
     if (nextGame.type === 'Game' && hoursDiff < -2 && hoursDiff > -26) {
       return { label: 'Log Score', href: '/coach/schedules', icon: ClipboardList };
     }
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
-  }, [nextGame]);
+  }, [nextGame, firstTeamId]);
+
+  // Season record — scores live only on top-level games (admin-recorded).
+  // Baseball teams appear as home or away; football games always store the SYBA
+  // team in teamId with our score in homeScore (admin score dialog convention).
+  const completedHomeQuery = useMemoFirebase(() => {
+    if (!db || !firstTeamId || !activeSport) return null;
+    return activeSport === 'football'
+      ? query(collection(db, 'games'), where('teamId', '==', firstTeamId), where('status', '==', 'completed'))
+      : query(collection(db, 'games'), where('homeTeamId', '==', firstTeamId), where('status', '==', 'completed'));
+  }, [db, firstTeamId, activeSport]);
+  const completedAwayQuery = useMemoFirebase(() => {
+    if (!db || !firstTeamId || activeSport !== 'baseball') return null;
+    return query(collection(db, 'games'), where('awayTeamId', '==', firstTeamId), where('status', '==', 'completed'));
+  }, [db, firstTeamId, activeSport]);
+  const { data: completedHomeGames } = useCollection<Game>(completedHomeQuery);
+  const { data: completedAwayGames } = useCollection<Game>(completedAwayQuery);
+
+  const seasonRecord = useMemo(() => {
+    // Completed games without recorded scores are skipped (graceful degrade)
+    const scored = [...(completedHomeGames ?? []), ...(completedAwayGames ?? [])]
+      .filter(g => g.type === 'game' && g.homeScore != null && g.awayScore != null)
+      .sort((a, b) => `${b.date}${b.time ?? ''}`.localeCompare(`${a.date}${a.time ?? ''}`));
+    let wins = 0, losses = 0, ties = 0;
+    const results = scored.map(g => {
+      const isHome = activeSport === 'football' || g.homeTeamId === firstTeamId;
+      const ours = isHome ? g.homeScore! : g.awayScore!;
+      const theirs = isHome ? g.awayScore! : g.homeScore!;
+      const opponent = activeSport === 'football'
+        ? (g.opponentName || 'TBD')
+        : ((isHome ? g.awayTeamName : g.homeTeamName) || 'TBD');
+      const outcome = ours > theirs ? 'W' : ours < theirs ? 'L' : 'T';
+      if (outcome === 'W') wins++;
+      else if (outcome === 'L') losses++;
+      else ties++;
+      return { id: g.id, outcome, ours, theirs, opponent };
+    });
+    return { wins, losses, ties, results: results.slice(0, 3) };
+  }, [completedHomeGames, completedAwayGames, activeSport, firstTeamId]);
+
+  const { toast } = useToast();
+  const handleWeatherCancel = async (teamId: string, gameId: string) => {
+    if (!db) return;
+    try {
+      await updateDoc(doc(db, 'teams', teamId, 'games', gameId), {
+        cancelled: true,
+        cancellationReason: 'Weather',
+      });
+      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather.' });
+    } catch {
+      toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
+    }
+  };
 
   // Latest announcements — scoped to active sport. Fetch a few extra so expired
   // ones can be filtered out client-side while still showing two.
@@ -255,11 +315,13 @@ export default function CoachDashboard() {
           <ChevronRight className="h-4 w-4 opacity-70" />
         </Link>
 
-        {/* Secondary quick actions */}
+        {/* Secondary quick actions — Roster follows the selected team; Drills is baseball-only */}
         <div className="grid grid-cols-4 gap-2 mb-5">
           {[
-            { href: '/coach/teams', icon: Users, label: 'Roster' },
-            { href: '/coach/drills', icon: Dumbbell, label: 'Drills' },
+            { href: firstTeamId ? `/coach/teams/${firstTeamId}` : '/coach/teams', icon: Users, label: 'Roster' },
+            activeSport === 'football'
+              ? { href: '/coach/announcements', icon: Megaphone, label: 'News' }
+              : { href: '/coach/drills', icon: Dumbbell, label: 'Drills' },
             { href: '/coach/schedules', icon: ClipboardList, label: 'Schedule' },
             { href: '/coach/contact', icon: Phone, label: 'Contact' },
           ].map(({ href, icon: Icon, label }) => (
@@ -276,8 +338,40 @@ export default function CoachDashboard() {
           ))}
         </div>
 
-        {/* Stats strip — 2 cols on mobile, 4 on desktop */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        {/* Next event — opponent, RSVP tally, and one-tap actions in one place */}
+        <div className="mb-5">
+          {loadingGames ? (
+            <Card className="border shadow-sm">
+              <CardContent className="p-4 space-y-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-6 w-56" />
+                <Skeleton className="h-3 w-32" />
+              </CardContent>
+            </Card>
+          ) : nextGame && firstTeamId ? (
+            <NextEventCard
+              teamId={firstTeamId}
+              game={nextGame}
+              tally={{ attending: attendingCount, maybe: maybeCount, notAttending: notAttendingCount, unreplied: unrepliedCount }}
+              onWeatherCancel={(gameId) => handleWeatherCancel(firstTeamId, gameId)}
+            />
+          ) : (
+            <Card className="border shadow-sm">
+              <CardContent className="p-4 flex items-center gap-3">
+                <Calendar className="h-8 w-8 text-muted shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">No upcoming events</p>
+                  <p className="text-xs text-muted-foreground">
+                    <Link href="/coach/schedules" className="text-primary font-medium">Add an event →</Link>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Stats strip — My Teams / Players / Record */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
           <Card className="border shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground">My Teams</CardTitle>
@@ -306,57 +400,37 @@ export default function CoachDashboard() {
               <p className="text-xs text-muted-foreground">Roster size</p>
             </CardContent>
           </Card>
-          <Card className="border shadow-sm">
+          <Card className="border shadow-sm col-span-2 lg:col-span-1">
             <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Next Event</CardTitle>
-              <Calendar className="h-3.5 w-3.5 text-primary" />
+              <CardTitle className="text-xs font-medium text-muted-foreground">Record</CardTitle>
+              <Trophy className="h-3.5 w-3.5 text-accent-foreground" />
             </CardHeader>
             <CardContent className="px-4 pb-3">
-              {nextGame ? (
+              {seasonRecord.wins + seasonRecord.losses + seasonRecord.ties > 0 ? (
                 <>
-                  <div className="text-xl font-bold">{nextGame.type}</div>
-                  <p className="text-xs text-muted-foreground">
-                    {format(new Date(nextGame.dateTime), 'EEE, MMM d @ h:mm a')}
-                  </p>
+                  <div className="text-xl font-bold">
+                    {seasonRecord.wins}-{seasonRecord.losses}{seasonRecord.ties > 0 ? `-${seasonRecord.ties}` : ''}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {seasonRecord.results.map(r => (
+                      <span
+                        key={r.id}
+                        className={cn(
+                          'text-[10px] font-semibold px-1.5 py-0.5 rounded-full truncate max-w-full',
+                          r.outcome === 'W' && 'bg-green-100 text-green-700',
+                          r.outcome === 'L' && 'bg-red-100 text-red-700',
+                          r.outcome === 'T' && 'bg-muted text-muted-foreground'
+                        )}
+                      >
+                        {r.outcome} {r.ours}-{r.theirs} vs {r.opponent}
+                      </span>
+                    ))}
+                  </div>
                 </>
               ) : (
                 <>
                   <div className="text-xl font-bold">—</div>
-                  <p className="text-xs text-muted-foreground">No upcoming events</p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-          <Card className="border shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 pt-3 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Attendance</CardTitle>
-              <UserCheck className="h-3.5 w-3.5 text-accent-foreground" />
-            </CardHeader>
-            <CardContent className="px-4 pb-3">
-              {totalRsvpCount > 0 ? (
-                <>
-                  <div className="text-sm font-bold text-foreground mb-1">
-                    {unrepliedCount > 0
-                      ? `${unrepliedCount} haven't replied`
-                      : `${attendingCount} confirmed`}
-                  </div>
-                  {/* RSVP bar: attending / maybe / no / unreplied */}
-                  <div className="flex h-1.5 rounded-full overflow-hidden gap-px mb-1">
-                    {attendingCount > 0 && <div className="bg-green-500 rounded-full" style={{ flex: attendingCount }} />}
-                    {maybeCount > 0 && <div className="bg-yellow-400 rounded-full" style={{ flex: maybeCount }} />}
-                    {notAttendingCount > 0 && <div className="bg-red-400 rounded-full" style={{ flex: notAttendingCount }} />}
-                    {unrepliedCount > 0 && <div className="bg-muted-foreground/20 rounded-full" style={{ flex: unrepliedCount }} />}
-                  </div>
-                  {unrepliedCount > 0 && (
-                    <Link href="/coach/teams" className="text-xs text-primary font-medium">
-                      Tap to nudge →
-                    </Link>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="text-xl font-bold">—</div>
-                  <p className="text-xs text-muted-foreground">No RSVPs yet</p>
+                  <p className="text-xs text-muted-foreground">No results yet</p>
                 </>
               )}
             </CardContent>
@@ -391,6 +465,7 @@ export default function CoachDashboard() {
                   filters={calendarFilters}
                   onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
                   visibleFilters={['games', 'practices']}
+                  onWeatherCancel={handleWeatherCancel}
                 />
               ) : loadingGames ? (
                 <div className="flex justify-center py-8">

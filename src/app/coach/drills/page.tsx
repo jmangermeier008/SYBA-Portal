@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useSport } from '@/firebase';
 import { Dumbbell, Clock, Users, ChevronDown, ChevronUp } from 'lucide-react';
 
 // L5: Drills are currently stored as a static array. When the library grows, consider
@@ -160,6 +162,28 @@ export default function DrillsPage() {
   const [selectedSkill, setSelectedSkill] = useState('All');
   const [selectedAge, setSelectedAge] = useState('All');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { activeSport } = useSport();
+
+  // The drill library is baseball-only content
+  if (activeSport === 'football') {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
+          <Card className="border-none shadow-md py-12 text-center max-w-md mx-auto mt-12">
+            <CardContent>
+              <Dumbbell className="h-12 w-12 text-muted mx-auto mb-3" />
+              <p className="font-semibold mb-1">Drills are a baseball feature</p>
+              <p className="text-sm text-muted-foreground mb-4">The practice drill library isn&apos;t available for football.</p>
+              <Button asChild>
+                <Link href="/coach/dashboard">Back to Dashboard</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   const filtered = DRILLS.filter((d) => {
     const skillMatch = selectedSkill === 'All' || d.skill === selectedSkill;

@@ -166,7 +166,7 @@ export default function CoachCompliancePage() {
                   <div>
                     <h3 className="font-bold text-lg mb-1">State Compliance Notice</h3>
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      To coach at SYBA, all volunteers must maintain current background checks. Documents must not expire before the end of the current season (June 30th).
+                      To coach for Sharpsville Youth Sports, all volunteers must maintain current background checks. Documents must not expire before the end of the current season (June 30th).
                     </p>
                   </div>
                 </CardContent>
