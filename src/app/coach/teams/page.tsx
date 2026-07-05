@@ -8,7 +8,8 @@ import { Users, ChevronRight, Loader2, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, query, where } from 'firebase/firestore';
+import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { useMemo } from 'react';
 
 interface Team {
   id: string;
@@ -16,7 +17,11 @@ interface Team {
   seasonId: string;
   divisionId: string;
   coach_uid?: string;
-  player_ids?: string[];
+}
+
+interface Enrollment {
+  id: string;
+  teamId: string;
 }
 
 export default function CoachTeamsPage() {
@@ -30,6 +35,21 @@ export default function CoachTeamsPage() {
   }, [db, user?.uid, activeSport]);
 
   const { data: teams, isLoading } = useCollection<Team>(teamsQuery);
+
+  const teamIds = useMemo(() => teams?.map((t) => t.id) ?? [], [teams]);
+
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !user || teamIds.length === 0) return null;
+    return query(collectionGroup(db, 'enrollments'), where('teamId', 'in', teamIds));
+  }, [db, user?.uid, teamIds]);
+
+  const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
+
+  const playerCountByTeam = useMemo(() => {
+    const counts = new Map<string, number>();
+    enrollments?.forEach((e) => counts.set(e.teamId, (counts.get(e.teamId) ?? 0) + 1));
+    return counts;
+  }, [enrollments]);
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -76,7 +96,7 @@ export default function CoachTeamsPage() {
                             <Users className="h-5 w-5" />
                           </div>
                           <div>
-                            <p className="text-sm font-bold">{team.player_ids?.length || 0} Players</p>
+                            <p className="text-sm font-bold">{playerCountByTeam.get(team.id) ?? 0} Players</p>
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Active Roster</p>
                           </div>
                         </div>

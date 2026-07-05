@@ -252,9 +252,26 @@ export default function MasterRosterPage() {
 
   const handleAssignTeam = (parentUserId: string, enrollmentId: string, playerId: string, newTeamId: string, oldTeamId?: string) => {
     const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', enrollmentId);
+    const batch = writeBatch(db);
 
-    updateDoc(enrollmentRef, {
+    batch.update(enrollmentRef, {
       teamId: newTeamId === 'unassigned' ? null : newTeamId
+    });
+
+    if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
+      batch.update(doc(db, 'teams', oldTeamId), {
+        player_ids: arrayRemove(playerId)
+      });
+    }
+
+    if (newTeamId && newTeamId !== 'unassigned' && newTeamId !== oldTeamId) {
+      batch.update(doc(db, 'teams', newTeamId), {
+        player_ids: arrayUnion(playerId)
+      });
+    }
+
+    batch.commit().then(() => {
+      toast({ title: "Assignment Updated", description: "Roster status updated." });
     }).catch((error: any) => {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({
@@ -264,44 +281,9 @@ export default function MasterRosterPage() {
         }));
       } else {
         console.error('[roster] Assignment error:', error);
+        toast({ title: "Assignment Failed", description: "Could not update roster status.", variant: "destructive" });
       }
     });
-
-    if (oldTeamId && oldTeamId !== 'unassigned' && oldTeamId !== newTeamId) {
-      const oldTeamRef = doc(db, 'teams', oldTeamId);
-      updateDoc(oldTeamRef, {
-        player_ids: arrayRemove(playerId)
-      }).catch((error: any) => {
-        if (error?.code === 'permission-denied') {
-          errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: oldTeamRef.path,
-            operation: 'update',
-            requestResourceData: { player_ids: 'arrayRemove' }
-          }));
-        } else {
-          console.error('[roster] Remove player error:', error);
-        }
-      });
-    }
-
-    if (newTeamId && newTeamId !== 'unassigned' && newTeamId !== oldTeamId) {
-      const newTeamRef = doc(db, 'teams', newTeamId);
-      updateDoc(newTeamRef, {
-        player_ids: arrayUnion(playerId)
-      }).catch((error: any) => {
-        if (error?.code === 'permission-denied') {
-          errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: newTeamRef.path,
-            operation: 'update',
-            requestResourceData: { player_ids: 'arrayUnion' }
-          }));
-        } else {
-          console.error('[roster] Add player error:', error);
-        }
-      });
-    }
-
-    toast({ title: "Assignment Initiated", description: "Updating roster status in the background." });
   };
 
   const handleDivisionOverride = async (enrollment: Enrollment, newDivisionId: string) => {

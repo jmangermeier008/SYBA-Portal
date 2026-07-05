@@ -70,6 +70,7 @@ interface Enrollment {
   divisionId: string;
   parentUserId: string;
   weightHistory?: WeightEntry[];
+  emergencyContacts?: EmergencyContact[];
 }
 
 interface UserProfile {
@@ -282,6 +283,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                 {enrollments.map((enrollment) => {
                   const player = playerMap.get(enrollment.playerId);
                   const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+                  const phone = parent?.phoneNumber ?? enrollment.emergencyContacts?.[0]?.phone;
                   if (!player) return null;
                   return (
                     <div key={enrollment.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card hover:shadow-sm transition-shadow">
@@ -301,9 +303,9 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                       {/* Medical alert button */}
                       <MedicalAlertButton player={player} iconSize="sm" />
                       {/* Quick call */}
-                      {parent?.phoneNumber ? (
+                      {phone ? (
                         <Button variant="outline" size="icon" className="h-8 w-8 rounded-full shrink-0" asChild>
-                          <a href={`tel:${parent.phoneNumber}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
+                          <a href={`tel:${phone}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
                         </Button>
                       ) : null}
                     </div>
@@ -316,6 +318,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                 {enrollments.map((enrollment) => {
                   const player = playerMap.get(enrollment.playerId);
                   const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
+                  const phone = parent?.phoneNumber ?? enrollment.emergencyContacts?.[0]?.phone;
 
                   if (!player) return null;
 
@@ -350,7 +353,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                           {parent ? (
                             <div className="bg-secondary/20 p-4 rounded-xl space-y-3 border border-secondary">
                               <p className="font-bold text-sm">{parent.displayName}</p>
-                              {parent.phoneNumber ? (
+                              {phone ? (
                                 <div className="flex gap-2">
                                   <Button
                                     variant="outline"
@@ -358,7 +361,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                                     className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
                                     asChild
                                   >
-                                    <a href={`tel:${parent.phoneNumber}`}>
+                                    <a href={`tel:${phone}`}>
                                       <Phone className="mr-2 h-3 w-3 text-primary" /> Call
                                     </a>
                                   </Button>
@@ -368,13 +371,13 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                                     className="flex-1 rounded-full bg-white hover:bg-primary/5 text-xs shadow-sm"
                                     asChild
                                   >
-                                    <a href={`sms:${parent.phoneNumber}`}>
+                                    <a href={`sms:${phone}`}>
                                       <MessageSquare className="mr-2 h-3 w-3 text-primary" /> Text
                                     </a>
                                   </Button>
                                 </div>
                               ) : (
-                                <p className="text-xs text-muted-foreground italic">Contact info not shared</p>
+                                <p className="text-xs text-muted-foreground italic">No phone number on file</p>
                               )}
                             </div>
                           ) : (
