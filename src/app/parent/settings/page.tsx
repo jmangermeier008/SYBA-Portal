@@ -13,6 +13,7 @@ import { doc, updateDoc, collection, query, orderBy, where, getDocs, arrayUnion 
 import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, UserPlus, CheckCircle2, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { stripPhone } from '@/lib/utils';
+import { useSport } from '@/firebase/sport-context';
 
 interface OfficerRecord {
   id: string;
@@ -40,13 +41,14 @@ export default function ParentSettingsPage() {
   const { user, profile } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const { activeSport, leagueName } = useSport();
   const [profileLoading, setProfileLoading] = useState(false);
   const [privacyLoading, setPrivacyLoading] = useState(false);
 
   const officersQuery = useMemoFirebase(() => {
-    if (!db) return null;
-    return query(collection(db, 'officers'), orderBy('order'));
-  }, [db]);
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'officers'), where('sport', '==', activeSport), orderBy('order'));
+  }, [db, activeSport]);
   const { data: officers } = useCollection<OfficerRecord>(officersQuery);
 
   const playersQuery = useMemoFirebase(() => {
@@ -150,7 +152,7 @@ export default function ParentSettingsPage() {
       // Look up the second parent's userProfile by email
       const snap = await getDocs(query(collection(db, 'userProfiles'), where('email', '==', email)));
       if (snap.empty) {
-        toast({ title: "User Not Found", description: `No SYBA account found for "${email}". They must sign up first.`, variant: "destructive" });
+        toast({ title: "User Not Found", description: `No account found for "${email}". They must sign up first.`, variant: "destructive" });
         return;
       }
       const secondParentDoc = snap.docs[0];
@@ -330,7 +332,7 @@ export default function ParentSettingsPage() {
                 <Users className="h-5 w-5" />
                 <CardTitle className="text-xl">League Leadership</CardTitle>
               </div>
-              <CardDescription>Contact information for SYBA board members.</CardDescription>
+              <CardDescription>Contact information for {leagueName} board members.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="divide-y">
@@ -384,7 +386,7 @@ export default function ParentSettingsPage() {
                 <ShieldCheck className="h-5 w-5 text-green-600 mt-0.5" />
                 <div className="text-xs text-muted-foreground leading-relaxed">
                   <p className="font-semibold text-foreground mb-1">Our Privacy Promise</p>
-                  SYBA will never sell your data. This toggle only controls visibility within the "My Team" roster view for parents on the same team. Coaches and Administrators always have access to contact info for emergency purposes.
+                  {leagueName} will never sell your data. This toggle only controls visibility within the "My Team" roster view for parents on the same team. Coaches and Administrators always have access to contact info for emergency purposes.
                 </div>
               </div>
             </CardContent>
