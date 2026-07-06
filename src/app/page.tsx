@@ -188,9 +188,11 @@ export default function Home() {
   const fullBoardOfficers = useMemo(() => {
     if (!officers) return [];
     return officers.filter(o =>
-      o.name != null && o.name !== ''
+      o.name != null && o.name !== '' &&
+      // Football keeps its board dialog to named positions only
+      !(publicSport === 'football' && o.title === 'At-Large Board Member')
     );
-  }, [officers]);
+  }, [officers, publicSport]);
 
   // Derived: active (non-expired) announcements, pinned first.
   // Team-scoped coach posts stay off the public homepage.
@@ -532,7 +534,7 @@ export default function Home() {
                 <DialogHeader>
                   <DialogTitle>Full Board of Directors</DialogTitle>
                   <DialogDescription>
-                    The complete roster of SYBA board members and their roles.
+                    The complete roster of {publicSport ? SPORT_CONFIG[publicSport].leagueName : 'league'} board members and their roles.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 py-2">
