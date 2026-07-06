@@ -336,7 +336,7 @@ export default function ParentSettingsPage() {
             </CardHeader>
             <CardContent>
               <div className="divide-y">
-                {(officers ?? []).map((officer) => (
+                {(officers ?? []).filter((o) => o.name && o.title !== 'At-Large Board Member').map((officer) => (
                   <div key={officer.id} className="flex items-center justify-between py-3">
                     <div>
                       <p className="text-sm text-muted-foreground">{officer.title}</p>
