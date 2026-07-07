@@ -5,25 +5,18 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { collection, collectionGroup, query, where } from 'firebase/firestore';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { ShieldCheck, Loader2, Search, RotateCcw, Plus, ExternalLink } from 'lucide-react';
-import Link from 'next/link';
+import { Progress } from '@/components/ui/progress';
+import { ShieldCheck, Loader2, Search, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { notifySportAdmins } from '@/lib/coach-notifications';
+import { PlayerEquipmentSheet } from '@/components/coach/equipment/PlayerEquipmentSheet';
+import { IssueItemDialog, type IssueTarget } from '@/components/coach/equipment/IssueItemDialog';
 import {
   EQUIP_FIELD_MAP,
-  SHED_ITEM_TYPES,
   commitAssignItem,
   commitReturnItem,
   typeLabel,
@@ -56,12 +49,15 @@ const EQUIP_TYPES = Object.keys(EQUIP_FIELD_MAP) as ShedItemType[];
 export default function CoachEquipmentPage() {
   const db = useFirestore();
   const { user, profile, loading: loadingUser } = useUser();
-  const { activeSport, isAdmin } = useSport();
+  const { activeSport } = useSport();
   const { toast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [teamFilter, setTeamFilter] = useState<string>('all');
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
-  const [issueDialog, setIssueDialog] = useState<{ enrollment: EnrollmentRow; equipType: ShedItemType } | null>(null);
+  const [openEnrollmentId, setOpenEnrollmentId] = useState<string | null>(null);
+  const [issueSlot, setIssueSlot] = useState<{ enrollmentId: string; equipType: ShedItemType } | null>(null);
+  const [restockRequested, setRestockRequested] = useState<Set<ShedItemType>>(new Set());
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user || activeSport !== 'football') return null;
@@ -87,29 +83,47 @@ export default function CoachEquipmentPage() {
     return map;
   }, [allPlayers]);
 
-  // Available inventory, loaded only while the issue picker is open
-  const inventoryQuery = useMemoFirebase(() => {
-    if (!db || !issueDialog) return null;
-    return query(
-      collection(db, 'equipmentInventory'),
-      where('type', '==', issueDialog.equipType),
-      where('status', '==', 'available')
-    );
-  }, [db, issueDialog?.equipType, !!issueDialog]);
-  const { data: availableItems, isLoading: loadingInventory } = useCollection<ShedItem>(inventoryQuery);
-
   const teamNameById = useMemo(() => Object.fromEntries((teams ?? []).map(t => [t.id, t.name])), [teams]);
 
   const rows = useMemo(() => {
     const named = (enrollments ?? []).map(e => {
       const p = playerMap.get(e.playerId);
-      return { enrollment: e, name: p ? `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() : 'Unknown player' };
+      const fe = e.footballEquipment ?? {};
+      return {
+        enrollment: e,
+        name: p ? `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() : 'Unknown player',
+        firstName: p?.firstName ?? '',
+        teamName: e.teamId ? teamNameById[e.teamId] : undefined,
+        issuedCount: EQUIP_TYPES.filter(t => fe[EQUIP_FIELD_MAP[t].statusField] === 'issued').length,
+      };
     });
     const q = searchQuery.trim().toLowerCase();
     return named
+      .filter(r => teamFilter === 'all' || r.enrollment.teamId === teamFilter)
       .filter(r => !q || r.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [enrollments, playerMap, searchQuery]);
+  }, [enrollments, playerMap, teamNameById, searchQuery, teamFilter]);
+
+  // The sheet reads live enrollment data so rows update as issues/returns land
+  const openRow = useMemo(
+    () => rows.find(r => r.enrollment.id === openEnrollmentId) ?? null,
+    [rows, openEnrollmentId]
+  );
+
+  const issueTarget: IssueTarget | null = useMemo(() => {
+    if (!issueSlot) return null;
+    const row = rows.find(r => r.enrollment.id === issueSlot.enrollmentId);
+    if (!row) return null;
+    const { sizeField } = EQUIP_FIELD_MAP[issueSlot.equipType];
+    const registeredSize = sizeField
+      ? ((row.enrollment.footballEquipment ?? {})[sizeField] as string | undefined)
+      : undefined;
+    return {
+      equipType: issueSlot.equipType,
+      playerFirstName: row.firstName,
+      registeredSize: registeredSize || undefined,
+    };
+  }, [issueSlot, rows]);
 
   const setSaving = (id: string, on: boolean) =>
     setSavingIds(prev => {
@@ -119,13 +133,14 @@ export default function CoachEquipmentPage() {
     });
 
   const handleIssue = async (item: ShedItem) => {
-    if (!db || !issueDialog) return;
-    const { enrollment, equipType } = issueDialog;
-    if (!enrollment.parentUserId) {
+    if (!db || !issueSlot) return;
+    const enrollment = (enrollments ?? []).find(e => e.id === issueSlot.enrollmentId);
+    const { equipType } = issueSlot;
+    if (!enrollment?.parentUserId) {
       toast({ variant: 'destructive', title: 'Save failed', description: 'Missing enrollment reference.' });
       return;
     }
-    setIssueDialog(null);
+    setIssueSlot(null);
     setSaving(enrollment.id, true);
     try {
       await commitAssignItem(
@@ -149,13 +164,21 @@ export default function CoachEquipmentPage() {
     }
   };
 
-  const handleReturn = async (enrollment: EnrollmentRow, equipType: ShedItemType) => {
-    if (!db || !enrollment.parentUserId) return;
+  const handleReturn = async (equipType: ShedItemType) => {
+    const enrollment = (enrollments ?? []).find(e => e.id === openEnrollmentId);
+    if (!db || !enrollment) return;
+    if (!enrollment.parentUserId) {
+      toast({ variant: 'destructive', title: 'Return failed', description: 'Missing enrollment reference.' });
+      return;
+    }
     const { inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
     const fe = enrollment.footballEquipment ?? {};
     const inventoryId = fe[inventoryIdField] as string | undefined;
     const tagNumber = (fe[tagField] as string | undefined) ?? '';
-    if (!inventoryId) return;
+    if (!inventoryId) {
+      toast({ variant: 'destructive', title: 'Return failed', description: 'No inventory record for this item — ask your equipment manager to return it from the admin page.' });
+      return;
+    }
     setSaving(enrollment.id, true);
     try {
       await commitReturnItem(
@@ -176,6 +199,19 @@ export default function CoachEquipmentPage() {
     } finally {
       setSaving(enrollment.id, false);
     }
+  };
+
+  const handleRequestRestock = () => {
+    if (!db || !issueSlot) return;
+    const { equipType } = issueSlot;
+    const row = rows.find(r => r.enrollment.id === issueSlot.enrollmentId);
+    notifySportAdmins(db, user?.uid ?? '', {
+      title: 'Equipment restock requested',
+      body: `${profile?.displayName || 'A coach'} needs ${typeLabel(equipType).toLowerCase()}${row ? ` for ${row.name}` : ''} — the shed has none available.`,
+      sport: 'football',
+    });
+    setRestockRequested(prev => new Set(prev).add(equipType));
+    toast({ title: 'Restock requested', description: 'Your equipment manager has been notified.' });
   };
 
   if (loadingUser) {
@@ -209,31 +245,46 @@ export default function CoachEquipmentPage() {
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       <main className="flex-1 md:ml-64 p-3 md:p-6 pt-16 md:pt-6">
-        <header className="mb-4 md:mb-6 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold font-headline">Team Equipment</h1>
-            <p className="text-sm text-muted-foreground">
-              Gear issued to your players. Issue or take back items right from the field — admins are notified.
-            </p>
-          </div>
-          {isAdmin && (
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/admin/equipment">
-                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                Full Equipment Manager
-              </Link>
-            </Button>
-          )}
+        <header className="mb-4 md:mb-6">
+          <h1 className="text-xl md:text-2xl font-bold font-headline">Team Equipment</h1>
+          <p className="text-sm text-muted-foreground">
+            Tap a player to issue or return gear right from the field — admins are notified.
+          </p>
         </header>
 
-        <div className="relative mb-4 max-w-sm">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search players…"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 rounded-xl"
-          />
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="relative w-full max-w-sm">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search players…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pl-9 rounded-xl"
+            />
+          </div>
+          {(teams ?? []).length > 1 && (
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                variant={teamFilter === 'all' ? 'default' : 'outline'}
+                className="rounded-full h-9"
+                onClick={() => setTeamFilter('all')}
+              >
+                All Teams
+              </Button>
+              {(teams ?? []).map(t => (
+                <Button
+                  key={t.id}
+                  size="sm"
+                  variant={teamFilter === t.id ? 'default' : 'outline'}
+                  className="rounded-full h-9"
+                  onClick={() => setTeamFilter(t.id)}
+                >
+                  {t.name}
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
 
         {isLoading ? (
@@ -251,108 +302,62 @@ export default function CoachEquipmentPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-3">
-            {rows.map(({ enrollment, name }) => {
-              const fe = enrollment.footballEquipment ?? {};
+          <div className="divide-y rounded-xl border bg-card max-w-2xl">
+            {rows.map(({ enrollment, name, teamName, issuedCount }) => {
               const saving = savingIds.has(enrollment.id);
+              const complete = issuedCount === EQUIP_TYPES.length;
               return (
-                <Card key={enrollment.id} className="border shadow-sm">
-                  <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-center justify-between">
-                    <div>
-                      <CardTitle className="text-sm font-semibold">{name}</CardTitle>
-                      {teamIds.length > 1 && enrollment.teamId && (
-                        <CardDescription className="text-xs">{teamNameById[enrollment.teamId]}</CardDescription>
-                      )}
-                    </div>
-                    {saving && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    <div className="flex flex-wrap gap-2">
-                      {EQUIP_TYPES.map(equipType => {
-                        const { statusField, tagField } = EQUIP_FIELD_MAP[equipType];
-                        const status = fe[statusField] as string | undefined;
-                        const tag = fe[tagField] as string | undefined;
-                        const issued = status === 'issued';
-                        return (
-                          <div
-                            key={equipType}
-                            className={cn(
-                              'flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs',
-                              issued ? 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-950/20 dark:border-blue-900 dark:text-blue-300'
-                                     : 'bg-muted/40 text-muted-foreground'
-                            )}
-                          >
-                            <span className="font-medium">{SHED_ITEM_TYPES[equipType]}</span>
-                            {issued ? (
-                              <>
-                                {tag && <Badge variant="outline" className="text-[10px] px-1 py-0">#{tag}</Badge>}
-                                <button
-                                  onClick={() => handleReturn(enrollment, equipType)}
-                                  disabled={saving}
-                                  className="ml-0.5 inline-flex items-center text-[10px] font-semibold underline-offset-2 hover:underline disabled:opacity-50"
-                                  title="Mark returned"
-                                >
-                                  <RotateCcw className="h-3 w-3 mr-0.5" /> Return
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                onClick={() => setIssueDialog({ enrollment, equipType })}
-                                disabled={saving}
-                                className="ml-0.5 inline-flex items-center text-[10px] font-semibold underline-offset-2 hover:underline disabled:opacity-50"
-                                title="Issue from inventory"
-                              >
-                                <Plus className="h-3 w-3 mr-0.5" /> Issue
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
+                <button
+                  key={enrollment.id}
+                  onClick={() => setOpenEnrollmentId(enrollment.id)}
+                  className={cn(
+                    'w-full flex items-center gap-3 p-3 min-h-[64px] text-left transition-colors active:scale-[.99] hover:bg-secondary/30',
+                    complete && 'bg-green-50/60 dark:bg-green-950/10'
+                  )}
+                >
+                  <div className={cn(
+                    'w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0',
+                    complete ? 'bg-green-600' : 'bg-primary'
+                  )}>
+                    {complete ? <CheckCircle2 className="h-5 w-5" /> : (name[0] ?? '?')}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">{name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {issuedCount} of {EQUIP_TYPES.length} issued{(teams ?? []).length > 1 && teamName ? ` · ${teamName}` : ''}
+                    </p>
+                  </div>
+                  <Progress
+                    value={(issuedCount / EQUIP_TYPES.length) * 100}
+                    className="w-16 h-1.5 shrink-0 hidden sm:block"
+                  />
+                  {saving
+                    ? <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                    : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+                </button>
               );
             })}
           </div>
         )}
 
-        <Dialog open={!!issueDialog} onOpenChange={next => !next && setIssueDialog(null)}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>
-                Issue {issueDialog ? SHED_ITEM_TYPES[issueDialog.equipType] : ''}
-              </DialogTitle>
-              <DialogDescription>
-                Pick an available item from the shed inventory.
-              </DialogDescription>
-            </DialogHeader>
-            {loadingInventory ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : (availableItems ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No available items of this type. Contact your equipment manager.
-              </p>
-            ) : (
-              <div className="max-h-64 overflow-y-auto space-y-1.5">
-                {(availableItems ?? [])
-                  .slice()
-                  .sort((a, b) => a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true }))
-                  .map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => handleIssue(item)}
-                      className="w-full flex items-center justify-between rounded-lg border px-3 py-2 text-sm hover:bg-secondary/40 transition-colors"
-                    >
-                      <span className="font-medium">Tag #{item.tagNumber}</span>
-                      <span className="text-xs text-muted-foreground">{item.size || '—'}</span>
-                    </button>
-                  ))}
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+        <PlayerEquipmentSheet
+          open={!!openRow}
+          onOpenChange={next => !next && setOpenEnrollmentId(null)}
+          playerName={openRow?.name ?? ''}
+          teamName={openRow?.teamName}
+          footballEquipment={openRow?.enrollment.footballEquipment}
+          saving={openRow ? savingIds.has(openRow.enrollment.id) : false}
+          onIssue={equipType => openRow && setIssueSlot({ enrollmentId: openRow.enrollment.id, equipType })}
+          onReturn={handleReturn}
+        />
+
+        <IssueItemDialog
+          target={issueTarget}
+          onOpenChange={next => !next && setIssueSlot(null)}
+          onSelect={handleIssue}
+          onRequestRestock={handleRequestRestock}
+          restockRequested={issueSlot ? restockRequested.has(issueSlot.equipType) : false}
+        />
       </main>
     </div>
   );

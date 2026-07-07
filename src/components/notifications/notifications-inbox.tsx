@@ -6,7 +6,7 @@ import { useSport } from '@/firebase/sport-context';
 import { collection, doc, query, orderBy, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, Megaphone, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Trash2, UserCheck } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
@@ -39,6 +39,15 @@ function NotifIcon({ type }: { type: NotificationType }) {
   }
   if (type === 'coachActivity') {
     return <Megaphone className={cn(base, 'text-blue-500')} />;
+  }
+  if (type === 'gameCancelled') {
+    return <CalendarX className={cn(base, 'text-destructive')} />;
+  }
+  if (type === 'gameRescheduled') {
+    return <CalendarDays className={cn(base, 'text-amber-500')} />;
+  }
+  if (type === 'rsvpNudge') {
+    return <UserCheck className={cn(base, 'text-primary')} />;
   }
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }

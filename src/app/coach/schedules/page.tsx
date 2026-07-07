@@ -15,6 +15,8 @@ import { AddEventDialog } from '@/components/calendar/AddEventDialog';
 import { SchedulePracticeDialog } from '@/components/coach/SchedulePracticeDialog';
 import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
+import { notifyTeamParents } from '@/lib/coach-notifications';
+import { format } from 'date-fns';
 import type { CalendarEvent, CustomEvent } from '@/types/scheduling';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -106,7 +108,18 @@ export default function CoachSchedulesPage() {
         cancelled: true,
         cancellationReason: 'Weather',
       });
-      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather.' });
+      const game = allTeamGames.find(g => g.id === gameId && g._teamId === teamId);
+      if (activeSport) {
+        notifyTeamParents(db, [teamId], user?.uid ?? '', {
+          type: 'gameCancelled',
+          title: 'Event Cancelled — Weather',
+          body: `${game?.type === 'Game' ? `The game vs ${game.opponentName || 'TBD'}` : 'Team practice'}${game?.dateTime ? ` on ${format(new Date(game.dateTime), 'EEE, MMM d h:mm a')}` : ''} has been cancelled due to weather.`,
+          sport: activeSport,
+          relatedDocId: gameId,
+          relatedDocType: 'game',
+        });
+      }
+      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather. Families have been notified.' });
     } catch {
       toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
     }

@@ -29,6 +29,7 @@ import {
 } from '@/lib/csv-import';
 import type { ConcessionSlot } from '@/types/scheduling';
 import { writeAuditLog } from '@/firebase/firestore/audit-log';
+import { notifyTeamParents } from '@/lib/coach-notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ interface Game {
   umpireNotified?: boolean;
 }
 
-interface Team { id: string; name: string; divisionId?: string; }
+interface Team { id: string; name: string; divisionId?: string; seasonId?: string; }
 interface Field { id: string; name: string; }
 interface Division { id: string; name: string; ageGroup?: string; }
 interface Season { id: string; name: string; status: string; }
@@ -539,6 +540,23 @@ export default function AdminGamesPage() {
         writeMirrorUpdates(editBatch, editingGame);
         await editBatch.commit();
 
+        // A date/time change is a reschedule — tell the affected families in-app.
+        if (dateTimeChanged && activeSport) {
+          notifyTeamParents(
+            db,
+            [editingGame.homeTeamId, editingGame.awayTeamId, editingGame.teamId].filter((t): t is string => !!t),
+            user?.uid ?? '',
+            {
+              type: 'gameRescheduled',
+              title: editingGame.type === 'game' ? 'Game Rescheduled' : 'Practice Rescheduled',
+              body: `${gameLabel(editingGame)} has moved from ${format(parseISO(editingGame.date), 'EEE, MMM d')} ${editingGame.time} to ${format(parseISO(form.date), 'EEE, MMM d')} ${form.time}.`,
+              sport: activeSport,
+              relatedDocId: editingGame.id,
+              relatedDocType: 'game',
+            }
+          );
+        }
+
         if (user) {
           writeAuditLog(db, {
             action: 'game.updated',
@@ -672,6 +690,23 @@ export default function AdminGamesPage() {
 
       await batch.commit();
 
+      // Tell the affected families in-app (volunteers get their own shift notice above).
+      if (activeSport) {
+        notifyTeamParents(
+          db,
+          [editingGame.homeTeamId, editingGame.awayTeamId, editingGame.teamId].filter((t): t is string => !!t),
+          user?.uid ?? '',
+          {
+            type: 'gameRescheduled',
+            title: editingGame.type === 'game' ? 'Game Rescheduled' : 'Practice Rescheduled',
+            body: `${label} has moved from ${oldDateLabel} to ${newDateLabel}.`,
+            sport: activeSport,
+            relatedDocId: editingGame.id,
+            relatedDocType: 'game',
+          }
+        );
+      }
+
       // Fire-and-forget email notifications
       if (affectedParentIds.size > 0 && user) {
         user.getIdToken().then(idToken =>
@@ -746,6 +781,23 @@ export default function AdminGamesPage() {
       });
 
       await batch.commit();
+
+      // Tell every affected family in-app (volunteers get their own shift notice above).
+      if (activeSport) {
+        notifyTeamParents(
+          db,
+          [game.homeTeamId, game.awayTeamId, game.teamId].filter((t): t is string => !!t),
+          user?.uid ?? '',
+          {
+            type: 'gameCancelled',
+            title: game.type === 'game' ? 'Game Cancelled' : 'Practice Cancelled',
+            body: `${label} on ${dateLabel} has been cancelled.`,
+            sport: activeSport,
+            relatedDocId: game.id,
+            relatedDocType: 'game',
+          }
+        );
+      }
 
       if (user) {
         writeAuditLog(db, {
@@ -897,14 +949,60 @@ export default function AdminGamesPage() {
     e.target.value = '';
   };
 
+  // Case-insensitive team lookup; when two teams share a name across seasons,
+  // the active season's team wins.
+  const matchTeam = (name?: string) => {
+    const n = (name ?? '').trim().toLowerCase();
+    if (!n) return undefined;
+    const candidates = (teams ?? []).filter(t => t.name.toLowerCase() === n);
+    return candidates.find(t => t.seasonId === activeSeason?.id) ?? candidates[0];
+  };
+
   const handleImport = async () => {
     if (!db || importRows.length === 0) return;
+
+    // Import-time guard: the teams list can change between file-select and
+    // import. An unmatched team would produce a game with no team mirror —
+    // invisible on coach and parent schedules — so block the whole import.
+    const teamErrors: ValidationError[] = [];
+    const matchedRows: ParsedGame[] = [];
+    for (const row of importRows) {
+      const isGame = row.type.toLowerCase() === 'game';
+      const usesSingleTeam = !isGame || activeSport === 'football';
+      const missing: Array<{ column: string; name?: string }> = [];
+      if (usesSingleTeam) {
+        if (!matchTeam(row.teamName)) missing.push({ column: 'TeamName', name: row.teamName });
+      } else {
+        if (!matchTeam(row.homeTeam)) missing.push({ column: 'HomeTeam', name: row.homeTeam });
+        if (!matchTeam(row.awayTeam)) missing.push({ column: 'AwayTeam', name: row.awayTeam });
+      }
+      if (missing.length > 0) {
+        missing.forEach(m => teamErrors.push({
+          row: row._row,
+          column: m.column,
+          message: `"${m.name ?? ''}" doesn't match an existing team — fix the name and try again.`,
+        }));
+      } else {
+        matchedRows.push(row);
+      }
+    }
+    if (teamErrors.length > 0) {
+      const blocked = importRows.length - matchedRows.length;
+      setImportErrors(prev => [...prev, ...teamErrors].sort((a, b) => a.row - b.row));
+      setImportRows(matchedRows);
+      toast({
+        title: 'Import blocked',
+        description: `${blocked} row${blocked !== 1 ? 's have' : ' has'} a team name that doesn't match an existing team. Nothing was imported.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsImporting(true);
     try {
       // Each row generates up to 3 writes (games/ + up to 2 team mirrors), so
       // chunk at 160 rows to stay under Firestore's 500-write-per-batch limit.
       const CHUNK = 160;
-      let unmirroredCount = 0;
       for (let i = 0; i < importRows.length; i += CHUNK) {
         const batch = writeBatch(db);
         for (const row of importRows.slice(i, i + CHUNK)) {
@@ -932,65 +1030,45 @@ export default function AdminGamesPage() {
             fieldId: isAwayGame ? '' : (matchedField?.id ?? ''),
             cancelled: false, createdAt: Timestamp.now(),
           };
-          let mirrored = false;
-
           if (isGame) {
             if (isFootballGame) {
-              const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
-              payload.teamId = team?.id ?? '';
-              payload.teamName = team?.name ?? row.teamName ?? '';
+              const team = matchTeam(row.teamName)!;
+              payload.teamId = team.id;
+              payload.teamName = team.name;
               payload.opponentName = row.opponentName ?? '';
               payload.locationType = (row.locationType ?? 'home').toLowerCase();
-              if (team) {
-                batch.set(doc(db, 'teams', team.id, 'games', id), {
-                  ...mirrorBase, teamId: team.id, type: 'Game',
-                  opponentName: row.opponentName ?? '',
-                  locationType: (row.locationType ?? 'home').toLowerCase(),
-                });
-                mirrored = true;
-              }
+              batch.set(doc(db, 'teams', team.id, 'games', id), {
+                ...mirrorBase, teamId: team.id, type: 'Game',
+                opponentName: row.opponentName ?? '',
+                locationType: (row.locationType ?? 'home').toLowerCase(),
+              });
             } else {
-              const home = (teams ?? []).find(t => t.name.toLowerCase() === (row.homeTeam ?? '').toLowerCase());
-              const away = (teams ?? []).find(t => t.name.toLowerCase() === (row.awayTeam ?? '').toLowerCase());
-              payload.homeTeamId = home?.id ?? ''; payload.homeTeamName = home?.name ?? row.homeTeam ?? '';
-              payload.awayTeamId = away?.id ?? ''; payload.awayTeamName = away?.name ?? row.awayTeam ?? '';
-              if (home) {
-                batch.set(doc(db, 'teams', home.id, 'games', id), {
-                  ...mirrorBase, teamId: home.id, type: 'Game',
-                  opponentName: away?.name ?? row.awayTeam ?? '',
-                });
-              }
-              if (away) {
-                batch.set(doc(db, 'teams', away.id, 'games', id), {
-                  ...mirrorBase, teamId: away.id, type: 'Game',
-                  opponentName: home?.name ?? row.homeTeam ?? '',
-                });
-              }
-              mirrored = !!home && !!away;
+              const home = matchTeam(row.homeTeam)!;
+              const away = matchTeam(row.awayTeam)!;
+              payload.homeTeamId = home.id; payload.homeTeamName = home.name;
+              payload.awayTeamId = away.id; payload.awayTeamName = away.name;
+              batch.set(doc(db, 'teams', home.id, 'games', id), {
+                ...mirrorBase, teamId: home.id, type: 'Game',
+                opponentName: away.name,
+              });
+              batch.set(doc(db, 'teams', away.id, 'games', id), {
+                ...mirrorBase, teamId: away.id, type: 'Game',
+                opponentName: home.name,
+              });
             }
           } else {
-            const team = (teams ?? []).find(t => t.name.toLowerCase() === (row.teamName ?? '').toLowerCase());
-            payload.teamId = team?.id ?? ''; payload.teamName = team?.name ?? row.teamName ?? '';
-            if (team) {
-              batch.set(doc(db, 'teams', team.id, 'games', id), {
-                ...mirrorBase, teamId: team.id, type: 'Practice',
-              });
-              mirrored = true;
-            }
+            const team = matchTeam(row.teamName)!;
+            payload.teamId = team.id; payload.teamName = team.name;
+            batch.set(doc(db, 'teams', team.id, 'games', id), {
+              ...mirrorBase, teamId: team.id, type: 'Practice',
+            });
           }
-          if (!mirrored) unmirroredCount++;
 
           batch.set(doc(db, 'games', id), payload);
         }
         await batch.commit();
       }
-      toast({
-        title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}`,
-        ...(unmirroredCount > 0 ? {
-          description: `${unmirroredCount} row${unmirroredCount !== 1 ? 's' : ''} had a team name that didn't match an existing team — those events won't appear on coach or parent schedules until the team name is corrected.`,
-          variant: 'destructive' as const,
-        } : {}),
-      });
+      toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}` });
       setImportOpen(false); setImportRows([]); setImportErrors([]);
     } catch (err: any) {
       toast({ title: 'Import Failed', description: err.message, variant: 'destructive' });

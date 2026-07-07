@@ -1,7 +1,7 @@
 
 "use client";
 
-import { use, useState, useMemo } from 'react';
+import { use, useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
@@ -31,6 +31,7 @@ import {
 import Link from 'next/link';
 import { calculateLeagueAge } from '@/lib/utils';
 import { format } from 'date-fns';
+import { GameAttendancePanel } from '@/components/coach/GameAttendancePanel';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
@@ -99,6 +100,14 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   // Weight Tracker state
   const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
   const [weightSaving, setWeightSaving] = useState<Record<string, boolean>>({});
+
+  // Deep-linkable tab (?tab=attendance) — read after mount to avoid a
+  // server/client hydration mismatch.
+  const [activeTab, setActiveTab] = useState('roster');
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'attendance' || t === 'weights') setActiveTab(t);
+  }, []);
 
   const teamDocRef = useMemoFirebase(() => {
     if (!db || !teamId) return null;
@@ -262,10 +271,13 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
           </div>
         </header>
 
-        <Tabs defaultValue="roster" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
             <TabsTrigger value="roster" className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Roster
+            </TabsTrigger>
+            <TabsTrigger value="attendance" className="flex items-center gap-2">
+              <CalendarCheck className="h-4 w-4" /> Attendance
             </TabsTrigger>
             <TabsTrigger value="weights" className="flex items-center gap-2">
               <Scale className="h-4 w-4" /> Weight Tracker
@@ -410,6 +422,15 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                 })}
               </div>
             )}
+          </TabsContent>
+
+          {/* ── ATTENDANCE TAB ── */}
+          <TabsContent value="attendance">
+            <GameAttendancePanel
+              teamId={teamId}
+              enrollments={enrollments ?? []}
+              playerMap={playerMap}
+            />
           </TabsContent>
 
           {/* ── WEIGHT TRACKER TAB ── */}

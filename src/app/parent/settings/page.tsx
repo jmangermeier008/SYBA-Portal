@@ -9,8 +9,9 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { doc, updateDoc, collection, query, orderBy, where, getDocs, arrayUnion } from 'firebase/firestore';
-import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, UserPlus, CheckCircle2, X } from 'lucide-react';
+import { doc, getDoc, updateDoc, collection, query, orderBy, where } from 'firebase/firestore';
+import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, CheckCircle2, X, ArrowRight } from 'lucide-react';
+import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { stripPhone } from '@/lib/utils';
 import { useSport } from '@/firebase/sport-context';
@@ -63,9 +64,7 @@ export default function ParentSettingsPage() {
     shareContactInfo: false,
   });
 
-  // Second parent linking state — keyed by playerId
-  const [linkEmail, setLinkEmail] = useState<Record<string, string>>({});
-  const [linkLoading, setLinkLoading] = useState<Record<string, boolean>>({});
+  // Display info for already-linked secondary parents — keyed by playerId
   const [linkedParents, setLinkedParents] = useState<Record<string, LinkedParent | null>>({});
 
   useEffect(() => {
@@ -87,14 +86,12 @@ export default function ParentSettingsPage() {
         if (cancelled) break;
         if (!player.secondaryParentId || linkedParents[player.id]) continue;
         try {
-          const snap = await getDocs(
-            query(collection(db, 'userProfiles'), where('__name__', '==', player.secondaryParentId))
-          );
-          if (!cancelled && !snap.empty) {
-            const data = snap.docs[0].data();
+          const snap = await getDoc(doc(db, 'userProfiles', player.secondaryParentId));
+          if (!cancelled && snap.exists()) {
+            const data = snap.data();
             setLinkedParents(prev => ({
               ...prev,
-              [player.id]: { uid: snap.docs[0].id, displayName: data.displayName || null, email: data.email || null },
+              [player.id]: { uid: snap.id, displayName: data.displayName || null, email: data.email || null },
             }));
           }
         } catch (err) {
@@ -143,58 +140,12 @@ export default function ParentSettingsPage() {
     }
   };
 
-  const handleLinkSecondParent = async (player: Player) => {
-    const email = linkEmail[player.id]?.trim().toLowerCase();
-    if (!email || !user || !db) return;
-
-    setLinkLoading(prev => ({ ...prev, [player.id]: true }));
-    try {
-      // Look up the second parent's userProfile by email
-      const snap = await getDocs(query(collection(db, 'userProfiles'), where('email', '==', email)));
-      if (snap.empty) {
-        toast({ title: "User Not Found", description: `No account found for "${email}". They must sign up first.`, variant: "destructive" });
-        return;
-      }
-      const secondParentDoc = snap.docs[0];
-      const secondParentUid = secondParentDoc.id;
-
-      if (secondParentUid === user.uid) {
-        toast({ title: "Invalid", description: "You cannot link your own account as a second parent.", variant: "destructive" });
-        return;
-      }
-
-      if (player.secondaryParentId === secondParentUid) {
-        toast({ title: "Already Linked", description: "This parent is already linked to this player." });
-        return;
-      }
-
-      // Write secondaryParentId to the player doc
-      const playerRef = doc(db, 'userProfiles', user.uid, 'players', player.id);
-      await updateDoc(playerRef, { secondaryParentId: secondParentUid });
-
-      // Grant the second parent access via enrolledPlayerIds on their profile
-      const secondParentRef = doc(db, 'userProfiles', secondParentUid);
-      await updateDoc(secondParentRef, { enrolledPlayerIds: arrayUnion(player.id) });
-
-      const data = secondParentDoc.data();
-      setLinkedParents(prev => ({
-        ...prev,
-        [player.id]: { uid: secondParentUid, displayName: data.displayName || null, email: data.email || null },
-      }));
-      setLinkEmail(prev => ({ ...prev, [player.id]: '' }));
-      toast({ title: "Second Parent Linked", description: `${data.displayName || email} can now co-manage ${player.firstName}.` });
-    } catch (error: any) {
-      toast({ title: "Link Failed", description: error.message || "Could not link the second parent.", variant: "destructive" });
-    } finally {
-      setLinkLoading(prev => ({ ...prev, [player.id]: false }));
-    }
-  };
-
   const handleUnlinkSecondParent = async (player: Player) => {
     if (!user || !db || !player.secondaryParentId) return;
     try {
       const playerRef = doc(db, 'userProfiles', user.uid, 'players', player.id);
-      await updateDoc(playerRef, { secondaryParentId: null });
+      // Reset parentIds to mirror what link-request approval writes
+      await updateDoc(playerRef, { secondaryParentId: null, parentIds: [user.uid] });
       setLinkedParents(prev => ({ ...prev, [player.id]: null }));
       toast({ title: "Second Parent Removed", description: `Co-management access for ${player.firstName} has been revoked.` });
     } catch (error: any) {
@@ -272,7 +223,7 @@ export default function ParentSettingsPage() {
                   <Users className="h-5 w-5" />
                   <CardTitle className="text-xl">Family Management</CardTitle>
                 </div>
-                <CardDescription>Link a second parent or guardian to co-manage a player's profile.</CardDescription>
+                <CardDescription>Second parents and guardians who co-manage a player's profile.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {players.map((player) => {
@@ -296,31 +247,24 @@ export default function ParentSettingsPage() {
                           </Button>
                         </div>
                       ) : (
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                              className="pl-9 h-9 text-sm"
-                              placeholder="Second parent's email"
-                              type="email"
-                              value={linkEmail[player.id] || ''}
-                              onChange={(e) => setLinkEmail(prev => ({ ...prev, [player.id]: e.target.value }))}
-                              onKeyDown={(e) => e.key === 'Enter' && handleLinkSecondParent(player)}
-                            />
-                          </div>
-                          <Button
-                            size="sm"
-                            className="h-9 rounded-xl shrink-0"
-                            disabled={!linkEmail[player.id] || linkLoading[player.id]}
-                            onClick={() => handleLinkSecondParent(player)}
-                          >
-                            {linkLoading[player.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                          </Button>
-                        </div>
+                        <p className="text-xs text-muted-foreground">No second parent linked.</p>
                       )}
                     </div>
                   );
                 })}
+
+                <div className="p-4 rounded-xl bg-muted/30 space-y-3">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    For security, co-parents request access from their own account: they sign in
+                    and tap <span className="font-semibold text-foreground">"I'm a Co-Parent"</span> on
+                    their My Players page. You'll approve the request from your dashboard.
+                  </p>
+                  <Button asChild variant="outline" size="sm" className="rounded-xl">
+                    <Link href="/parent/family">
+                      Go to My Players <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

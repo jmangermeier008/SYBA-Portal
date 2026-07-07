@@ -2,6 +2,7 @@
 
 import {
   collection,
+  collectionGroup,
   doc,
   getDocs,
   query,
@@ -10,10 +11,10 @@ import {
   Timestamp,
   type Firestore,
 } from 'firebase/firestore';
-import type { NotificationRelatedDocType, Sport } from '@/types/scheduling';
+import type { NotificationRelatedDocType, NotificationType, Sport } from '@/types/scheduling';
 
-interface NotifyPayload {
-  type: 'coachActivity' | 'announcement';
+export interface NotifyPayload {
+  type: NotificationType;
   title: string;
   body: string;
   sport: Sport;
@@ -54,6 +55,33 @@ export function notifyUsers(
   batchNotifications(db, recipients, payload).catch(err =>
     console.error('Notification fan-out failed:', err)
   );
+}
+
+/** Notify the parents of every player enrolled on the given team(s) — e.g. a
+ *  cancellation, reschedule, or team announcement. Only the primary parent on
+ *  each enrollment is reached (enrollments don't carry secondary parents). */
+export function notifyTeamParents(
+  db: Firestore,
+  teamIds: string[],
+  actorUid: string,
+  payload: NotifyPayload
+): void {
+  const ids = [...new Set(teamIds.filter(Boolean))];
+  if (ids.length === 0) return;
+  Promise.all(
+    ids.map(teamId =>
+      getDocs(query(collectionGroup(db, 'enrollments'), where('teamId', '==', teamId)))
+    )
+  )
+    .then(snaps => {
+      const parentIds = snaps.flatMap(snap =>
+        snap.docs
+          .map(d => (d.data() as { parentUserId?: string }).parentUserId ?? '')
+          .filter(Boolean)
+      );
+      notifyUsers(db, parentIds, actorUid, payload);
+    })
+    .catch(err => console.error('Team parent notification fan-out failed:', err));
 }
 
 /** Notify every Admin of the given sport that a coach took an action

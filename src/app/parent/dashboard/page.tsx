@@ -5,50 +5,30 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { Users, Calendar, Bell, Loader2, Check, X, HelpCircle, Printer } from 'lucide-react';
+import { Users, Calendar, Bell, Loader2, Printer } from 'lucide-react';
 import { openPrintTab } from '@/lib/print-job';
 import { TaskCenter } from '@/components/parent/task-center';
+import { NextUpCard } from '@/components/parent/next-up-card';
 import { FamilyComplianceTracker } from '@/components/parent/family-compliance-tracker';
 import { UrgentAnnouncementBanner } from '@/components/parent/urgent-announcement-banner';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
 import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { isAnnouncementActive, type CalendarEvent, type LinkRequest } from '@/types/scheduling';
 
-function useCountdown(targetDate: string | undefined) {
-  const [label, setLabel] = useState('');
-  useEffect(() => {
-    if (!targetDate) return;
-    const update = () => {
-      const diff = new Date(targetDate).getTime() - Date.now();
-      if (diff <= 0) { setLabel('Today!'); return; }
-      const days = Math.floor(diff / 86400000);
-      const hours = Math.floor((diff % 86400000) / 3600000);
-      setLabel(days > 0 ? `In ${days}d ${hours}h` : `In ${hours}h`);
-    };
-    update();
-    const t = setInterval(update, 60000);
-    return () => clearInterval(t);
-  }, [targetDate]);
-  return label;
-}
-
 export default function ParentDashboard() {
   const { profile, user, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
-  const isMobile = useIsMobile();
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [resumingPayment, setResumingPayment] = useState(false);
   const [uploadingPhysicalFor, setUploadingPhysicalFor] = useState<string | null>(null);
@@ -204,21 +184,15 @@ export default function ParentDashboard() {
     }
   };
 
-  // Next upcoming game for first assigned team. Team-game dateTime strings are
-  // naive local time (no Z), so the comparison value must be too — comparing
-  // against UTC toISOString() makes today's game vanish hours before kickoff.
-  const now = useMemo(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"), []);
-  const nextGameQuery = useMemoFirebase(() => {
-    if (!db || !selectedTeamId) return null;
-    return query(
-      collection(db, 'teams', selectedTeamId, 'games'),
-      where('dateTime', '>=', now),
-      orderBy('dateTime', 'asc'),
-      limit(1)
-    );
-  }, [db, selectedTeamId]);
-  const { data: nextGames, isLoading: loadingGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string }>(nextGameQuery);
-  const nextGame = nextGames?.[0];
+  // Children with a team assignment — each gets its own Next Up card. First
+  // enrollment with a teamId wins, matching the season-calendar team derivation.
+  const enrolledChildren = useMemo(() => {
+    if (!players || !enrollments) return [];
+    return players.flatMap(p => {
+      const teamId = enrollments.find(e => e.playerId === p.id && e.teamId)?.teamId;
+      return teamId ? [{ player: p, teamId }] : [];
+    });
+  }, [players, enrollments]);
 
   const allTeamGamesQuery = useMemoFirebase(() => {
     if (!db || !selectedTeamId) return null;
@@ -229,27 +203,12 @@ export default function ParentDashboard() {
   }, [db, selectedTeamId]);
   const { data: allTeamGames, isLoading: loadingAllTeamGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string; cancelled?: boolean }>(allTeamGamesQuery);
 
-  const countdown = useCountdown(nextGame?.dateTime);
-
-  // Current RSVP for next game
-  const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || !selectedTeamId || !nextGame?.id) return null;
-    return collection(db, 'teams', selectedTeamId, 'games', nextGame.id, 'rsvps');
-  }, [db, selectedTeamId, nextGame?.id]);
-  const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string; gameId?: string }>(rsvpsQuery);
-  // H12: Fix RSVP lookup — check by canonical doc ID first (which encodes gameId), then
-  // fall back to playerId+gameId match for older records that lack a composite doc ID.
-  const currentRsvp = selectedPlayerId && nextGame
-    ? rsvps?.find(r =>
-        r.id === `${selectedPlayerId}_${nextGame.id}` ||
-        (r.playerId === selectedPlayerId && r.gameId === nextGame.id)
-      )
-    : undefined;
-
+  // RSVP writer for the season-schedule calendar (per selected player); the
+  // Next Up cards carry their own per-child writer.
   const handleDashboardRSVP = async (
     status: 'Attending' | 'Maybe' | 'Not Attending',
-    gameId: string = nextGame?.id ?? '',
-    teamId: string = selectedTeamId ?? ''
+    gameId: string,
+    teamId: string
   ) => {
     if (!user || !db || !teamId || !selectedPlayerId || !gameId) return;
     setRsvpLoading(true);
@@ -549,102 +508,31 @@ export default function ParentDashboard() {
             </div>
           )}
 
-          {/* ── Next Up Hero ── */}
-          <Card className="border shadow-sm mb-4">
-            <CardContent className="pt-4 pb-4">
-              {loadingGames ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-8 w-48" />
-                  <Skeleton className="h-4 w-36" />
-                  <Skeleton className="h-12 w-full mt-2" />
-                </div>
-              ) : nextGame ? (
-                <>
-                  <p className="text-xs font-bold uppercase tracking-widest text-primary mb-1">
-                    {format(new Date(nextGame.dateTime), 'EEEE')} · {countdown}
-                  </p>
-                  <p className="text-2xl font-bold tracking-tight mb-0.5">
-                    {nextGame.type === 'Game' && nextGame.opponentName
-                      ? `vs ${nextGame.opponentName}`
-                      : nextGame.type === 'Game' ? 'Game' : 'Team Practice'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {format(new Date(nextGame.dateTime), 'h:mm a')}{nextGame.location ? ` · ${nextGame.location}` : ''}
-                  </p>
-                  {rsvps && (
-                    <div className="flex gap-2 mt-2 flex-wrap">
-                      <span className="text-xs px-2 py-1 bg-secondary rounded-full text-muted-foreground">
-                        👥 {rsvps.filter(r => r.status === 'Attending').length} attending
-                      </span>
-                    </div>
-                  )}
-                  {selectedTeamId && selectedPlayerId && (
-                    <div className={cn("mt-3", isMobile ? "flex gap-2" : "flex gap-1.5")}>
-                      {rsvpLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => handleDashboardRSVP('Attending')}
-                            className={cn(
-                              "flex items-center justify-center gap-1.5 border transition-colors font-semibold",
-                              isMobile
-                                ? "flex-1 min-h-[48px] rounded-xl text-sm px-3"
-                                : "px-3 py-2 min-h-[40px] rounded-full text-xs",
-                              currentRsvp?.status === 'Attending'
-                                ? "bg-green-500 text-white border-green-500"
-                                : "border-green-300 text-green-700 hover:bg-green-50"
-                            )}
-                          >
-                            <Check className={isMobile ? "h-4 w-4" : "h-3 w-3"} />
-                            {isMobile ? "I'll be there" : "Yes"}
-                          </button>
-                          <button
-                            onClick={() => handleDashboardRSVP('Maybe')}
-                            className={cn(
-                              "flex items-center justify-center gap-1.5 border transition-colors font-semibold",
-                              isMobile
-                                ? "flex-1 min-h-[48px] rounded-xl text-sm px-3"
-                                : "px-3 py-2 min-h-[40px] rounded-full text-xs",
-                              currentRsvp?.status === 'Maybe'
-                                ? "bg-yellow-400 text-white border-yellow-400"
-                                : "border-yellow-300 text-yellow-700 hover:bg-yellow-50"
-                            )}
-                          >
-                            <HelpCircle className={isMobile ? "h-4 w-4" : "h-3 w-3"} /> Maybe
-                          </button>
-                          <button
-                            onClick={() => handleDashboardRSVP('Not Attending')}
-                            className={cn(
-                              "flex items-center justify-center gap-1.5 border transition-colors font-semibold",
-                              isMobile
-                                ? "flex-1 min-h-[48px] rounded-xl text-sm px-3"
-                                : "px-3 py-2 min-h-[40px] rounded-full text-xs",
-                              currentRsvp?.status === 'Not Attending'
-                                ? "bg-red-500 text-white border-red-500"
-                                : "border-red-300 text-red-700 hover:bg-red-50"
-                            )}
-                          >
-                            <X className={isMobile ? "h-4 w-4" : "h-3 w-3"} />
-                            {isMobile ? "Can't make it" : "No"}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
+          {/* ── Next Up — one card per enrolled child ── */}
+          {enrolledChildren.length > 0 ? (
+            <div className="space-y-3 mb-4">
+              {enrolledChildren.map(({ player, teamId }) => (
+                <NextUpCard
+                  key={player.id}
+                  player={player}
+                  teamId={teamId}
+                  showPlayerName={enrolledChildren.length > 1}
+                />
+              ))}
+            </div>
+          ) : (
+            <Card className="border shadow-sm mb-4">
+              <CardContent className="pt-4 pb-4">
                 <div className="flex items-center gap-3 py-2">
                   <Calendar className="h-8 w-8 text-muted-foreground/40" />
                   <div>
                     <p className="font-semibold text-sm">No upcoming games</p>
-                    <p className="text-xs text-muted-foreground">Your schedule will appear here once the league publishes games.</p>
+                    <p className="text-xs text-muted-foreground">Your schedule will appear here once your player is placed on a team.</p>
                   </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Announcements */}
           <Card className="border shadow-sm mb-4">

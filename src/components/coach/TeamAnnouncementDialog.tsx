@@ -4,12 +4,8 @@ import { useState, useEffect } from 'react';
 import {
   addDoc,
   collection,
-  collectionGroup,
   doc,
-  getDocs,
-  query,
   updateDoc,
-  where,
   type Firestore,
 } from 'firebase/firestore';
 import {
@@ -27,7 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { notifySportAdmins, notifyUsers } from '@/lib/coach-notifications';
+import { notifySportAdmins, notifyTeamParents } from '@/lib/coach-notifications';
 import type { Announcement, Sport } from '@/types/scheduling';
 
 interface TeamAnnouncementDialogProps {
@@ -93,21 +89,14 @@ export function TeamAnnouncementDialog({ open, onOpenChange, db, sport, teams, c
           ...(expiresAt ? { expiresAt } : {}),
         });
         // In-app ping to the team's families; failures never roll back the post
-        getDocs(query(collectionGroup(db, 'enrollments'), where('teamId', '==', team.id)))
-          .then(snap => {
-            const parentIds = snap.docs
-              .map(d => (d.data() as { parentUserId?: string }).parentUserId ?? '')
-              .filter(Boolean);
-            notifyUsers(db, parentIds, creator.uid, {
-              type: 'announcement',
-              title: `${team.name}: ${title.trim()}`,
-              body: body.trim(),
-              sport,
-              relatedDocId: docRef.id,
-              relatedDocType: 'announcement',
-            });
-          })
-          .catch(err => console.error('Team announcement fan-out failed:', err));
+        notifyTeamParents(db, [team.id], creator.uid, {
+          type: 'announcement',
+          title: `${team.name}: ${title.trim()}`,
+          body: body.trim(),
+          sport,
+          relatedDocId: docRef.id,
+          relatedDocType: 'announcement',
+        });
         notifySportAdmins(db, creator.uid, {
           title: 'Team announcement posted by coach',
           body: `${team.name}: ${title.trim()}`,

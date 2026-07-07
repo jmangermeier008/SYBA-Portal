@@ -10,7 +10,7 @@ import {
   query,
   orderBy,
   doc,
-  setDoc,
+  writeBatch,
   where,
   collectionGroup,
   getDocs,
@@ -196,28 +196,46 @@ export default function ParentSchedulesPage() {
 
   // ── RSVP handler ────────────────────────────────────────────────────────────
   const handleRSVP = async (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
-    if (!user || !db || !selectedPlayerId || selectedPlayerId === 'all' || rsvpLoading) return;
+    if (!user || !db || !selectedPlayerId || rsvpLoading) return;
+    // In "All Players" view the event's team decides which child(ren) the RSVP
+    // is for; otherwise it's the selected player.
+    const playerIds = selectedPlayerId !== 'all'
+      ? [selectedPlayerId]
+      : [...new Set((enrollments ?? []).filter(e => e.teamId === teamId).map(e => e.playerId))];
+    if (playerIds.length === 0) {
+      toast({ title: 'RSVP Failed', description: 'No enrolled player found for this team.', variant: 'destructive' });
+      return;
+    }
     setRsvpLoading(true);
-    const rsvpId = `${selectedPlayerId}_${gameId}`;
-    const rsvpRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId);
-    const rsvpData = {
-      id: rsvpId,
-      gameId,
-      playerId: selectedPlayerId,
-      parentUserId: user.uid,
-      status,
-      timestamp: new Date().toISOString(),
-      teamId,
-    };
+    const batch = writeBatch(db);
+    const firstRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', `${playerIds[0]}_${gameId}`);
+    const rsvpData = playerIds.map(playerId => {
+      const rsvpId = `${playerId}_${gameId}`;
+      const data = {
+        id: rsvpId,
+        gameId,
+        playerId,
+        parentUserId: user.uid,
+        status,
+        timestamp: new Date().toISOString(),
+        teamId,
+      };
+      batch.set(doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId), data, { merge: true });
+      return data;
+    });
     try {
-      await setDoc(rsvpRef, rsvpData, { merge: true });
-      toast({ title: 'RSVP Sent', description: `Availability updated to ${status}.` });
+      await batch.commit();
+      const names = playerIds
+        .map(id => players?.find(p => p.id === id)?.firstName)
+        .filter(Boolean)
+        .join(', ');
+      toast({ title: 'RSVP Sent', description: `${names ? `${names} updated` : 'Availability updated'} to ${status}.` });
     } catch (err: any) {
       toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
       errorEmitter.emit('permission-error', new FirestorePermissionError({
-        path: rsvpRef.path,
+        path: firstRef.path,
         operation: 'write',
-        requestResourceData: rsvpData,
+        requestResourceData: rsvpData[0],
       }));
     } finally {
       setRsvpLoading(false);
@@ -284,7 +302,7 @@ export default function ParentSchedulesPage() {
           filters={filters}
           onFilterChange={handleFilterChange}
           visibleFilters={['games', 'practices', 'concessions', 'events']}
-          onRsvp={selectedPlayerId !== 'all' ? handleRSVP : undefined}
+          onRsvp={handleRSVP}
           onConcessionViewDetails={() => router.push('/parent/volunteers')}
           childSelector={childSelector}
         />

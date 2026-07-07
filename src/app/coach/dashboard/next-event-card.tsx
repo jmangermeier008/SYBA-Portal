@@ -99,7 +99,7 @@ export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }
         ) : (
           <div className="flex items-center gap-2">
             <Button asChild size="sm" variant="outline" className="text-xs">
-              <Link href={`/coach/teams/${teamId}`}>
+              <Link href={`/coach/teams/${teamId}?tab=attendance`}>
                 <UserCheck className="h-3.5 w-3.5 mr-1.5" />
                 Nudge Parents
               </Link>
@@ -117,7 +117,7 @@ export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }
                   <AlertDialogDescription>
                     {isGame ? `The game vs ${game.opponentName || 'TBD'}` : 'This practice'} on{' '}
                     {format(new Date(game.dateTime), 'EEE, MMM d @ h:mm a')} will be marked as
-                    cancelled due to weather. Parents will see it as cancelled on their schedule.
+                    cancelled due to weather. Families will be notified and will see it as cancelled on their schedule.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

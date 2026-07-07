@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { notifyTeamParents } from '@/lib/coach-notifications';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { isAnnouncementActive, type CalendarEvent, type Game } from '@/types/scheduling';
@@ -181,7 +182,7 @@ export default function CoachDashboard() {
       return { label: 'Claim Practice Slot', href: '/coach/practice-slots', icon: ClipboardList };
     }
     if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
-      return { label: 'Take Attendance', href: `/coach/teams/${nextGame._teamId}`, icon: UserCheck };
+      return { label: 'Take Attendance', href: `/coach/teams/${nextGame._teamId}?tab=attendance`, icon: UserCheck };
     }
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
   }, [nextGame, unscoredGames]) as {
@@ -272,7 +273,18 @@ export default function CoachDashboard() {
       setAllTeamGames(prev => prev.map(g =>
         g.id === gameId && g._teamId === teamId ? { ...g, cancelled: true, cancellationReason: 'Weather' } : g
       ));
-      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather.' });
+      const game = allTeamGames.find(g => g.id === gameId && g._teamId === teamId);
+      if (activeSport) {
+        notifyTeamParents(db, [teamId], user?.uid ?? '', {
+          type: 'gameCancelled',
+          title: 'Event Cancelled — Weather',
+          body: `${game?.type === 'Game' ? `The game vs ${game.opponentName || 'TBD'}` : 'Team practice'}${game?.dateTime ? ` on ${format(new Date(game.dateTime), 'EEE, MMM d h:mm a')}` : ''} has been cancelled due to weather.`,
+          sport: activeSport,
+          relatedDocId: gameId,
+          relatedDocType: 'game',
+        });
+      }
+      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather. Families have been notified.' });
     } catch {
       toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
     }

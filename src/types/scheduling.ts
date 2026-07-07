@@ -336,7 +336,10 @@ export type NotificationType =
   | 'clearanceApproved'
   | 'clearanceRejected'
   | 'announcement'
-  | 'coachActivity';
+  | 'coachActivity'
+  | 'gameCancelled'
+  | 'gameRescheduled'
+  | 'rsvpNudge';
 
 export type NotificationRelatedDocType =
   | 'game'
