@@ -119,7 +119,7 @@ export default function CoachSchedulesPage() {
           relatedDocType: 'game',
         });
       }
-      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather. Families have been notified.' });
+      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather. Families are being notified.' });
     } catch {
       toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
     }

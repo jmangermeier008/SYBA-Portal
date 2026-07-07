@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
-import { collection, query, where, orderBy, collectionGroup, limit, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, collectionGroup, limit, doc, updateDoc } from 'firebase/firestore';
+import { writeRsvp } from '@/lib/rsvp';
 import { Users, Calendar, Bell, Loader2, Printer } from 'lucide-react';
 import { openPrintTab } from '@/lib/print-job';
 import { TaskCenter } from '@/components/parent/task-center';
@@ -24,12 +25,24 @@ import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { isAnnouncementActive, type CalendarEvent, type LinkRequest } from '@/types/scheduling';
 
+// Pick the enrollment whose team should drive schedules/cards: the active
+// sport's enrollment first, then the most recently registered — never an
+// arbitrary (possibly prior-season) one.
+function pickTeamEnrollment<T extends { teamId?: string; sport?: string; registered_at?: string }>(
+  list: T[],
+  activeSport: string | null | undefined
+): T | undefined {
+  const withTeam = list
+    .filter(e => e.teamId)
+    .sort((a, b) => (b.registered_at ?? '').localeCompare(a.registered_at ?? ''));
+  return withTeam.find(e => e.sport === activeSport) ?? withTeam[0];
+}
+
 export default function ParentDashboard() {
   const { profile, user, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
-  const [rsvpLoading, setRsvpLoading] = useState(false);
   const [resumingPayment, setResumingPayment] = useState(false);
   const [uploadingPhysicalFor, setUploadingPhysicalFor] = useState<string | null>(null);
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
@@ -114,11 +127,11 @@ export default function ParentDashboard() {
   // Derive team from selected player's enrollment
   useEffect(() => {
     if (!enrollments) return;
-    const enrollment = selectedPlayerId
-      ? enrollments.find(e => e.playerId === selectedPlayerId)
-      : enrollments.find(e => e.teamId);
-    setSelectedTeamId(enrollment?.teamId ?? '');
-  }, [selectedPlayerId, enrollments]);
+    const pool = selectedPlayerId
+      ? enrollments.filter(e => e.playerId === selectedPlayerId)
+      : enrollments;
+    setSelectedTeamId(pickTeamEnrollment(pool, activeSport)?.teamId ?? '');
+  }, [selectedPlayerId, enrollments, activeSport]);
 
   // Enrollment status logic
   const pendingEnrollment = enrollments?.find(e =>
@@ -184,15 +197,16 @@ export default function ParentDashboard() {
     }
   };
 
-  // Children with a team assignment — each gets its own Next Up card. First
-  // enrollment with a teamId wins, matching the season-calendar team derivation.
+  // Children with a team assignment — each gets its own Next Up card. Prefer
+  // the active sport's enrollment; among the rest, most recently registered
+  // wins, so a stale prior-season teamId never drives the card.
   const enrolledChildren = useMemo(() => {
     if (!players || !enrollments) return [];
     return players.flatMap(p => {
-      const teamId = enrollments.find(e => e.playerId === p.id && e.teamId)?.teamId;
+      const teamId = pickTeamEnrollment(enrollments.filter(e => e.playerId === p.id), activeSport)?.teamId;
       return teamId ? [{ player: p, teamId }] : [];
     });
-  }, [players, enrollments]);
+  }, [players, enrollments, activeSport]);
 
   const allTeamGamesQuery = useMemoFirebase(() => {
     if (!db || !selectedTeamId) return null;
@@ -211,24 +225,11 @@ export default function ParentDashboard() {
     teamId: string
   ) => {
     if (!user || !db || !teamId || !selectedPlayerId || !gameId) return;
-    setRsvpLoading(true);
-    const rsvpId = `${selectedPlayerId}_${gameId}`;
-    const rsvpRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId);
     try {
-      await setDoc(rsvpRef, {
-        id: rsvpId,
-        gameId,
-        playerId: selectedPlayerId,
-        parentUserId: user.uid,
-        status,
-        timestamp: new Date().toISOString(),
-        teamId,
-      }, { merge: true });
+      await writeRsvp(db, { teamId, gameId, playerId: selectedPlayerId, parentUserId: user.uid, status });
       toast({ title: "RSVP Updated", description: `Marked as ${status}.` });
     } catch (err: any) {
       toast({ title: "RSVP Failed", description: err.message, variant: "destructive" });
-    } finally {
-      setRsvpLoading(false);
     }
   };
 

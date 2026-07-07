@@ -12,6 +12,7 @@ import { BellRing, CalendarCheck, Check, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { notifyUsers } from '@/lib/coach-notifications';
+import { nowDateTime } from '@/lib/game-shape';
 
 interface AttendanceEnrollment {
   id: string;
@@ -70,21 +71,29 @@ export function GameAttendancePanel({
   const [nudging, setNudging] = useState(false);
   const [nudgedGameIds, setNudgedGameIds] = useState<Set<string>>(new Set());
 
-  // Naive local datetime string, matching the team-game dateTime format —
-  // never toISOString(), which is UTC and hours off.
-  const nowLocal = useMemo(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"), []);
+  // Include today's earlier events, not just future ones — the dashboard's
+  // 'Take Attendance' CTA deep-links here up to 2 hours after kickoff, and an
+  // in-progress game must still be selectable.
+  const startOfToday = useMemo(() => `${nowDateTime().slice(0, 10)}T00:00:00`, []);
 
   const gamesQuery = useMemoFirebase(() => {
     if (!db || !teamId) return null;
     return query(
       collection(db, 'teams', teamId, 'games'),
-      where('dateTime', '>=', nowLocal),
+      where('dateTime', '>=', startOfToday),
       orderBy('dateTime', 'asc')
     );
-  }, [db, teamId, nowLocal]);
+  }, [db, teamId, startOfToday]);
   const { data: games, isLoading: loadingGames } = useCollection<TeamGame>(gamesQuery);
 
-  const effectiveGameId = selectedId ?? games?.find(g => !g.cancelled)?.id ?? null;
+  // Default to the event the coach most likely came for: the first one that
+  // started less than 2 hours ago or is still ahead; else today's last event.
+  const defaultGameId = useMemo(() => {
+    const current = (games ?? []).filter(g => !g.cancelled);
+    const cutoff = nowDateTime(-2 * 60 * 60 * 1000);
+    return (current.find(g => (g.dateTime ?? '') >= cutoff) ?? current[current.length - 1])?.id ?? null;
+  }, [games]);
+  const effectiveGameId = selectedId ?? defaultGameId;
   const selectedGame = games?.find(g => g.id === effectiveGameId) ?? null;
 
   const rsvpsQuery = useMemoFirebase(() => {
@@ -123,7 +132,9 @@ export function GameAttendancePanel({
     try {
       const parentIds = [...new Set(tally.unreplied.map(r => r.enrollment.parentUserId).filter(Boolean))];
       const when = selectedGame.dateTime ? format(new Date(selectedGame.dateTime), 'EEE, MMM d h:mm a') : '';
-      notifyUsers(db, parentIds, user.uid, {
+      // Await the write: only claim success (and disable retry) once the
+      // notifications actually landed.
+      await notifyUsers(db, parentIds, user.uid, {
         type: 'rsvpNudge',
         title: 'RSVP needed',
         body: `Coach is asking: can your player make the ${selectedGame.type === 'Game' ? `game vs ${selectedGame.opponentName || 'TBD'}` : 'practice'} on ${when}? Open your schedule to reply.`,
@@ -135,6 +146,13 @@ export function GameAttendancePanel({
       toast({
         title: 'Nudge sent',
         description: `${parentIds.length} famil${parentIds.length === 1 ? 'y' : 'ies'} asked to RSVP.`,
+      });
+    } catch (err) {
+      console.error('RSVP nudge failed:', err);
+      toast({
+        title: 'Nudge failed',
+        description: "The reminders couldn't be sent. Please try again.",
+        variant: 'destructive',
       });
     } finally {
       setNudging(false);

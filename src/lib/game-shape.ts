@@ -9,9 +9,20 @@
  * copy-pasted across admin/coach/parent pages. They live here so there is a single
  * source of truth and the shapes can't drift apart.
  */
+import { format } from 'date-fns';
 import type { CalendarEvent } from '@/types/scheduling';
 
 // ─── Date <-> dateTime ───────────────────────────────────────────────────────
+
+/**
+ * The current moment as a naive-local `dateTime` string, for comparing against
+ * team-subcollection games. NEVER use new Date().toISOString() for this — it's
+ * UTC and hours off. Pass `offsetMs` to shift the moment (e.g. -2h to include
+ * recently started events).
+ */
+export function nowDateTime(offsetMs = 0): string {
+  return format(new Date(Date.now() + offsetMs), "yyyy-MM-dd'T'HH:mm:ss");
+}
 
 /**
  * Combine a naive-local date + time into the team-subcollection `dateTime` string.

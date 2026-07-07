@@ -42,19 +42,17 @@ function batchNotifications(db: Firestore, userIds: string[], payload: NotifyPay
   return batch.commit();
 }
 
-/** Notify the given users (deduped, actor excluded). Fire-and-forget: failures
- *  are logged, never thrown — a fan-out failure must not block or roll back the
- *  coach's primary action. */
+/** Notify the given users (deduped, actor excluded). Returns the write promise:
+ *  await it when the caller needs delivery confirmation before claiming success
+ *  (e.g. the RSVP nudge); otherwise chain .catch(...) for fire-and-forget. */
 export function notifyUsers(
   db: Firestore,
   userIds: string[],
   actorUid: string,
   payload: NotifyPayload
-): void {
+): Promise<void> {
   const recipients = [...new Set(userIds)].filter(uid => uid && uid !== actorUid);
-  batchNotifications(db, recipients, payload).catch(err =>
-    console.error('Notification fan-out failed:', err)
-  );
+  return batchNotifications(db, recipients, payload);
 }
 
 /** Notify the parents of every player enrolled on the given team(s) — e.g. a
@@ -79,7 +77,7 @@ export function notifyTeamParents(
           .map(d => (d.data() as { parentUserId?: string }).parentUserId ?? '')
           .filter(Boolean)
       );
-      notifyUsers(db, parentIds, actorUid, payload);
+      return notifyUsers(db, parentIds, actorUid, payload);
     })
     .catch(err => console.error('Team parent notification fan-out failed:', err));
 }

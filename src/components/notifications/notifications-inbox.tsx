@@ -54,10 +54,22 @@ function NotifIcon({ type }: { type: NotificationType }) {
 
 // ─── Navigation routing ────────────────────────────────────────────────────────
 
-function getNotifRoute(relatedDocType: NotificationRelatedDocType | undefined, isCoach: boolean): string | null {
+// Parent-directed types route to the parent schedule even for coaches — a
+// coach-parent's child RSVP nudge is about their kid's team, not the one they
+// coach.
+const PARENT_DIRECTED_TYPES: NotificationType[] = ['rsvpNudge', 'gameCancelled', 'gameRescheduled'];
+
+function getNotifRoute(
+  relatedDocType: NotificationRelatedDocType | undefined,
+  type: NotificationType | undefined,
+  isCoach: boolean
+): string | null {
   if (relatedDocType === 'concessionSlot') return '/parent/volunteers';
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
-  if (relatedDocType === 'game') return isCoach ? '/coach/schedules' : '/parent/schedules';
+  if (relatedDocType === 'game') {
+    if (type && PARENT_DIRECTED_TYPES.includes(type)) return '/parent/schedules';
+    return isCoach ? '/coach/schedules' : '/parent/schedules';
+  }
   if (relatedDocType === 'announcement') return isCoach ? '/coach/announcements' : '/parent/announcements';
   if (relatedDocType === 'clearance') return '/coach/compliance';
   return null;
@@ -108,7 +120,7 @@ export function NotificationsInbox() {
     if (!notif.read) {
       await updateDoc(doc(db, 'notifications', notif.id), { read: true });
     }
-    const route = getNotifRoute(notif.relatedDocType, isCoach);
+    const route = getNotifRoute(notif.relatedDocType, notif.type, isCoach);
     if (route) router.push(route);
   };
 

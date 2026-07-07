@@ -855,6 +855,20 @@ export default function AdminGamesPage() {
       const shiftsSnap = await getDocs(query(collection(db, 'concessionSlots'), where('gameId', '==', game.id)));
       shiftsSnap.forEach(shiftDoc => batch.delete(shiftDoc.ref));
       await batch.commit();
+
+      // Deleting removes the game from every schedule just like a cancellation —
+      // families need the same alert or the game silently vanishes.
+      if (activeSport) {
+        notifyTeamParents(db, mirrorTeamIds, user?.uid ?? '', {
+          type: 'gameCancelled',
+          title: game.type === 'game' ? 'Game Cancelled' : 'Practice Cancelled',
+          body: `${gameLabel(game)} on ${format(parseISO(game.date), 'MMM d')} has been removed from the schedule.`,
+          sport: activeSport,
+          relatedDocId: game.id,
+          relatedDocType: 'game',
+        });
+      }
+
       if (user) {
         writeAuditLog(db, {
           action: 'game.deleted',
@@ -938,24 +952,29 @@ export default function AdminGamesPage() {
     }
   };
 
+  // A team is importable only if it belongs to the active season (legacy docs
+  // without a seasonId get the benefit of the doubt). A prior-season team must
+  // never match: its mirror would be invisible on every current schedule.
+  const isCurrentTeam = (t: Team) =>
+    !activeSeason || !t.seasonId || t.seasonId === activeSeason.id;
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
     const parsed = parseGameScheduleCSV(text, activeSport ?? undefined);
-    const result = validateGameRows(parsed, (teams ?? []).map(t => t.name), (fields ?? []).map(f => f.name), activeSport ?? undefined);
+    const result = validateGameRows(parsed, (teams ?? []).filter(isCurrentTeam).map(t => t.name), (fields ?? []).map(f => f.name), activeSport ?? undefined);
     setImportRows(result.valid);
     setImportErrors(result.errors);
     e.target.value = '';
   };
 
-  // Case-insensitive team lookup; when two teams share a name across seasons,
-  // the active season's team wins.
+  // Case-insensitive team lookup, restricted to the active season's teams so
+  // file-select validation and import-time matching can never disagree.
   const matchTeam = (name?: string) => {
     const n = (name ?? '').trim().toLowerCase();
     if (!n) return undefined;
-    const candidates = (teams ?? []).filter(t => t.name.toLowerCase() === n);
-    return candidates.find(t => t.seasonId === activeSeason?.id) ?? candidates[0];
+    return (teams ?? []).filter(isCurrentTeam).find(t => t.name.toLowerCase() === n);
   };
 
   const handleImport = async () => {
@@ -965,7 +984,7 @@ export default function AdminGamesPage() {
     // import. An unmatched team would produce a game with no team mirror —
     // invisible on coach and parent schedules — so block the whole import.
     const teamErrors: ValidationError[] = [];
-    const matchedRows: ParsedGame[] = [];
+    const erroredRowNumbers = new Set<number>();
     for (const row of importRows) {
       const isGame = row.type.toLowerCase() === 'game';
       const usesSingleTeam = !isGame || activeSport === 'football';
@@ -977,22 +996,23 @@ export default function AdminGamesPage() {
         if (!matchTeam(row.awayTeam)) missing.push({ column: 'AwayTeam', name: row.awayTeam });
       }
       if (missing.length > 0) {
+        erroredRowNumbers.add(row._row);
         missing.forEach(m => teamErrors.push({
           row: row._row,
           column: m.column,
-          message: `"${m.name ?? ''}" doesn't match an existing team — fix the name and try again.`,
+          message: `"${m.name ?? ''}" doesn't match a team in the active season — fix the name and re-upload.`,
         }));
-      } else {
-        matchedRows.push(row);
       }
     }
     if (teamErrors.length > 0) {
-      const blocked = importRows.length - matchedRows.length;
+      // Keep every row in the preview so the admin can see exactly which ones
+      // are bad, and so a second Import click re-blocks instead of silently
+      // importing a partial file.
+      const blocked = erroredRowNumbers.size;
       setImportErrors(prev => [...prev, ...teamErrors].sort((a, b) => a.row - b.row));
-      setImportRows(matchedRows);
       toast({
         title: 'Import blocked',
-        description: `${blocked} row${blocked !== 1 ? 's have' : ' has'} a team name that doesn't match an existing team. Nothing was imported.`,
+        description: `${blocked} row${blocked !== 1 ? 's have' : ' has'} a team name that doesn't match a team in the active season. Nothing was imported — fix the team names in your CSV and re-upload.`,
         variant: 'destructive',
       });
       return;

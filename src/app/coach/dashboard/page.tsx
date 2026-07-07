@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { notifyTeamParents } from '@/lib/coach-notifications';
+import { nowDateTime } from '@/lib/game-shape';
 import { useToast } from '@/hooks/use-toast';
 import { isAnnouncementActive, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
@@ -73,9 +74,8 @@ export default function CoachDashboard() {
 
   const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
 
-  // Team game dateTime strings are naive local (no Z) — compare with a naive-local
-  // "now", never toISOString(). useState keeps the floor stable across renders.
-  const [nowLocal] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"));
+  // useState keeps the comparison floor stable across renders.
+  const [nowLocal] = useState(() => nowDateTime());
 
   // Selected scope: single-team coaches are always scoped to their team;
   // multi-team coaches default to the combined "All Teams" view.
@@ -278,7 +278,7 @@ export default function CoachDashboard() {
           relatedDocType: 'game',
         });
       }
-      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather. Families have been notified.' });
+      toast({ title: 'Event Cancelled', description: 'Marked as cancelled due to weather. Families are being notified.' });
     } catch {
       toast({ title: 'Error', description: 'Could not cancel the event.', variant: 'destructive' });
     }

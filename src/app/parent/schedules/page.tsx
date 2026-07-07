@@ -25,6 +25,7 @@ import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
+import { addRsvpToBatch, rsvpDocRef } from '@/lib/rsvp';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
@@ -208,21 +209,9 @@ export default function ParentSchedulesPage() {
     }
     setRsvpLoading(true);
     const batch = writeBatch(db);
-    const firstRef = doc(db, 'teams', teamId, 'games', gameId, 'rsvps', `${playerIds[0]}_${gameId}`);
-    const rsvpData = playerIds.map(playerId => {
-      const rsvpId = `${playerId}_${gameId}`;
-      const data = {
-        id: rsvpId,
-        gameId,
-        playerId,
-        parentUserId: user.uid,
-        status,
-        timestamp: new Date().toISOString(),
-        teamId,
-      };
-      batch.set(doc(db, 'teams', teamId, 'games', gameId, 'rsvps', rsvpId), data, { merge: true });
-      return data;
-    });
+    const targets = playerIds.map(playerId => ({ teamId, gameId, playerId, parentUserId: user.uid, status }));
+    targets.forEach(t => addRsvpToBatch(db, batch, t));
+    const firstRef = rsvpDocRef(db, targets[0]);
     try {
       await batch.commit();
       const names = playerIds
@@ -235,7 +224,7 @@ export default function ParentSchedulesPage() {
       errorEmitter.emit('permission-error', new FirestorePermissionError({
         path: firstRef.path,
         operation: 'write',
-        requestResourceData: rsvpData[0],
+        requestResourceData: targets[0],
       }));
     } finally {
       setRsvpLoading(false);

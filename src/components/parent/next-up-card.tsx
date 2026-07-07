@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, orderBy, limit, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
+import { writeRsvp, type RsvpStatus } from '@/lib/rsvp';
+import { nowDateTime } from '@/lib/game-shape';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -47,10 +49,7 @@ export function NextUpCard({
   const isMobile = useIsMobile();
   const [rsvpLoading, setRsvpLoading] = useState(false);
 
-  // Team-game dateTime strings are naive local time (no Z), so the comparison
-  // value must be too — comparing against UTC toISOString() makes today's
-  // game vanish hours before kickoff.
-  const now = useMemo(() => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"), []);
+  const now = useMemo(() => nowDateTime(), []);
   const nextGameQuery = useMemoFirebase(() => {
     if (!db || !teamId) return null;
     return query(
@@ -81,21 +80,11 @@ export function NextUpCard({
       )
     : undefined;
 
-  const handleRsvp = async (status: 'Attending' | 'Maybe' | 'Not Attending') => {
+  const handleRsvp = async (status: RsvpStatus) => {
     if (!user || !db || !teamId || !nextGame?.id) return;
     setRsvpLoading(true);
-    const rsvpId = `${player.id}_${nextGame.id}`;
-    const rsvpRef = doc(db, 'teams', teamId, 'games', nextGame.id, 'rsvps', rsvpId);
     try {
-      await setDoc(rsvpRef, {
-        id: rsvpId,
-        gameId: nextGame.id,
-        playerId: player.id,
-        parentUserId: user.uid,
-        status,
-        timestamp: new Date().toISOString(),
-        teamId,
-      }, { merge: true });
+      await writeRsvp(db, { teamId, gameId: nextGame.id, playerId: player.id, parentUserId: user.uid, status });
       toast({ title: 'RSVP Updated', description: `${showPlayerName && player.firstName ? `${player.firstName} marked` : 'Marked'} as ${status}.` });
     } catch (err: any) {
       toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
