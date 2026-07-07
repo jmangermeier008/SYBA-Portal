@@ -2,12 +2,11 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit, doc, updateDoc, getDocs } from 'firebase/firestore';
-import { Dumbbell, Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, Phone, ChevronRight, ShieldAlert, Trophy } from 'lucide-react';
+import { Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, ChevronRight, ShieldAlert, Trophy } from 'lucide-react';
 import { isBefore, addMonths } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -16,8 +15,7 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { notifyTeamParents } from '@/lib/coach-notifications';
 import { useToast } from '@/hooks/use-toast';
-import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import { isAnnouncementActive, type CalendarEvent, type Game } from '@/types/scheduling';
+import { isAnnouncementActive, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
 import { LogScoreDialog } from '@/components/coach/LogScoreDialog';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
@@ -53,7 +51,7 @@ type TeamGameEvent = GameEvent & { _teamId: string };
 export default function CoachDashboard() {
   const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
-  const { activeSport, isAdmin } = useSport();
+  const { activeSport } = useSport();
 
   // -1 = "All Teams" combined view (the default for multi-team coaches)
   const [selectedTeamIndex, setSelectedTeamIndex] = useState(-1);
@@ -114,10 +112,6 @@ export default function CoachDashboard() {
     }).catch(() => setLoadingGames(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, teamIdsKey, loadingTeams]);
-
-  const [scheduleView, setScheduleView] = useState<'list' | 'calendar'>('list');
-  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
-  const router = useRouter();
 
   // Scope to the selected pill (or all teams), sorted chronologically
   const visibleGames = useMemo(() => {
@@ -325,24 +319,6 @@ export default function CoachDashboard() {
     return expiringSoon ? ('expiring' as const) : null;
   }, [clearances]);
 
-  const calendarEvents = useMemo((): CalendarEvent[] => {
-    return visibleGames.map(g => {
-      const dateTime = g.dateTime ?? '';
-      return {
-        id: g.id,
-        eventType: g.type === 'Game' ? 'game' as const : 'practice' as const,
-        date: dateTime.slice(0, 10),
-        startTime: dateTime.slice(11, 16),
-        title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
-        status: g.cancelled ? 'cancelled' as const : 'scheduled' as const,
-        fieldName: g.location,
-        sourceType: 'team-game' as const,
-        sourceId: g.id,
-        teamId: g._teamId,
-      };
-    });
-  }, [visibleGames]);
-
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -470,47 +446,6 @@ export default function CoachDashboard() {
               ))}
             </CardContent>
           </Card>
-        )}
-
-        {/* Secondary quick actions — Roster follows the selected team; Drills is baseball-only */}
-        <div className="grid grid-cols-4 gap-2 mb-5">
-          {[
-            { href: selectedTeamId ? `/coach/teams/${selectedTeamId}` : '/coach/teams', icon: Users, label: 'Roster' },
-            activeSport === 'football'
-              ? { href: '/coach/announcements', icon: Megaphone, label: 'News' }
-              : { href: '/coach/drills', icon: Dumbbell, label: 'Drills' },
-            { href: '/coach/schedules', icon: ClipboardList, label: 'Schedule' },
-            { href: '/coach/contact', icon: Phone, label: 'Contact' },
-          ].map(({ href, icon: Icon, label }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex flex-col items-center gap-1.5 rounded-xl border bg-card p-2.5 active:scale-95 transition-transform text-center"
-            >
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                <Icon className="h-4 w-4 text-primary" />
-              </div>
-              <p className="text-xs font-medium leading-tight text-muted-foreground">{label}</p>
-            </Link>
-          ))}
-        </div>
-
-        {/* Dual-role: quick jumps into admin tools without leaving the coach home base */}
-        {isAdmin && (
-          <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border bg-secondary/20 px-3 py-2">
-            <span className="text-xs font-semibold text-muted-foreground">Admin shortcuts:</span>
-            <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-              <Link href="/admin/games">Add game</Link>
-            </Button>
-            {activeSport === 'football' && (
-              <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-                <Link href="/admin/equipment">Equipment</Link>
-              </Button>
-            )}
-            <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-              <Link href="/admin/roster">Roster</Link>
-            </Button>
-          </div>
         )}
 
         {/* Next event — opponent, RSVP tally, and one-tap actions in one place */}
@@ -642,28 +577,12 @@ export default function CoachDashboard() {
                   Upcoming games and practices{selectedTeam ? ` for ${selectedTeam.name}` : isAllTeamsView ? ' across all your teams' : ''}
                 </CardDescription>
               </div>
-              <div className="flex items-center rounded-full border bg-muted p-0.5 text-sm shrink-0">
-                <button
-                  onClick={() => setScheduleView('list')}
-                  className={cn('px-3 py-1.5 min-h-[36px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'list' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
-                >List</button>
-                <button
-                  onClick={() => setScheduleView('calendar')}
-                  className={cn('px-3 py-1.5 min-h-[36px] rounded-full transition-colors text-xs font-semibold', scheduleView === 'calendar' ? 'bg-white shadow text-foreground' : 'text-muted-foreground')}
-                >Calendar</button>
-              </div>
+              <Button variant="ghost" size="sm" className="text-xs shrink-0" asChild>
+                <Link href="/coach/schedules">Full schedule →</Link>
+              </Button>
             </CardHeader>
             <CardContent>
-              {scheduleView === 'calendar' ? (
-                <LeagueCalendar
-                  events={calendarEvents}
-                  isLoading={loadingGames}
-                  filters={calendarFilters}
-                  onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
-                  visibleFilters={['games', 'practices']}
-                  onWeatherCancel={handleWeatherCancel}
-                />
-              ) : loadingGames ? (
+              {loadingGames ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-7 w-7 animate-spin text-primary" />
                 </div>
@@ -697,9 +616,6 @@ export default function CoachDashboard() {
                           </p>
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs px-2" asChild>
-                        <Link href="/coach/schedules">Manage</Link>
-                      </Button>
                     </div>
                   ))}
                 </div>
