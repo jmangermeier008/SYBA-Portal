@@ -238,7 +238,12 @@ export default function AdminSettingsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Request failed');
-      if (data.tokenCount === 0) {
+      if (data.scheduled) {
+        toast({
+          title: `Test scheduled for ${data.target}`,
+          description: `Arriving in ~${data.delaySeconds} seconds. If nothing shows on the locked device, check that notifications were enabled from the installed app.`,
+        });
+      } else if (data.tokenCount === 0) {
         toast({
           title: `No devices registered for ${data.target}`,
           description: 'Enable notifications on the device first (dashboard banner or Parent Settings), then try again.',
