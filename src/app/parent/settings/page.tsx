@@ -8,13 +8,15 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useUser, useFirestore, useFirebaseApp, useCollection, useMemoFirebase } from '@/firebase';
 import { doc, getDoc, updateDoc, collection, query, orderBy, where } from 'firebase/firestore';
-import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, CheckCircle2, X, ArrowRight } from 'lucide-react';
+import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, CheckCircle2, X, ArrowRight, Bell } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { stripPhone } from '@/lib/utils';
 import { useSport } from '@/firebase/sport-context';
+import { isIosBrowser, isStandalone } from '@/lib/pwa';
+import { enablePush, disablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
 
 interface OfficerRecord {
   id: string;
@@ -41,10 +43,74 @@ interface LinkedParent {
 export default function ParentSettingsPage() {
   const { user, profile } = useUser();
   const db = useFirestore();
+  const app = useFirebaseApp();
   const { toast } = useToast();
   const { activeSport, leagueName } = useSport();
   const [profileLoading, setProfileLoading] = useState(false);
   const [privacyLoading, setPrivacyLoading] = useState(false);
+
+  // Push notification toggle — device-level state, resolved client-side only
+  const [push, setPush] = useState({
+    hydrated: false,
+    supported: false,
+    enabled: false,
+    blocked: false,
+    iosNeedsInstall: false,
+  });
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    isPushSupported().then(supported => {
+      if (cancelled) return;
+      const permission =
+        typeof window !== 'undefined' && 'Notification' in window
+          ? Notification.permission
+          : 'default';
+      setPush({
+        hydrated: true,
+        supported,
+        enabled:
+          supported &&
+          permission === 'granted' &&
+          !!getStoredPushToken() &&
+          profile?.notificationPrefs?.push !== false,
+        blocked: permission === 'denied',
+        iosNeedsInstall: !supported && isIosBrowser() && !isStandalone(),
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
+  const handlePushToggle = async (on: boolean) => {
+    if (!user) return;
+    setPushBusy(true);
+    if (on) {
+      const result = await enablePush(app, db, user.uid);
+      if (result.status === 'granted') {
+        setPush(s => ({ ...s, enabled: true }));
+        toast({ title: 'Notifications on', description: 'This device will now get schedule alerts.' });
+      } else if (result.status === 'denied') {
+        setPush(s => ({ ...s, blocked: true }));
+        toast({
+          title: 'Notifications are blocked',
+          description: 'Your browser blocked notifications for this site. Re-enable them in browser settings, then try again.',
+          variant: 'destructive',
+        });
+      } else if (result.status === 'ios-needs-install') {
+        setPush(s => ({ ...s, iosNeedsInstall: true }));
+      } else if (result.status === 'error') {
+        toast({ title: 'Could not enable notifications', description: result.message, variant: 'destructive' });
+      }
+    } else {
+      await disablePush(app, db, user.uid);
+      setPush(s => ({ ...s, enabled: false }));
+      toast({ title: 'Push notifications off' });
+    }
+    setPushBusy(false);
+  };
 
   const officersQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
@@ -340,6 +406,41 @@ export default function ParentSettingsPage() {
                 Save Privacy Settings
               </Button>
             </CardFooter>
+          </Card>
+
+          {/* Notifications */}
+          <Card className="border-none shadow-md">
+            <CardHeader>
+              <div className="flex items-center gap-2 text-primary">
+                <Bell className="h-5 w-5" />
+                <CardTitle className="text-xl">Notifications</CardTitle>
+              </div>
+              <CardDescription>Device alerts for cancellations and schedule changes. Email and in-portal notifications are unaffected.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-4 p-4 rounded-xl bg-secondary/20 border">
+                <div className="space-y-0.5">
+                  <Label className="text-base">Push notifications</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {!push.hydrated
+                      ? 'Checking this device…'
+                      : push.blocked
+                        ? 'Notifications are blocked for this site in your browser settings. Re-enable them there to turn this on.'
+                        : push.iosNeedsInstall
+                          ? 'On iPhone, first add the portal to your Home Screen (Share → Add to Home Screen), then turn this on from the installed app.'
+                          : push.supported
+                            ? 'Get an alert on this device the moment a game or practice is cancelled or moved.'
+                            : 'Not supported in this browser.'}
+                  </p>
+                </div>
+                <Switch
+                  checked={push.enabled}
+                  disabled={!push.hydrated || pushBusy || push.blocked || !push.supported}
+                  onCheckedChange={handlePushToggle}
+                  aria-label="Toggle push notifications"
+                />
+              </div>
+            </CardContent>
           </Card>
         </div>
       </main>

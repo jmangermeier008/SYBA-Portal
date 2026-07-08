@@ -42,6 +42,7 @@ import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType,
 import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
 import { normalizeGame } from '@/lib/game-shape';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
+import { PushPrompt } from '@/components/pwa/push-prompt';
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -598,6 +599,9 @@ export default function AdminDashboard({
 
         {/* One-time invite to install the portal as a home-screen app */}
         <InstallPrompt />
+
+        {/* Opt-in to push alerts for cancellations and schedule changes */}
+        <PushPrompt />
 
         {/* ── Zone 1: Alerts ── */}
         <div className="mb-4">

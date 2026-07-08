@@ -65,7 +65,7 @@ export default function AdminAnnouncementsPage() {
   // Fan-out: create an in-app notification for every user. Every authenticated
   // user is a baseline parent, so all profiles are notified — the notification
   // inbox scopes display by sport via the notification's own sport field.
-  const fanOutNotifications = async (announcementId: string, title: string, body: string, isGlobal: boolean) => {
+  const fanOutNotifications = async (announcementId: string, title: string, body: string, isGlobal: boolean, isUrgent: boolean) => {
     if (!db) return;
     const usersSnap = await getDocs(collection(db, 'userProfiles'));
     if (usersSnap.empty) return;
@@ -86,6 +86,26 @@ export default function AdminAnnouncementsPage() {
       });
     });
     await notifBatch.commit();
+
+    // Urgent announcements additionally buzz opted-in devices via web push.
+    // Fire-and-forget: a push failure never blocks the published announcement.
+    if (isUrgent && user) {
+      user
+        .getIdToken()
+        .then(idToken =>
+          fetch('/api/push/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({
+              userIds: usersSnap.docs.map(d => d.id),
+              title,
+              body: bodyPreview,
+              url: '/parent/announcements',
+            }),
+          })
+        )
+        .catch(() => undefined);
+    }
   };
 
   // Emails the announcement to every opted-in family via the server route.
@@ -137,7 +157,7 @@ export default function AdminAnnouncementsPage() {
           ...(form.expiresAt ? { expiresAt: form.expiresAt } : { expiresAt: deleteField() }),
           updatedAt: new Date().toISOString(),
         });
-        if (form.notify) await fanOutNotifications(editTarget.id, title, body, form.isGlobal);
+        if (form.notify) await fanOutNotifications(editTarget.id, title, body, form.isGlobal, form.isUrgent);
         toast({ title: form.notify ? 'Announcement Updated & Everyone Re-Notified' : 'Announcement Updated' });
         if (form.sendEmail) await sendAnnouncementEmail(title, body);
       } else {
@@ -152,7 +172,7 @@ export default function AdminAnnouncementsPage() {
           publishedAt: new Date().toISOString(),
           publishedBy: profile?.displayName || 'Admin',
         });
-        if (form.notify) await fanOutNotifications(newDocRef.id, title, body, form.isGlobal);
+        if (form.notify) await fanOutNotifications(newDocRef.id, title, body, form.isGlobal, form.isUrgent);
         toast({ title: form.notify ? 'Announcement Published' : 'Announcement Published Quietly' });
         if (form.sendEmail) await sendAnnouncementEmail(title, body);
       }

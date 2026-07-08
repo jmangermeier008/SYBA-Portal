@@ -205,6 +205,14 @@ service cloud.firestore {
           !(resource.data.get('payment_status', '') in ['paid', 'fee_waived'])
         );
       }
+
+      // Per-device web-push registration tokens (doc ID = FCM token).
+      // Owner-only: tokens are device credentials and must never be readable
+      // by other signed-in users. Server-side sends and dead-token pruning
+      // use the Admin SDK, which bypasses rules.
+      match /pushTokens/{tokenId} {
+        allow read, write: if isUser(userId);
+      }
     }
 
     // ---------------------------------------------------------------------------

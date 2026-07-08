@@ -6,7 +6,7 @@ import { doc, onSnapshot, setDoc, updateDoc, Firestore } from 'firebase/firestor
 import { useAuth, useFirestore } from '../provider';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
-import type { Sport, SportRole } from '@/types/scheduling';
+import type { NotificationPrefs, Sport, SportRole } from '@/types/scheduling';
 
 export interface UserProfile {
   id: string;
@@ -24,6 +24,7 @@ export interface UserProfile {
   teamIds?: string[];
   divisionIds?: string[];  // Football coach division assignments
   preferredSport?: Sport;
+  notificationPrefs?: NotificationPrefs;
   complianceStatus?: 'pending' | 'approved' | 'action_required';
   manualComplianceOverride?: boolean;
   createdAt: string;

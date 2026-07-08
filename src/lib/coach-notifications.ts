@@ -11,7 +11,36 @@ import {
   Timestamp,
   type Firestore,
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import type { NotificationRelatedDocType, NotificationType, Sport } from '@/types/scheduling';
+
+/** Best-effort web push riding along with the in-app write. Fully detached:
+ *  any failure (offline, signed out, push not configured) is swallowed so it
+ *  can never affect the notification batch it mirrors. */
+function pushBestEffort(userIds: string[], payload: NotifyPayload) {
+  try {
+    if (userIds.length === 0) return;
+    const user = getAuth().currentUser;
+    if (!user) return;
+    user
+      .getIdToken()
+      .then(idToken =>
+        fetch('/api/push/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({
+            userIds,
+            title: payload.title,
+            body: payload.body,
+            url: '/parent/notifications',
+          }),
+        })
+      )
+      .catch(() => undefined);
+  } catch {
+    /* push is best-effort */
+  }
+}
 
 export interface NotifyPayload {
   type: NotificationType;
@@ -39,7 +68,11 @@ function batchNotifications(db: Firestore, userIds: string[], payload: NotifyPay
       sport: payload.sport,
     });
   });
-  return batch.commit();
+  const commit = batch.commit();
+  // Mirror to web push only once the in-app docs are committed (side chain —
+  // the caller still awaits/handles the original commit promise).
+  commit.then(() => pushBestEffort(userIds, payload)).catch(() => undefined);
+  return commit;
 }
 
 /** Notify the given users (deduped, actor excluded). Returns the write promise:

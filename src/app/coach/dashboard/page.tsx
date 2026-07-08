@@ -20,6 +20,7 @@ import { isAnnouncementActive, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
 import { LogScoreDialog } from '@/components/coach/LogScoreDialog';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
+import { PushPrompt } from '@/components/pwa/push-prompt';
 
 interface Team {
   id: string;
@@ -343,6 +344,9 @@ export default function CoachDashboard() {
 
         {/* One-time invite to install the portal as a home-screen app */}
         <InstallPrompt />
+
+        {/* Opt-in to push alerts for cancellations and schedule changes */}
+        <PushPrompt />
 
         {clearanceAlert && (
           <div className={cn(

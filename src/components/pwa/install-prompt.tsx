@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Download, Share, SquarePlus, X } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { isIosBrowser, isStandalone } from '@/lib/pwa';
 
 const DISMISSED_KEY = 'syba_install_dismissed';
 
@@ -27,19 +28,6 @@ function writeDismissed() {
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
-
-function isStandalone(): boolean {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as any).standalone === true // iOS Safari
-  );
-}
-
-function isIosBrowser(): boolean {
-  const ua = navigator.userAgent;
-  // iPadOS 13+ reports itself as Macintosh, but Macs have no touch points.
-  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 }
 
 /**

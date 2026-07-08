@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useUser, useFirestore, useCollection, useMemoFirebase, useAuth } from '@/firebase';
 import { collection, doc, setDoc, deleteDoc, query, orderBy, where, writeBatch } from 'firebase/firestore';
 import { useSport } from '@/firebase/sport-context';
-import { Settings, Save, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain, Trash2, Plus, Mail } from 'lucide-react';
+import { Settings, Save, CreditCard, Lock, Loader2, Users, Check, Wrench, CloudRain, Trash2, Plus, Mail, Bell } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { INQUIRY_TOPICS } from '@/data/inquiry-topics';
 import type { InquiryTopic } from '@/data/inquiry-topics';
@@ -205,13 +205,47 @@ function OfficerRow({ officer, holderName, onSave, onDelete }: {
 }
 
 export default function AdminSettingsPage() {
-  const { isSiteAdmin } = useUser();
+  const { user, isSiteAdmin } = useUser();
   const { activeSport, isAdmin } = useSport();
   const db = useFirestore();
   const auth = useAuth();
   const { toast } = useToast();
 
   const [notifEmail, setNotifEmail] = useState('');
+  const [testPushBusy, setTestPushBusy] = useState(false);
+
+  // Site Admin self-test: pushes to the caller's own registered devices only,
+  // verifying the whole pipeline (token → FCM → service worker → OS alert).
+  const handleTestPush = async () => {
+    if (!user) return;
+    setTestPushBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/admin/test-push', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      if (data.tokenCount === 0) {
+        toast({
+          title: 'No devices registered',
+          description: 'Enable notifications on this device first (dashboard banner or Parent Settings), then try again.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: `Test sent to ${data.sent} of ${data.tokenCount} device${data.tokenCount === 1 ? '' : 's'}`,
+          description: 'Background this tab or lock your phone — the notification should appear within seconds.' +
+            (data.pruned > 0 ? ` Removed ${data.pruned} stale device registration${data.pruned === 1 ? '' : 's'}.` : ''),
+        });
+      }
+    } catch (err: any) {
+      toast({ title: 'Test push failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setTestPushBusy(false);
+    }
+  };
   const [stripeConfigured, setStripeConfigured] = useState<boolean | null>(null);
   const [stripeMode, setStripeMode] = useState<'sandbox' | 'production' | null>(null);
   const [stripeKeys, setStripeKeys] = useState<{ test: boolean; live: boolean }>({ test: false, live: false });
@@ -863,6 +897,29 @@ export default function AdminSettingsPage() {
                     Internal tools for managing test data and system state. All actions are permanent and cannot be undone.
                   </p>
                 </div>
+
+                {/* Push self-test — Site Admin only (matches the API route gate) */}
+                {isSiteAdmin && (
+                  <Card className="border-none shadow-md">
+                    <CardHeader className="flex flex-row items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                        <Bell className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <CardTitle>Test Push Notification</CardTitle>
+                        <CardDescription>
+                          Sends a test notification to your own registered devices only — no parents are contacted. Enable notifications on a device first, then use this to confirm delivery end-to-end.
+                        </CardDescription>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <Button onClick={handleTestPush} disabled={testPushBusy}>
+                        {testPushBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
+                        Send Test Notification
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <MaintenanceCard
                   title="Clear User Notifications"

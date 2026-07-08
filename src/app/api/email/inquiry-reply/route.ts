@@ -3,7 +3,7 @@ import { verifyBearerUid, getCallerProfile, hasAnyRole } from '@/lib/server-auth
 
 function getAppUrl(sport?: string): string {
   if (sport === 'football') return process.env.FOOTBALL_BASE_URL || 'https://sharpsvillefootball.com';
-  return process.env.NEXT_PUBLIC_BASE_URL || 'https://syba.blue';
+  return process.env.NEXT_PUBLIC_BASE_URL || 'https://sharpsvilleyouthsports.com';
 }
 
 function sportPrefix(sport?: string): string {

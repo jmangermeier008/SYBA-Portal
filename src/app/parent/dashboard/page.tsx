@@ -13,6 +13,7 @@ import { NextUpCard } from '@/components/parent/next-up-card';
 import { FamilyComplianceTracker } from '@/components/parent/family-compliance-tracker';
 import { UrgentAnnouncementBanner } from '@/components/parent/urgent-announcement-banner';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
+import { PushPrompt } from '@/components/pwa/push-prompt';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -412,6 +413,9 @@ export default function ParentDashboard() {
 
           {/* One-time invite to install the portal as a home-screen app */}
           <InstallPrompt />
+
+          {/* Opt-in to push alerts for cancellations and schedule changes */}
+          <PushPrompt />
 
           {/* Family Compliance & Volunteer Tracker — top of the workspace (football) */}
           <FamilyComplianceTracker />

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Timestamp } from 'firebase-admin/firestore';
 import { getAdminFirestore } from '@/lib/firebase-admin';
+import { sendPushToUsers } from '@/lib/push-server';
 
 /**
  * GET/POST /api/reminders
@@ -107,6 +108,7 @@ async function runReminders(req: Request) {
     let slotsProcessed = 0;
     let emailsSent = 0;
     let notificationsWritten = 0;
+    let pushesSent = 0;
 
     for (const slotDoc of snap.docs) {
       const slot = slotDoc.data();
@@ -150,6 +152,14 @@ async function runReminders(req: Request) {
           });
           notificationsWritten++;
         }
+
+        // Web push mirror — sendPushToUsers honors the push pref itself and never throws
+        const shiftPush = await sendPushToUsers([parentId], {
+          title: 'Volunteer shift tomorrow',
+          body: `You're signed up for a ${shiftType} shift${spotsNote} ${when}${where ? ` (${where})` : ''}.`,
+          url: '/parent/volunteers',
+        });
+        pushesSent += shiftPush.sent;
 
         if (prefs.email !== false && profile.email) {
           const ok = await sendEmail(
@@ -252,6 +262,13 @@ async function runReminders(req: Request) {
             notificationsWritten++;
           }
 
+          const gamePush = await sendPushToUsers([parentId], {
+            title: 'Game tomorrow',
+            body: `${team.name ?? 'Your team'} plays ${gameLabel} ${when}${whereNote}.${needsRsvp ? ' Please RSVP.' : ''}`,
+            url: '/parent/schedules',
+          });
+          pushesSent += gamePush.sent;
+
           if (needsRsvp && prefs.email !== false && profile.email) {
             if (emailsSent + gameEmailsSent >= EMAIL_BUDGET) {
               gameEmailsSkipped++;
@@ -274,7 +291,7 @@ async function runReminders(req: Request) {
     if (gameEmailsSkipped > 0) {
       console.warn(`[reminders] email budget reached — skipped ${gameEmailsSkipped} game-reminder emails (in-app still sent)`);
     }
-    console.log(`[reminders] date=${targetDate} slots=${slotsProcessed} games=${gamesProcessed} emails=${emailsSent + gameEmailsSent} notifications=${notificationsWritten}`);
+    console.log(`[reminders] date=${targetDate} slots=${slotsProcessed} games=${gamesProcessed} emails=${emailsSent + gameEmailsSent} notifications=${notificationsWritten} pushes=${pushesSent}`);
     return NextResponse.json({
       ok: true,
       date: targetDate,
@@ -284,6 +301,7 @@ async function runReminders(req: Request) {
       gameEmailsSent,
       gameEmailsSkipped,
       notificationsWritten,
+      pushesSent,
     });
   } catch (error: any) {
     console.error('[reminders] Error:', error.message);

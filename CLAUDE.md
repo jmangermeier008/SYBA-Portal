@@ -328,6 +328,8 @@ Key props by role:
 | Variable | Purpose |
 |---|---|
 | `NEXT_PUBLIC_FIREBASE_API_KEY` + 5 more | Firebase client SDK |
+| `NEXT_PUBLIC_FIREBASE_VAPID_KEY` | Web Push certificate public key (Firebase Console → Cloud Messaging) — without it the push Enable button reports "not configured" |
+| `NEXT_PUBLIC_BASE_URL` | Canonical site origin — Stripe redirects, inquiry-reply links, push click-through links (falls back to `https://sharpsvilleyouthsports.com`) |
 | `FIREBASE_ADMIN_*` | Firebase Admin SDK (server API routes) |
 | `STRIPE_SECRET_KEY` | Stripe server-side |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe client-side |

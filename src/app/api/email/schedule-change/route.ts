@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 import { verifyBearerUid, getCallerProfile, hasAnyRole } from '@/lib/server-auth';
+import { sendPushToUsers } from '@/lib/push-server';
 
 function sportPrefix(sport?: string): string {
   if (sport === 'baseball') return '[SYBA Baseball] ';
@@ -58,6 +59,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unknown notification type' }, { status: 400 });
     }
 
+    // Web push rides along with the email (never throws) — sent first so the
+    // "no valid emails" early return below can't skip it.
+    const pushCopy = {
+      shiftMoved: {
+        title: `${prefix}Concession shift rescheduled`,
+        body: `Your shift for ${gameLabel} moved from ${oldDateLabel} to ${newDateLabel}.`,
+        url: '/parent/volunteers',
+      },
+      shiftCancelled: {
+        title: `${prefix}Concession shift cancelled`,
+        body: `Your shift for ${gameLabel} on ${oldDateLabel} was cancelled — the game is off.`,
+        url: '/parent/volunteers',
+      },
+      practiceSlotCancelled: {
+        title: `${prefix}Practice slot cancelled`,
+        body: `Your practice slot at ${gameLabel} on ${oldDateLabel} was cancelled.`,
+        url: '/coach/practice-slots',
+      },
+    }[type as 'shiftMoved' | 'shiftCancelled' | 'practiceSlotCancelled'];
+    const pushResult = await sendPushToUsers(userIds, pushCopy);
+
     // Fetch emails for all affected users via Firebase Admin
     const db = getAdminFirestore();
     const emailPromises = userIds.map(uid =>
@@ -66,7 +88,7 @@ export async function POST(req: Request) {
     const emails = (await Promise.all(emailPromises)).filter((e): e is string => !!e);
 
     if (emails.length === 0) {
-      return NextResponse.json({ ok: true, sent: 0, note: 'No valid emails found' });
+      return NextResponse.json({ ok: true, sent: 0, pushSent: pushResult.sent, note: 'No valid emails found' });
     }
 
     // Send via Resend
@@ -90,7 +112,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: err }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, sent: emails.length });
+    return NextResponse.json({ ok: true, sent: emails.length, pushSent: pushResult.sent });
   } catch (error: any) {
     console.error('[schedule-change email] Error:', error.message);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

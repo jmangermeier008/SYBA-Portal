@@ -370,6 +370,9 @@ export interface Notification {
 export interface NotificationPrefs {
   email: boolean;
   inApp: boolean;
+  // Web push. Undefined = never enabled (senders skip only `=== false`);
+  // device tokens live at userProfiles/{uid}/pushTokens/{token}.
+  push?: boolean;
 }
 
 /** Firestore user profile (collection: userProfiles). Extends the Firebase Auth user record. */
