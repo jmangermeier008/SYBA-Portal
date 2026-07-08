@@ -31,14 +31,17 @@ function AdminInquiriesContent() {
 
   const inquiriesQuery = useMemoFirebase(() => {
     if (!db || !isBoardMember || !activeSport) return null;
-    return query(
-      collection(db, 'inquiries'),
-      where('sport', '==', activeSport),
-      orderBy('createdAt', 'desc')
-    );
+    // No sport clause in the query: email-originated inquiries predating the
+    // webhook's sport stamping have no sport field and a `where` would hide
+    // them from every sport view. Scoped client-side below instead.
+    return query(collection(db, 'inquiries'), orderBy('createdAt', 'desc'));
   }, [db, isBoardMember, activeSport]);
 
-  const { data: inquiries, isLoading } = useCollection<Inquiry>(inquiriesQuery);
+  const { data: allInquiries, isLoading } = useCollection<Inquiry>(inquiriesQuery);
+  const inquiries = useMemo(
+    () => allInquiries?.filter(inq => inq.sport === activeSport || !inq.sport) ?? null,
+    [allInquiries, activeSport]
+  );
 
   const filtered = useMemo(() => {
     if (!inquiries) return [];

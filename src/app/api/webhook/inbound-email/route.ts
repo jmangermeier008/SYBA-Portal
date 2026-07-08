@@ -156,6 +156,10 @@ export async function POST(req: Request) {
     // Look up officer record by @syba.blue address to determine topic and assignedToRole dynamically
     let topic: InquiryTopic = 'general';
     let assignedToRole = 'Secretary';
+    // The admin inquiries page is sport-scoped — an inquiry with no sport is
+    // invisible in the UI (bug found during the 2026-07-09 loop incident).
+    let sport = 'baseball';
+    if (recipientEmail === 'football@sharpsvillesports.com') sport = 'football';
 
     const officerSnap = await db.collection('officers')
       .where('email', '==', recipientEmail)
@@ -166,6 +170,7 @@ export async function POST(req: Request) {
       const officer = officerSnap.docs[0].data();
       assignedToRole = officer.title ?? 'Secretary';
       topic = (officer.mappedTopic as InquiryTopic) ?? 'general';
+      if (officer.sport === 'baseball' || officer.sport === 'football') sport = officer.sport;
     }
 
     const topicConfig = getTopicConfig(topic);
@@ -182,6 +187,7 @@ export async function POST(req: Request) {
       senderEmail,
       senderRole: 'Email',
       topic,
+      sport,
       subject: subject.slice(0, 100),
       message,
       messageHtml: rawHtml || null,
