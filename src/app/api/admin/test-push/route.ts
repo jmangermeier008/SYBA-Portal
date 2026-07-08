@@ -3,6 +3,9 @@ import { getAdminFirestore } from '@/lib/firebase-admin';
 import { verifyBearerUid, getCallerProfile } from '@/lib/server-auth';
 import { sendPushToUsers } from '@/lib/push-server';
 
+// Delayed test sends hold the function open past the default limit.
+export const maxDuration = 60;
+
 /**
  * POST /api/admin/test-push — Site Admin test send.
  *
@@ -50,12 +53,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, target: targetLabel, cleared: tokensSnap.size });
     }
 
+    // Optional delay so lock-screen delivery can be tested from the target
+    // device itself: tap send, lock the phone, notification arrives after
+    // the countdown. Capped well under maxDuration.
+    const delaySeconds = Math.min(Math.max(Number(body?.delaySeconds) || 0, 0), 30);
+    if (delaySeconds > 0) {
+      await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+    }
+
     const result = await sendPushToUsers([targetUid], {
       title: 'SYBA test notification',
       body: `Push notifications are working for ${targetLabel} (${new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} ET).`,
       url: '/parent/notifications',
     });
-    return NextResponse.json({ ok: true, target: targetLabel, ...result });
+    return NextResponse.json({ ok: true, target: targetLabel, delaySeconds, ...result });
   } catch (error: any) {
     console.error('[test-push] Error:', error.message);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

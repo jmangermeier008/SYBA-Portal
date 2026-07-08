@@ -217,15 +217,24 @@ export default function AdminSettingsPage() {
 
   // Site Admin test send: pushes to the caller's own registered devices (or a
   // pilot user's, by email), verifying the whole pipeline end-to-end.
-  const handleTestPush = async () => {
+  const handleTestPush = async (delaySeconds = 0) => {
     if (!user) return;
     setTestPushBusy(true);
+    if (delaySeconds > 0) {
+      toast({
+        title: `Sending in ${delaySeconds} seconds`,
+        description: 'Lock the phone or switch apps now — the notification should appear on the lock screen.',
+      });
+    }
     try {
       const idToken = await user.getIdToken();
       const res = await fetch('/api/admin/test-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify(testPushEmail.trim() ? { email: testPushEmail.trim() } : {}),
+        body: JSON.stringify({
+          ...(testPushEmail.trim() ? { email: testPushEmail.trim() } : {}),
+          ...(delaySeconds > 0 ? { delaySeconds } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Request failed');
@@ -955,9 +964,13 @@ export default function AdminSettingsPage() {
                         />
                       </div>
                       <div className="flex flex-wrap gap-3">
-                        <Button onClick={handleTestPush} disabled={testPushBusy}>
+                        <Button onClick={() => handleTestPush()} disabled={testPushBusy}>
                           {testPushBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
                           Send Test Notification
+                        </Button>
+                        <Button variant="secondary" onClick={() => handleTestPush(15)} disabled={testPushBusy}>
+                          <Bell className="mr-2 h-4 w-4" />
+                          Send in 15s (lock phone first)
                         </Button>
                         <Button variant="outline" onClick={handleClearPushDevices} disabled={testPushBusy}>
                           <Trash2 className="mr-2 h-4 w-4" />
