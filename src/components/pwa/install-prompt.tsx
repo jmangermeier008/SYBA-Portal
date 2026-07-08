@@ -5,12 +5,21 @@ import { Download, Share, SquarePlus, X } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { isIosBrowser, isStandalone } from '@/lib/pwa';
+import { isPushEnableAskActive } from '@/lib/push-client';
 
 const DISMISSED_KEY = 'syba_install_dismissed';
+// Snooze rather than hide forever — on iPhone, installing is the gateway to
+// notifications, so a dismissal shouldn't close that door permanently.
+const DISMISS_DAYS = 30;
 
 function readDismissed(): boolean {
   try {
-    return localStorage.getItem(DISMISSED_KEY) === '1';
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    if (!raw) return false;
+    const dismissedAt = Number(raw);
+    // Legacy value '1' (pre-snooze) parses as epoch — treated as expired.
+    if (!Number.isFinite(dismissedAt)) return false;
+    return Date.now() - dismissedAt < DISMISS_DAYS * 24 * 60 * 60 * 1000;
   } catch {
     return false;
   }
@@ -18,7 +27,7 @@ function readDismissed(): boolean {
 
 function writeDismissed() {
   try {
-    localStorage.setItem(DISMISSED_KEY, '1');
+    localStorage.setItem(DISMISSED_KEY, String(Date.now()));
   } catch {
     /* ignore — private mode / storage disabled */
   }
@@ -43,12 +52,17 @@ export function InstallPrompt() {
   const [dismissed, setDismissed] = useState(true);
   const [installed, setInstalled] = useState(false);
   const [isIos, setIsIos] = useState(false);
+  const [deferToPushAsk, setDeferToPushAsk] = useState(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     setDismissed(readDismissed());
     setInstalled(isStandalone());
     setIsIos(isIosBrowser());
+    // One banner at a time: while the enable-notifications ask is active
+    // (Android/desktop), the install invite waits for a later visit. On iOS
+    // browsers push is unsupported until installed, so install still leads.
+    isPushEnableAskActive().then(setDeferToPushAsk);
     setHydrated(true);
 
     const onBeforeInstall = (e: Event) => {
@@ -78,9 +92,10 @@ export function InstallPrompt() {
     if (outcome === 'accepted') handleDismiss();
   };
 
-  // No banner while checking localStorage, once installed/dismissed, or in
-  // browsers with no install path (no Chromium event, not iOS Safari).
-  if (!hydrated || dismissed || installed || (!installEvent && !isIos)) return null;
+  // No banner while checking localStorage, once installed/dismissed, while
+  // the notifications ask has the banner slot, or in browsers with no
+  // install path (no Chromium event, not iOS Safari).
+  if (!hydrated || dismissed || installed || deferToPushAsk || (!installEvent && !isIos)) return null;
 
   return (
     <Alert className="relative mb-4 pr-10 border-primary/30 bg-primary/5">

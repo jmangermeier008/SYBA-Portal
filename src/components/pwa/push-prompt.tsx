@@ -9,35 +9,11 @@ import { useToast } from '@/hooks/use-toast';
 import {
   enablePush,
   getStoredPushToken,
+  isPushPromptSnoozed,
   isPushSupported,
   refreshPushToken,
+  snoozePushPrompt,
 } from '@/lib/push-client';
-
-const DISMISSED_KEY = 'syba_push_prompt_dismissed';
-// Dismissal snoozes rather than hides forever — an accidental ✕ shouldn't
-// permanently cut a family off from the enable path.
-const DISMISS_DAYS = 30;
-
-function readDismissed(): boolean {
-  try {
-    const raw = localStorage.getItem(DISMISSED_KEY);
-    if (!raw) return false;
-    const dismissedAt = Number(raw);
-    // Legacy value '1' (pre-snooze) parses as epoch — treated as expired.
-    if (!Number.isFinite(dismissedAt)) return false;
-    return Date.now() - dismissedAt < DISMISS_DAYS * 24 * 60 * 60 * 1000;
-  } catch {
-    return false;
-  }
-}
-
-function writeDismissed() {
-  try {
-    localStorage.setItem(DISMISSED_KEY, String(Date.now()));
-  } catch {
-    /* ignore — private mode / storage disabled */
-  }
-}
 
 /**
  * Dismissible banner inviting the user to turn on push notifications for
@@ -63,7 +39,7 @@ export function PushPrompt() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setDismissed(readDismissed());
+    setDismissed(isPushPromptSnoozed());
     const hasToken = !!getStoredPushToken();
     const permission = 'Notification' in window ? Notification.permission : 'default';
     setEnabled(permission === 'granted' && hasToken);
@@ -83,7 +59,7 @@ export function PushPrompt() {
 
   const handleDismiss = () => {
     setDismissed(true);
-    writeDismissed();
+    snoozePushPrompt();
   };
 
   const handleEnable = async () => {

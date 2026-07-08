@@ -40,6 +40,44 @@ export function getStoredPushToken(): string | null {
   }
 }
 
+// Enable-prompt snooze, shared by the dashboard banner (which writes it) and
+// the install banner (which yields the banner slot while the push ask is
+// active). Dismissal snoozes rather than hides forever.
+const PROMPT_SNOOZE_KEY = 'syba_push_prompt_dismissed';
+const PROMPT_SNOOZE_DAYS = 30;
+
+export function isPushPromptSnoozed(): boolean {
+  try {
+    const raw = localStorage.getItem(PROMPT_SNOOZE_KEY);
+    if (!raw) return false;
+    const at = Number(raw);
+    // Legacy value '1' parses as epoch — treated as expired.
+    if (!Number.isFinite(at)) return false;
+    return Date.now() - at < PROMPT_SNOOZE_DAYS * 24 * 60 * 60 * 1000;
+  } catch {
+    return false;
+  }
+}
+
+export function snoozePushPrompt() {
+  try {
+    localStorage.setItem(PROMPT_SNOOZE_KEY, String(Date.now()));
+  } catch {
+    /* ignore — private mode / storage disabled */
+  }
+}
+
+/** True when the dashboard push banner would currently show its Enable ask —
+ *  other prompts (e.g. the install banner) defer to it so users get one ask
+ *  at a time. */
+export async function isPushEnableAskActive(): Promise<boolean> {
+  if (typeof window === 'undefined' || !('Notification' in window)) return false;
+  if (Notification.permission !== 'default') return false;
+  if (getStoredPushToken()) return false;
+  if (isPushPromptSnoozed()) return false;
+  return isPushSupported();
+}
+
 /** Resolves false on SSR, unsupported browsers, and iOS browser tabs. */
 export async function isPushSupported(): Promise<boolean> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return false;
