@@ -166,6 +166,7 @@ export function PlayerTable({
   const [statusFilter, setStatusFilter] = useState<'pending' | 'verified' | 'all'>('pending');
   const [divisionFilter, setDivisionFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
+  const [missingPhysicalOnly, setMissingPhysicalOnly] = useState(false);
   const [search, setSearch] = useState('');
 
   const [auditingPlayer, setAuditingPlayer] = useState<PlayerWithDocs | null>(null);
@@ -267,9 +268,11 @@ export function PlayerTable({
         const matchesDivision = divisionFilter === 'all' || playerDivisionId === divisionFilter;
         const matchesPayment =
           paymentFilter === 'all' || paymentBucket(getPaymentStatus(enrollment)) === paymentFilter;
+        const matchesPhysical =
+          !missingPhysicalOnly || (!p.physicalFormUrl && !p.compliance?.physicalVerified);
         const matchesSearch =
           q === '' || `${p.firstName} ${p.lastName}`.toLowerCase().includes(q);
-        return matchesStatus && matchesDivision && matchesPayment && matchesSearch;
+        return matchesStatus && matchesDivision && matchesPayment && matchesPhysical && matchesSearch;
       })
       // Pending payment first, then waitlisted, then everyone else; alphabetical within each group
       .sort((a, b) => {
@@ -282,12 +285,12 @@ export function PlayerTable({
           (a.firstName ?? '').localeCompare(b.firstName ?? '', undefined, { sensitivity: 'base' })
         );
       });
-  }, [players, statusFilter, divisionFilter, paymentFilter, search, playerEnrollmentMap]);
+  }, [players, statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, search, playerEnrollmentMap]);
 
   // Counts for the one-click triage chips — respect only the division filter so
   // the numbers stay meaningful while other filters change
   const attentionCounts = useMemo(() => {
-    let paymentPending = 0, docsToVerify = 0, waitlisted = 0;
+    let paymentPending = 0, docsToVerify = 0, missingPhysical = 0, waitlisted = 0;
     players.forEach(p => {
       const enrollment = playerEnrollmentMap.get(p.id);
       const playerDivisionId = enrollment?.divisionId ?? p.divisionId;
@@ -299,8 +302,9 @@ export function PlayerTable({
         (!!p.birthCertificateUrl && !p.ageVerified) ||
         (!!p.physicalFormUrl && !p.compliance?.physicalVerified);
       if (hasUnverifiedDoc) docsToVerify++;
+      if (!p.physicalFormUrl && !p.compliance?.physicalVerified) missingPhysical++;
     });
-    return { paymentPending, docsToVerify, waitlisted };
+    return { paymentPending, docsToVerify, missingPhysical, waitlisted };
   }, [players, divisionFilter, playerEnrollmentMap]);
 
   const openAudit = (player: PlayerWithDocs) => {
@@ -452,37 +456,50 @@ export function PlayerTable({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 space-y-4">
-          {/* One-click triage chips — what still needs attention, at a glance */}
-          {(attentionCounts.paymentPending > 0 || attentionCounts.docsToVerify > 0 || attentionCounts.waitlisted > 0) && (
+          {/* One-click triage chips — what still needs attention, at a glance.
+              Each chip is a single-purpose view: click to isolate, click again
+              to clear. Chips with nothing to show stay hidden. */}
+          {(attentionCounts.paymentPending > 0 || attentionCounts.docsToVerify > 0 || attentionCounts.missingPhysical > 0 || attentionCounts.waitlisted > 0) && (
             <div className="flex flex-wrap gap-2">
               {([
                 {
                   key: 'payment',
                   label: 'Payment pending',
                   count: attentionCounts.paymentPending,
-                  active: paymentFilter === 'pending' && statusFilter === 'all',
-                  apply: () => { setPaymentFilter('pending'); setStatusFilter('all'); setSearch(''); },
+                  active: paymentFilter === 'pending' && statusFilter === 'all' && !missingPhysicalOnly,
+                  apply: () => setPaymentFilter('pending'),
                 },
                 {
                   key: 'docs',
                   label: 'Docs to verify',
                   count: attentionCounts.docsToVerify,
-                  active: statusFilter === 'pending' && paymentFilter === 'all',
-                  apply: () => { setStatusFilter('pending'); setPaymentFilter('all'); setSearch(''); },
+                  active: statusFilter === 'pending' && paymentFilter === 'all' && !missingPhysicalOnly,
+                  apply: () => setStatusFilter('pending'),
+                },
+                {
+                  key: 'physical',
+                  label: 'No physical on file',
+                  count: attentionCounts.missingPhysical,
+                  active: missingPhysicalOnly,
+                  apply: () => setMissingPhysicalOnly(true),
                 },
                 {
                   key: 'waitlist',
                   label: 'Waitlisted',
                   count: attentionCounts.waitlisted,
-                  active: paymentFilter === 'waitlisted' && statusFilter === 'all',
-                  apply: () => { setPaymentFilter('waitlisted'); setStatusFilter('all'); setSearch(''); },
+                  active: paymentFilter === 'waitlisted' && statusFilter === 'all' && !missingPhysicalOnly,
+                  apply: () => setPaymentFilter('waitlisted'),
                 },
               ] as const).filter(c => c.count > 0).map(c => (
                 <button
                   key={c.key}
                   onClick={() => {
-                    if (c.active) { setStatusFilter('all'); setPaymentFilter('all'); }
-                    else c.apply();
+                    // Reset to a neutral state, then apply this chip's view
+                    setStatusFilter('all');
+                    setPaymentFilter('all');
+                    setMissingPhysicalOnly(false);
+                    setSearch('');
+                    if (!c.active) c.apply();
                   }}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                     c.active
