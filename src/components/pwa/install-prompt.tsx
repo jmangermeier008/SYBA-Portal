@@ -4,7 +4,15 @@ import { useEffect, useState } from 'react';
 import { BellRing, Download, MoreVertical, Share, SquarePlus, X } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
+import {
+  canBrowserInstall,
+  clearDeferredInstallEvent,
+  getDeferredInstallEvent,
+  isIosBrowser,
+  isStandalone,
+  subscribeInstallEvent,
+  type BeforeInstallPromptEvent,
+} from '@/lib/pwa';
 
 const DISMISSED_KEY = 'syba_install_dismissed';
 // Snooze rather than hide forever — installing is the gateway to
@@ -30,12 +38,6 @@ function writeDismissed() {
   } catch {
     /* ignore — private mode / storage disabled */
   }
-}
-
-/** Chromium-only event; not in the standard TS DOM lib. */
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
 /**
@@ -64,18 +66,17 @@ export function InstallPrompt() {
     setInstalled(isStandalone());
     setIsIos(isIosBrowser());
     setInstallable(canBrowserInstall());
+    // Read from the module-level capture — the event fires once per page
+    // load and this component may mount after it (heavy pages, client-side
+    // navigation), so listening here directly would miss it.
+    setInstallEvent(getDeferredInstallEvent());
     setHydrated(true);
 
-    const onBeforeInstall = (e: Event) => {
-      e.preventDefault();
-      setInstallEvent(e as BeforeInstallPromptEvent);
-    };
+    const unsubscribe = subscribeInstallEvent(setInstallEvent);
     const onInstalled = () => setJustInstalled(true);
-
-    window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+      unsubscribe();
       window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);
@@ -89,7 +90,7 @@ export function InstallPrompt() {
     if (!installEvent) return;
     await installEvent.prompt();
     const { outcome } = await installEvent.userChoice;
-    setInstallEvent(null);
+    clearDeferredInstallEvent(); // single-use — also updates subscribers
     if (outcome === 'accepted') setJustInstalled(true);
   };
 

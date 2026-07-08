@@ -7,14 +7,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useFirebaseApp, useFirestore, useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
-import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
+import {
+  canBrowserInstall,
+  clearDeferredInstallEvent,
+  getDeferredInstallEvent,
+  isIosBrowser,
+  isStandalone,
+  subscribeInstallEvent,
+  type BeforeInstallPromptEvent,
+} from '@/lib/pwa';
 import { enablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
-
-/** Chromium-only event; not in the standard TS DOM lib. */
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
 
 /**
  * Guided notification setup — the page announcements and emails link to.
@@ -52,18 +54,14 @@ export default function GetAlertsPage() {
       setHydrated(true);
     });
 
-    const onBeforeInstall = (e: Event) => {
-      e.preventDefault();
-      setInstallEvent(e as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setInstallEvent(null);
-      setJustInstalled(true);
-    };
-    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    // Module-level capture — the event fires once per page load and this
+    // page may mount after it (client-side navigation).
+    setInstallEvent(getDeferredInstallEvent());
+    const unsubscribe = subscribeInstallEvent(setInstallEvent);
+    const onInstalled = () => setJustInstalled(true);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+      unsubscribe();
       window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);
@@ -72,7 +70,7 @@ export default function GetAlertsPage() {
     if (!installEvent) return;
     await installEvent.prompt();
     const { outcome } = await installEvent.userChoice;
-    setInstallEvent(null);
+    clearDeferredInstallEvent(); // single-use — also updates subscribers
     if (outcome === 'accepted') setJustInstalled(true);
   };
 

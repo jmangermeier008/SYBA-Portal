@@ -25,3 +25,46 @@ export function isIosBrowser(): boolean {
 export function canBrowserInstall(): boolean {
   return 'onbeforeinstallprompt' in window;
 }
+
+/** Chromium-only event; not in the standard TS DOM lib. */
+export interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+// `beforeinstallprompt` fires ONCE per page load, whenever Chrome feels like
+// it — components that mount late (e.g. on the heavy admin dashboard) miss
+// it if they listen themselves. Capture it here at module load, which runs
+// before any page finishes mounting, and let install UIs subscribe.
+let deferredInstallEvent: BeforeInstallPromptEvent | null = null;
+const installEventListeners = new Set<(e: BeforeInstallPromptEvent | null) => void>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); // suppress Chrome's own mini-infobar; we show our banner
+    deferredInstallEvent = e as BeforeInstallPromptEvent;
+    installEventListeners.forEach(l => l(deferredInstallEvent));
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstallEvent = null;
+  });
+}
+
+/** The captured install event, if Chrome has offered one this page load. */
+export function getDeferredInstallEvent(): BeforeInstallPromptEvent | null {
+  return deferredInstallEvent;
+}
+
+/** Notifies when the install event arrives (or is consumed). Returns unsubscribe. */
+export function subscribeInstallEvent(
+  cb: (e: BeforeInstallPromptEvent | null) => void
+): () => void {
+  installEventListeners.add(cb);
+  return () => installEventListeners.delete(cb);
+}
+
+/** Call after prompt() — the event is single-use. */
+export function clearDeferredInstallEvent() {
+  deferredInstallEvent = null;
+  installEventListeners.forEach(l => l(null));
+}
