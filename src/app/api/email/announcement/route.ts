@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getAdminFirestore } from '@/lib/firebase-admin';
 import { verifyBearerUid, getCallerProfile, hasAnyRole } from '@/lib/server-auth';
+import { SPORT_CONFIG } from '@/config/sports';
+import type { Sport } from '@/types/scheduling';
 
 function sportPrefix(sport?: string): string {
   if (sport === 'baseball') return '[SYBA Baseball] ';
@@ -57,6 +59,18 @@ export async function POST(req: Request) {
 
     const audience = [...emails];
     const from = process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <onboarding@resend.dev>';
+    // NEVER address this to our own domain — mail to a syba.blue address
+    // re-enters through the Mailgun inbound webhook and becomes inquiries
+    // (the 2026-07-09 loop incident). The sending admin gets one receipt
+    // copy per chunk instead.
+    const receiptTo = caller.email || process.env.INQUIRY_EMAIL_SITE_ADMIN || from;
+    // Real parent replies should land at the sport's public contact address,
+    // where they become properly routed inquiries (robot replies are filtered
+    // by the inbound webhook).
+    const replyTo =
+      (!isGlobal && (sport === 'baseball' || sport === 'football')
+        ? SPORT_CONFIG[sport as Sport]?.contactEmail
+        : undefined) ?? 'info@syba.blue';
     const subject = `${sportPrefix(isGlobal ? undefined : sport)}${title}`;
     const text = `${body}\n\n—\nThis announcement was sent by your league through the SYBA Portal. Log in to see full details and manage your family's schedule.`;
 
@@ -70,7 +84,16 @@ export async function POST(req: Request) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         },
-        body: JSON.stringify({ from, to: [from], bcc: chunk, subject, text }),
+        body: JSON.stringify({
+          // Loop marker — the inbound-email webhook drops portal-sent mail
+          headers: { 'X-SYBA-Mailer': 'portal' },
+          from,
+          to: [receiptTo],
+          reply_to: replyTo,
+          bcc: chunk,
+          subject,
+          text,
+        }),
       });
       if (res.ok) {
         sent += chunk.length;

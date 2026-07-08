@@ -20,6 +20,63 @@ function normalizeEmail(raw: string): string {
   return email;
 }
 
+/** Mailgun's `message-headers` form field: JSON array of [name, value] pairs. */
+function parseMessageHeaders(formData: FormData): Map<string, string> {
+  try {
+    const raw = (formData.get('message-headers') as string) ?? '';
+    if (!raw) return new Map();
+    const pairs = JSON.parse(raw) as [string, unknown][];
+    const map = new Map<string, string>();
+    for (const [name, value] of pairs) {
+      map.set(String(name).toLowerCase(), String(value));
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+/** The portal's own outbound sending addresses — mail from OR to these must
+ *  never become an inquiry (it's our own output echoing back through Mailgun). */
+function portalOutboundAddresses(): string[] {
+  return [normalizeEmail(process.env.RESEND_FROM_EMAIL ?? ''), 'onboarding@resend.dev'].filter(
+    Boolean
+  );
+}
+
+/**
+ * Loop and robot filtering. The announcement incident (2026-07-09): portal
+ * email addressed to our own domain re-entered through this webhook, became
+ * an inquiry, whose notification email to an officer @syba.blue alias
+ * re-entered again — an infinite loop that burned the day's Resend quota in
+ * under a minute. Every guard below closes one link of that chain.
+ * Returns a drop reason, or null when the mail is a real human inquiry.
+ */
+function dropReason(
+  senderEmail: string,
+  recipientEmail: string,
+  headers: Map<string, string>
+): string | null {
+  const ours = portalOutboundAddresses();
+  if (ours.includes(senderEmail)) return 'self-sent (portal outbound address)';
+  if (ours.includes(recipientEmail)) return 'addressed to the portal outbound address';
+  // Any mail the portal itself sent carries this marker (see X-SYBA-Mailer in
+  // the Resend calls) — catches every possible loop regardless of addressing.
+  if (headers.has('x-syba-mailer')) return 'portal-originated (loop marker header)';
+  const autoSubmitted = headers.get('auto-submitted')?.toLowerCase() ?? '';
+  if (autoSubmitted.startsWith('auto')) return 'auto-submitted (out-of-office/bounce)';
+  if (headers.has('x-auto-response-suppress')) return 'auto-responder';
+  const precedence = headers.get('precedence')?.toLowerCase() ?? '';
+  if (['bulk', 'junk', 'auto_reply', 'auto-reply'].includes(precedence)) {
+    return `precedence: ${precedence}`;
+  }
+  const senderLocal = senderEmail.split('@')[0];
+  if (['mailer-daemon', 'postmaster', 'no-reply', 'noreply', 'bounce'].includes(senderLocal)) {
+    return 'automated sender address';
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
   try {
     // Mailgun sends multipart/form-data with full email content including body
@@ -72,7 +129,29 @@ export async function POST(req: Request) {
     const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw);
     const recipientEmail = normalizeEmail(toRaw);
 
+    // Loop-breakers and robot filtering — return 200 so Mailgun does not retry.
+    const reason = dropReason(senderEmail, recipientEmail, parseMessageHeaders(formData));
+    if (reason) {
+      console.warn(`[inbound-email] Dropped (${reason})`, JSON.stringify({ from: senderEmail, to: recipientEmail, subject }));
+      return NextResponse.json({ ok: true, dropped: reason });
+    }
+
     const db = getAdminFirestore();
+
+    // Runaway brake: if one sender has produced 5+ inquiries in the last 10
+    // minutes, something automated slipped past the filters — stop feeding it.
+    // (Equality-only query — no composite index needed; recency counted in code.)
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const recentSnap = await db
+      .collection('inquiries')
+      .where('senderEmail', '==', senderEmail)
+      .limit(50)
+      .get();
+    const recentCount = recentSnap.docs.filter(d => (d.data().createdAt ?? '') > tenMinutesAgo).length;
+    if (recentCount >= 5) {
+      console.warn(`[inbound-email] Dropped (rate limit: ${recentCount} inquiries in 10min)`, JSON.stringify({ from: senderEmail, subject }));
+      return NextResponse.json({ ok: true, dropped: 'sender rate limit' });
+    }
 
     // Look up officer record by @syba.blue address to determine topic and assignedToRole dynamically
     let topic: InquiryTopic = 'general';

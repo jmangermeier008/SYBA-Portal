@@ -177,6 +177,10 @@ export async function sendInquiryNotification(inquiryId: string): Promise<Inquir
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
     },
     body: JSON.stringify({
+      // Loop marker — the inbound-email webhook drops portal-sent mail. This
+      // send goes to officer @syba.blue aliases that route back through the
+      // webhook, so without the marker it would loop (2026-07-09 incident).
+      headers: { 'X-SYBA-Mailer': 'portal' },
       from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <notifications@syba.blue>',
       to: finalRecipients,
       ...(replyTo ? { reply_to: replyTo } : {}),

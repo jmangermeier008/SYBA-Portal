@@ -64,6 +64,8 @@ async function sendEmail(to: string, subject: string, text: string): Promise<boo
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
     },
     body: JSON.stringify({
+      // Loop marker — the inbound-email webhook drops portal-sent mail
+      headers: { 'X-SYBA-Mailer': 'portal' },
       from: process.env.RESEND_FROM_EMAIL ?? 'SYBA Portal <onboarding@resend.dev>',
       to: [to],
       subject,
