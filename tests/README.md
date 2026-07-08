@@ -63,6 +63,13 @@ Cleanup (lookup by email → typed-email confirm → wipe players/enrollments/
 uploads) and Orphan Record Scan (find + delete players with no enrollments),
 both verified against Firestore after the UI actions.
 
+**Coach mobile nav (`coach-mobile-nav.spec.ts`)** — at 390×844: the
+pending-clearance warning banner sits below the mobile top bar (regression:
+it used to cover the hamburger, trapping coaches with no navigation), the
+hamburger opens the drawer and the acting-as switcher works, exactly one
+bottom tab bar renders, and the compliance lock screen's "Back to Parent
+Dashboard" escape link works.
+
 **Mobile (`mobile.spec.ts`)** — at 390×844, 360×800, 768×1024: no horizontal
 scroll on home/login/signup/forgot-password/enroll steps 1–2/dashboard/
 confirmation; sign-in CTA above the fold; focused inputs not clipped;

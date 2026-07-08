@@ -9,6 +9,8 @@ import { SPORT_CONFIG, HUB_LOGO_URL } from '@/config/sports';
 import { collection, query, orderBy, limit } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { isIosBrowser } from '@/lib/pwa';
+import { getStoredPushToken, isPushSupported } from '@/lib/push-client';
 import {
   Trophy,
   LayoutDashboard,
@@ -29,6 +31,7 @@ import {
   HeartHandshake,
   Handshake,
   Bell,
+  BellRing,
   BookOpen,
   CalendarDays,
   ChevronDown,
@@ -414,6 +417,19 @@ export function Sidebar() {
     }
   }, [pathname]);
 
+  // "Turn on alerts" CTA — shown until this device has push enabled (or blocked it).
+  // iOS browser tabs count as eligible: /get-alerts walks through the install step.
+  const [showAlertsCta, setShowAlertsCta] = useState(false);
+  useEffect(() => {
+    const permission =
+      typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied';
+    if (permission === 'denied') return;
+    if (permission === 'granted' && getStoredPushToken()) return;
+    isPushSupported().then(supported => {
+      setShowAlertsCta(supported || isIosBrowser());
+    });
+  }, []);
+
   // Unread in-app notifications badge (parents + coaches)
   // Fetches recent unread notifications, then filters client-side by activeSport or isGlobal.
   const unreadNotifsQuery = useMemoFirebase(() => {
@@ -698,6 +714,26 @@ export function Sidebar() {
       </nav>
 
       <div className={cn("border-t space-y-2", collapsed && !isMobile ? "p-2" : "p-4")}>
+        {/* Persistent alerts entry point — visible until this device enables push,
+            so a dismissed dashboard banner isn't the end of the road */}
+        {showAlertsCta && (collapsed && !isMobile ? (
+          <Link
+            href="/get-alerts"
+            title="Turn on alerts"
+            className="w-full flex items-center justify-center p-2 min-h-[44px] rounded-lg text-primary hover:bg-primary/10 transition-colors"
+          >
+            <BellRing className="h-4 w-4" />
+          </Link>
+        ) : (
+          <Link
+            href="/get-alerts"
+            className="w-full flex items-center gap-2 px-3 min-h-[44px] rounded-lg text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+          >
+            <BellRing className="h-4 w-4" />
+            Turn on alerts
+          </Link>
+        ))}
+
         {/* User info */}
         {(!collapsed || isMobile) && (
           <div className="px-3 flex items-center gap-3">

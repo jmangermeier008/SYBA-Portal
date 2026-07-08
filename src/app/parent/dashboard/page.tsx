@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { usePushNudge } from '@/hooks/use-push-nudge';
 import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
@@ -44,6 +45,7 @@ export default function ParentDashboard() {
   const { activeSport } = useSport();
   const db = useFirestore();
   const { toast } = useToast();
+  const nudgePush = usePushNudge();
   const [resumingPayment, setResumingPayment] = useState(false);
   const [uploadingPhysicalFor, setUploadingPhysicalFor] = useState<string | null>(null);
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
@@ -229,6 +231,7 @@ export default function ParentDashboard() {
     try {
       await writeRsvp(db, { teamId, gameId, playerId: selectedPlayerId, parentUserId: user.uid, status });
       toast({ title: "RSVP Updated", description: `Marked as ${status}.` });
+      nudgePush('Turn on notifications and this device gets a game-day reminder.');
     } catch (err: any) {
       toast({ title: "RSVP Failed", description: err.message, variant: "destructive" });
     }

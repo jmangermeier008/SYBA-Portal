@@ -42,6 +42,7 @@ import {
   CloudRain,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 import type { Field, FieldType, MaintenanceClosure, ComplexClosure, ComplexClosuresDocument, PracticeSlot } from '@/types/scheduling';
 
 // ─── Empty state factories ──────────────────────────────────────────────────
@@ -233,6 +234,7 @@ export default function FieldManagementPage() {
         if (slotsSnap.size > 0) {
           const batch = writeBatch(db);
           let notifyCount = 0;
+          const pushCoachIds = new Set<string>();
           const fieldName = closureDialog.field.name;
           const reason = closureForm.reason.trim();
           for (const slotDoc of slotsSnap.docs) {
@@ -260,9 +262,15 @@ export default function FieldManagementPage() {
                 createdAt: Timestamp.now(),
               });
               notifyCount++;
+              pushCoachIds.add(coachId);
             }
           }
           await batch.commit();
+          pushToUsersBestEffort([...pushCoachIds], {
+            title: 'Practice cancelled — field closure',
+            body: `Practice at ${fieldName} on ${closureForm.date} was cancelled due to a field closure${reason ? `: ${reason}` : ''}.`,
+            url: '/coach/practice-slots',
+          });
           toast({
             title: 'Closure Added + Practices Cancelled',
             description: `${slotsSnap.size} practice slot${slotsSnap.size !== 1 ? 's' : ''} cancelled. ${notifyCount} coach${notifyCount !== 1 ? 'es' : ''} notified.`,
@@ -318,6 +326,7 @@ export default function FieldManagementPage() {
         if (slotsSnap.size > 0) {
           const batch = writeBatch(db);
           let notifyCount = 0;
+          const pushCoachIds = new Set<string>();
           const reason = complexForm.reason.trim();
           for (const slotDoc of slotsSnap.docs) {
             const slotData = slotDoc.data() as PracticeSlot;
@@ -344,9 +353,15 @@ export default function FieldManagementPage() {
                 createdAt: Timestamp.now(),
               });
               notifyCount++;
+              pushCoachIds.add(coachId);
             }
           }
           await batch.commit();
+          pushToUsersBestEffort([...pushCoachIds], {
+            title: 'Practice cancelled — complex closed',
+            body: `Practice on ${complexForm.date} was cancelled — the entire complex is closed${reason ? `: ${reason}` : ''}.`,
+            url: '/coach/practice-slots',
+          });
           toast({
             title: 'Complex Closed + Practices Cancelled',
             description: `${slotsSnap.size} practice slot${slotsSnap.size !== 1 ? 's' : ''} cancelled across all fields. ${notifyCount} coach${notifyCount !== 1 ? 'es' : ''} notified.`,

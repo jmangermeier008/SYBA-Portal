@@ -34,6 +34,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { usePushNudge } from '@/hooks/use-push-nudge';
 import { buildConcessionEvents } from '@/lib/calendar-events';
 import { format, parseISO, isAfter, differenceInHours } from 'date-fns';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -222,6 +223,7 @@ export default function ParentVolunteersPage() {
   const { profile, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
   const { toast } = useToast();
+  const nudgePush = usePushNudge();
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
   const [actioningSlotId, setActioningSlotId] = useState<string | null>(null);
   const [confirmCancelSlot, setConfirmCancelSlot] = useState<ConcessionSlot | null>(null);
@@ -416,6 +418,7 @@ export default function ParentVolunteersPage() {
         createdAt: Timestamp.now(),
       });
       toast({ title: 'Signed Up!', description: `You're volunteering on ${format(parseISO(slot.gameDate), 'EEEE, MMM d')} from ${formatTime(slot.startTime)} to ${formatTime(slot.endTime)}.` });
+      nudgePush('Turn on notifications and this device gets a reminder the day before your shift.');
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {

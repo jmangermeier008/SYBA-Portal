@@ -15,10 +15,18 @@ import {
 } from '@/lib/push-client';
 
 const DISMISSED_KEY = 'syba_push_prompt_dismissed';
+// Dismissal snoozes rather than hides forever — an accidental ✕ shouldn't
+// permanently cut a family off from the enable path.
+const DISMISS_DAYS = 30;
 
 function readDismissed(): boolean {
   try {
-    return localStorage.getItem(DISMISSED_KEY) === '1';
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    if (!raw) return false;
+    const dismissedAt = Number(raw);
+    // Legacy value '1' (pre-snooze) parses as epoch — treated as expired.
+    if (!Number.isFinite(dismissedAt)) return false;
+    return Date.now() - dismissedAt < DISMISS_DAYS * 24 * 60 * 60 * 1000;
   } catch {
     return false;
   }
@@ -26,7 +34,7 @@ function readDismissed(): boolean {
 
 function writeDismissed() {
   try {
-    localStorage.setItem(DISMISSED_KEY, '1');
+    localStorage.setItem(DISMISSED_KEY, String(Date.now()));
   } catch {
     /* ignore — private mode / storage disabled */
   }

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Calendar, Check, X, HelpCircle, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { usePushNudge } from '@/hooks/use-push-nudge';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 
@@ -46,6 +47,7 @@ export function NextUpCard({
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const nudgePush = usePushNudge();
   const isMobile = useIsMobile();
   const [rsvpLoading, setRsvpLoading] = useState(false);
 
@@ -86,6 +88,7 @@ export function NextUpCard({
     try {
       await writeRsvp(db, { teamId, gameId: nextGame.id, playerId: player.id, parentUserId: user.uid, status });
       toast({ title: 'RSVP Updated', description: `${showPlayerName && player.firstName ? `${player.firstName} marked` : 'Marked'} as ${status}.` });
+      nudgePush('Turn on notifications and this device gets a game-day reminder.');
     } catch (err: any) {
       toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
     } finally {

@@ -14,6 +14,7 @@ import { Loader2, CalendarDays, Clock, MapPin, AlertTriangle } from 'lucide-reac
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 import type { PracticeSlot } from '@/types/scheduling';
 
 function formatTime(t: string) {
@@ -144,6 +145,13 @@ export function BulkApproveDialog({
       }
 
       await batch.commit();
+      // One push per coach even when several of their slots were approved
+      const approvedCoachIds = [...new Set(selectedSlots.map(s => s.pendingCoachId).filter((id): id is string => !!id))];
+      pushToUsersBestEffort(approvedCoachIds, {
+        title: 'Practice slots approved',
+        body: 'Your practice slot request was approved — see your team calendar for the details.',
+        url: '/coach/practice-slots',
+      });
       onSuccess();
       onOpenChange(false);
     } catch (err: any) {

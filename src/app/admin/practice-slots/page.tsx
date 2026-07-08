@@ -25,6 +25,7 @@ import {
   MapPin, XCircle, ChevronRight, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 import {
   format, parseISO, eachWeekOfInterval, addDays, isAfter,
   isBefore, startOfDay, startOfWeek, endOfWeek,
@@ -432,6 +433,13 @@ export default function PracticeSlotsAdminPage() {
       }
 
       await batch.commit();
+      if (slot.coachId) {
+        pushToUsersBestEffort([slot.coachId], {
+          title: 'Practice Slot Cancelled',
+          body: `Your practice slot on ${format(parseISO(slot.date), 'MMM d')} at ${slot.fieldName} has been cancelled by the board.`,
+          url: '/coach/practice-slots',
+        });
+      }
       toast({ title: 'Slot Cancelled', description: slot.coachId ? 'The coach has been notified.' : undefined });
       setCancelDialog({ open: false, slot: null, isCancelling: false });
     } catch (err: any) {
@@ -474,6 +482,13 @@ export default function PracticeSlotsAdminPage() {
       }
 
       await batch.commit();
+      if (slot.coachId) {
+        pushToUsersBestEffort([slot.coachId], {
+          title: 'Practice Slot Removed',
+          body: `Your practice slot on ${format(parseISO(slot.date), 'MMM d')} at ${slot.fieldName} has been removed.`,
+          url: '/coach/practice-slots',
+        });
+      }
       toast({ title: 'Deleted' });
       setDeleteDialog({ open: false, slot: null, isDeleting: false });
     } catch (err: any) {
@@ -559,6 +574,13 @@ export default function PracticeSlotsAdminPage() {
         });
       });
 
+      if (slot.pendingCoachId) {
+        pushToUsersBestEffort([slot.pendingCoachId], {
+          title: 'Practice Slot Approved',
+          body: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} has been approved.`,
+          url: '/coach/practice-slots',
+        });
+      }
       toast({ title: 'Approved', description: 'The coach has been notified.' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -596,6 +618,13 @@ export default function PracticeSlotsAdminPage() {
       });
 
       await batch.commit();
+      if (slot.pendingCoachId) {
+        pushToUsersBestEffort([slot.pendingCoachId], {
+          title: 'Practice Slot Request Not Approved',
+          body: `Your request for ${slot.fieldName} on ${format(parseISO(slot.date), 'MMM d')} was not approved.`,
+          url: '/coach/practice-slots',
+        });
+      }
       toast({ title: 'Request Denied', description: 'The coach has been notified and the slot is available again.' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });

@@ -14,10 +14,16 @@ import {
 import { getAuth } from 'firebase/auth';
 import type { NotificationRelatedDocType, NotificationType, Sport } from '@/types/scheduling';
 
-/** Best-effort web push riding along with the in-app write. Fully detached:
- *  any failure (offline, signed out, push not configured) is swallowed so it
- *  can never affect the notification batch it mirrors. */
-function pushBestEffort(userIds: string[], payload: NotifyPayload) {
+/** Best-effort web push riding along with an in-app notification write.
+ *  Fully detached: any failure (offline, signed out, push not configured) is
+ *  swallowed so it can never affect the write it mirrors. Exported for the
+ *  few notification writers that don't go through notifyUsers (e.g. admin
+ *  practice-slot flows) — always call it AFTER the in-app write succeeds so
+ *  the inbox stays the system of record. */
+export function pushToUsersBestEffort(
+  userIds: string[],
+  payload: { title: string; body: string; url?: string }
+) {
   try {
     if (userIds.length === 0) return;
     const user = getAuth().currentUser;
@@ -32,7 +38,7 @@ function pushBestEffort(userIds: string[], payload: NotifyPayload) {
             userIds,
             title: payload.title,
             body: payload.body,
-            url: '/parent/notifications',
+            url: payload.url ?? '/parent/notifications',
           }),
         })
       )
@@ -71,7 +77,9 @@ function batchNotifications(db: Firestore, userIds: string[], payload: NotifyPay
   const commit = batch.commit();
   // Mirror to web push only once the in-app docs are committed (side chain —
   // the caller still awaits/handles the original commit promise).
-  commit.then(() => pushBestEffort(userIds, payload)).catch(() => undefined);
+  commit
+    .then(() => pushToUsersBestEffort(userIds, { title: payload.title, body: payload.body }))
+    .catch(() => undefined);
   return commit;
 }
 
