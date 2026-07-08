@@ -108,6 +108,22 @@ function getPaymentStatus(e?: EnrollmentRecord): string | null {
   return e.payment_status ?? e.paymentStatus ?? 'pending';
 }
 
+type PaymentFilter = 'all' | 'pending' | 'paid' | 'fee_waived' | 'waitlisted';
+
+function paymentBucket(status: string | null): Exclude<PaymentFilter, 'all'> | 'other' {
+  if (status === 'pending' || status === 'pending_payment') return 'pending';
+  if (status === 'paid') return 'paid';
+  if (status === 'fee_waived') return 'fee_waived';
+  if (status === 'waitlisted') return 'waitlisted';
+  return 'other';
+}
+
+// Sort weight — unpaid work floats to the top of every view
+function paymentRank(status: string | null): number {
+  const bucket = paymentBucket(status);
+  return bucket === 'pending' ? 0 : bucket === 'waitlisted' ? 1 : 2;
+}
+
 function PaymentBadge({ enrollment }: { enrollment?: EnrollmentRecord }) {
   const status = getPaymentStatus(enrollment);
   if (!status) return <Badge variant="outline" className="text-muted-foreground">—</Badge>;
@@ -121,6 +137,8 @@ function PaymentBadge({ enrollment }: { enrollment?: EnrollmentRecord }) {
       return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-none">Pending</Badge>;
     case 'waitlisted':
       return <Badge variant="outline" className="text-muted-foreground">Waitlisted</Badge>;
+    case 'refunded':
+      return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-none">Refunded</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -147,6 +165,8 @@ export function PlayerTable({
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<'pending' | 'verified' | 'all'>('pending');
   const [divisionFilter, setDivisionFilter] = useState('all');
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
+  const [search, setSearch] = useState('');
 
   const [auditingPlayer, setAuditingPlayer] = useState<PlayerWithDocs | null>(null);
   const [deletingPlayer, setDeletingPlayer] = useState<PlayerWithDocs | null>(null);
@@ -234,17 +254,54 @@ export function PlayerTable({
   }, [divisions]);
 
   const filteredPlayers = useMemo(() => {
-    return players.filter(p => {
-      const fullyVerified = p.ageVerified && p.compliance?.physicalVerified;
-      const matchesStatus =
-        statusFilter === 'all' ? true :
-        statusFilter === 'verified' ? !!fullyVerified :
-        !fullyVerified;
-      const playerDivisionId = playerEnrollmentMap.get(p.id)?.divisionId ?? p.divisionId;
-      const matchesDivision = divisionFilter === 'all' || playerDivisionId === divisionFilter;
-      return matchesStatus && matchesDivision;
+    const q = search.trim().toLowerCase();
+    return players
+      .filter(p => {
+        const fullyVerified = p.ageVerified && p.compliance?.physicalVerified;
+        const matchesStatus =
+          statusFilter === 'all' ? true :
+          statusFilter === 'verified' ? !!fullyVerified :
+          !fullyVerified;
+        const enrollment = playerEnrollmentMap.get(p.id);
+        const playerDivisionId = enrollment?.divisionId ?? p.divisionId;
+        const matchesDivision = divisionFilter === 'all' || playerDivisionId === divisionFilter;
+        const matchesPayment =
+          paymentFilter === 'all' || paymentBucket(getPaymentStatus(enrollment)) === paymentFilter;
+        const matchesSearch =
+          q === '' || `${p.firstName} ${p.lastName}`.toLowerCase().includes(q);
+        return matchesStatus && matchesDivision && matchesPayment && matchesSearch;
+      })
+      // Pending payment first, then waitlisted, then everyone else; alphabetical within each group
+      .sort((a, b) => {
+        const rankDiff =
+          paymentRank(getPaymentStatus(playerEnrollmentMap.get(a.id))) -
+          paymentRank(getPaymentStatus(playerEnrollmentMap.get(b.id)));
+        if (rankDiff !== 0) return rankDiff;
+        return (
+          (a.lastName ?? '').localeCompare(b.lastName ?? '', undefined, { sensitivity: 'base' }) ||
+          (a.firstName ?? '').localeCompare(b.firstName ?? '', undefined, { sensitivity: 'base' })
+        );
+      });
+  }, [players, statusFilter, divisionFilter, paymentFilter, search, playerEnrollmentMap]);
+
+  // Counts for the one-click triage chips — respect only the division filter so
+  // the numbers stay meaningful while other filters change
+  const attentionCounts = useMemo(() => {
+    let paymentPending = 0, docsToVerify = 0, waitlisted = 0;
+    players.forEach(p => {
+      const enrollment = playerEnrollmentMap.get(p.id);
+      const playerDivisionId = enrollment?.divisionId ?? p.divisionId;
+      if (divisionFilter !== 'all' && playerDivisionId !== divisionFilter) return;
+      const bucket = paymentBucket(getPaymentStatus(enrollment));
+      if (bucket === 'pending') paymentPending++;
+      if (bucket === 'waitlisted') waitlisted++;
+      const hasUnverifiedDoc =
+        (!!p.birthCertificateUrl && !p.ageVerified) ||
+        (!!p.physicalFormUrl && !p.compliance?.physicalVerified);
+      if (hasUnverifiedDoc) docsToVerify++;
     });
-  }, [players, statusFilter, divisionFilter]);
+    return { paymentPending, docsToVerify, waitlisted };
+  }, [players, divisionFilter, playerEnrollmentMap]);
 
   const openAudit = (player: PlayerWithDocs) => {
     setAuditDob(player.dateOfBirth);
@@ -395,8 +452,64 @@ export function PlayerTable({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 space-y-4">
+          {/* One-click triage chips — what still needs attention, at a glance */}
+          {(attentionCounts.paymentPending > 0 || attentionCounts.docsToVerify > 0 || attentionCounts.waitlisted > 0) && (
+            <div className="flex flex-wrap gap-2">
+              {([
+                {
+                  key: 'payment',
+                  label: 'Payment pending',
+                  count: attentionCounts.paymentPending,
+                  active: paymentFilter === 'pending' && statusFilter === 'all',
+                  apply: () => { setPaymentFilter('pending'); setStatusFilter('all'); setSearch(''); },
+                },
+                {
+                  key: 'docs',
+                  label: 'Docs to verify',
+                  count: attentionCounts.docsToVerify,
+                  active: statusFilter === 'pending' && paymentFilter === 'all',
+                  apply: () => { setStatusFilter('pending'); setPaymentFilter('all'); setSearch(''); },
+                },
+                {
+                  key: 'waitlist',
+                  label: 'Waitlisted',
+                  count: attentionCounts.waitlisted,
+                  active: paymentFilter === 'waitlisted' && statusFilter === 'all',
+                  apply: () => { setPaymentFilter('waitlisted'); setStatusFilter('all'); setSearch(''); },
+                },
+              ] as const).filter(c => c.count > 0).map(c => (
+                <button
+                  key={c.key}
+                  onClick={() => {
+                    if (c.active) { setStatusFilter('all'); setPaymentFilter('all'); }
+                    else c.apply();
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                    c.active
+                      ? 'bg-yellow-500 border-yellow-500 text-white'
+                      : 'bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100'
+                  }`}
+                >
+                  {c.label}
+                  <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${
+                    c.active ? 'bg-white/25' : 'bg-yellow-200/80'
+                  }`}>
+                    {c.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Filters */}
           <div className="flex flex-wrap gap-3 items-center">
+            <Input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search players…"
+              className="w-full sm:w-48 rounded-xl h-9 bg-white shadow-sm border"
+            />
             <div className="flex rounded-xl border bg-white overflow-hidden shadow-sm">
               {(['pending', 'verified', 'all'] as const).map(s => (
                 <button
@@ -421,6 +534,18 @@ export function PlayerTable({
                 {divisions.map(d => (
                   <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={paymentFilter} onValueChange={v => setPaymentFilter(v as PaymentFilter)}>
+              <SelectTrigger className="w-full sm:w-44 rounded-xl h-9 bg-white shadow-sm border">
+                <SelectValue placeholder="All Payments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Payments</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="fee_waived">Waived</SelectItem>
+                <SelectItem value="waitlisted">Waitlisted</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground ml-auto">

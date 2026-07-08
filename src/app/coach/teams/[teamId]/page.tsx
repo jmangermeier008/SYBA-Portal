@@ -32,7 +32,6 @@ import Link from 'next/link';
 import { calculateLeagueAge } from '@/lib/utils';
 import { format } from 'date-fns';
 import { GameAttendancePanel } from '@/components/coach/GameAttendancePanel';
-import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
   DialogContent,
@@ -94,7 +93,6 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const { user, isSiteAdmin } = useUser();
   const { isAdmin } = useSport();
   const router = useRouter();
-  const isMobile = useIsMobile();
   const { toast } = useToast();
 
   // Weight Tracker state
@@ -297,43 +295,8 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                   </Button>
                 </CardContent>
               </Card>
-            ) : isMobile ? (
-              /* ── Mobile: compact list rows ── */
-              <div className="space-y-2">
-                {enrollments.map((enrollment) => {
-                  const player = playerMap.get(enrollment.playerId);
-                  const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
-                  const phone = parent?.phoneNumber ?? enrollment.emergencyContacts?.[0]?.phone;
-                  if (!player) return null;
-                  return (
-                    <div key={enrollment.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card hover:shadow-sm transition-shadow">
-                      {/* Avatar */}
-                      <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
-                        {enrollment.jerseyNumber || player.firstName?.[0] || '?'}
-                      </div>
-                      {/* Name + meta */}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{player.firstName} {player.lastName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Age {calculateLeagueAge(player.dateOfBirth)}
-                          {enrollment.jerseyNumber ? ` · #${enrollment.jerseyNumber}` : ''}
-                          {' · '}{enrollment.divisionId}
-                        </p>
-                      </div>
-                      {/* Medical alert button */}
-                      <MedicalAlertButton player={player} iconSize="sm" />
-                      {/* Quick call */}
-                      {phone ? (
-                        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full shrink-0" asChild>
-                          <a href={`tel:${phone}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
-                        </Button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
             ) : (
-              /* ── Desktop: full cards ── */
+              /* Single column on phones (stacked full cards), 2–3 columns on larger screens */
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {enrollments.map((enrollment) => {
                   const player = playerMap.get(enrollment.playerId);
