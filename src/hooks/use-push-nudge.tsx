@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/hooks/use-toast';
 import { useFirebaseApp, useFirestore, useUser } from '@/firebase';
-import { isIosBrowser, isStandalone } from '@/lib/pwa';
+import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
 import { enablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
 
 // One nudge per device per week, tops — high-intent moments only.
@@ -37,6 +37,10 @@ export function usePushNudge() {
         isPushSupported().then(supported => {
           const iosNeedsInstall = !supported && isIosBrowser() && !isStandalone();
           if (!supported && !iosNeedsInstall) return;
+          // Inline enable only where it sticks (installed app / non-installable
+          // browser); installable browsers route to the install-first walkthrough.
+          const enableInline =
+            supported && (isStandalone() || (!canBrowserInstall() && !isIosBrowser()));
           try {
             localStorage.setItem(NUDGE_KEY, String(Date.now()));
           } catch {
@@ -45,7 +49,7 @@ export function usePushNudge() {
           toast({
             title: 'Want a reminder the day before?',
             description,
-            action: supported ? (
+            action: enableInline ? (
               <ToastAction
                 altText="Turn on notifications"
                 onClick={() => {

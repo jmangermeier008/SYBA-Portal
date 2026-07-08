@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { stripPhone } from '@/lib/utils';
 import { useSport } from '@/firebase/sport-context';
-import { isIosBrowser, isStandalone } from '@/lib/pwa';
+import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
 import { enablePush, disablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
 
 interface OfficerRecord {
@@ -433,7 +433,9 @@ export default function ParentSettingsPage() {
                         : push.iosNeedsInstall
                           ? 'On iPhone, first add the portal to your Home Screen (Share → Add to Home Screen), then turn this on from the installed app.'
                           : push.supported
-                            ? 'Get an alert on this device the moment a game or practice is cancelled or moved.'
+                            ? (canBrowserInstall() && !isStandalone()
+                                ? 'For the most reliable alerts, install the app first (browser menu → Add to Home screen) and turn this on there — or flip this on to enable in this browser.'
+                                : 'Get an alert on this device the moment a game or practice is cancelled or moved.')
                             : 'Not supported in this browser.'}
                   </p>
                 </div>

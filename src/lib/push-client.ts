@@ -67,17 +67,6 @@ export function snoozePushPrompt() {
   }
 }
 
-/** True when the dashboard push banner would currently show its Enable ask —
- *  other prompts (e.g. the install banner) defer to it so users get one ask
- *  at a time. */
-export async function isPushEnableAskActive(): Promise<boolean> {
-  if (typeof window === 'undefined' || !('Notification' in window)) return false;
-  if (Notification.permission !== 'default') return false;
-  if (getStoredPushToken()) return false;
-  if (isPushPromptSnoozed()) return false;
-  return isPushSupported();
-}
-
 /** Resolves false on SSR, unsupported browsers, and iOS browser tabs. */
 export async function isPushSupported(): Promise<boolean> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return false;

@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Download, Share, SquarePlus, X } from 'lucide-react';
+import { BellRing, Download, MoreVertical, Share, SquarePlus, X } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { isIosBrowser, isStandalone } from '@/lib/pwa';
-import { isPushEnableAskActive } from '@/lib/push-client';
+import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
 
 const DISMISSED_KEY = 'syba_install_dismissed';
-// Snooze rather than hide forever — on iPhone, installing is the gateway to
+// Snooze rather than hide forever — installing is the gateway to
 // notifications, so a dismissal shouldn't close that door permanently.
 const DISMISS_DAYS = 30;
 
@@ -40,36 +39,38 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 /**
- * Dismissible banner inviting the user to install the portal as a home-screen
- * app. On Chromium (Android / desktop Chrome & Edge) it shows an Install button
- * wired to the native install prompt; on iPhone/iPad it shows Add-to-Home-Screen
- * instructions since Safari has no install API. Hidden entirely when already
- * running as an installed app, in browsers with no install path, or after the
- * user dismisses it (persisted to localStorage).
+ * Step one of the unified alerts flow: install the portal as a home-screen
+ * app, then enable notifications INSIDE it (browser and installed app hold
+ * separate notification permissions on Android — enabling in the browser
+ * first would make the app prompt again).
+ *
+ * Renders from stable capability checks (canBrowserInstall/isIosBrowser) so
+ * it appears consistently on every load; the flaky `beforeinstallprompt`
+ * event only upgrades the Chromium path from menu instructions to a one-tap
+ * button whenever it happens to arrive. After install it shows a hand-off
+ * ("open the app, enable alerts there") instead of vanishing.
  */
 export function InstallPrompt() {
   const [hydrated, setHydrated] = useState(false);
   const [dismissed, setDismissed] = useState(true);
   const [installed, setInstalled] = useState(false);
+  const [justInstalled, setJustInstalled] = useState(false);
   const [isIos, setIsIos] = useState(false);
-  const [deferToPushAsk, setDeferToPushAsk] = useState(false);
+  const [installable, setInstallable] = useState(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     setDismissed(readDismissed());
     setInstalled(isStandalone());
     setIsIos(isIosBrowser());
-    // One banner at a time: while the enable-notifications ask is active
-    // (Android/desktop), the install invite waits for a later visit. On iOS
-    // browsers push is unsupported until installed, so install still leads.
-    isPushEnableAskActive().then(setDeferToPushAsk);
+    setInstallable(canBrowserInstall());
     setHydrated(true);
 
     const onBeforeInstall = (e: Event) => {
       e.preventDefault();
       setInstallEvent(e as BeforeInstallPromptEvent);
     };
-    const onInstalled = () => setInstalled(true);
+    const onInstalled = () => setJustInstalled(true);
 
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onInstalled);
@@ -89,20 +90,43 @@ export function InstallPrompt() {
     await installEvent.prompt();
     const { outcome } = await installEvent.userChoice;
     setInstallEvent(null);
-    if (outcome === 'accepted') handleDismiss();
+    if (outcome === 'accepted') setJustInstalled(true);
   };
 
-  // No banner while checking localStorage, once installed/dismissed, while
-  // the notifications ask has the banner slot, or in browsers with no
-  // install path (no Chromium event, not iOS Safari).
-  if (!hydrated || dismissed || installed || deferToPushAsk || (!installEvent && !isIos)) return null;
+  // Hidden while checking localStorage, inside the installed app, after a
+  // dismissal, or in browsers with no install path (those get the direct
+  // enable banner instead).
+  if (!hydrated || dismissed || installed || (!installable && !isIos)) return null;
+
+  // Post-install hand-off: the next step happens inside the app, not here.
+  if (justInstalled) {
+    return (
+      <Alert className="relative mb-4 pr-10 border-green-300 bg-green-50">
+        <BellRing className="h-4 w-4" />
+        <AlertTitle>App installed — one step left for alerts</AlertTitle>
+        <AlertDescription>
+          Open <span className="font-medium">SV Sports</span> from your home screen, log in,
+          and tap <span className="font-medium">Enable notifications</span> there.
+        </AlertDescription>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-2 top-2 h-7 w-7"
+          onClick={handleDismiss}
+          aria-label="Dismiss"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </Alert>
+    );
+  }
 
   return (
     <Alert className="relative mb-4 pr-10 border-primary/30 bg-primary/5">
       <Download className="h-4 w-4" />
-      <AlertTitle>Get the SV Sports app on your home screen</AlertTitle>
+      <AlertTitle>Get the SV Sports app + schedule alerts</AlertTitle>
       <AlertDescription>
-        {isIos && !installEvent ? (
+        {isIos ? (
           <span className="inline-flex flex-wrap items-center gap-1">
             Tap the Share button
             <Share className="inline h-4 w-4" aria-label="Share icon" />
@@ -111,16 +135,25 @@ export function InstallPrompt() {
               <SquarePlus className="inline h-4 w-4" aria-hidden />
               Add to Home Screen
             </span>
-            for one-tap access to schedules and RSVPs.
+            — then open the app to turn on game &amp; schedule alerts.
           </span>
-        ) : (
+        ) : installEvent ? (
           <div className="flex flex-wrap items-center gap-3">
-            <span>One-tap access to schedules, RSVPs, and announcements.</span>
+            <span>Install the app, then turn on alerts inside it for cancellations and schedule changes.</span>
             <Button size="sm" onClick={handleInstall}>
               <Download className="mr-1.5 h-4 w-4" />
               Install app
             </Button>
           </div>
+        ) : (
+          <span className="inline-flex flex-wrap items-center gap-1">
+            Open your browser&apos;s
+            <MoreVertical className="inline h-4 w-4" aria-label="menu icon" />
+            menu and choose
+            <span className="font-medium">Add to Home screen</span>
+            (or <span className="font-medium">Install app</span>) — then open the app to turn
+            on game &amp; schedule alerts.
+          </span>
         )}
       </AlertDescription>
       <Button

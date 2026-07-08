@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bell, BellRing, CheckCircle2, Download, Loader2, LogIn, Share, SquarePlus } from 'lucide-react';
+import { Bell, BellRing, CheckCircle2, Download, Loader2, LogIn, MoreVertical, Share, SquarePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useFirebaseApp, useFirestore, useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
-import { isIosBrowser, isStandalone } from '@/lib/pwa';
+import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
 import { enablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
 
 /** Chromium-only event; not in the standard TS DOM lib. */
@@ -18,10 +18,12 @@ interface BeforeInstallPromptEvent extends Event {
 
 /**
  * Guided notification setup — the page announcements and emails link to.
- * Detects the visitor's device and shows only the steps that apply:
- * iPhone browser → install-to-Home-Screen walkthrough first (Apple requires
- * it for push); installed app / Android / desktop → a single Enable button,
- * then an optional one-tap app install and a clear "you're done" hand-off.
+ * One flow on every device: install the app first, then enable notifications
+ * INSIDE it (on Android the installed app holds its own notification
+ * permission, so browser-first enabling would prompt twice). iPhone gets the
+ * Share-sheet walkthrough; Android/desktop Chromium get a one-tap install
+ * (or menu instructions); browsers that can't install (e.g. desktop Firefox)
+ * keep the direct Enable button.
  */
 export default function GetAlertsPage() {
   const app = useFirebaseApp();
@@ -35,14 +37,15 @@ export default function GetAlertsPage() {
   const [enabled, setEnabled] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [platform, setPlatform] = useState({ ios: false, installed: false });
+  const [platform, setPlatform] = useState({ ios: false, installed: false, installable: false });
+  const [justInstalled, setJustInstalled] = useState(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     const permission = 'Notification' in window ? Notification.permission : 'default';
     setEnabled(permission === 'granted' && !!getStoredPushToken());
     setBlocked(permission === 'denied');
-    setPlatform({ ios: isIosBrowser(), installed: isStandalone() });
+    setPlatform({ ios: isIosBrowser(), installed: isStandalone(), installable: canBrowserInstall() });
     isPushSupported().then(ok => {
       setSupported(ok);
       setIosNeedsInstall(!ok && isIosBrowser() && !isStandalone());
@@ -55,7 +58,7 @@ export default function GetAlertsPage() {
     };
     const onInstalled = () => {
       setInstallEvent(null);
-      setPlatform(p => ({ ...p, installed: true }));
+      setJustInstalled(true);
     };
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onInstalled);
@@ -69,7 +72,8 @@ export default function GetAlertsPage() {
     if (!installEvent) return;
     await installEvent.prompt();
     const { outcome } = await installEvent.userChoice;
-    if (outcome === 'accepted') setInstallEvent(null);
+    setInstallEvent(null);
+    if (outcome === 'accepted') setJustInstalled(true);
   };
 
   const handleEnable = async () => {
@@ -141,12 +145,6 @@ export default function GetAlertsPage() {
                   </p>
                 </div>
               </div>
-              {installEvent && !platform.installed && (
-                <Button variant="outline" onClick={handleInstall} className="h-11 w-full rounded-xl">
-                  <Download className="mr-2 h-4 w-4" />
-                  Optional: add the app to your home screen
-                </Button>
-              )}
               <Button asChild className="h-11 w-full rounded-xl">
                 <Link href="/parent/dashboard">Go to my dashboard</Link>
               </Button>
@@ -193,6 +191,43 @@ export default function GetAlertsPage() {
                 (iOS 16.4 or newer). Alerts stop if the icon is ever deleted.
               </p>
             </div>
+          ) : platform.installable && !platform.installed ? (
+            justInstalled ? (
+              <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+                <div className="text-sm">
+                  <p className="font-semibold">App installed — one step left.</p>
+                  <p className="text-muted-foreground">
+                    Open <span className="font-medium text-foreground">SV Sports</span> from your
+                    home screen, log in, and tap{' '}
+                    <span className="font-medium text-foreground">Enable notifications</span> there.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm font-semibold">Step 1 — install the app:</p>
+                {installEvent ? (
+                  <Button onClick={handleInstall} className="h-11 w-full rounded-xl">
+                    <Download className="mr-2 h-4 w-4" />
+                    Install the SV Sports app
+                  </Button>
+                ) : (
+                  <p className="rounded-xl border bg-secondary/20 p-4 text-sm leading-relaxed">
+                    Open your browser&apos;s
+                    <MoreVertical className="mx-0.5 inline h-4 w-4" aria-label="menu icon" />
+                    menu and choose <span className="font-medium">Add to Home screen</span>{' '}
+                    (or <span className="font-medium">Install app</span>).
+                  </p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold text-foreground">Step 2</span> — open the new{' '}
+                  <span className="font-medium text-foreground">SV Sports</span> icon, log in, and
+                  tap <span className="font-medium text-foreground">Enable notifications</span> on
+                  your dashboard. That&apos;s it — alerts arrive like any other app&apos;s.
+                </p>
+              </div>
+            )
           ) : !supported ? (
             <p className="text-sm text-muted-foreground">
               This browser doesn&apos;t support notifications. Try Chrome, Edge, or Firefox on a

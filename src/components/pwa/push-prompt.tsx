@@ -6,6 +6,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useFirebaseApp, useFirestore, useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
 import {
   enablePush,
   getStoredPushToken,
@@ -16,14 +17,15 @@ import {
 } from '@/lib/push-client';
 
 /**
- * Dismissible banner inviting the user to turn on push notifications for
- * schedule changes and cancellations. Permission is requested only from the
- * button click — never automatically. Hidden on iPhone browser tabs — the
- * InstallPrompt beside it already owns the Add-to-Home-Screen message
- * (Apple's prerequisite for push), and this banner appears with its Enable
- * button once the user is inside the installed app. Also hidden once
- * enabled, when blocked, in unsupported browsers, or after dismissal.
- * Silently refreshes this device's rotated FCM token on mount.
+ * Step two of the unified alerts flow: the Enable ask, shown only where
+ * enabling actually sticks — inside the installed app, or in browsers with
+ * no install path at all (e.g. desktop Firefox). In installable browsers the
+ * InstallPrompt owns the banner slot, because on Android the installed app
+ * holds a separate notification permission and enabling in the browser first
+ * would just prompt again after install. Permission is requested only from
+ * the button click — never automatically. Hidden once enabled, when blocked,
+ * unsupported, or dismissed (30-day snooze). Silently refreshes this
+ * device's rotated FCM token on mount.
  */
 export function PushPrompt() {
   const app = useFirebaseApp();
@@ -34,6 +36,7 @@ export function PushPrompt() {
   const [hydrated, setHydrated] = useState(false);
   const [dismissed, setDismissed] = useState(true);
   const [supported, setSupported] = useState(false);
+  const [enableHere, setEnableHere] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,6 +47,9 @@ export function PushPrompt() {
     const permission = 'Notification' in window ? Notification.permission : 'default';
     setEnabled(permission === 'granted' && hasToken);
     setBlocked(permission === 'denied');
+    // Enabling belongs in the installed app; browsers that can never install
+    // (no Chromium install support, not iOS) keep the direct path.
+    setEnableHere(isStandalone() || (!canBrowserInstall() && !isIosBrowser()));
     isPushSupported().then(ok => {
       setSupported(ok);
       setHydrated(true);
@@ -87,7 +93,7 @@ export function PushPrompt() {
     // 'dismissed' — user closed the browser prompt; leave the banner as-is.
   };
 
-  if (!hydrated || dismissed || enabled || blocked || !user || !supported) return null;
+  if (!hydrated || dismissed || enabled || blocked || !user || !supported || !enableHere) return null;
 
   return (
     <Alert className="relative mb-4 pr-10 border-primary/30 bg-primary/5">
