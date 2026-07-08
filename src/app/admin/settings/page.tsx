@@ -248,6 +248,35 @@ export default function AdminSettingsPage() {
       setTestPushBusy(false);
     }
   };
+
+  // Wipe every push registration for the target (self or pilot email) so the
+  // next enable starts from a clean slate — used when repeated installs/tests
+  // have piled up stale device registrations.
+  const handleClearPushDevices = async () => {
+    if (!user) return;
+    setTestPushBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/admin/test-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({
+          action: 'clear-devices',
+          ...(testPushEmail.trim() ? { email: testPushEmail.trim() } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      toast({
+        title: `Cleared ${data.cleared} device registration${data.cleared === 1 ? '' : 's'} for ${data.target}`,
+        description: 'The device(s) will stop receiving pushes until notifications are enabled again (dashboard banner or Parent Settings).',
+      });
+    } catch (err: any) {
+      toast({ title: 'Clear failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setTestPushBusy(false);
+    }
+  };
   const [stripeConfigured, setStripeConfigured] = useState<boolean | null>(null);
   const [stripeMode, setStripeMode] = useState<'sandbox' | 'production' | null>(null);
   const [stripeKeys, setStripeKeys] = useState<{ test: boolean; live: boolean }>({ test: false, live: false });
@@ -925,10 +954,19 @@ export default function AdminSettingsPage() {
                           onChange={e => setTestPushEmail(e.target.value)}
                         />
                       </div>
-                      <Button onClick={handleTestPush} disabled={testPushBusy}>
-                        {testPushBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
-                        Send Test Notification
-                      </Button>
+                      <div className="flex flex-wrap gap-3">
+                        <Button onClick={handleTestPush} disabled={testPushBusy}>
+                          {testPushBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
+                          Send Test Notification
+                        </Button>
+                        <Button variant="outline" onClick={handleClearPushDevices} disabled={testPushBusy}>
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Clear Registered Devices
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Device counts include old registrations from deleted/re-added home-screen icons. Those clean themselves up automatically after a failed delivery, or use Clear Registered Devices for a fresh start before re-testing.
+                      </p>
                     </CardContent>
                   </Card>
                 )}

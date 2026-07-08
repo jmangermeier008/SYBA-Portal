@@ -24,10 +24,8 @@ export async function POST(req: Request) {
 
     let targetUid = uid;
     let targetLabel = 'your account';
-    const email = await req
-      .json()
-      .then(body => (typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''))
-      .catch(() => ''); // empty body = self-test
+    const body = await req.json().catch(() => ({})); // empty body = self-test
+    const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
     if (email) {
       const match = await getAdminFirestore()
         .collection('userProfiles')
@@ -39,6 +37,17 @@ export async function POST(req: Request) {
       }
       targetUid = match.docs[0].id;
       targetLabel = email;
+    }
+
+    // Clean-slate helper for device testing: wipe every registration for the
+    // target so the next enable shows exactly one device. Stale registrations
+    // are otherwise pruned automatically when a send reports them dead.
+    if (body?.action === 'clear-devices') {
+      const tokensSnap = await getAdminFirestore()
+        .collection(`userProfiles/${targetUid}/pushTokens`)
+        .get();
+      await Promise.all(tokensSnap.docs.map(d => d.ref.delete()));
+      return NextResponse.json({ ok: true, target: targetLabel, cleared: tokensSnap.size });
     }
 
     const result = await sendPushToUsers([targetUid], {
