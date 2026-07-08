@@ -425,7 +425,11 @@ export default function ParentSettingsPage() {
                     {!push.hydrated
                       ? 'Checking this device…'
                       : push.blocked
-                        ? 'Notifications are blocked for this site in your browser settings. Re-enable them there to turn this on.'
+                        ? (isStandalone() && isIosBrowser()
+                            ? 'Notifications are blocked. On your iPhone: Settings → Notifications → SV Sports → Allow Notifications, then return here.'
+                            : isStandalone()
+                              ? 'Notifications are blocked. In your phone Settings → Apps → SV Sports → Notifications, turn them on, then return here.'
+                              : 'Notifications are blocked. Tap the padlock/settings icon next to the web address, set Notifications to Allow, then reload.')
                         : push.iosNeedsInstall
                           ? 'On iPhone, first add the portal to your Home Screen (Share → Add to Home Screen), then turn this on from the installed app.'
                           : push.supported

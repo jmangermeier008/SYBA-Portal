@@ -28,11 +28,13 @@ export default function GetAlertsPage() {
   const [enabled, setEnabled] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [platform, setPlatform] = useState({ ios: false, installed: false });
 
   useEffect(() => {
     const permission = 'Notification' in window ? Notification.permission : 'default';
     setEnabled(permission === 'granted' && !!getStoredPushToken());
     setBlocked(permission === 'denied');
+    setPlatform({ ios: isIosBrowser(), installed: isStandalone() });
     isPushSupported().then(ok => {
       setSupported(ok);
       setIosNeedsInstall(!ok && isIosBrowser() && !isStandalone());
@@ -110,12 +112,31 @@ export default function GetAlertsPage() {
             </div>
           ) : blocked ? (
             <div className="rounded-xl border bg-secondary/20 p-4 text-sm leading-relaxed">
-              <p className="mb-1 font-semibold">Notifications are blocked for this site.</p>
-              <p className="text-muted-foreground">
-                Your browser remembered an earlier &quot;Block&quot; choice. To undo it, open your
-                browser&apos;s site settings for this website, change Notifications to
-                &quot;Ask&quot; or &quot;Allow&quot;, then reload this page.
+              <p className="mb-2 font-semibold">Notifications are blocked on this device.</p>
+              <p className="mb-2 text-muted-foreground">
+                An earlier &quot;Block&quot; or &quot;Don&apos;t Allow&quot; choice was remembered.
+                Here&apos;s how to undo it:
               </p>
+              {platform.installed && platform.ios ? (
+                <ol className="list-decimal space-y-1.5 pl-5 text-muted-foreground">
+                  <li>Open your iPhone&apos;s <span className="font-medium text-foreground">Settings</span> app.</li>
+                  <li>Scroll down and tap <span className="font-medium text-foreground">Notifications</span>.</li>
+                  <li>Find and tap <span className="font-medium text-foreground">SV Sports</span> in the app list.</li>
+                  <li>Turn on <span className="font-medium text-foreground">Allow Notifications</span>, then come back here.</li>
+                </ol>
+              ) : platform.installed ? (
+                <ol className="list-decimal space-y-1.5 pl-5 text-muted-foreground">
+                  <li>Open your phone&apos;s <span className="font-medium text-foreground">Settings</span> app and go to <span className="font-medium text-foreground">Apps</span>.</li>
+                  <li>Find <span className="font-medium text-foreground">SV Sports</span> and tap <span className="font-medium text-foreground">Notifications</span>.</li>
+                  <li>Turn notifications on, then come back here and tap the button again.</li>
+                </ol>
+              ) : (
+                <ol className="list-decimal space-y-1.5 pl-5 text-muted-foreground">
+                  <li>Tap or click the <span className="font-medium text-foreground">padlock or settings icon</span> just left of the web address at the top of this page.</li>
+                  <li>Find <span className="font-medium text-foreground">Notifications</span> and change it to <span className="font-medium text-foreground">Allow</span> (or &quot;Ask&quot;).</li>
+                  <li>Reload this page and tap the button again.</li>
+                </ol>
+              )}
             </div>
           ) : iosNeedsInstall ? (
             <div className="space-y-3">

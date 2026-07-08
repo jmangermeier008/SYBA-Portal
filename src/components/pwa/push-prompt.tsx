@@ -136,12 +136,17 @@ export function PushPrompt() {
             — then open the app from your home screen and enable notifications there.
           </span>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <span>Know right away when a game or practice is cancelled or moved.</span>
-            <Button size="sm" onClick={handleEnable} disabled={busy}>
-              <Bell className="mr-1.5 h-4 w-4" />
-              {busy ? 'Enabling…' : 'Enable notifications'}
-            </Button>
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <span>Know right away when a game or practice is cancelled or moved.</span>
+              <Button size="sm" onClick={handleEnable} disabled={busy}>
+                <Bell className="mr-1.5 h-4 w-4" />
+                {busy ? 'Enabling…' : 'Enable notifications'}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Your browser will ask for permission — choose <span className="font-medium">Allow</span>.
+            </p>
           </div>
         )}
       </AlertDescription>
