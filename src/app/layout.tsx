@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 import { Toaster } from '@/components/ui/toaster';
+import { PushForegroundListener } from '@/components/notifications/push-foreground-listener';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -40,6 +41,7 @@ export default async function RootLayout({
         <FirebaseClientProvider>
           {children}
           <Toaster />
+          <PushForegroundListener />
         </FirebaseClientProvider>
       </body>
     </html>

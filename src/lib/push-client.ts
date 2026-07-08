@@ -55,7 +55,13 @@ async function registerToken(
   db: Firestore,
   uid: string
 ): Promise<string | null> {
-  const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+  let registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+  // On a device's first enable the worker is still installing here, and
+  // subscribing against a non-active worker throws "Subscription failed -
+  // no active Service Worker". `ready` resolves once it is activated.
+  if (!registration.active) {
+    registration = await navigator.serviceWorker.ready;
+  }
   const token = await getToken(getMessaging(app), {
     vapidKey: VAPID_KEY,
     serviceWorkerRegistration: registration,

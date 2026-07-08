@@ -213,9 +213,10 @@ export default function AdminSettingsPage() {
 
   const [notifEmail, setNotifEmail] = useState('');
   const [testPushBusy, setTestPushBusy] = useState(false);
+  const [testPushEmail, setTestPushEmail] = useState('');
 
-  // Site Admin self-test: pushes to the caller's own registered devices only,
-  // verifying the whole pipeline (token → FCM → service worker → OS alert).
+  // Site Admin test send: pushes to the caller's own registered devices (or a
+  // pilot user's, by email), verifying the whole pipeline end-to-end.
   const handleTestPush = async () => {
     if (!user) return;
     setTestPushBusy(true);
@@ -223,20 +224,21 @@ export default function AdminSettingsPage() {
       const idToken = await user.getIdToken();
       const res = await fetch('/api/admin/test-push', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${idToken}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify(testPushEmail.trim() ? { email: testPushEmail.trim() } : {}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Request failed');
       if (data.tokenCount === 0) {
         toast({
-          title: 'No devices registered',
-          description: 'Enable notifications on this device first (dashboard banner or Parent Settings), then try again.',
+          title: `No devices registered for ${data.target}`,
+          description: 'Enable notifications on the device first (dashboard banner or Parent Settings), then try again.',
           variant: 'destructive',
         });
       } else {
         toast({
-          title: `Test sent to ${data.sent} of ${data.tokenCount} device${data.tokenCount === 1 ? '' : 's'}`,
-          description: 'Background this tab or lock your phone — the notification should appear within seconds.' +
+          title: `Test sent to ${data.sent} of ${data.tokenCount} device${data.tokenCount === 1 ? '' : 's'} for ${data.target}`,
+          description: 'If the portal is open on the device, it appears as an in-app toast; otherwise as a system notification within seconds.' +
             (data.pruned > 0 ? ` Removed ${data.pruned} stale device registration${data.pruned === 1 ? '' : 's'}.` : ''),
         });
       }
@@ -908,11 +910,21 @@ export default function AdminSettingsPage() {
                       <div>
                         <CardTitle>Test Push Notification</CardTitle>
                         <CardDescription>
-                          Sends a test notification to your own registered devices only — no parents are contacted. Enable notifications on a device first, then use this to confirm delivery end-to-end.
+                          Sends a test notification to your own registered devices, or to one pilot user by email — no one else is contacted. The target must enable notifications on their device first.
                         </CardDescription>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-3">
+                      <div className="space-y-1.5 max-w-sm">
+                        <Label htmlFor="test-push-email">Target email (optional — blank sends to yourself)</Label>
+                        <Input
+                          id="test-push-email"
+                          type="email"
+                          placeholder="family-member@example.com"
+                          value={testPushEmail}
+                          onChange={e => setTestPushEmail(e.target.value)}
+                        />
+                      </div>
                       <Button onClick={handleTestPush} disabled={testPushBusy}>
                         {testPushBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
                         Send Test Notification
