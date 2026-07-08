@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bell, BellRing, CheckCircle2, Loader2, LogIn, Share, SquarePlus } from 'lucide-react';
+import { Bell, BellRing, CheckCircle2, Download, Loader2, LogIn, Share, SquarePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useFirebaseApp, useFirestore, useUser } from '@/firebase';
@@ -10,11 +10,18 @@ import { useToast } from '@/hooks/use-toast';
 import { isIosBrowser, isStandalone } from '@/lib/pwa';
 import { enablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
 
+/** Chromium-only event; not in the standard TS DOM lib. */
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 /**
  * Guided notification setup — the page announcements and emails link to.
  * Detects the visitor's device and shows only the steps that apply:
  * iPhone browser → install-to-Home-Screen walkthrough first (Apple requires
- * it for push); installed app / Android / desktop → a single Enable button.
+ * it for push); installed app / Android / desktop → a single Enable button,
+ * then an optional one-tap app install and a clear "you're done" hand-off.
  */
 export default function GetAlertsPage() {
   const app = useFirebaseApp();
@@ -29,6 +36,7 @@ export default function GetAlertsPage() {
   const [blocked, setBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [platform, setPlatform] = useState({ ios: false, installed: false });
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     const permission = 'Notification' in window ? Notification.permission : 'default';
@@ -40,7 +48,29 @@ export default function GetAlertsPage() {
       setIosNeedsInstall(!ok && isIosBrowser() && !isStandalone());
       setHydrated(true);
     });
+
+    const onBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setInstallEvent(e as BeforeInstallPromptEvent);
+    };
+    const onInstalled = () => {
+      setInstallEvent(null);
+      setPlatform(p => ({ ...p, installed: true }));
+    };
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
   }, []);
+
+  const handleInstall = async () => {
+    if (!installEvent) return;
+    await installEvent.prompt();
+    const { outcome } = await installEvent.userChoice;
+    if (outcome === 'accepted') setInstallEvent(null);
+  };
 
   const handleEnable = async () => {
     if (!user) return;
@@ -100,15 +130,29 @@ export default function GetAlertsPage() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : enabled ? (
-            <div className="flex items-start gap-3 rounded-xl border bg-secondary/20 p-4">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 text-green-600" />
-              <div className="text-sm">
-                <p className="font-semibold">Alerts are on for this device.</p>
-                <p className="text-muted-foreground">
-                  You can turn them off anytime in Settings. To add another phone or computer,
-                  open this page there too.
-                </p>
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+                <div className="text-sm">
+                  <p className="font-semibold">You&apos;re all set — alerts are on for this device.</p>
+                  <p className="text-muted-foreground">
+                    You&apos;ll be notified about cancellations, schedule changes, and day-before
+                    game and volunteer reminders. Turn them off anytime in Settings.
+                  </p>
+                </div>
               </div>
+              {installEvent && !platform.installed && (
+                <Button variant="outline" onClick={handleInstall} className="h-11 w-full rounded-xl">
+                  <Download className="mr-2 h-4 w-4" />
+                  Optional: add the app to your home screen
+                </Button>
+              )}
+              <Button asChild className="h-11 w-full rounded-xl">
+                <Link href="/parent/dashboard">Go to my dashboard</Link>
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">
+                Want alerts on another phone or computer? Open this page there too.
+              </p>
             </div>
           ) : blocked ? (
             <div className="rounded-xl border bg-secondary/20 p-4 text-sm leading-relaxed">
