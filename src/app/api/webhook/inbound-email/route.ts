@@ -60,6 +60,10 @@ function dropReason(
   const ours = portalOutboundAddresses();
   if (ours.includes(senderEmail)) return 'self-sent (portal outbound address)';
   if (ours.includes(recipientEmail)) return 'addressed to the portal outbound address';
+  // Resend delivers our mail with an envelope sender on the send. subdomain
+  // (e.g. 0100...@send.syba.blue) — that's what Mailgun reports as `sender`
+  // for portal-originated mail (observed in the 2026-07-08 loop).
+  if (senderEmail.endsWith('@send.syba.blue')) return 'self-sent (Resend envelope sender)';
   // Any mail the portal itself sent carries this marker (see X-SYBA-Mailer in
   // the Resend calls) — catches every possible loop regardless of addressing.
   if (headers.has('x-syba-mailer')) return 'portal-originated (loop marker header)';

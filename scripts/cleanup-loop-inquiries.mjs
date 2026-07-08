@@ -17,7 +17,7 @@ import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const DELETE = process.argv.includes('--delete');
-const SINCE = '2026-07-09';
+const SINCE = '2026-07-08';
 
 const env = readFileSync('.env.local', 'utf8');
 const m = env.match(/^FIREBASE_SERVICE_ACCOUNT_KEY=(.*)$/m);
@@ -33,6 +33,7 @@ function isFlood(x) {
   const inbound = (x.inboundRecipient ?? '').toLowerCase();
   if (sender === 'noreply@syba.blue' || sender === 'onboarding@resend.dev') return true;
   if (sender.endsWith('@resend.dev') || sender.includes('bounces')) return true;
+  if (sender.endsWith('@send.syba.blue')) return true; // Resend envelope sender (observed flood signature)
   if (subject.includes('New Inquiry:')) return true;
   if (inbound === 'noreply@syba.blue') return true;
   return false;
