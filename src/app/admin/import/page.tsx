@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { useFirestore, useUser, useMemoFirebase, useCollection } from '@/firebase';
 import {
   doc, deleteDoc, collection, query, orderBy,
-  collectionGroup, where, getDocs,
+  collectionGroup,
 } from 'firebase/firestore';
 import {
   Loader2, Trash2, Users,
@@ -16,6 +16,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { deleteSeasonCascade } from '@/lib/season-delete';
 import type { Announcement } from '@/types/scheduling';
 
 interface Team {
@@ -128,26 +129,16 @@ export default function DataManagementPage() {
     if (!db) return;
     setDeleteLoadingId(seasonId);
     try {
-      // Check for enrollment dependencies
-      const enrollSnap = await getDocs(
-        query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId))
-      );
-      if (!enrollSnap.empty) {
+      const result = await deleteSeasonCascade(db, seasonId);
+      if (!result.ok) {
         toast({
           variant: "destructive",
           title: "Cannot Delete Season",
-          description: `${enrollSnap.size} enrollment record(s) reference this season. Remove enrollments first.`,
+          description: `${result.count} enrollment record(s) reference this season. Archive it from the Seasons page instead.`,
         });
         setConfirmDeleteSeasonId(null);
         return;
       }
-
-      // Delete all divisions under the season
-      const divsSnap = await getDocs(collection(db, 'seasons', seasonId, 'divisions'));
-      await Promise.all(divsSnap.docs.map(d => deleteDoc(d.ref)));
-
-      // Delete the season itself
-      await deleteDoc(doc(db, 'seasons', seasonId));
       setConfirmDeleteSeasonId(null);
       toast({ title: "Season Deleted" });
     } catch (e: any) {

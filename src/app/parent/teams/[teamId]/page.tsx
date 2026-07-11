@@ -40,6 +40,8 @@ interface Team {
   id: string;
   name: string;
   divisionId: string;
+  coachIds?: string[];
+  coach_uid?: string; // legacy single-coach field
 }
 
 interface UserProfile {
@@ -80,6 +82,11 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
   const { data: allTeams } = useCollection<Team>(teamsQuery);
 
   const team = allTeams?.find(t => t.id === teamId);
+
+  const coachUids = [...new Set([...(team?.coachIds ?? []), ...(team?.coach_uid ? [team.coach_uid] : [])])];
+  const coaches = coachUids
+    .map(uid => allUsers?.find(u => u.id === uid))
+    .filter((c): c is UserProfile => !!c);
 
   // C4: Only show the directory if the current user has an enrollment on this team
   const userEnrollmentsQuery = useMemoFirebase(() => {
@@ -153,6 +160,40 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
             </Badge>
           </div>
         </header>
+
+          {/* ── Coaching staff ── */}
+          <div className="mb-4 md:mb-6">
+            <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Coaching Staff</h4>
+            {coaches.length > 0 ? (
+              <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                {coaches.map(coach => (
+                  <div key={coach.id} className="flex items-center gap-3 p-3 border rounded-xl bg-card">
+                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white shrink-0">
+                      <UserIcon className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate">{coach.displayName || coach.email}</p>
+                      <p className="text-xs text-muted-foreground">Coach</p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {coach.phoneNumber && (
+                        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" asChild>
+                          <a href={`tel:${coach.phoneNumber}`}><Phone className="h-3.5 w-3.5 text-primary" /></a>
+                        </Button>
+                      )}
+                      {coach.email && (
+                        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" asChild>
+                          <a href={`mailto:${coach.email}`}><Mail className="h-3.5 w-3.5 text-primary" /></a>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground italic">Coach not yet assigned.</p>
+            )}
+          </div>
 
           {isMobile ? (
             /* ── Mobile: compact list rows ── */

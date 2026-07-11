@@ -6,10 +6,20 @@ import { useSport } from '@/firebase/sport-context';
 import { collection, doc, query, orderBy, where, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Trash2, UserCheck } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Notification, NotificationType, NotificationRelatedDocType } from '@/types/scheduling';
 
@@ -93,6 +103,7 @@ export function NotificationsInbox() {
   }, [db, user?.uid]);
 
   const { data: rawNotifications, isLoading } = useCollection<Notification>(notifQuery);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   // Client-side sport filter: show notifications scoped to activeSport, global alerts (isGlobal),
   // and legacy notifications that predate the sport field (sport === undefined).
@@ -141,9 +152,12 @@ export function NotificationsInbox() {
 
   const handleClearAll = async () => {
     if (!db || !notifications || notifications.length === 0) return;
-    const batch = writeBatch(db);
-    notifications.forEach(n => batch.delete(doc(db, 'notifications', n.id)));
-    await batch.commit();
+    // Firestore batches cap at 500 ops — chunk to stay safely under
+    for (let i = 0; i < notifications.length; i += 400) {
+      const batch = writeBatch(db);
+      notifications.slice(i, i + 400).forEach(n => batch.delete(doc(db, 'notifications', n.id)));
+      await batch.commit();
+    }
   };
 
   if (isLoading) {
@@ -180,7 +194,7 @@ export function NotificationsInbox() {
               <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark all as read
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={handleClearAll} className="text-xs text-muted-foreground">
+          <Button variant="ghost" size="sm" onClick={() => setConfirmClearAll(true)} className="text-xs text-muted-foreground">
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Clear all
           </Button>
         </div>
@@ -234,6 +248,26 @@ export function NotificationsInbox() {
           );
         })}
       </div>
+
+      <AlertDialog open={confirmClearAll} onOpenChange={setConfirmClearAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all notifications?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes {notifications.length === 1 ? 'your notification' : `all ${notifications.length} notifications`}. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleClearAll}
+            >
+              Clear all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

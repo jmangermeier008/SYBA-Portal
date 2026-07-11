@@ -8,6 +8,16 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useUser, useFirestore, useFirebaseApp, useCollection, useMemoFirebase } from '@/firebase';
 import { doc, getDoc, updateDoc, collection, query, orderBy, where } from 'firebase/firestore';
 import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, CheckCircle2, X, ArrowRight, Bell } from 'lucide-react';
@@ -48,6 +58,7 @@ export default function ParentSettingsPage() {
   const { activeSport, leagueName } = useSport();
   const [profileLoading, setProfileLoading] = useState(false);
   const [privacyLoading, setPrivacyLoading] = useState(false);
+  const [unlinkTarget, setUnlinkTarget] = useState<Player | null>(null);
 
   // Push notification toggle — device-level state, resolved client-side only
   const [push, setPush] = useState({
@@ -307,7 +318,7 @@ export default function ParentSettingsPage() {
                             variant="ghost"
                             size="sm"
                             className="h-7 rounded-full text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => handleUnlinkSecondParent(player)}
+                            onClick={() => setUnlinkTarget(player)}
                           >
                             <X className="h-3 w-3 mr-1" /> Remove
                           </Button>
@@ -449,6 +460,35 @@ export default function ParentSettingsPage() {
             </CardContent>
           </Card>
         </div>
+
+        <AlertDialog open={!!unlinkTarget} onOpenChange={(open) => { if (!open) setUnlinkTarget(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove second parent?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {unlinkTarget && (
+                  <>
+                    {linkedParents[unlinkTarget.id]?.displayName || linkedParents[unlinkTarget.id]?.email || 'The linked parent'} will
+                    immediately lose access to {unlinkTarget.firstName}'s profile, schedule, and RSVPs.
+                    They would need to send a new co-parent request to regain access.
+                  </>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  if (unlinkTarget) handleUnlinkSecondParent(unlinkTarget);
+                  setUnlinkTarget(null);
+                }}
+              >
+                Remove Access
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );

@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,13 @@ import { Plus, Trophy, Calendar, Loader2, Trash2, Lock, Star, Pencil, Copy } fro
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { SPORT_CONFIG } from '@/config/sports';
-import { collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, where, collectionGroup, writeBatch, updateDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, query, orderBy, where, writeBatch, updateDoc } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { countSeasonEnrollments, deleteSeasonCascade } from '@/lib/season-delete';
 import Link from 'next/link';
 
 interface Season {
@@ -44,6 +45,9 @@ export default function SeasonsAdminPage() {
   const [deletingSeason, setDeletingSeason] = useState<Season | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  // null = still counting; blocks the delete button until the check completes
+  const [deletingEnrollmentCount, setDeletingEnrollmentCount] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState({
     registrationOpen: '',
     registrationClose: '',
@@ -200,32 +204,35 @@ export default function SeasonsAdminPage() {
     }
   };
 
+  // Pre-check enrollments when the delete dialog opens so the button can be
+  // disabled with an explanation instead of failing on click.
+  useEffect(() => {
+    if (!deletingSeason || !db) {
+      setDeletingEnrollmentCount(null);
+      return;
+    }
+    let cancelled = false;
+    countSeasonEnrollments(db, deletingSeason.id)
+      .then(count => { if (!cancelled) setDeletingEnrollmentCount(count); })
+      .catch(() => { if (!cancelled) setDeletingEnrollmentCount(0); });
+    return () => { cancelled = true; };
+  }, [deletingSeason, db]);
+
   const handleDeleteSeason = async () => {
     if (!deletingSeason) return;
     setIsDeleting(true);
     const id = deletingSeason.id;
     try {
-      // 1. Delete all enrollments for this season
-      const enrollmentsSnap = await getDocs(query(collectionGroup(db, 'enrollments'), where('seasonId', '==', id)));
-      await Promise.all(enrollmentsSnap.docs.map(d => deleteDoc(d.ref)));
-
-      // 2. Delete all teams for this season, including each team's games subcollection
-      const teamsSnap = await getDocs(query(collection(db, 'teams'), where('seasonId', '==', id)));
-      await Promise.all(
-        teamsSnap.docs.map(async teamDoc => {
-          const teamGamesSnap = await getDocs(collection(db, 'teams', teamDoc.id, 'games'));
-          await Promise.all(teamGamesSnap.docs.map(g => deleteDoc(g.ref)));
-          await deleteDoc(teamDoc.ref);
-        })
-      );
-
-      // 3. Delete all division subcollection documents
-      const divisionsSnapshot = await getDocs(collection(db, 'seasons', id, 'divisions'));
-      await Promise.all(divisionsSnapshot.docs.map(divDoc => deleteDoc(divDoc.ref)));
-
-      // 4. Delete the season document itself
-      await deleteDoc(doc(db, 'seasons', id));
-      toast({ title: "Season Deleted", description: "Season, divisions, teams, and enrollments have been removed." });
+      const result = await deleteSeasonCascade(db, id);
+      if (!result.ok) {
+        toast({
+          variant: "destructive",
+          title: "Cannot Delete Season",
+          description: `${result.count} enrollment record(s) reference this season. Archive it instead to preserve registration and payment history.`,
+        });
+        return;
+      }
+      toast({ title: "Season Deleted", description: "Season, divisions, teams, and games have been removed." });
       setDeletingSeason(null);
       setDeleteConfirmName('');
     } catch (error: any) {
@@ -239,6 +246,21 @@ export default function SeasonsAdminPage() {
       }
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleArchiveSeason = async () => {
+    if (!deletingSeason) return;
+    setIsArchiving(true);
+    try {
+      await updateDoc(doc(db, 'seasons', deletingSeason.id), { status: 'archived', isActive: false });
+      toast({ title: "Season Archived", description: `${deletingSeason.name} is hidden from enrollment but all records are preserved.` });
+      setDeletingSeason(null);
+      setDeleteConfirmName('');
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Archive Failed", description: error.message });
+    } finally {
+      setIsArchiving(false);
     }
   };
 
@@ -645,8 +667,20 @@ export default function SeasonsAdminPage() {
             <li>The season: <strong>{deletingSeason?.name}</strong></li>
             <li>All divisions within this season</li>
             <li>All teams assigned to this season</li>
-            <li>All enrollment records associated with this season</li>
+            <li>All games and RSVPs for those teams</li>
           </ul>
+          {deletingEnrollmentCount !== null && deletingEnrollmentCount > 0 ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              This season has <strong>{deletingEnrollmentCount} enrollment record(s)</strong> with registration
+              and payment history, so it cannot be deleted. Archive it instead — archiving hides the season
+              but preserves every record.
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Prefer <strong>Archive Instead</strong> if this season ever had real registrations — archiving
+              hides the season but preserves its history.
+            </p>
+          )}
           <div className="space-y-2 pt-2">
             <Label htmlFor="deleteConfirmName">
               Type <strong>{deletingSeason?.name}</strong> to confirm
@@ -663,9 +697,19 @@ export default function SeasonsAdminPage() {
             <Button variant="outline" onClick={() => { setDeletingSeason(null); setDeleteConfirmName(''); }}>
               Cancel
             </Button>
+            <Button variant="secondary" disabled={isArchiving || isDeleting} onClick={handleArchiveSeason}>
+              {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Archive Instead
+            </Button>
             <Button
               variant="destructive"
-              disabled={deleteConfirmName !== deletingSeason?.name || isDeleting}
+              disabled={
+                deleteConfirmName !== deletingSeason?.name ||
+                isDeleting ||
+                isArchiving ||
+                deletingEnrollmentCount === null ||
+                deletingEnrollmentCount > 0
+              }
               onClick={handleDeleteSeason}
             >
               {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}

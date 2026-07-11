@@ -342,6 +342,80 @@ export default function RegistrationDashboardPage() {
     }
   };
 
+  // Bulk variant of the audit path — writes the exact same field set per player
+  // (rules only allow this key set for Board Members), skipping players without
+  // the relevant uploaded document or already verified.
+  const handleBulkVerify = async (
+    targets: PlayerWithDocs[],
+    opts: { approveAge?: boolean; approvePhysical?: boolean }
+  ): Promise<{ updated: number; skipped: number }> => {
+    if (!db || !user) return { updated: 0, skipped: targets.length };
+    const now = new Date().toISOString();
+
+    const updates: { path: string; data: Record<string, unknown> }[] = [];
+    let skipped = 0;
+    for (const player of targets) {
+      const canVerifyAge = !!opts.approveAge && !!player.birthCertificateUrl && player.ageVerified !== true;
+      const canVerifyPhysical = !!opts.approvePhysical && !!player.physicalFormUrl && player.compliance?.physicalVerified !== true;
+      if (!canVerifyAge && !canVerifyPhysical) {
+        skipped++;
+        continue;
+      }
+      const data: Record<string, unknown> = {
+        'compliance.verifiedBy': user.uid,
+        'compliance.verifiedAt': now,
+        updatedAt: now,
+      };
+      if (canVerifyAge) {
+        data.ageVerified = true;
+        data['compliance.birthCertificateVerified'] = true;
+        data.verifiedBy = user.uid;
+        data.verifiedByName = profile?.displayName || 'Admin';
+        data.verifiedAt = now;
+      }
+      if (canVerifyPhysical) {
+        data['compliance.physicalVerified'] = true;
+      }
+      const bothVerified =
+        (canVerifyAge || player.ageVerified === true) &&
+        (canVerifyPhysical || player.compliance?.physicalVerified === true);
+      data['compliance.verificationStatus'] = bothVerified ? 'approved' : 'pending';
+      updates.push({
+        path: (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`,
+        data,
+      });
+    }
+
+    if (updates.length === 0) {
+      toast({ title: 'Nothing to Verify', description: 'The selected players are already verified or have no uploaded document.' });
+      return { updated: 0, skipped };
+    }
+
+    setGlobalProcessing(true);
+    try {
+      // Firestore batches cap at 500 ops — chunk and commit sequentially
+      for (let i = 0; i < updates.length; i += 400) {
+        const batch = writeBatch(db);
+        updates.slice(i, i + 400).forEach(u => batch.update(doc(db, u.path), u.data as any));
+        await batch.commit();
+      }
+      toast({
+        title: 'Bulk Verification Saved',
+        description: `Verified ${updates.length} player(s)${skipped > 0 ? `, skipped ${skipped} already verified or missing documents` : ''}.`,
+      });
+      return { updated: updates.length, skipped };
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({ path: updates[0].path, operation: 'update', requestResourceData: updates[0].data }));
+      } else {
+        toast({ variant: 'destructive', title: 'Bulk Verification Failed', description: error.message });
+      }
+      return { updated: 0, skipped };
+    } finally {
+      setGlobalProcessing(false);
+    }
+  };
+
   const handleDeletePlayer = async (player: PlayerWithDocs): Promise<boolean> => {
     if (!db) return false;
     const refPath = (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`;
@@ -804,6 +878,7 @@ export default function RegistrationDashboardPage() {
                 initialAuditPlayerId={auditPlayerId ?? undefined}
                 onAuditSubmit={handleAuditSubmit}
                 onDeletePlayer={handleDeletePlayer}
+                onBulkVerify={handleBulkVerify}
                 onWaiveFee={(player, enrollment) => setFeeWaiverDialog({ open: true, player, enrollment, reason: '', loading: false })}
                 onPromoteWaitlist={(player, enrollment) => setPromoteDialog({ open: true, player, enrollment, loading: false })}
               />

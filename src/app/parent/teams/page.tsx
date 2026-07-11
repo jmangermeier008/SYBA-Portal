@@ -23,12 +23,20 @@ interface Team {
   name: string;
   divisionId: string;
   seasonId: string;
+  coachIds?: string[];
+  coach_uid?: string; // legacy single-coach field
 }
 
 interface Player {
   id: string;
   firstName: string;
   lastName: string;
+}
+
+interface UserProfile {
+  id: string;
+  displayName: string;
+  email: string;
 }
 
 export default function ParentTeamsPage() {
@@ -49,10 +57,15 @@ export default function ParentTeamsPage() {
     if (!db || !user) return null;
     return collectionGroup(db, 'players');
   }, [db, user]);
+  const usersQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return collection(db, 'userProfiles');
+  }, [db, user]);
 
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allTeams } = useCollection<Team>(teamsQuery);
   const { data: allPlayers } = useCollection<Player>(playersQuery);
+  const { data: allUsers } = useCollection<UserProfile>(usersQuery);
 
   // Filter out duplicate teams (if multiple kids on one team) and unassigned enrollments
   const parentTeams = allTeams?.filter(team => 
@@ -87,9 +100,14 @@ export default function ParentTeamsPage() {
           <div className="grid gap-6">
             {parentTeams.map((team) => {
               const teamEnrollments = enrollments?.filter(e => e.teamId === team.id) || [];
-              const enrolledChildren = teamEnrollments.map(e => 
+              const enrolledChildren = teamEnrollments.map(e =>
                 allPlayers?.find(p => p.id === e.playerId)?.firstName
               ).filter(Boolean).join(', ');
+              const coachUids = [...new Set([...(team.coachIds ?? []), ...(team.coach_uid ? [team.coach_uid] : [])])];
+              const coachNames = coachUids
+                .map(uid => allUsers?.find(u => u.id === uid)?.displayName)
+                .filter(Boolean)
+                .join(', ');
 
               return (
                 <Card key={team.id} className="border-none shadow-lg overflow-hidden group hover:shadow-xl transition-shadow">
@@ -107,6 +125,11 @@ export default function ParentTeamsPage() {
                         <p className="text-sm text-muted-foreground">
                           Children on team: <span className="font-semibold text-foreground">{enrolledChildren}</span>
                         </p>
+                        {coachNames && (
+                          <p className="text-sm text-muted-foreground">
+                            Coach: <span className="font-semibold text-foreground">{coachNames}</span>
+                          </p>
+                        )}
                       </div>
                       <Button asChild className="rounded-full shadow-lg shadow-primary/20">
                         <Link href={`/parent/teams/${team.id}`}>

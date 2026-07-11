@@ -17,7 +17,7 @@ The SYBA Portal is the official management platform for the Sharpsville Youth Ba
 | Role | Access |
 |---|---|
 | **Parent** | Family dashboard, player enrollment, schedules, RSVP, concession signup |
-| **Coach** | Team roster, schedules, practice slots, AI drill generator, compliance |
+| **Coach** | Team roster, schedules, practice slots, practice drills, compliance |
 | **Board Member** | All league management pages (read + write) |
 | **Admin** | Everything Board Members can do, plus user role management |
 | **Site Admin** | Full system access |
@@ -44,7 +44,7 @@ Users can hold multiple roles simultaneously.
 - **Team Schedule** — List or Calendar view (Month/Week) directly from the dashboard; full calendar on the Schedules page
 - **Weather/Field Cancellations** — Cancel a game with a reason directly from the calendar event popover
 - **Practice Slots** — View pre-allocated time slots for your team; claim or release slots
-- **AI Drill Generator** — Generate age-specific practice drill plans using built-in Genkit AI
+- **Practice Drills** — Built-in library of practice drills by focus area
 - **Team Roster** — Player names, jersey numbers, and parent contact info
 - **Compliance** — Upload required state background check (PIAA clearance)
 - **Notifications** — Alerts for schedule changes and slot availability
@@ -108,7 +108,6 @@ npm run dev          # Start dev server on http://localhost:9002 (Turbopack)
 npm run build        # Production build
 npm run typecheck    # TypeScript check (npx tsc --noEmit)
 npm run lint         # ESLint
-npm run genkit:dev   # Start Genkit AI dev server (drill generator)
 ```
 
 ---
@@ -120,7 +119,6 @@ npm run genkit:dev   # Start Genkit AI dev server (drill generator)
 | Framework | Next.js 15 (App Router, React 19) |
 | Database & Auth | Firebase 11 (Firestore, Auth, Storage) |
 | Payments | Stripe |
-| AI | Google Genkit 1.16 (Gemini) |
 | UI | shadcn/ui (Radix UI) + Tailwind CSS |
 | Calendar | Custom LeagueCalendar + react-day-picker 9 |
 | Language | TypeScript 5 |

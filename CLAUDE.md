@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Full-stack youth baseball league management portal for Sharpsville Youth Baseball Association. Built on Next.js 15 App Router + Firebase + Stripe + Google Genkit AI.
+Full-stack youth baseball league management portal for Sharpsville Youth Baseball Association. Built on Next.js 15 App Router + Firebase + Stripe.
 
 **Dev server:** `npm run dev` → http://localhost:9002
 
@@ -17,7 +17,6 @@ Full-stack youth baseball league management portal for Sharpsville Youth Basebal
 | Auth | Firebase Authentication (email/password) |
 | Storage | Firebase Storage (clearance document uploads) |
 | Payments | Stripe Checkout (enrollment registration fees) |
-| AI | Google Genkit 1.16 + Gemini (AI drill generator) |
 | UI | shadcn/ui (Radix UI) + Tailwind CSS 3 |
 | Calendar | Custom LeagueCalendar + react-day-picker 9 |
 | Icons | lucide-react |
@@ -28,7 +27,6 @@ Full-stack youth baseball league management portal for Sharpsville Youth Basebal
 
 ```
 src/
-├── ai/                       Genkit AI flows (practice drill generator)
 ├── app/
 │   ├── (auth)/               Login/signup pages (route group — no sidebar)
 │   ├── admin/                Board Member + Admin pages (20+ routes)
@@ -350,5 +348,4 @@ npm run dev              # Dev server at http://localhost:9002 (Turbopack)
 npm run build            # Production build
 npm run typecheck        # npx tsc --noEmit --skipLibCheck
 npm run lint             # Next.js ESLint
-npm run genkit:dev       # Genkit AI dev server (drill generator feature)
 ```

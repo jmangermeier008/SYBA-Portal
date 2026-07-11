@@ -14,11 +14,34 @@ import { collection, query, orderBy, doc, addDoc, updateDoc, deleteDoc, deleteFi
 import { Megaphone, Plus, Trash2, Loader2, Lock, Clock, Pin, AlertTriangle, Pencil, CalendarClock, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import type { Announcement } from '@/types/scheduling';
+import type { Announcement, Division } from '@/types/scheduling';
 
-const EMPTY_FORM = { title: '', body: '', pinned: false, isGlobal: false, isUrgent: false, expiresAt: '', notify: true, sendEmail: false };
+type AudienceType = 'all' | 'team' | 'division';
+
+const EMPTY_FORM = {
+  title: '', body: '', pinned: false, isGlobal: false, isUrgent: false, expiresAt: '', notify: true,
+  sendEmail: false, audienceType: 'all' as AudienceType, audienceTeamId: '', audienceDivisionId: '',
+};
+
+interface TeamOption {
+  id: string;
+  name: string;
+  seasonId: string;
+}
+
+// Everything the confirm-before-send dialog needs, captured at save time so it
+// survives the form reset.
+interface PendingEmail {
+  title: string;
+  body: string;
+  isGlobal: boolean;
+  audience: { type: AudienceType; teamId?: string; divisionId?: string; seasonId?: string };
+  audienceLabel: string;
+  audienceSize: number | null; // null while the dry-run count loads
+}
 
 export default function AdminAnnouncementsPage() {
   const { user, profile, loading: loadingUser } = useUser();
@@ -34,12 +57,35 @@ export default function AdminAnnouncementsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [pendingEmail, setPendingEmail] = useState<PendingEmail | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
+
   const announcementsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
     return query(collection(db, 'announcements'), where('sport', '==', activeSport), orderBy('publishedAt', 'desc'));
   }, [db, activeSport]);
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
+
+  // Audience targeting options — teams and divisions of this sport's active season
+  const seasonsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: seasons } = useCollection<{ id: string; isActive?: boolean; status?: string }>(seasonsQuery);
+  const activeSeasonId = seasons?.find(s => s.isActive || s.status === 'active')?.id ?? null;
+
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !activeSeasonId) return null;
+    return query(collection(db, 'teams'), where('seasonId', '==', activeSeasonId));
+  }, [db, activeSeasonId]);
+  const { data: teams } = useCollection<TeamOption>(teamsQuery);
+
+  const divisionsQuery = useMemoFirebase(() => {
+    if (!db || !activeSeasonId) return null;
+    return collection(db, 'seasons', activeSeasonId, 'divisions');
+  }, [db, activeSeasonId]);
+  const { data: divisions } = useCollection<Division>(divisionsQuery);
 
   const openAdd = () => {
     setEditTarget(null);
@@ -58,6 +104,9 @@ export default function AdminAnnouncementsPage() {
       expiresAt: ann.expiresAt ?? '',
       notify: false, // editing is silent unless the admin opts in
       sendEmail: false,
+      audienceType: 'all',
+      audienceTeamId: '',
+      audienceDivisionId: '',
     });
     setDialogOpen(true);
   };
@@ -108,17 +157,62 @@ export default function AdminAnnouncementsPage() {
     }
   };
 
-  // Emails the announcement to every opted-in family via the server route.
-  // Failure here shouldn't roll back the published announcement — surface a
-  // toast and let the admin retry from an edit instead.
-  const sendAnnouncementEmail = async (title: string, body: string) => {
+  // Step 1 of the email flow: the announcement is already published — resolve
+  // the audience size (dry run, nothing sent) and open the confirm dialog.
+  const prepareAnnouncementEmail = async (title: string, body: string, isGlobal: boolean) => {
     if (!user) return;
+    const audience =
+      form.audienceType === 'team' && form.audienceTeamId
+        ? { type: 'team' as const, teamId: form.audienceTeamId }
+        : form.audienceType === 'division' && form.audienceDivisionId && activeSeasonId
+          ? { type: 'division' as const, divisionId: form.audienceDivisionId, seasonId: activeSeasonId }
+          : { type: 'all' as const };
+    const audienceLabel =
+      audience.type === 'team'
+        ? `Families on ${teams?.find(t => t.id === audience.teamId)?.name ?? 'the selected team'}`
+        : audience.type === 'division'
+          ? `Families in ${divisions?.find(d => d.id === audience.divisionId)?.name ?? 'the selected division'}`
+          : isGlobal ? 'All families (both sports)' : 'All families in this sport';
+
+    setPendingEmail({ title, body, isGlobal, audience, audienceLabel, audienceSize: null });
     try {
       const idToken = await user.getIdToken();
       const res = await fetch('/api/email/announcement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ title, body, sport: activeSport, isGlobal: form.isGlobal }),
+        body: JSON.stringify({ title, body, sport: activeSport, isGlobal, audience, dryRun: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not resolve the email audience');
+      setPendingEmail(prev => (prev ? { ...prev, audienceSize: data.audienceSize } : prev));
+    } catch (err: any) {
+      setPendingEmail(null);
+      toast({
+        title: 'Announcement published, but email preview failed',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Step 2: the admin confirmed — actually send. Failure here shouldn't roll
+  // back the published announcement — surface a toast and let the admin retry
+  // from an edit instead.
+  const handleConfirmSendEmail = async () => {
+    if (!user || !pendingEmail) return;
+    setSendingEmail(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/email/announcement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({
+          title: pendingEmail.title,
+          body: pendingEmail.body,
+          sport: activeSport,
+          isGlobal: pendingEmail.isGlobal,
+          audience: pendingEmail.audience,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Email send failed');
@@ -131,12 +225,16 @@ export default function AdminAnnouncementsPage() {
       } else {
         toast({ title: `Emailed ${data.sent} families` });
       }
+      setPendingEmail(null);
     } catch (err: any) {
       toast({
         title: 'Announcement published, but email failed',
         description: err.message,
         variant: 'destructive',
       });
+      setPendingEmail(null);
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -159,7 +257,7 @@ export default function AdminAnnouncementsPage() {
         });
         if (form.notify) await fanOutNotifications(editTarget.id, title, body, form.isGlobal, form.isUrgent);
         toast({ title: form.notify ? 'Announcement Updated & Everyone Re-Notified' : 'Announcement Updated' });
-        if (form.sendEmail) await sendAnnouncementEmail(title, body);
+        if (form.sendEmail) await prepareAnnouncementEmail(title, body, form.isGlobal);
       } else {
         const newDocRef = await addDoc(collection(db, 'announcements'), {
           title,
@@ -174,7 +272,7 @@ export default function AdminAnnouncementsPage() {
         });
         if (form.notify) await fanOutNotifications(newDocRef.id, title, body, form.isGlobal, form.isUrgent);
         toast({ title: form.notify ? 'Announcement Published' : 'Announcement Published Quietly' });
-        if (form.sendEmail) await sendAnnouncementEmail(title, body);
+        if (form.sendEmail) await prepareAnnouncementEmail(title, body, form.isGlobal);
       }
       setDialogOpen(false);
       setEditTarget(null);
@@ -434,15 +532,64 @@ export default function AdminAnnouncementsPage() {
                   <Mail className="h-3.5 w-3.5" /> Also send as email
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Emails this announcement to every family that hasn&apos;t turned off email updates.
-                  Best for things families must see even if they don&apos;t open the portal.
+                  Emails this announcement to families that haven&apos;t turned off email updates.
+                  You&apos;ll see how many recipients and a preview before anything is sent.
                 </p>
               </div>
             </div>
+            {form.sendEmail && (
+              <div className="space-y-2 rounded-xl border bg-secondary/20 p-3">
+                <Label>Email recipients</Label>
+                <Select
+                  value={form.audienceType}
+                  onValueChange={(v) => setForm(f => ({ ...f, audienceType: v as AudienceType, audienceTeamId: '', audienceDivisionId: '' }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All families</SelectItem>
+                    {(teams?.length ?? 0) > 0 && <SelectItem value="team">A specific team</SelectItem>}
+                    {(divisions?.length ?? 0) > 0 && <SelectItem value="division">A specific division</SelectItem>}
+                  </SelectContent>
+                </Select>
+                {form.audienceType === 'team' && (
+                  <Select value={form.audienceTeamId} onValueChange={(v) => setForm(f => ({ ...f, audienceTeamId: v }))}>
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder="Choose a team…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teams?.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                {form.audienceType === 'division' && (
+                  <Select value={form.audienceDivisionId} onValueChange={(v) => setForm(f => ({ ...f, audienceDivisionId: v }))}>
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder="Choose a division…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {divisions?.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Email targeting only affects the email — the announcement itself and in-app
+                  notifications still reach everyone on the portal.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving || !form.title.trim() || !form.body.trim()}>
+            <Button
+              onClick={handleSave}
+              disabled={
+                saving || !form.title.trim() || !form.body.trim() ||
+                (form.sendEmail && form.audienceType === 'team' && !form.audienceTeamId) ||
+                (form.sendEmail && form.audienceType === 'division' && !form.audienceDivisionId)
+              }
+            >
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} {editTarget ? 'Save Changes' : 'Publish'}
             </Button>
           </DialogFooter>
@@ -462,6 +609,71 @@ export default function AdminAnnouncementsPage() {
             <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Send Confirm — the announcement is already live; this gates only the email blast */}
+      <Dialog open={!!pendingEmail} onOpenChange={(open) => {
+        if (!open && !sendingEmail) {
+          setPendingEmail(null);
+          toast({ title: 'Announcement published without email', description: 'The email was not sent. Edit the announcement to send it later.' });
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" /> Confirm Email
+            </DialogTitle>
+            <DialogDescription>
+              Your announcement is published on the portal. Review the email before it goes out — this cannot be unsent.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl border bg-secondary/20 p-3 text-sm space-y-1">
+              <p>
+                <span className="text-muted-foreground">To:</span>{' '}
+                <span className="font-semibold">{pendingEmail?.audienceLabel}</span>
+                {' — '}
+                {pendingEmail?.audienceSize === null
+                  ? <Loader2 className="inline h-3.5 w-3.5 animate-spin align-middle" />
+                  : <span className="font-semibold">{pendingEmail?.audienceSize} recipient{pendingEmail?.audienceSize !== 1 ? 's' : ''}</span>}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Subject:</span>{' '}
+                <span className="font-semibold">
+                  {pendingEmail?.isGlobal ? '' : activeSport === 'baseball' ? '[SYBA Baseball] ' : activeSport === 'football' ? '[SYFA Football] ' : ''}
+                  {pendingEmail?.title}
+                </span>
+              </p>
+            </div>
+            <div className="rounded-xl border p-3 max-h-48 overflow-y-auto">
+              <p className="text-sm whitespace-pre-wrap">{pendingEmail?.body}</p>
+            </div>
+            {pendingEmail?.audienceSize === 0 && (
+              <p className="text-sm text-destructive">
+                No recipients match this audience — nothing would be sent. Check the team or division selection.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={sendingEmail}
+              onClick={() => {
+                setPendingEmail(null);
+                toast({ title: 'Announcement published without email', description: 'The email was not sent. Edit the announcement to send it later.' });
+              }}
+            >
+              Don&apos;t Send
+            </Button>
+            <Button
+              onClick={handleConfirmSendEmail}
+              disabled={sendingEmail || pendingEmail?.audienceSize === null || pendingEmail?.audienceSize === 0}
+            >
+              {sendingEmail && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Send to {pendingEmail?.audienceSize ?? '…'} {pendingEmail?.audienceSize === 1 ? 'Family' : 'Families'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ArrowUpCircle, BadgeCheck, CheckCircle2, Circle, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
@@ -96,6 +97,11 @@ interface PlayerTableProps {
   initialAuditPlayerId?: string;
   onAuditSubmit: (player: PlayerWithDocs, formData: AuditFormData) => Promise<boolean>;
   onDeletePlayer: (player: PlayerWithDocs) => Promise<boolean>;
+  /** When provided (and canAudit), rows get selection checkboxes + bulk verify actions */
+  onBulkVerify?: (
+    players: PlayerWithDocs[],
+    opts: { approveAge?: boolean; approvePhysical?: boolean }
+  ) => Promise<{ updated: number; skipped: number }>;
   /** When provided, unpaid rows get a "Mark as Fee Waived" action */
   onWaiveFee?: (player: PlayerWithDocs, enrollment: EnrollmentRecord) => void;
   /** When provided, waitlisted rows get a "Promote from Waitlist" action */
@@ -156,6 +162,7 @@ export function PlayerTable({
   initialAuditPlayerId,
   onAuditSubmit,
   onDeletePlayer,
+  onBulkVerify,
   onWaiveFee,
   onPromoteWaitlist,
 }: PlayerTableProps) {
@@ -171,6 +178,9 @@ export function PlayerTable({
 
   const [auditingPlayer, setAuditingPlayer] = useState<PlayerWithDocs | null>(null);
   const [deletingPlayer, setDeletingPlayer] = useState<PlayerWithDocs | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<'age' | 'physical' | null>(null);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
   const [auditDocTab, setAuditDocTab] = useState<'birthCert' | 'physical'>('birthCert');
   const [auditDob, setAuditDob] = useState('');
   const [auditDivisionId, setAuditDivisionId] = useState('');
@@ -286,6 +296,47 @@ export function PlayerTable({
         );
       });
   }, [players, statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, search, playerEnrollmentMap]);
+
+  // ── Bulk selection ──────────────────────────────────────────────────────────
+  const bulkEnabled = canAudit && !!onBulkVerify;
+
+  // A stale selection across a filter change could silently include rows the
+  // admin can no longer see — clear it instead.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, search]);
+
+  const selectedPlayers = useMemo(
+    () => filteredPlayers.filter(p => selectedIds.has(p.id)),
+    [filteredPlayers, selectedIds]
+  );
+  const allSelected = filteredPlayers.length > 0 && selectedPlayers.length === filteredPlayers.length;
+  const someSelected = selectedPlayers.length > 0 && !allSelected;
+
+  const toggleSelect = (playerId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(playerId)) next.delete(playerId);
+      else next.add(playerId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(filteredPlayers.map(p => p.id)));
+  };
+
+  const handleBulkConfirm = async () => {
+    if (!onBulkVerify || !bulkAction || selectedPlayers.length === 0) return;
+    setBulkProcessing(true);
+    const result = await onBulkVerify(selectedPlayers, {
+      approveAge: bulkAction === 'age',
+      approvePhysical: bulkAction === 'physical',
+    });
+    setBulkProcessing(false);
+    setBulkAction(null);
+    if (result.updated > 0) setSelectedIds(new Set());
+  };
 
   // Counts for the one-click triage chips — respect only the division filter so
   // the numbers stay meaningful while other filters change
@@ -574,6 +625,42 @@ export function PlayerTable({
             </Button>
           </div>
 
+          {/* Bulk action bar */}
+          {bulkEnabled && selectedPlayers.length > 0 && (
+            <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-xl border bg-primary/5 border-primary/20 px-4 py-2.5 shadow-sm">
+              <p className="text-sm font-semibold text-primary">
+                {selectedPlayers.length} selected
+              </p>
+              <div className="flex flex-wrap gap-2 ml-auto">
+                <Button
+                  size="sm"
+                  className="rounded-full h-8"
+                  disabled={busy || bulkProcessing}
+                  onClick={() => setBulkAction('age')}
+                >
+                  <BadgeCheck className="h-3.5 w-3.5 mr-1.5" /> Verify Birth Certificates
+                </Button>
+                <Button
+                  size="sm"
+                  className="rounded-full h-8"
+                  disabled={busy || bulkProcessing}
+                  onClick={() => setBulkAction('physical')}
+                >
+                  <BadgeCheck className="h-3.5 w-3.5 mr-1.5" /> Verify Physicals
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-full h-8 text-muted-foreground"
+                  disabled={bulkProcessing}
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear selection
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Table / Cards */}
           {filteredPlayers.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
@@ -593,9 +680,19 @@ export function PlayerTable({
                   <Card key={player.id} className="border shadow-sm">
                     <CardContent className="p-4 space-y-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-sm">{player.firstName} {player.lastName}</p>
-                          <p className="text-xs text-muted-foreground">{divisionName} · DOB {player.dateOfBirth}</p>
+                        <div className="flex items-start gap-3">
+                          {bulkEnabled && (
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={selectedIds.has(player.id)}
+                              onCheckedChange={() => toggleSelect(player.id)}
+                              aria-label={`Select ${player.firstName} ${player.lastName}`}
+                            />
+                          )}
+                          <div>
+                            <p className="font-semibold text-sm">{player.firstName} {player.lastName}</p>
+                            <p className="text-xs text-muted-foreground">{divisionName} · DOB {player.dateOfBirth}</p>
+                          </div>
                         </div>
                         <PaymentBadge enrollment={enrollment} />
                       </div>
@@ -656,7 +753,16 @@ export function PlayerTable({
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent bg-secondary/10">
-                    <TableHead className="pl-6">Player</TableHead>
+                    {bulkEnabled && (
+                      <TableHead className="w-10 pl-4">
+                        <Checkbox
+                          checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                          onCheckedChange={toggleSelectAll}
+                          aria-label="Select all players"
+                        />
+                      </TableHead>
+                    )}
+                    <TableHead className={bulkEnabled ? '' : 'pl-6'}>Player</TableHead>
                     <TableHead>Division</TableHead>
                     <TableHead>Payment</TableHead>
                     <TableHead>Birth Cert</TableHead>
@@ -671,8 +777,17 @@ export function PlayerTable({
                     const divisionId = enrollment?.divisionId ?? player.divisionId;
                     const divisionName = divisionId ? (divisionNameMap.get(divisionId) ?? '—') : '—';
                     return (
-                      <TableRow key={player.id}>
-                        <TableCell className="pl-6 py-4">
+                      <TableRow key={player.id} data-state={selectedIds.has(player.id) ? 'selected' : undefined}>
+                        {bulkEnabled && (
+                          <TableCell className="w-10 pl-4">
+                            <Checkbox
+                              checked={selectedIds.has(player.id)}
+                              onCheckedChange={() => toggleSelect(player.id)}
+                              aria-label={`Select ${player.firstName} ${player.lastName}`}
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell className={`py-4 ${bulkEnabled ? '' : 'pl-6'}`}>
                           <div className="font-semibold">{player.firstName} {player.lastName}</div>
                           <div className="text-xs text-muted-foreground">{player.dateOfBirth}</div>
                         </TableCell>
@@ -1024,6 +1139,29 @@ export function PlayerTable({
               onClick={handleDelete}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Player'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk verify confirmation */}
+      <AlertDialog open={!!bulkAction} onOpenChange={open => { if (!open && !bulkProcessing) setBulkAction(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {bulkAction === 'age' ? 'Verify birth certificates?' : 'Verify physicals?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This marks the {bulkAction === 'age' ? 'birth certificate' : 'physical form'} as verified for
+              the <strong>{selectedPlayers.length} selected player{selectedPlayers.length !== 1 ? 's' : ''}</strong>,
+              recorded under your name. Players without an uploaded document, or already verified, are skipped
+              automatically.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkProcessing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={bulkProcessing} onClick={(e) => { e.preventDefault(); handleBulkConfirm(); }}>
+              {bulkProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : `Verify ${selectedPlayers.length} Player${selectedPlayers.length !== 1 ? 's' : ''}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
