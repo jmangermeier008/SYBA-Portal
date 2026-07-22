@@ -763,17 +763,24 @@ export default function EquipmentPage() {
   const filteredShedItems = useMemo(() => {
     if (!shedItems) return [];
     const q = shedSearchQuery.toLowerCase();
-    return shedItems.filter(item => {
-      if (item.status === 'retired' && !showRetired) return false;
-      if (shedTypeFilter !== 'all' && item.type !== shedTypeFilter) return false;
-      if (!q) return true;
-      return (
-        item.tagNumber.toLowerCase().includes(q) ||
-        typeLabel(item.type, typeLabels).toLowerCase().includes(q) ||
-        item.size.toLowerCase().includes(q) ||
-        (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
+    return shedItems
+      .filter(item => {
+        if (item.status === 'retired' && !showRetired) return false;
+        if (shedTypeFilter !== 'all' && item.type !== shedTypeFilter) return false;
+        if (!q) return true;
+        return (
+          item.tagNumber.toLowerCase().includes(q) ||
+          typeLabel(item.type, typeLabels).toLowerCase().includes(q) ||
+          item.size.toLowerCase().includes(q) ||
+          (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
+        );
+      })
+      // Stable, human order: grouped by type name, then numeric-aware tag
+      // number (H-2 before H-10) — same ordering as the inventory export
+      .sort((a, b) =>
+        typeLabel(a.type, typeLabels).localeCompare(typeLabel(b.type, typeLabels)) ||
+        a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true })
       );
-    });
   }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap, showRetired, typeLabels]);
 
   // Bulk recert selection targets: visible helmets/shoulder pads that aren't retired
