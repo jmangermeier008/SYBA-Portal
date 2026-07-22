@@ -275,7 +275,7 @@ export default function EquipmentPage() {
   const [shedSearchQuery, setShedSearchQuery] = useState('');
   const [shedTypeFilter, setShedTypeFilter] = useState<string>('all');
   const [addItemDialog, setAddItemDialog] = useState(false);
-  const [addItemForm, setAddItemForm] = useState({ tagNumber: '', type: 'helmet' as string, size: '', notes: '' });
+  const [addItemForm, setAddItemForm] = useState({ tagNumber: '', type: 'helmet' as string, size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
   const [addItemCustomType, setAddItemCustomType] = useState('');
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [checkOutDialog, setCheckOutDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
@@ -803,6 +803,11 @@ export default function EquipmentPage() {
       toast({ title: 'Duplicate tag number', description: `Tag #${addItemForm.tagNumber.trim()} already exists in inventory.`, variant: 'destructive' });
       return;
     }
+    const year = addItemForm.purchaseYear.trim();
+    if (year && !/^\d{4}$/.test(year)) {
+      toast({ title: 'Invalid purchase year', description: 'Enter a 4-digit year, e.g. 2024.', variant: 'destructive' });
+      return;
+    }
     setAddItemSaving(true);
     try {
       const batch = writeBatch(db);
@@ -811,6 +816,9 @@ export default function EquipmentPage() {
         type,
         size: addItemForm.size.trim(),
         status: 'available',
+        ...(year ? { purchaseYear: Number(year) } : {}),
+        ...(addItemForm.lastRecertDate ? { lastRecertDate: addItemForm.lastRecertDate } : {}),
+        ...(addItemForm.condition ? { condition: addItemForm.condition } : {}),
         notes: addItemForm.notes.trim() || '',
       });
       // Register brand-new custom types so they persist even at zero items
@@ -819,7 +827,7 @@ export default function EquipmentPage() {
       }
       await batch.commit();
       toast({ title: 'Item added', description: `Tag #${addItemForm.tagNumber} added to Shed.` });
-      setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '' });
+      setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
       setAddItemCustomType('');
       setAddItemDialog(false);
     } catch (err: any) {
@@ -2359,7 +2367,7 @@ export default function EquipmentPage() {
         </Tabs>
 
         {/* Add Item Dialog */}
-        <Dialog open={addItemDialog} onOpenChange={(open) => { setAddItemDialog(open); if (!open) { setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '' }); setAddItemCustomType(''); } }}>
+        <Dialog open={addItemDialog} onOpenChange={(open) => { setAddItemDialog(open); if (!open) { setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' }); setAddItemCustomType(''); } }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -2406,10 +2414,47 @@ export default function EquipmentPage() {
                   onChange={(e) => setAddItemForm(f => ({ ...f, size: e.target.value }))}
                 />
               </div>
+              {RECERT_TYPES.has(addItemForm.type) && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Purchase Year</Label>
+                      <Input placeholder="e.g. 2024" inputMode="numeric" value={addItemForm.purchaseYear}
+                        onChange={(e) => setAddItemForm(f => ({ ...f, purchaseYear: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Last Recert Date</Label>
+                      <Input type="date" value={addItemForm.lastRecertDate}
+                        onChange={(e) => setAddItemForm(f => ({ ...f, lastRecertDate: e.target.value }))} />
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full h-8 text-xs gap-1.5"
+                    onClick={() => setAddItemForm(f => ({ ...f, lastRecertDate: new Date().toISOString().slice(0, 10) }))}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Recertified today
+                  </Button>
+                </>
+              )}
+              <div className="space-y-1">
+                <Label>Condition</Label>
+                <Select value={addItemForm.condition || 'unset'} onValueChange={(v) => setAddItemForm(f => ({ ...f, condition: v === 'unset' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="Not recorded" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">Not recorded</SelectItem>
+                    {(Object.entries(CONDITION_LABELS) as [ItemCondition, string][]).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1">
                 <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
                 <Input
-                  placeholder="Condition, color, etc."
+                  placeholder="Condition details, color, etc."
                   value={addItemForm.notes}
                   onChange={(e) => setAddItemForm(f => ({ ...f, notes: e.target.value }))}
                 />
