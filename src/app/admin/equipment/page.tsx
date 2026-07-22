@@ -1148,38 +1148,78 @@ export default function EquipmentPage() {
 
   function downloadTemplate() {
     const wb = XLSX.utils.book_new();
+    const label = (slug: ShedItemType) => typeLabel(slug, typeLabels);
     const data = [
       ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Date', 'Notes'],
-      ['H-001', 'helmet', 'YM', '2024', '2025-06-01', 'Example row — replace with your real inventory'],
-      ['SP-001', 'shoulder_pads', 'YM', '2024', '2025-06-01', ''],
-      ['GJ-001', 'game_jersey', 'YL', '', '', ''],
-      ['SJ-001', 'scrimmage_jersey', 'YL', '', '', ''],
-      ['PJ-001', 'practice_jersey', 'YL', '', '', ''],
-      ['GP-001', 'game_pants', 'YM', '', '', ''],
-      ['PP-001', 'practice_pants', 'YM', '', '', ''],
+      ['H-001', label('helmet'), 'YM', '2024', '2025-06-01', 'Example row — replace with your real inventory'],
+      ['SP-001', label('shoulder_pads'), 'YM', '2024', '2025-06-01', ''],
+      ['GJ-001', label('game_jersey'), 'YL', '', '', ''],
+      ['SJ-001', label('scrimmage_jersey'), 'YL', '', '', ''],
+      ['PJ-001', label('practice_jersey'), 'YL', '', '', ''],
+      ['GP-001', label('game_pants'), 'YM', '', '', ''],
+      ['PP-001', label('practice_pants'), 'YM', '', '', ''],
     ];
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 44 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
 
-    const standardTypes = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
+    const standardTypeLabels = (Object.keys(SHED_ITEM_TYPES) as ShedItemType[]).map(label);
+    const customTypeLabels = customTypes.map((slug) => typeLabel(slug, typeLabels));
     const valuesData: (string | string[])[][] = [
-      ['Standard Types', '', 'Valid Sizes (Helmets)', '', 'Valid Sizes (All Others)'],
-      ...Array.from({ length: Math.max(standardTypes.length, HELMET_SIZES.length, PAD_SIZES.length) }, (_, i) => [
-        standardTypes[i] ?? '',
+      ['Standard Types', '', 'Custom Types', '', 'Valid Sizes (Helmets)', '', 'Valid Sizes (All Others)'],
+      ...Array.from({ length: Math.max(standardTypeLabels.length, customTypeLabels.length, HELMET_SIZES.length, PAD_SIZES.length) }, (_, i) => [
+        standardTypeLabels[i] ?? '',
+        '',
+        customTypeLabels[i] ?? '',
         '',
         HELMET_SIZES[i] ?? '',
         '',
         PAD_SIZES[i] ?? '',
       ]),
       [''],
-      ['Custom types (e.g. "mouth_guard") are also accepted. They are tracked in Shed Inventory but do not appear as Player Assignment columns.'],
+      ['New custom types (e.g. "Mouth Guard") are also accepted. They are tracked in Shed Inventory but do not appear as Player Assignment columns.'],
       ['Purchase Year (e.g. 2024) and Last Recert Date (YYYY-MM-DD) are optional but recommended for helmets and shoulder pads — they drive the 2-year recert and 10-year service-life flags.'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(valuesData);
-    ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
+    ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'Valid Values');
     XLSX.writeFile(wb, 'equipment_inventory_template.xlsx');
+  }
+
+  function handleExportInventory() {
+    const items = [...(shedItems ?? [])].sort(
+      (a, b) => typeLabel(a.type, typeLabels).localeCompare(typeLabel(b.type, typeLabels)) ||
+        a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true })
+    );
+    const recertText: Record<RecertState, string> = {
+      retire: 'Retire (10+ yrs)', due: 'Recert due', 'no-record': 'No recert record', ok: 'OK',
+    };
+    // Template columns first so the file is re-import-compatible (import reads
+    // named columns and ignores the audit columns)
+    const data = [
+      ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Date', 'Notes', 'Status', 'Issued To', 'Issued At', 'Condition', 'Recert'],
+      ...items.map((item) => {
+        const state = recertState(item);
+        return [
+          item.tagNumber,
+          typeLabel(item.type, typeLabels),
+          item.size,
+          item.purchaseYear ? String(item.purchaseYear) : '',
+          item.lastRecertDate ?? '',
+          item.notes ?? '',
+          item.status === 'available' ? 'Available' : item.status === 'issued' ? 'Issued' : 'Retired',
+          item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? item.issuedToPlayerId) : '',
+          item.status === 'issued' && item.issuedAt ? new Date(item.issuedAt).toLocaleDateString() : '',
+          item.condition ? CONDITION_LABELS[item.condition] : '',
+          state ? recertText[state] : '',
+        ];
+      }),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 30 }, { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+    XLSX.writeFile(wb, `equipment_inventory_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   async function parseImportFile(file: File): Promise<{ valid: ImportRow[]; errors: ImportError[] }> {
@@ -1191,23 +1231,31 @@ export default function EquipmentPage() {
     const existingTags = new Set((shedItems ?? []).map((i) => i.tagNumber.toLowerCase()));
     const seenTags = new Set<string>();
 
+    // Display labels (including renames, e.g. "Head Protector" for helmet) resolve
+    // to their existing slug instead of minting a new type
+    const labelToSlug = new Map<string, string>();
+    Object.entries(SHED_ITEM_TYPES).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
+    Object.entries(typeLabels).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
+
     const valid: ImportRow[] = [];
     const errors: ImportError[] = [];
 
     rows.forEach((row, idx) => {
       const rowNum = idx + 2;
       const tagNumber = String(row['Tag Number'] ?? '').trim();
-      // Custom types are accepted — normalized to a slug (e.g. "Mouth Guard" → mouth_guard).
-      // A renamed display label (e.g. "Head Protector" for helmet) resolves to its
-      // existing slug instead of minting a new type.
+      // Custom types are accepted — normalized to a slug (e.g. "Mouth Guard" → mouth_guard)
       const rawType = String(row['Type'] ?? '').trim();
-      const labelToSlug = new Map<string, string>();
-      Object.entries(SHED_ITEM_TYPES).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
-      Object.entries(typeLabels).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
       const type = labelToSlug.get(rawType.toLowerCase()) ?? normalizeTypeSlug(rawType);
       const size = String(row['Size'] ?? '').trim();
       const purchaseYearRaw = String(row['Purchase Year'] ?? '').trim();
-      const lastRecertRaw = String(row['Last Recert Date'] ?? '').trim();
+      // A genuine Excel date cell arrives as a serial number — convert it to YYYY-MM-DD
+      const lastRecertCell = row['Last Recert Date'] as unknown;
+      const lastRecertRaw = typeof lastRecertCell === 'number'
+        ? (() => {
+            const d = XLSX.SSF.parse_date_code(lastRecertCell);
+            return d ? `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}` : String(lastRecertCell);
+          })()
+        : String(lastRecertCell ?? '').trim();
       const notes = String(row['Notes'] ?? '').trim();
 
       if (!tagNumber) { errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row }); return; }
@@ -1237,27 +1285,32 @@ export default function EquipmentPage() {
     if (!db || importRows.length === 0) return;
     setImportSaving(true);
     try {
-      const batch = writeBatch(db);
-      importRows.forEach((row) => {
-        const ref = doc(collection(db, 'equipmentInventory'));
-        batch.set(ref, {
-          tagNumber: row.tagNumber,
-          type: row.type,
-          size: row.size,
-          status: 'available',
-          ...(row.purchaseYear ? { purchaseYear: row.purchaseYear } : {}),
-          ...(row.lastRecertDate ? { lastRecertDate: row.lastRecertDate } : {}),
-          notes: row.notes ?? '',
-        });
-      });
-      // Register any brand-new custom types so they persist at zero items
-      const newSlugs = new Set(
+      // Register any brand-new custom types so they persist at zero items, then
+      // the item rows — chunked to stay under Firestore's 500-op batch limit
+      const newSlugs = [...new Set(
         importRows.map((r) => r.type).filter((t) => !(t in SHED_ITEM_TYPES) && !typeLabels[t])
-      );
+      )];
+      const typesBatch = writeBatch(db);
       newSlugs.forEach((slug) => {
-        batch.set(doc(db, 'equipmentTypes', slug), { label: typeLabel(slug) });
+        typesBatch.set(doc(db, 'equipmentTypes', slug), { label: typeLabel(slug) });
       });
-      await batch.commit();
+      if (newSlugs.length > 0) await typesBatch.commit();
+
+      for (let i = 0; i < importRows.length; i += 400) {
+        const batch = writeBatch(db);
+        importRows.slice(i, i + 400).forEach((row) => {
+          batch.set(doc(collection(db, 'equipmentInventory')), {
+            tagNumber: row.tagNumber,
+            type: row.type,
+            size: row.size,
+            status: 'available',
+            ...(row.purchaseYear ? { purchaseYear: row.purchaseYear } : {}),
+            ...(row.lastRecertDate ? { lastRecertDate: row.lastRecertDate } : {}),
+            notes: row.notes ?? '',
+          });
+        });
+        await batch.commit();
+      }
       toast({ title: 'Import complete', description: `${importRows.length} item${importRows.length !== 1 ? 's' : ''} added to inventory.` });
       setImportDialog(false);
       setImportRows([]);
@@ -1975,6 +2028,14 @@ export default function EquipmentPage() {
                 </Button>
                 <Button variant="outline" onClick={downloadTemplate} className="rounded-xl gap-1.5 flex-1 sm:flex-initial">
                   <Download className="h-4 w-4" /> Download Template
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleExportInventory}
+                  disabled={(shedItems?.length ?? 0) === 0}
+                  className="rounded-xl gap-1.5 flex-1 sm:flex-initial"
+                >
+                  <Download className="h-4 w-4" /> Export Inventory
                 </Button>
                 <Button
                   variant="outline"
