@@ -62,11 +62,19 @@ interface CoachProfile {
   email: string;
 }
 
-// The two PA Act 153 clearance docs every coach/volunteer must hold. Labels
-// mirror src/app/coach/compliance/page.tsx so notifications read the same.
-const CLEARANCE_DOCS = [
+// The two PA Act 153 clearance docs every coach/volunteer must hold — only
+// these gate coach portal access via complianceStatus. Labels mirror
+// src/app/coach/compliance/page.tsx so notifications read the same.
+const REQUIRED_CLEARANCE_DOCS = [
   { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance' },
   { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check' },
+];
+
+// All reviewable compliance docs, including tracking-only ones that never
+// block portal access.
+const ALL_CLEARANCE_DOCS = [
+  ...REQUIRED_CLEARANCE_DOCS,
+  { id: 'USAFootball', label: 'USA Football Coach Certification' },
 ];
 
 function getEnrollmentStatus(e: Enrollment) {
@@ -486,7 +494,7 @@ export default function RegistrationDashboardPage() {
   ): Promise<'approved' | 'pending' | 'action_required'> => {
     if (!db) return 'pending';
     const snaps = await Promise.all(
-      CLEARANCE_DOCS.map(c => getDoc(doc(db, 'userProfiles', userId, 'clearances', c.id)))
+      REQUIRED_CLEARANCE_DOCS.map(c => getDoc(doc(db, 'userProfiles', userId, 'clearances', c.id)))
     );
     const statuses = snaps.map(s => (s.exists() ? (s.data() as any).status : undefined));
     const overall = statuses.every(s => s === 'Approved')
@@ -509,7 +517,7 @@ export default function RegistrationDashboardPage() {
     reason?: string
   ) => {
     if (!db) return;
-    const label = CLEARANCE_DOCS.find(c => c.id === clearanceId)?.label ?? clearanceId;
+    const label = ALL_CLEARANCE_DOCS.find(c => c.id === clearanceId)?.label ?? clearanceId;
     await setDoc(doc(db, 'notifications', crypto.randomUUID()), {
       userId,
       type: status === 'Approved' ? 'clearanceApproved' : 'clearanceRejected',

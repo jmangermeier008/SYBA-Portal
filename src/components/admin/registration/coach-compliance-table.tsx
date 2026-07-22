@@ -82,6 +82,7 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const CLEARANCE_SLOTS: { type: string; label: string }[] = [
   { type: 'ChildAbuse', label: 'PA Child Abuse History Clearance' },
   { type: 'CriminalRecord', label: 'PA State Police Criminal Record Check' },
+  { type: 'USAFootball', label: 'USA Football Coach Certification' },
 ];
 
 /** Admin-side upload of a clearance on behalf of a coach who hasn't submitted one. */
@@ -160,23 +161,30 @@ function ManualClearanceUpload({
   );
 }
 
-/** Renders both clearance slots for one coach, with view/review actions and admin upload. */
+/** Renders all clearance slots for one coach, with view/review actions and admin upload. */
 function ClearanceAuditList({
   u,
   ca,
   cr,
+  uf,
   onUploadClearance,
   onReview,
 }: {
   u: CoachProfile;
   ca?: ClearanceRecord;
   cr?: ClearanceRecord;
+  uf?: ClearanceRecord;
   onUploadClearance: (coachUserId: string, type: string, expirationDate: string, file: File) => Promise<boolean>;
   onReview: (clearance: ClearanceRecord) => void;
 }) {
+  const recordsByType: Record<string, ClearanceRecord | undefined> = {
+    ChildAbuse: ca,
+    CriminalRecord: cr,
+    USAFootball: uf,
+  };
   const slots = CLEARANCE_SLOTS.map(s => ({
     ...s,
-    record: s.type === 'ChildAbuse' ? ca : cr,
+    record: recordsByType[s.type],
   }));
   return (
     <div className="space-y-4">
@@ -272,8 +280,10 @@ export function CoachComplianceTable({
       const uc = clearances.filter(c => c.userId === u.id);
       const ca = uc.find(c => ['ChildAbuse', 'child_abuse', 'childabuse'].includes(c.type));
       const cr = uc.find(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type));
+      const uf = uc.find(c => ['USAFootball', 'usa_football', 'usafootball'].includes(c.type));
+      // USA Football cert is tracking-only — only the two PA clearances gate access.
       const isCleared = [ca, cr].every(c => c?.status === 'Approved');
-      return { user: u, ca, cr, isCleared };
+      return { user: u, ca, cr, uf, isCleared };
     });
   }, [coaches, clearances]);
 
@@ -358,7 +368,7 @@ export function CoachComplianceTable({
           ) : isMobile ? (
             /* ── Mobile card layout ── */
             <div className="space-y-3">
-              {filteredVolunteers.map(({ user: u, ca, cr, isCleared }) => (
+              {filteredVolunteers.map(({ user: u, ca, cr, uf, isCleared }) => (
                 <Card key={u.id} className="border shadow-sm">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -370,6 +380,8 @@ export function CoachComplianceTable({
                           {getStatusIcon(ca?.status)}
                           <span className="text-xs text-muted-foreground ml-1">Criminal:</span>
                           {getStatusIcon(cr?.status)}
+                          <span className="text-xs text-muted-foreground ml-1">USA FB:</span>
+                          {getStatusIcon(uf?.status)}
                         </div>
                       </div>
                       <Badge
@@ -395,6 +407,7 @@ export function CoachComplianceTable({
                                 u={u}
                                 ca={ca}
                                 cr={cr}
+                                uf={uf}
                                 onUploadClearance={onUploadClearance}
                                 onReview={c => setReviewingClearance({ userId: u.id, clearance: c })}
                               />
@@ -427,12 +440,13 @@ export function CoachComplianceTable({
                     <TableHead className="pl-6">Volunteer</TableHead>
                     <TableHead className="text-center">Child Abuse</TableHead>
                     <TableHead className="text-center">Criminal</TableHead>
+                    <TableHead className="text-center">USA Football</TableHead>
                     <TableHead className="text-center">Overall</TableHead>
                     <TableHead className="pr-6 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredVolunteers.map(({ user: u, ca, cr, isCleared }) => (
+                  {filteredVolunteers.map(({ user: u, ca, cr, uf, isCleared }) => (
                     <TableRow key={u.id}>
                       <TableCell className="pl-6 py-4">
                         <div className="font-semibold">{u.displayName}</div>
@@ -443,6 +457,9 @@ export function CoachComplianceTable({
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center">{getStatusIcon(cr?.status)}</div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex justify-center">{getStatusIcon(uf?.status)}</div>
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge
@@ -469,6 +486,7 @@ export function CoachComplianceTable({
                                   u={u}
                                   ca={ca}
                                   cr={cr}
+                                  uf={uf}
                                   onUploadClearance={onUploadClearance}
                                   onReview={c => setReviewingClearance({ userId: u.id, clearance: c })}
                                 />

@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 const CLEARANCE_TYPES = [
   { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance', description: 'Mandatory state background check.' },
   { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check', description: 'State police criminal history report.' },
+  { id: 'USAFootball', label: 'USA Football Coach Certification', description: 'Annual USA Football coaching certification (football coaches).' },
 ];
 
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
