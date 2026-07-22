@@ -339,7 +339,8 @@ export type NotificationType =
   | 'coachActivity'
   | 'gameCancelled'
   | 'gameRescheduled'
-  | 'rsvpNudge';
+  | 'rsvpNudge'
+  | 'equipment';
 
 export type NotificationRelatedDocType =
   | 'game'

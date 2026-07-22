@@ -34,6 +34,7 @@ import { PlayerTable, type PlayerWithDocs, type AuditFormData, type EnrollmentRe
 import { CoachComplianceTable } from '@/components/admin/registration/coach-compliance-table';
 import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
 import type { Division } from '@/types/scheduling';
+import { countIssuedEquipment } from '@/lib/equipment';
 
 interface Enrollment {
   id: string;
@@ -424,11 +425,25 @@ export default function RegistrationDashboardPage() {
     // delete them too (no orphans) and release any division spots they held.
     const parentUid = refPath.split('/')[1];
     try {
-      const batch = writeBatch(db);
-      batch.delete(playerRef);
       const enrollSnap = await getDocs(
         query(collection(db, 'userProfiles', parentUid, 'enrollments'), where('playerId', '==', player.id))
       );
+
+      // Physical gear is still in the family's hands — make the admin resolve
+      // it in Equipment (return or retire) before the record disappears
+      const issuedCount = enrollSnap.docs.reduce(
+        (n, d) => n + countIssuedEquipment((d.data() as any).footballEquipment), 0);
+      if (issuedCount > 0) {
+        toast({
+          variant: 'destructive',
+          title: 'Cannot Delete Player',
+          description: `${issuedCount} equipment item(s) still checked out — return them in Equipment first.`,
+        });
+        return false;
+      }
+
+      const batch = writeBatch(db);
+      batch.delete(playerRef);
       for (const enrollDoc of enrollSnap.docs) {
         const e = enrollDoc.data() as any;
         batch.delete(enrollDoc.ref);

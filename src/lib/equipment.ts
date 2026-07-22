@@ -6,6 +6,7 @@
  * `equipmentInventory/{item}`.
  */
 import {
+  Timestamp,
   collection,
   deleteField,
   doc,
@@ -111,6 +112,54 @@ export const EQUIP_FIELD_MAP: Record<ShedItemType, {
   practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId',   tagField: 'practicePantsTagNumber' },
 };
 
+/** Count of standard-slot items currently issued on an enrollment's mirror fields. */
+export function countIssuedEquipment(fe?: FootballEquipment): number {
+  if (!fe) return 0;
+  return Object.values(EQUIP_FIELD_MAP)
+    .filter(({ statusField }) => fe[statusField] === 'issued').length;
+}
+
+export function hasIssuedEquipment(fe?: FootballEquipment): boolean {
+  return countIssuedEquipment(fe) > 0;
+}
+
+export interface EquipmentNotifyInfo {
+  parentUserId: string;
+  actorUid: string;
+  event: 'issued' | 'returned';
+  itemLabel: string;
+  tagNumber?: string;
+  playerName?: string;
+  /** Overrides the composed body — used for consolidated bulk-return messages. */
+  body?: string;
+}
+
+/** Adds the parent-facing in-app notification to an existing equipment batch,
+ *  matching the doc shape of coach-notifications' batchNotifications. No-ops
+ *  when the parent is missing or is the actor (no self-notification).
+ *  Limitation: enrollments carry only the primary parentUserId — a second
+ *  parent on two-parent families is not notified. */
+export function addEquipmentNotificationToBatch(
+  batch: WriteBatch,
+  db: Firestore,
+  info: EquipmentNotifyInfo
+): void {
+  if (!info.parentUserId || info.parentUserId === info.actorUid) return;
+  const tag = info.tagNumber ? ` #${info.tagNumber}` : '';
+  const who = info.playerName || 'your player';
+  batch.set(doc(db, 'notifications', crypto.randomUUID()), {
+    userId: info.parentUserId,
+    type: 'equipment',
+    title: info.event === 'issued' ? 'Equipment issued' : 'Equipment returned',
+    body: info.body ?? (info.event === 'issued'
+      ? `${info.itemLabel}${tag} was issued to ${who}.`
+      : `${info.itemLabel}${tag} was returned for ${who}.`),
+    read: false,
+    createdAt: Timestamp.now(),
+    sport: 'football',
+  });
+}
+
 export interface EquipmentEnrollmentRef {
   id: string;
   parentUserId: string;
@@ -202,6 +251,15 @@ export async function commitAssignItem(
     actorName: actor.name,
   });
 
+  addEquipmentNotificationToBatch(batch, db, {
+    parentUserId: enrollment.parentUserId,
+    actorUid: actor.uid,
+    event: 'issued',
+    itemLabel: typeLabel(equipType),
+    tagNumber: item.tagNumber,
+    playerName,
+  });
+
   // If a different item was previously assigned for this slot, return it to available
   if (prevInventoryId && prevInventoryId !== item.id) {
     batch.update(doc(db, 'equipmentInventory', prevInventoryId), {
@@ -261,6 +319,14 @@ export async function commitReturnItem(
       playerName: playerName ?? '',
       actorUid: actor.uid,
       actorName: actor.name,
+    });
+    addEquipmentNotificationToBatch(batch, db, {
+      parentUserId: enrollment.parentUserId,
+      actorUid: actor.uid,
+      event: 'returned',
+      itemLabel: typeLabel(equipType),
+      tagNumber: item.tagNumber,
+      playerName,
     });
   }
 

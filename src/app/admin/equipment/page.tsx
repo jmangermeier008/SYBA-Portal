@@ -77,6 +77,7 @@ import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 import {
   EQUIP_FIELD_MAP,
   SHED_ITEM_TYPES,
+  addEquipmentNotificationToBatch,
   addHistoryToBatch,
   commitAssignItem,
   commitReturnItem,
@@ -638,6 +639,17 @@ export default function EquipmentPage() {
         });
       }
 
+      if (linkedIds.length > 0) {
+        const playerName = playerNameMap.get(enrollment.playerId) ?? 'your player';
+        addEquipmentNotificationToBatch(batch, db, {
+          parentUserId,
+          actorUid: currentActor.uid,
+          event: 'returned',
+          itemLabel: '',
+          body: `${linkedIds.length} item${linkedIds.length !== 1 ? 's' : ''} marked returned for ${playerName}.`,
+        });
+      }
+
       await batch.commit();
       toast({ title: 'Equipment returned', description: 'All items marked as returned.' });
     } catch (err: any) {
@@ -665,6 +677,7 @@ export default function EquipmentPage() {
 
       // Chunk to stay under the 500-op batch limit: each player is 1 enrollment
       // update + up to 7 item updates + 7 history events
+      const returnedByParent = new Map<string, { count: number; playerNames: Set<string> }>();
       for (let i = 0; i < targets.length; i += 25) {
         const batch = writeBatch(db);
         targets.slice(i, i + 25).forEach((e) => {
@@ -689,9 +702,29 @@ export default function EquipmentPage() {
               actorUid: currentActor.uid,
               actorName: currentActor.name,
             });
+            const agg = returnedByParent.get(e.parentUserId!) ?? { count: 0, playerNames: new Set<string>() };
+            agg.count += 1;
+            agg.playerNames.add(playerNameMap.get(e.playerId) ?? 'your player');
+            returnedByParent.set(e.parentUserId!, agg);
           });
         });
         await batch.commit();
+      }
+
+      // One consolidated notification per parent, after all chunks land —
+      // fire-and-forget so a notification hiccup doesn't fail the bulk return
+      if (returnedByParent.size > 0) {
+        const notifBatch = writeBatch(db);
+        returnedByParent.forEach(({ count, playerNames }, parentUserId) => {
+          addEquipmentNotificationToBatch(notifBatch, db, {
+            parentUserId,
+            actorUid: currentActor.uid,
+            event: 'returned',
+            itemLabel: '',
+            body: `${count} item${count !== 1 ? 's' : ''} marked returned for ${[...playerNames].join(', ')}.`,
+          });
+        });
+        notifBatch.commit().catch(console.error);
       }
       toast({ title: 'Equipment marked as Returned', description: `${targets.length} player(s) updated.` });
       setSelectedIds(new Set());
@@ -889,6 +922,17 @@ export default function EquipmentPage() {
         actorName: currentActor.name,
       });
 
+      if (enrollment?.parentUserId) {
+        addEquipmentNotificationToBatch(batch, db, {
+          parentUserId: enrollment.parentUserId,
+          actorUid: currentActor.uid,
+          event: 'issued',
+          itemLabel: typeLabel(item.type, typeLabels),
+          tagNumber: item.tagNumber,
+          playerName: playerNameMap.get(checkOutPlayerId),
+        });
+      }
+
       // Custom types have no enrollment slot — only the shed item tracks the assignment
       const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
       if (enrollment?.parentUserId && enrollment?.id && fieldMap) {
@@ -942,17 +986,32 @@ export default function EquipmentPage() {
         actorName: currentActor.name,
       });
 
+      if (item.issuedToParentUserId) {
+        addEquipmentNotificationToBatch(batch, db, {
+          parentUserId: item.issuedToParentUserId,
+          actorUid: currentActor.uid,
+          event: 'returned',
+          itemLabel: typeLabel(item.type, typeLabels),
+          tagNumber: item.tagNumber,
+          playerName: item.issuedToPlayerId ? playerNameMap.get(item.issuedToPlayerId) : undefined,
+        });
+      }
+
+      // Only touch the enrollment mirror if the enrollment still exists — the
+      // record may have been deleted while gear was out (pre-guard data), and a
+      // batch update on a missing doc would fail the whole return
       const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
       if (item.issuedToParentUserId && item.issuedToEnrollmentId && fieldMap) {
-        const { statusField, inventoryIdField, tagField } = fieldMap;
-        batch.update(
-          doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId),
-          {
+        const enrollRef = doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId);
+        const enrollSnap = await getDoc(enrollRef);
+        if (enrollSnap.exists()) {
+          const { statusField, inventoryIdField, tagField } = fieldMap;
+          batch.update(enrollRef, {
             [`footballEquipment.${String(statusField)}`]: 'returned',
             [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
             [`footballEquipment.${String(tagField)}`]: deleteField(),
-          }
-        );
+          });
+        }
       }
 
       await batch.commit();

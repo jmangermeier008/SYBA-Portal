@@ -2,6 +2,7 @@
 
 import { getAdminFirestore, getAdminAuth, getAdminStorage } from '@/lib/firebase-admin';
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { countIssuedEquipment } from '@/lib/equipment';
 
 async function batchDelete(docs: QueryDocumentSnapshot[], batchSize = 500): Promise<number> {
   const db = getAdminFirestore();
@@ -466,6 +467,14 @@ export async function deletePlayerRecord(
     .collection(`userProfiles/${uid}/enrollments`)
     .where('playerId', '==', playerId)
     .get();
+
+  const issuedCount = enrollSnap.docs.reduce(
+    (n, d) => n + countIssuedEquipment(d.data().footballEquipment), 0);
+  if (issuedCount > 0) {
+    throw new Error(
+      `${issuedCount} equipment item(s) still checked out for this player — return them in Equipment first.`);
+  }
+
   const decrements = divisionDecrementsFor(enrollSnap.docs);
 
   const filesDeleted = await deleteStorageForPlayers([playerId]);
@@ -488,6 +497,12 @@ export async function deleteEnrollmentRecord(
   const ref = db.doc(`userProfiles/${uid}/enrollments/${enrollmentId}`);
   const snap = await ref.get();
   if (!snap.exists) return;
+
+  const issuedCount = countIssuedEquipment(snap.data()?.footballEquipment);
+  if (issuedCount > 0) {
+    throw new Error(
+      `${issuedCount} equipment item(s) still checked out on this enrollment — return them in Equipment first.`);
+  }
 
   const decrements = divisionDecrementsFor([snap as QueryDocumentSnapshot]);
   await ref.delete();

@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Trash2, UserCheck } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Shirt, Trash2, UserCheck } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo, useState } from 'react';
@@ -59,6 +59,9 @@ function NotifIcon({ type }: { type: NotificationType }) {
   if (type === 'rsvpNudge') {
     return <UserCheck className={cn(base, 'text-primary')} />;
   }
+  if (type === 'equipment') {
+    return <Shirt className={cn(base, 'text-primary')} />;
+  }
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }
 
@@ -74,6 +77,8 @@ function getNotifRoute(
   type: NotificationType | undefined,
   isCoach: boolean
 ): string | null {
+  // Parent dashboard shows the issued-gear card with tag numbers
+  if (type === 'equipment') return '/parent/dashboard';
   if (relatedDocType === 'concessionSlot') return '/parent/volunteers';
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
   if (relatedDocType === 'game') {
