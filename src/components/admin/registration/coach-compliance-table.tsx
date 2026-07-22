@@ -281,8 +281,9 @@ export function CoachComplianceTable({
       const ca = uc.find(c => ['ChildAbuse', 'child_abuse', 'childabuse'].includes(c.type));
       const cr = uc.find(c => ['CriminalRecord', 'criminal', 'criminal_record', 'criminalrecord'].includes(c.type));
       const uf = uc.find(c => ['USAFootball', 'usa_football', 'usafootball'].includes(c.type));
-      // USA Football cert is tracking-only — only the two PA clearances gate access.
-      const isCleared = [ca, cr].every(c => c?.status === 'Approved');
+      // CLEARED requires all three docs, but portal access (complianceStatus)
+      // still keys off only the two PA clearances.
+      const isCleared = [ca, cr, uf].every(c => c?.status === 'Approved');
       return { user: u, ca, cr, uf, isCleared };
     });
   }, [coaches, clearances]);
