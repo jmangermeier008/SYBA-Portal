@@ -42,6 +42,7 @@ interface Player {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  grade?: string;
   parentUserId: string;
   medicalNotes?: string;
   ageVerified?: boolean;
@@ -262,6 +263,7 @@ export default function FamilyPage() {
                         <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
                         <CardDescription className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" /> Born: {player.dateOfBirth}
+                          {player.grade && <> · Grade: {player.grade}</>}
                         </CardDescription>
                       </div>
                     </div>
@@ -329,6 +331,7 @@ export default function FamilyPage() {
                         <CardTitle className="font-headline">{player.firstName} {player.lastName}</CardTitle>
                         <CardDescription className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" /> Born: {player.dateOfBirth}
+                          {player.grade && <> · Grade: {player.grade}</>}
                         </CardDescription>
                       </div>
                     </div>

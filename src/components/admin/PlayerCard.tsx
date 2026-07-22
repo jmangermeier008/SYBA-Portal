@@ -37,6 +37,7 @@ export interface PlayerCardPlayer {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  grade?: string;
   medicalNotes?: string;
 }
 
@@ -129,6 +130,11 @@ export function PlayerCard({
                 <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
                   Age: {calculateLeagueAge(player.dateOfBirth)}
                 </Badge>
+                {player.grade && (
+                  <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
+                    Grade: {player.grade}
+                  </Badge>
+                )}
                 {assigned && !editingJersey && (
                   <Badge variant="outline" className="text-[10px]">#{assigned}</Badge>
                 )}

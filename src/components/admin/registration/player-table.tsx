@@ -462,7 +462,7 @@ export function PlayerTable({
   };
 
   const exportCSV = () => {
-    const headers = ['Player Name', 'Division', 'Age', 'DOB', 'Payment Status', 'Birth Cert Status', 'Physical Status'];
+    const headers = ['Player Name', 'Division', 'Age', 'Grade', 'DOB', 'Payment Status', 'Birth Cert Status', 'Physical Status'];
     if (showLeagueForm) headers.push('Registration Form', 'Parent/Player Agreement');
     const rows = filteredPlayers.map(player => {
       const divName = player.divisionId ? (divisionNameMap.get(player.divisionId) ?? '') : '';
@@ -473,7 +473,7 @@ export function PlayerTable({
       const physicalStatus = player.compliance?.physicalVerified ? 'Verified' : player.physicalFormUrl ? 'Pending' : 'No Document';
       const row = [
         `${player.firstName} ${player.lastName}`,
-        divName, String(age), player.dateOfBirth ?? '',
+        divName, String(age), player.grade ?? '', player.dateOfBirth ?? '',
         payStatus, birthCertStatus, physicalStatus,
       ];
       if (showLeagueForm) {
@@ -691,7 +691,7 @@ export function PlayerTable({
                           )}
                           <div>
                             <p className="font-semibold text-sm">{player.firstName} {player.lastName}</p>
-                            <p className="text-xs text-muted-foreground">{divisionName} · DOB {player.dateOfBirth}</p>
+                            <p className="text-xs text-muted-foreground">{divisionName} · DOB {player.dateOfBirth}{player.grade ? ` · Grade ${player.grade}` : ''}</p>
                           </div>
                         </div>
                         <PaymentBadge enrollment={enrollment} />
@@ -789,7 +789,7 @@ export function PlayerTable({
                         )}
                         <TableCell className={`py-4 ${bulkEnabled ? '' : 'pl-6'}`}>
                           <div className="font-semibold">{player.firstName} {player.lastName}</div>
-                          <div className="text-xs text-muted-foreground">{player.dateOfBirth}</div>
+                          <div className="text-xs text-muted-foreground">{player.dateOfBirth}{player.grade ? ` · Grade ${player.grade}` : ''}</div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{divisionName}</TableCell>
                         <TableCell>

@@ -52,6 +52,7 @@ interface Player {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  grade?: string;
   medicalNotes?: string;
   parentUserId: string;
   emergencyContacts?: EmergencyContact[];
@@ -319,6 +320,11 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                                 <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
                                   Age: {calculateLeagueAge(player.dateOfBirth)}
                                 </Badge>
+                                {player.grade && (
+                                  <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px]">
+                                    Grade: {player.grade}
+                                  </Badge>
+                                )}
                                 {enrollment.jerseyNumber && (
                                   <Badge variant="outline" className="text-[10px]">#{enrollment.jerseyNumber}</Badge>
                                 )}
