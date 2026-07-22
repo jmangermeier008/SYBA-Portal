@@ -146,18 +146,21 @@ const MAX_SERVICE_YEARS = 10;
 
 type RecertState = 'retire' | 'due' | 'no-record' | 'ok';
 
+/** Extracts the 4-digit year from a stored recert value — new records store
+ *  "YYYY", legacy live data may still be "YYYY-MM-DD". */
+function recertYear(value?: string): number | null {
+  if (!value) return null;
+  const y = Number(value.slice(0, 4));
+  return Number.isInteger(y) && y > 0 ? y : null;
+}
+
 function recertState(item: ShedItem): RecertState | null {
   if (!RECERT_TYPES.has(item.type)) return null;
-  const now = new Date();
-  if (item.purchaseYear && now.getFullYear() - item.purchaseYear >= MAX_SERVICE_YEARS) return 'retire';
-  const baseline = item.lastRecertDate
-    ? new Date(item.lastRecertDate)
-    : item.purchaseYear
-      ? new Date(item.purchaseYear, 0, 1)
-      : null;
-  if (!baseline) return 'no-record';
-  const cutoff = new Date(now.getFullYear() - RECERT_CYCLE_YEARS, now.getMonth(), now.getDate());
-  return baseline <= cutoff ? 'due' : 'ok';
+  const nowYear = new Date().getFullYear();
+  if (item.purchaseYear && nowYear - item.purchaseYear >= MAX_SERVICE_YEARS) return 'retire';
+  const baselineYear = recertYear(item.lastRecertDate) ?? item.purchaseYear;
+  if (!baselineYear) return 'no-record';
+  return nowYear - baselineYear >= RECERT_CYCLE_YEARS ? 'due' : 'ok';
 }
 
 function normalizeTypeSlug(raw: string): string {
@@ -177,7 +180,7 @@ function RecertBadge({ item }: { item: ShedItem }) {
     case 'ok':
       return (
         <span className="text-xs text-green-700 whitespace-nowrap">
-          OK{item.lastRecertDate ? ` · ${item.lastRecertDate}` : ''}
+          OK{recertYear(item.lastRecertDate) ? ` · ${recertYear(item.lastRecertDate)}` : ''}
         </span>
       );
   }
@@ -815,6 +818,11 @@ export default function EquipmentPage() {
       toast({ title: 'Invalid purchase year', description: 'Enter a 4-digit year, e.g. 2024.', variant: 'destructive' });
       return;
     }
+    const addRecert = addItemForm.lastRecertDate.trim();
+    if (addRecert && !/^\d{4}$/.test(addRecert)) {
+      toast({ title: 'Invalid recert year', description: 'Enter a 4-digit year, e.g. 2025.', variant: 'destructive' });
+      return;
+    }
     setAddItemSaving(true);
     try {
       const batch = writeBatch(db);
@@ -824,7 +832,7 @@ export default function EquipmentPage() {
         size: addItemForm.size.trim(),
         status: 'available',
         ...(year ? { purchaseYear: Number(year) } : {}),
-        ...(addItemForm.lastRecertDate ? { lastRecertDate: addItemForm.lastRecertDate } : {}),
+        ...(addRecert ? { lastRecertDate: addRecert } : {}),
         ...(addItemForm.condition ? { condition: addItemForm.condition } : {}),
         notes: addItemForm.notes.trim() || '',
       });
@@ -1056,7 +1064,7 @@ export default function EquipmentPage() {
       size: item.size,
       notes: item.notes ?? '',
       purchaseYear: item.purchaseYear ? String(item.purchaseYear) : '',
-      lastRecertDate: item.lastRecertDate ?? '',
+      lastRecertDate: recertYear(item.lastRecertDate) ? String(recertYear(item.lastRecertDate)) : '',
       condition: item.condition ?? '',
     });
     setEditDialog({ open: true, item });
@@ -1068,6 +1076,11 @@ export default function EquipmentPage() {
     const year = editForm.purchaseYear.trim();
     if (year && !/^\d{4}$/.test(year)) {
       toast({ title: 'Invalid purchase year', description: 'Enter a 4-digit year, e.g. 2024.', variant: 'destructive' });
+      return;
+    }
+    const editRecert = editForm.lastRecertDate.trim();
+    if (editRecert && !/^\d{4}$/.test(editRecert)) {
+      toast({ title: 'Invalid recert year', description: 'Enter a 4-digit year, e.g. 2025.', variant: 'destructive' });
       return;
     }
     const newTag = editForm.tagNumber.trim();
@@ -1087,7 +1100,7 @@ export default function EquipmentPage() {
         size: editForm.size.trim(),
         notes: editForm.notes.trim(),
         purchaseYear: year ? Number(year) : deleteField(),
-        lastRecertDate: editForm.lastRecertDate || deleteField(),
+        lastRecertDate: editRecert || deleteField(),
         condition: editForm.condition || deleteField(),
       });
       // Issued item with a standard slot: keep the enrollment's mirrored tag in sync
@@ -1113,6 +1126,10 @@ export default function EquipmentPage() {
 
   async function handleBulkRecert() {
     if (!db || !recertDateValue || shedSelected.size === 0) return;
+    if (!/^\d{4}$/.test(recertDateValue.trim())) {
+      toast({ title: 'Invalid recert year', description: 'Enter a 4-digit year, e.g. 2025.', variant: 'destructive' });
+      return;
+    }
     setRecertSaving(true);
     try {
       const targets = (shedItems ?? []).filter((i) => shedSelected.has(i.id));
@@ -1120,11 +1137,11 @@ export default function EquipmentPage() {
       for (let i = 0; i < targets.length; i += 400) {
         const batch = writeBatch(db);
         targets.slice(i, i + 400).forEach((item) => {
-          batch.update(doc(db, 'equipmentInventory', item.id), { lastRecertDate: recertDateValue });
+          batch.update(doc(db, 'equipmentInventory', item.id), { lastRecertDate: recertDateValue.trim() });
         });
         await batch.commit();
       }
-      toast({ title: 'Recert date saved', description: `${targets.length} item${targets.length !== 1 ? 's' : ''} marked recertified ${recertDateValue}.` });
+      toast({ title: 'Recert year saved', description: `${targets.length} item${targets.length !== 1 ? 's' : ''} marked recertified ${recertDateValue.trim()}.` });
       setShedSelected(new Set());
       setRecertDateDialog(false);
       setRecertDateValue('');
@@ -1224,9 +1241,9 @@ export default function EquipmentPage() {
     const wb = XLSX.utils.book_new();
     const label = (slug: ShedItemType) => typeLabel(slug, typeLabels);
     const data = [
-      ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Date', 'Notes'],
-      ['H-001', label('helmet'), 'YM', '2024', '2025-06-01', 'Example row — replace with your real inventory'],
-      ['SP-001', label('shoulder_pads'), 'YM', '2024', '2025-06-01', ''],
+      ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Year', 'Notes'],
+      ['H-001', label('helmet'), 'YM', '2024', '2025', 'Example row — replace with your real inventory'],
+      ['SP-001', label('shoulder_pads'), 'YM', '2024', '2025', ''],
       ['GJ-001', label('game_jersey'), 'YL', '', '', ''],
       ['SJ-001', label('scrimmage_jersey'), 'YL', '', '', ''],
       ['PJ-001', label('practice_jersey'), 'YL', '', '', ''],
@@ -1252,7 +1269,7 @@ export default function EquipmentPage() {
       ]),
       [''],
       ['New custom types (e.g. "Mouth Guard") are also accepted. They are tracked in Shed Inventory but do not appear as Player Assignment columns.'],
-      ['Purchase Year (e.g. 2024) and Last Recert Date (YYYY-MM-DD) are optional but recommended for helmets and shoulder pads — they drive the 2-year recert and 10-year service-life flags.'],
+      ['Purchase Year (e.g. 2024) and Last Recert Year (e.g. 2025) are optional but recommended for helmets and shoulder pads — they drive the 2-year recert and 10-year service-life flags.'],
     ];
     const ws2 = XLSX.utils.aoa_to_sheet(valuesData);
     ws2['!cols'] = [{ wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }, { wch: 4 }, { wch: 20 }];
@@ -1271,7 +1288,7 @@ export default function EquipmentPage() {
     // Template columns first so the file is re-import-compatible (import reads
     // named columns and ignores the audit columns)
     const data = [
-      ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Date', 'Notes', 'Status', 'Issued To', 'Issued At', 'Condition', 'Recert'],
+      ['Tag Number', 'Type', 'Size', 'Purchase Year', 'Last Recert Year', 'Notes', 'Status', 'Issued To', 'Issued At', 'Condition', 'Recert'],
       ...items.map((item) => {
         const state = recertState(item);
         return [
@@ -1279,7 +1296,7 @@ export default function EquipmentPage() {
           typeLabel(item.type, typeLabels),
           item.size,
           item.purchaseYear ? String(item.purchaseYear) : '',
-          item.lastRecertDate ?? '',
+          recertYear(item.lastRecertDate) ? String(recertYear(item.lastRecertDate)) : '',
           item.notes ?? '',
           item.status === 'available' ? 'Available' : item.status === 'issued' ? 'Issued' : 'Retired',
           item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? item.issuedToPlayerId) : '',
@@ -1322,14 +1339,22 @@ export default function EquipmentPage() {
       const type = labelToSlug.get(rawType.toLowerCase()) ?? normalizeTypeSlug(rawType);
       const size = String(row['Size'] ?? '').trim();
       const purchaseYearRaw = String(row['Purchase Year'] ?? '').trim();
-      // A genuine Excel date cell arrives as a serial number — convert it to YYYY-MM-DD
-      const lastRecertCell = row['Last Recert Date'] as unknown;
-      const lastRecertRaw = typeof lastRecertCell === 'number'
-        ? (() => {
-            const d = XLSX.SSF.parse_date_code(lastRecertCell);
-            return d ? `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}` : String(lastRecertCell);
-          })()
-        : String(lastRecertCell ?? '').trim();
+      // Recert is tracked by year. Accept: a plain year, a legacy full date
+      // (old exports/files), or a genuine Excel date cell (arrives as a large
+      // serial number — a typed year like 2025 is small enough to tell apart).
+      const lastRecertCell = (row['Last Recert Year'] ?? row['Last Recert Date']) as unknown;
+      let lastRecertRaw: string;
+      if (typeof lastRecertCell === 'number') {
+        if (lastRecertCell >= 1900 && lastRecertCell <= 2200) {
+          lastRecertRaw = String(lastRecertCell);
+        } else {
+          const d = XLSX.SSF.parse_date_code(lastRecertCell);
+          lastRecertRaw = d ? String(d.y) : String(lastRecertCell);
+        }
+      } else {
+        lastRecertRaw = String(lastRecertCell ?? '').trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(lastRecertRaw)) lastRecertRaw = lastRecertRaw.slice(0, 4);
+      }
       const notes = String(row['Notes'] ?? '').trim();
 
       if (!tagNumber) { errors.push({ row: rowNum, reason: 'Tag Number is required', rawData: row }); return; }
@@ -1338,8 +1363,7 @@ export default function EquipmentPage() {
       if (!type) { errors.push({ row: rowNum, reason: 'Type is required', rawData: row }); return; }
       if (!size) { errors.push({ row: rowNum, reason: 'Size is required', rawData: row }); return; }
       if (purchaseYearRaw && !/^\d{4}$/.test(purchaseYearRaw)) { errors.push({ row: rowNum, reason: `Purchase Year "${purchaseYearRaw}" must be a 4-digit year`, rawData: row }); return; }
-      // Excel may hand back a date cell in other formats; accept YYYY-MM-DD only for determinism
-      if (lastRecertRaw && !/^\d{4}-\d{2}-\d{2}$/.test(lastRecertRaw)) { errors.push({ row: rowNum, reason: `Last Recert Date "${lastRecertRaw}" must be YYYY-MM-DD`, rawData: row }); return; }
+      if (lastRecertRaw && !/^\d{4}$/.test(lastRecertRaw)) { errors.push({ row: rowNum, reason: `Last Recert Year "${lastRecertRaw}" must be a 4-digit year`, rawData: row }); return; }
 
       seenTags.add(tagNumber.toLowerCase());
       valid.push({
@@ -2150,9 +2174,9 @@ export default function EquipmentPage() {
                 <Button
                   size="sm"
                   className="rounded-full h-8 text-xs gap-1.5"
-                  onClick={() => { setRecertDateValue(new Date().toISOString().slice(0, 10)); setRecertDateDialog(true); }}
+                  onClick={() => { setRecertDateValue(String(new Date().getFullYear())); setRecertDateDialog(true); }}
                 >
-                  <CalendarCheck className="h-3.5 w-3.5" /> Set Recert Date
+                  <CalendarCheck className="h-3.5 w-3.5" /> Set Recert Year
                 </Button>
                 <Button size="sm" variant="ghost" className="rounded-full h-8 text-xs" onClick={() => setShedSelected(new Set())}>
                   Clear
@@ -2430,8 +2454,8 @@ export default function EquipmentPage() {
                         onChange={(e) => setAddItemForm(f => ({ ...f, purchaseYear: e.target.value }))} />
                     </div>
                     <div className="space-y-1">
-                      <Label>Last Recert Date</Label>
-                      <Input type="date" value={addItemForm.lastRecertDate}
+                      <Label>Last Recert Year</Label>
+                      <Input placeholder="e.g. 2025" inputMode="numeric" value={addItemForm.lastRecertDate}
                         onChange={(e) => setAddItemForm(f => ({ ...f, lastRecertDate: e.target.value }))} />
                     </div>
                   </div>
@@ -2440,9 +2464,9 @@ export default function EquipmentPage() {
                     size="sm"
                     variant="outline"
                     className="rounded-full h-8 text-xs gap-1.5"
-                    onClick={() => setAddItemForm(f => ({ ...f, lastRecertDate: new Date().toISOString().slice(0, 10) }))}
+                    onClick={() => setAddItemForm(f => ({ ...f, lastRecertDate: String(new Date().getFullYear()) }))}
                   >
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Recertified today
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Recertified this year
                   </Button>
                 </>
               )}
@@ -2533,8 +2557,8 @@ export default function EquipmentPage() {
                         onChange={(e) => setEditForm(f => ({ ...f, purchaseYear: e.target.value }))} />
                     </div>
                     <div className="space-y-1">
-                      <Label>Last Recert Date</Label>
-                      <Input type="date" value={editForm.lastRecertDate}
+                      <Label>Last Recert Year</Label>
+                      <Input placeholder="e.g. 2025" inputMode="numeric" value={editForm.lastRecertDate}
                         onChange={(e) => setEditForm(f => ({ ...f, lastRecertDate: e.target.value }))} />
                     </div>
                   </div>
@@ -2543,9 +2567,9 @@ export default function EquipmentPage() {
                     size="sm"
                     variant="outline"
                     className="rounded-full h-8 text-xs gap-1.5"
-                    onClick={() => setEditForm(f => ({ ...f, lastRecertDate: new Date().toISOString().slice(0, 10) }))}
+                    onClick={() => setEditForm(f => ({ ...f, lastRecertDate: String(new Date().getFullYear()) }))}
                   >
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Recertified today
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Recertified this year
                   </Button>
                 </>
               )}
@@ -2956,16 +2980,16 @@ export default function EquipmentPage() {
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <CalendarCheck className="h-5 w-5 text-primary" /> Set Recert Date
+                <CalendarCheck className="h-5 w-5 text-primary" /> Set Recert Year
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                Sets the Last Recert Date on {shedSelected.size} selected item{shedSelected.size !== 1 ? 's' : ''} — use after a batch comes back from reconditioning.
+                Sets the Last Recert Year on {shedSelected.size} selected item{shedSelected.size !== 1 ? 's' : ''} — use after a batch comes back from reconditioning.
               </p>
               <div className="space-y-1">
-                <Label>Recert Date <span className="text-destructive">*</span></Label>
-                <Input type="date" value={recertDateValue} onChange={(e) => setRecertDateValue(e.target.value)} />
+                <Label>Recert Year <span className="text-destructive">*</span></Label>
+                <Input placeholder="e.g. 2025" inputMode="numeric" value={recertDateValue} onChange={(e) => setRecertDateValue(e.target.value)} />
               </div>
             </div>
             <DialogFooter>

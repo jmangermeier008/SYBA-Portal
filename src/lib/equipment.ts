@@ -71,7 +71,7 @@ export interface ShedItem {
   returnedAt?: string;
   retiredAt?: string;
   purchaseYear?: number;        // year the item was bought — drives 10-yr service-life flag
-  lastRecertDate?: string;      // YYYY-MM-DD — drives 2-yr recert cycle flag
+  lastRecertDate?: string;      // "YYYY" (legacy values may be "YYYY-MM-DD") — drives 2-yr recert cycle flag
   condition?: ItemCondition;    // captured at return time
   notes?: string;
 }
