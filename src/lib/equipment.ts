@@ -6,11 +6,13 @@
  * `equipmentInventory/{item}`.
  */
 import {
+  collection,
   deleteField,
   doc,
   getDoc,
   writeBatch,
   type Firestore,
+  type WriteBatch,
 } from 'firebase/firestore';
 
 export type EquipmentStatus = 'not_issued' | 'issued' | 'returned';
@@ -83,8 +85,12 @@ export const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
   practice_pants: 'Practice Pants',
 };
 
-export function typeLabel(type: string): string {
+/** Admin-editable display labels from `equipmentTypes/{slug}` docs, keyed by slug. */
+export type TypeLabelOverrides = Record<string, string>;
+
+export function typeLabel(type: string, overrides?: TypeLabelOverrides): string {
   return (
+    overrides?.[type] ??
     SHED_ITEM_TYPES[type as ShedItemType] ??
     type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   );
@@ -112,6 +118,27 @@ export interface EquipmentEnrollmentRef {
   footballEquipment?: FootballEquipment;
 }
 
+export type EquipmentHistoryEventType = 'issued' | 'returned' | 'retired' | 'restored';
+
+/** Append-only audit event stored at `equipmentInventory/{itemId}/history/{eventId}`. */
+export interface EquipmentHistoryEvent {
+  event: EquipmentHistoryEventType;
+  at: string; // ISO timestamp
+  playerId?: string;
+  playerName?: string;
+  actorUid: string;
+  actorName: string;
+}
+
+export function addHistoryToBatch(
+  batch: WriteBatch,
+  db: Firestore,
+  itemId: string,
+  event: EquipmentHistoryEvent
+): void {
+  batch.set(doc(collection(db, 'equipmentInventory', itemId, 'history')), event);
+}
+
 /** Thrown when the race pre-check finds the item was just issued elsewhere. */
 export class ItemAlreadyIssuedError extends Error {
   constructor(tagNumber: string) {
@@ -128,7 +155,8 @@ export async function commitAssignItem(
   enrollment: EquipmentEnrollmentRef,
   item: ShedItem,
   equipType: ShedItemType,
-  actor: { uid: string; name: string }
+  actor: { uid: string; name: string },
+  playerName?: string
 ): Promise<void> {
   // Pre-check for race condition: verify item is still free (or already assigned here)
   const freshSnap = await getDoc(doc(db, 'equipmentInventory', item.id));
@@ -165,6 +193,15 @@ export async function commitAssignItem(
     returnedAt: '',
   });
 
+  addHistoryToBatch(batch, db, item.id, {
+    event: 'issued',
+    at: now,
+    playerId: enrollment.playerId,
+    playerName: playerName ?? '',
+    actorUid: actor.uid,
+    actorName: actor.name,
+  });
+
   // If a different item was previously assigned for this slot, return it to available
   if (prevInventoryId && prevInventoryId !== item.id) {
     batch.update(doc(db, 'equipmentInventory', prevInventoryId), {
@@ -173,6 +210,14 @@ export async function commitAssignItem(
       issuedToParentUserId: '',
       issuedToEnrollmentId: '',
       returnedAt: now,
+    });
+    addHistoryToBatch(batch, db, prevInventoryId, {
+      event: 'returned',
+      at: now,
+      playerId: enrollment.playerId,
+      playerName: playerName ?? '',
+      actorUid: actor.uid,
+      actorName: actor.name,
     });
   }
 
@@ -185,7 +230,9 @@ export async function commitReturnItem(
   db: Firestore,
   enrollment: EquipmentEnrollmentRef,
   item: ShedItem,
-  equipType: ShedItemType
+  equipType: ShedItemType,
+  actor?: { uid: string; name: string },
+  playerName?: string
 ): Promise<void> {
   const { statusField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
 
@@ -205,6 +252,17 @@ export async function commitReturnItem(
     issuedToEnrollmentId: '',
     returnedAt: now,
   });
+
+  if (actor) {
+    addHistoryToBatch(batch, db, item.id, {
+      event: 'returned',
+      at: now,
+      playerId: enrollment.playerId,
+      playerName: playerName ?? '',
+      actorUid: actor.uid,
+      actorName: actor.name,
+    });
+  }
 
   await batch.commit();
 }

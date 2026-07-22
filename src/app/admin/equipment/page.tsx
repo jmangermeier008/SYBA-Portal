@@ -15,7 +15,10 @@ import {
   doc,
   getDocs,
   getDoc,
+  limit,
+  orderBy,
   query,
+  setDoc,
   updateDoc,
   where,
   writeBatch,
@@ -62,6 +65,9 @@ import {
   ArchiveRestore,
   Printer,
   Filter,
+  Settings2,
+  History,
+  CalendarCheck,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -71,15 +77,18 @@ import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 import {
   EQUIP_FIELD_MAP,
   SHED_ITEM_TYPES,
+  addHistoryToBatch,
   commitAssignItem,
   commitReturnItem,
   typeLabel,
+  type EquipmentHistoryEvent,
   type EquipmentStatus,
   type FootballEquipment,
   type ItemCondition,
   type ShedItem,
   type ShedItemType,
 } from '@/lib/equipment';
+import { useEquipmentTypes } from '@/hooks/use-equipment-types';
 
 const HELMET_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'S', 'M', 'L', 'XL', '2XL'] as const;
 const PAD_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
@@ -274,7 +283,7 @@ export default function EquipmentPage() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
   const [retireDialog, setRetireDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
   const [editDialog, setEditDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
-  const [editForm, setEditForm] = useState({ size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
+  const [editForm, setEditForm] = useState({ tagNumber: '', type: '', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [conditionDialog, setConditionDialog] = useState<{ open: boolean; item: ShedItem | null }>({ open: false, item: null });
   const [showRetired, setShowRetired] = useState(false);
@@ -283,6 +292,19 @@ export default function EquipmentPage() {
   const [importErrors, setImportErrors] = useState<ImportError[]>([]);
   const [importSaving, setImportSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Manage Types dialog
+  const [manageTypesDialog, setManageTypesDialog] = useState(false);
+  const [newTypeLabel, setNewTypeLabel] = useState('');
+  const [renamingSlug, setRenamingSlug] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [typeSaving, setTypeSaving] = useState(false);
+
+  // Bulk recert-date selection (shed tab — separate from the assignments-tab selection)
+  const [shedSelected, setShedSelected] = useState<Set<string>>(new Set());
+  const [recertDateDialog, setRecertDateDialog] = useState(false);
+  const [recertDateValue, setRecertDateValue] = useState('');
+  const [recertSaving, setRecertSaving] = useState(false);
 
   const searchParams = useSearchParams();
   useEffect(() => {
@@ -340,6 +362,21 @@ export default function EquipmentPage() {
   }, [db, isAdmin, isBoardMember]);
 
   const { data: shedItems } = useCollection<ShedItem>(shedQuery);
+
+  // Admin-managed type registry: label overrides + custom types that persist at zero items
+  const { labels: typeLabels, managedTypes } = useEquipmentTypes(isAdmin || isBoardMember);
+
+  // History of the item currently open in the Edit dialog
+  const historyQuery = useMemoFirebase(() => {
+    if (!db || !editDialog.item) return null;
+    return query(
+      collection(db, 'equipmentInventory', editDialog.item.id, 'history'),
+      orderBy('at', 'desc'),
+      limit(25)
+    );
+  }, [db, editDialog.item?.id]);
+
+  const { data: historyEvents } = useCollection<EquipmentHistoryEvent & { id: string }>(historyQuery);
 
   // Parent contact info for the printable chase list (same pattern as admin/roster)
   const profilesQuery = useMemoFirebase(() => {
@@ -517,7 +554,8 @@ export default function EquipmentPage() {
         { id: enrollmentId, parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
         item,
         equipType,
-        { uid: user?.uid ?? '', name: profile?.displayName || profile?.email || '' }
+        currentActor,
+        playerNameMap.get(enrollment.playerId)
       );
       toast({ title: 'Assigned', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(enrollment.playerId) ?? 'player'}.` });
     } catch (err: any) {
@@ -542,7 +580,9 @@ export default function EquipmentPage() {
         db,
         { id: enrollmentId, parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
         item,
-        equipType
+        equipType,
+        currentActor,
+        playerNameMap.get(enrollment.playerId)
       );
       toast({ title: 'Returned', description: `Tag #${item.tagNumber} is now available.` });
     } catch (err: any) {
@@ -588,6 +628,14 @@ export default function EquipmentPage() {
           issuedToEnrollmentId: '',
           returnedAt: now,
         });
+        addHistoryToBatch(batch, db, itemId, {
+          event: 'returned',
+          at: now,
+          playerId: enrollment.playerId,
+          playerName: playerNameMap.get(enrollment.playerId) ?? '',
+          actorUid: currentActor.uid,
+          actorName: currentActor.name,
+        });
       }
 
       await batch.commit();
@@ -608,7 +656,6 @@ export default function EquipmentPage() {
     setBulkSaving(true);
     try {
       const targets = (enrollments ?? []).filter((e) => selectedIds.has(e.id));
-      const batch = writeBatch(db);
       const now = new Date().toISOString();
 
       const enrollmentUpdates: Record<string, any> = {};
@@ -616,29 +663,36 @@ export default function EquipmentPage() {
       ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
       ALL_TAG_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
 
-      const allLinkedItemIds: string[] = [];
-
-      targets.forEach((e) => {
-        if (!e.parentUserId || !e.id) return;
-        batch.update(doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.id), enrollmentUpdates);
-        const fe = e.footballEquipment ?? {};
-        ALL_INVENTORY_ID_FIELDS.forEach((f) => {
-          const itemId = fe[f] as string | undefined;
-          if (itemId) allLinkedItemIds.push(itemId);
+      // Chunk to stay under the 500-op batch limit: each player is 1 enrollment
+      // update + up to 7 item updates + 7 history events
+      for (let i = 0; i < targets.length; i += 25) {
+        const batch = writeBatch(db);
+        targets.slice(i, i + 25).forEach((e) => {
+          if (!e.parentUserId || !e.id) return;
+          batch.update(doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.id), enrollmentUpdates);
+          const fe = e.footballEquipment ?? {};
+          ALL_INVENTORY_ID_FIELDS.forEach((f) => {
+            const itemId = fe[f] as string | undefined;
+            if (!itemId) return;
+            batch.update(doc(db, 'equipmentInventory', itemId), {
+              status: 'available',
+              issuedToPlayerId: '',
+              issuedToParentUserId: '',
+              issuedToEnrollmentId: '',
+              returnedAt: now,
+            });
+            addHistoryToBatch(batch, db, itemId, {
+              event: 'returned',
+              at: now,
+              playerId: e.playerId,
+              playerName: playerNameMap.get(e.playerId) ?? '',
+              actorUid: currentActor.uid,
+              actorName: currentActor.name,
+            });
+          });
         });
-      });
-
-      for (const itemId of allLinkedItemIds) {
-        batch.update(doc(db, 'equipmentInventory', itemId), {
-          status: 'available',
-          issuedToPlayerId: '',
-          issuedToParentUserId: '',
-          issuedToEnrollmentId: '',
-          returnedAt: now,
-        });
+        await batch.commit();
       }
-
-      await batch.commit();
       toast({ title: 'Equipment marked as Returned', description: `${targets.length} player(s) updated.` });
       setSelectedIds(new Set());
     } catch (err: any) {
@@ -648,14 +702,30 @@ export default function EquipmentPage() {
     }
   }
 
-  // Custom types present in inventory (anything outside the 7 standard types)
+  // Custom types: the managed registry plus any legacy inventory slugs without a doc
   const customTypes = useMemo(() => {
     const custom = new Set<string>();
+    managedTypes.forEach((t) => {
+      if (!(t.slug in SHED_ITEM_TYPES)) custom.add(t.slug);
+    });
     (shedItems ?? []).forEach((item) => {
       if (!(item.type in SHED_ITEM_TYPES)) custom.add(item.type);
     });
-    return [...custom].sort();
+    return [...custom].sort((a, b) => typeLabel(a, typeLabels).localeCompare(typeLabel(b, typeLabels)));
+  }, [shedItems, managedTypes, typeLabels]);
+
+  const typeItemCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    (shedItems ?? []).forEach((item) => counts.set(item.type, (counts.get(item.type) ?? 0) + 1));
+    return counts;
   }, [shedItems]);
+
+  function isDuplicateTag(tag: string, excludeId?: string): boolean {
+    const norm = tag.trim().toLowerCase();
+    return (shedItems ?? []).some((i) => i.id !== excludeId && i.tagNumber.trim().toLowerCase() === norm);
+  }
+
+  const currentActor = { uid: user?.uid ?? '', name: profile?.displayName || profile?.email || '' };
 
   const filteredShedItems = useMemo(() => {
     if (!shedItems) return [];
@@ -666,26 +736,55 @@ export default function EquipmentPage() {
       if (!q) return true;
       return (
         item.tagNumber.toLowerCase().includes(q) ||
-        typeLabel(item.type).toLowerCase().includes(q) ||
+        typeLabel(item.type, typeLabels).toLowerCase().includes(q) ||
         item.size.toLowerCase().includes(q) ||
         (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
       );
     });
-  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap, showRetired]);
+  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap, showRetired, typeLabels]);
+
+  // Bulk recert selection targets: visible helmets/shoulder pads that aren't retired
+  const recertEligibleVisible = useMemo(
+    () => filteredShedItems.filter((i) => RECERT_TYPES.has(i.type) && i.status !== 'retired'),
+    [filteredShedItems]
+  );
+  const allRecertSelected = recertEligibleVisible.length > 0 && recertEligibleVisible.every((i) => shedSelected.has(i.id));
+
+  function toggleShedRow(id: string) {
+    setShedSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllRecert() {
+    setShedSelected(allRecertSelected ? new Set() : new Set(recertEligibleVisible.map((i) => i.id)));
+  }
 
   async function handleAddShedItem() {
     if (!db || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()) return;
     const type = addItemForm.type === '__other__' ? normalizeTypeSlug(addItemCustomType) : addItemForm.type;
     if (!type) return;
+    if (isDuplicateTag(addItemForm.tagNumber)) {
+      toast({ title: 'Duplicate tag number', description: `Tag #${addItemForm.tagNumber.trim()} already exists in inventory.`, variant: 'destructive' });
+      return;
+    }
     setAddItemSaving(true);
     try {
-      await addDoc(collection(db, 'equipmentInventory'), {
+      const batch = writeBatch(db);
+      batch.set(doc(collection(db, 'equipmentInventory')), {
         tagNumber: addItemForm.tagNumber.trim(),
         type,
         size: addItemForm.size.trim(),
         status: 'available',
         notes: addItemForm.notes.trim() || '',
       });
+      // Register brand-new custom types so they persist even at zero items
+      if (addItemForm.type === '__other__' && !(type in SHED_ITEM_TYPES) && !typeLabels[type]) {
+        batch.set(doc(db, 'equipmentTypes', type), { label: addItemCustomType.trim() });
+      }
+      await batch.commit();
       toast({ title: 'Item added', description: `Tag #${addItemForm.tagNumber} added to Shed.` });
       setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '' });
       setAddItemCustomType('');
@@ -694,6 +793,70 @@ export default function EquipmentPage() {
       toast({ title: 'Failed to add item', description: err.message, variant: 'destructive' });
     } finally {
       setAddItemSaving(false);
+    }
+  }
+
+  async function handleAddType() {
+    if (!db || !newTypeLabel.trim()) return;
+    const slug = normalizeTypeSlug(newTypeLabel);
+    if (!slug) return;
+    const labelTaken = Object.values(SHED_ITEM_TYPES).concat(Object.values(typeLabels))
+      .some((l) => l.trim().toLowerCase() === newTypeLabel.trim().toLowerCase());
+    if (slug in SHED_ITEM_TYPES || typeLabels[slug] || customTypes.includes(slug) || labelTaken) {
+      toast({ title: 'Type already exists', description: `"${newTypeLabel.trim()}" matches an existing type.`, variant: 'destructive' });
+      return;
+    }
+    setTypeSaving(true);
+    try {
+      await setDoc(doc(db, 'equipmentTypes', slug), { label: newTypeLabel.trim() });
+      toast({ title: 'Type added', description: `"${newTypeLabel.trim()}" is now available when adding items.` });
+      setNewTypeLabel('');
+    } catch (err: any) {
+      toast({ title: 'Failed to add type', description: err.message, variant: 'destructive' });
+    } finally {
+      setTypeSaving(false);
+    }
+  }
+
+  async function handleRenameType(slug: string) {
+    if (!db || !renameValue.trim()) return;
+    setTypeSaving(true);
+    try {
+      await setDoc(doc(db, 'equipmentTypes', slug), { label: renameValue.trim() });
+      toast({ title: 'Type renamed', description: `Now shown as "${renameValue.trim()}" everywhere.` });
+      setRenamingSlug(null);
+      setRenameValue('');
+    } catch (err: any) {
+      toast({ title: 'Rename failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setTypeSaving(false);
+    }
+  }
+
+  async function handleResetTypeLabel(slug: string) {
+    if (!db) return;
+    setTypeSaving(true);
+    try {
+      await deleteDoc(doc(db, 'equipmentTypes', slug));
+      toast({ title: 'Label reset', description: `Restored the default name "${SHED_ITEM_TYPES[slug as ShedItemType]}".` });
+    } catch (err: any) {
+      toast({ title: 'Reset failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setTypeSaving(false);
+    }
+  }
+
+  async function handleDeleteType(slug: string) {
+    if (!db) return;
+    if ((typeItemCounts.get(slug) ?? 0) > 0) return;
+    setTypeSaving(true);
+    try {
+      await deleteDoc(doc(db, 'equipmentTypes', slug));
+      toast({ title: 'Type deleted', description: `"${typeLabel(slug, typeLabels)}" removed.` });
+    } catch (err: any) {
+      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setTypeSaving(false);
     }
   }
 
@@ -715,6 +878,15 @@ export default function EquipmentPage() {
         issuedByUid: user?.uid ?? '',
         issuedByName: profile?.displayName || profile?.email || '',
         returnedAt: '',
+      });
+
+      addHistoryToBatch(batch, db, item.id, {
+        event: 'issued',
+        at: now,
+        playerId: checkOutPlayerId,
+        playerName: playerNameMap.get(checkOutPlayerId) ?? '',
+        actorUid: currentActor.uid,
+        actorName: currentActor.name,
       });
 
       // Custom types have no enrollment slot — only the shed item tracks the assignment
@@ -761,6 +933,15 @@ export default function EquipmentPage() {
         returnedAt: now,
       });
 
+      addHistoryToBatch(batch, db, item.id, {
+        event: 'returned',
+        at: now,
+        playerId: item.issuedToPlayerId ?? '',
+        playerName: item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '') : '',
+        actorUid: currentActor.uid,
+        actorName: currentActor.name,
+      });
+
       const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
       if (item.issuedToParentUserId && item.issuedToEnrollmentId && fieldMap) {
         const { statusField, inventoryIdField, tagField } = fieldMap;
@@ -796,6 +977,8 @@ export default function EquipmentPage() {
 
   function openEditDialog(item: ShedItem) {
     setEditForm({
+      tagNumber: item.tagNumber,
+      type: item.type,
       size: item.size,
       notes: item.notes ?? '',
       purchaseYear: item.purchaseYear ? String(item.purchaseYear) : '',
@@ -806,22 +989,46 @@ export default function EquipmentPage() {
   }
 
   async function handleEditSave() {
-    if (!db || !editDialog.item || !editForm.size.trim()) return;
+    if (!db || !editDialog.item || !editForm.size.trim() || !editForm.tagNumber.trim()) return;
+    const item = editDialog.item;
     const year = editForm.purchaseYear.trim();
     if (year && !/^\d{4}$/.test(year)) {
       toast({ title: 'Invalid purchase year', description: 'Enter a 4-digit year, e.g. 2024.', variant: 'destructive' });
       return;
     }
+    const newTag = editForm.tagNumber.trim();
+    if (isDuplicateTag(newTag, item.id)) {
+      toast({ title: 'Duplicate tag number', description: `Tag #${newTag} already exists in inventory.`, variant: 'destructive' });
+      return;
+    }
+    // Type changes are locked while issued (enforced in the UI too) — the
+    // enrollment slot mirror is keyed by type and would go stale
+    const newType = item.status === 'issued' ? item.type : (editForm.type || item.type);
     setEditSaving(true);
     try {
-      await updateDoc(doc(db, 'equipmentInventory', editDialog.item.id), {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'equipmentInventory', item.id), {
+        tagNumber: newTag,
+        type: newType,
         size: editForm.size.trim(),
         notes: editForm.notes.trim(),
         purchaseYear: year ? Number(year) : deleteField(),
         lastRecertDate: editForm.lastRecertDate || deleteField(),
         condition: editForm.condition || deleteField(),
       });
-      toast({ title: 'Item updated', description: `Tag #${editDialog.item.tagNumber} saved.` });
+      // Issued item with a standard slot: keep the enrollment's mirrored tag in sync
+      const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
+      if (
+        item.status === 'issued' && newTag !== item.tagNumber && fieldMap &&
+        item.issuedToParentUserId && item.issuedToEnrollmentId
+      ) {
+        batch.update(
+          doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId),
+          { [`footballEquipment.${String(fieldMap.tagField)}`]: newTag }
+        );
+      }
+      await batch.commit();
+      toast({ title: 'Item updated', description: `Tag #${newTag} saved.` });
       setEditDialog({ open: false, item: null });
     } catch (err: any) {
       toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
@@ -830,13 +1037,40 @@ export default function EquipmentPage() {
     }
   }
 
+  async function handleBulkRecert() {
+    if (!db || !recertDateValue || shedSelected.size === 0) return;
+    setRecertSaving(true);
+    try {
+      const targets = (shedItems ?? []).filter((i) => shedSelected.has(i.id));
+      // Stay well under Firestore's 500-op batch limit
+      for (let i = 0; i < targets.length; i += 400) {
+        const batch = writeBatch(db);
+        targets.slice(i, i + 400).forEach((item) => {
+          batch.update(doc(db, 'equipmentInventory', item.id), { lastRecertDate: recertDateValue });
+        });
+        await batch.commit();
+      }
+      toast({ title: 'Recert date saved', description: `${targets.length} item${targets.length !== 1 ? 's' : ''} marked recertified ${recertDateValue}.` });
+      setShedSelected(new Set());
+      setRecertDateDialog(false);
+      setRecertDateValue('');
+    } catch (err: any) {
+      toast({ title: 'Bulk update failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setRecertSaving(false);
+    }
+  }
+
   async function handleRetire(item: ShedItem) {
     if (!db) return;
     try {
-      await updateDoc(doc(db, 'equipmentInventory', item.id), {
-        status: 'retired',
-        retiredAt: new Date().toISOString(),
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'equipmentInventory', item.id), { status: 'retired', retiredAt: now });
+      addHistoryToBatch(batch, db, item.id, {
+        event: 'retired', at: now, actorUid: currentActor.uid, actorName: currentActor.name,
       });
+      await batch.commit();
       toast({ title: 'Item retired', description: `Tag #${item.tagNumber} removed from circulation; history preserved.` });
     } catch (err: any) {
       toast({ title: 'Retire failed', description: err.message, variant: 'destructive' });
@@ -848,7 +1082,13 @@ export default function EquipmentPage() {
   async function handleRestore(item: ShedItem) {
     if (!db) return;
     try {
-      await updateDoc(doc(db, 'equipmentInventory', item.id), { status: 'available', retiredAt: '' });
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'equipmentInventory', item.id), { status: 'available', retiredAt: '' });
+      addHistoryToBatch(batch, db, item.id, {
+        event: 'restored', at: now, actorUid: currentActor.uid, actorName: currentActor.name,
+      });
+      await batch.commit();
       toast({ title: 'Item restored', description: `Tag #${item.tagNumber} is available again.` });
     } catch (err: any) {
       toast({ title: 'Restore failed', description: err.message, variant: 'destructive' });
@@ -858,7 +1098,12 @@ export default function EquipmentPage() {
   async function handleDeleteShedItem(item: ShedItem) {
     if (!db) return;
     try {
-      await deleteDoc(doc(db, 'equipmentInventory', item.id));
+      // Remove the audit subcollection too — otherwise its docs are orphaned
+      const historySnap = await getDocs(collection(db, 'equipmentInventory', item.id, 'history'));
+      const batch = writeBatch(db);
+      historySnap.docs.forEach((d) => batch.delete(d.ref));
+      batch.delete(doc(db, 'equipmentInventory', item.id));
+      await batch.commit();
       toast({ title: 'Item deleted', description: `Tag #${item.tagNumber} removed from inventory.` });
     } catch (err: any) {
       toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
@@ -877,7 +1122,7 @@ export default function EquipmentPage() {
           const { statusField, tagField } = EQUIP_FIELD_MAP[type];
           if (fe[statusField] === 'issued') {
             const tag = fe[tagField] as string | undefined;
-            items.push(`${SHED_ITEM_TYPES[type]}${tag ? ` #${tag}` : ''}`);
+            items.push(`${typeLabel(type, typeLabels)}${tag ? ` #${tag}` : ''}`);
           }
         });
         const parent = e.parentUserId ? profileMap.get(e.parentUserId) : undefined;
@@ -952,8 +1197,14 @@ export default function EquipmentPage() {
     rows.forEach((row, idx) => {
       const rowNum = idx + 2;
       const tagNumber = String(row['Tag Number'] ?? '').trim();
-      // Custom types are accepted — normalized to a slug (e.g. "Mouth Guard" → mouth_guard)
-      const type = normalizeTypeSlug(String(row['Type'] ?? ''));
+      // Custom types are accepted — normalized to a slug (e.g. "Mouth Guard" → mouth_guard).
+      // A renamed display label (e.g. "Head Protector" for helmet) resolves to its
+      // existing slug instead of minting a new type.
+      const rawType = String(row['Type'] ?? '').trim();
+      const labelToSlug = new Map<string, string>();
+      Object.entries(SHED_ITEM_TYPES).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
+      Object.entries(typeLabels).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
+      const type = labelToSlug.get(rawType.toLowerCase()) ?? normalizeTypeSlug(rawType);
       const size = String(row['Size'] ?? '').trim();
       const purchaseYearRaw = String(row['Purchase Year'] ?? '').trim();
       const lastRecertRaw = String(row['Last Recert Date'] ?? '').trim();
@@ -998,6 +1249,13 @@ export default function EquipmentPage() {
           ...(row.lastRecertDate ? { lastRecertDate: row.lastRecertDate } : {}),
           notes: row.notes ?? '',
         });
+      });
+      // Register any brand-new custom types so they persist at zero items
+      const newSlugs = new Set(
+        importRows.map((r) => r.type).filter((t) => !(t in SHED_ITEM_TYPES) && !typeLabels[t])
+      );
+      newSlugs.forEach((slug) => {
+        batch.set(doc(db, 'equipmentTypes', slug), { label: typeLabel(slug) });
       });
       await batch.commit();
       toast({ title: 'Import complete', description: `${importRows.length} item${importRows.length !== 1 ? 's' : ''} added to inventory.` });
@@ -1201,14 +1459,14 @@ export default function EquipmentPage() {
                           </th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 left-10 z-30 bg-muted border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">Player</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Division</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Helmet Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Pads Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['helmet'] ? `${typeLabels['helmet']} Tag` : 'Helmet Tag'}</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['shoulder_pads'] ? `${typeLabels['shoulder_pads']} Tag` : 'Pads Tag'}</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Jersey #</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Game Jersey</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Scrimmage</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Practice Jersey</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Game Pants Tag</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Practice Pants Tag</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['game_jersey'] ?? 'Game Jersey'}</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['scrimmage_jersey'] ?? 'Scrimmage'}</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['practice_jersey'] ?? 'Practice Jersey'}</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['game_pants'] ? `${typeLabels['game_pants']} Tag` : 'Game Pants Tag'}</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['practice_pants'] ? `${typeLabels['practice_pants']} Tag` : 'Practice Pants Tag'}</th>
                           <th className="px-4 py-3 sticky top-0 right-0 z-30 bg-muted border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]" />
                         </tr>
                       </thead>
@@ -1511,7 +1769,7 @@ export default function EquipmentPage() {
 
                               {/* Helmet */}
                               <div className="space-y-1.5">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Helmet</p>
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{typeLabel('helmet', typeLabels)}</p>
                                 <div className="flex items-center gap-3">
                                   <Combobox
                                     options={getOptionsForType('helmet', fe.helmetInventoryId)}
@@ -1532,7 +1790,7 @@ export default function EquipmentPage() {
 
                               {/* Shoulder Pads */}
                               <div className="space-y-1.5">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Shoulder Pads</p>
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{typeLabel('shoulder_pads', typeLabels)}</p>
                                 <div className="flex items-center gap-3">
                                   <Combobox
                                     options={getOptionsForType('shoulder_pads', fe.padInventoryId)}
@@ -1688,21 +1946,21 @@ export default function EquipmentPage() {
                   <Input
                     placeholder="Search tag, size, player…"
                     value={shedSearchQuery}
-                    onChange={(e) => setShedSearchQuery(e.target.value)}
+                    onChange={(e) => { setShedSearchQuery(e.target.value); setShedSelected(new Set()); }}
                     className="pl-9 w-full sm:w-64"
                   />
                 </div>
-                <Select value={shedTypeFilter} onValueChange={setShedTypeFilter}>
+                <Select value={shedTypeFilter} onValueChange={(v) => { setShedTypeFilter(v); setShedSelected(new Set()); }}>
                   <SelectTrigger className="w-full sm:w-48 rounded-xl">
                     <SelectValue placeholder="All Types" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
-                    {(Object.entries(SHED_ITEM_TYPES) as [ShedItemType, string][]).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    {(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]).map((value) => (
+                      <SelectItem key={value} value={value}>{typeLabel(value, typeLabels)}</SelectItem>
                     ))}
                     {customTypes.map((value) => (
-                      <SelectItem key={value} value={value}>{typeLabel(value)}</SelectItem>
+                      <SelectItem key={value} value={value}>{typeLabel(value, typeLabels)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1712,6 +1970,9 @@ export default function EquipmentPage() {
                 </label>
               </div>
               <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" onClick={() => setManageTypesDialog(true)} className="rounded-xl gap-1.5 flex-1 sm:flex-initial">
+                  <Settings2 className="h-4 w-4" /> Manage Types
+                </Button>
                 <Button variant="outline" onClick={downloadTemplate} className="rounded-xl gap-1.5 flex-1 sm:flex-initial">
                   <Download className="h-4 w-4" /> Download Template
                 </Button>
@@ -1747,6 +2008,23 @@ export default function EquipmentPage() {
               </Card>
             )}
 
+            {/* Bulk recert action bar */}
+            {shedSelected.size > 0 && (
+              <div className="flex items-center gap-3 rounded-xl border bg-primary/5 px-4 py-2.5">
+                <span className="text-sm font-medium">{shedSelected.size} selected</span>
+                <Button
+                  size="sm"
+                  className="rounded-full h-8 text-xs gap-1.5"
+                  onClick={() => { setRecertDateValue(new Date().toISOString().slice(0, 10)); setRecertDateDialog(true); }}
+                >
+                  <CalendarCheck className="h-3.5 w-3.5" /> Set Recert Date
+                </Button>
+                <Button size="sm" variant="ghost" className="rounded-full h-8 text-xs" onClick={() => setShedSelected(new Set())}>
+                  Clear
+                </Button>
+              </div>
+            )}
+
             {/* ── Desktop table ─────────────────────────────── */}
             {filteredShedItems.length > 0 && !isMobile && (
               <Card className="border-none shadow-md overflow-hidden">
@@ -1754,6 +2032,20 @@ export default function EquipmentPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/30">
+                        <th className="px-3 py-3 w-10">
+                          {recertEligibleVisible.length > 0 && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Checkbox checked={allRecertSelected} onCheckedChange={toggleAllRecert} aria-label="Select all helmets and shoulder pads" />
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>Select helmets &amp; shoulder pads for bulk recert</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Tag #</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Type</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Size</th>
@@ -1766,14 +2058,23 @@ export default function EquipmentPage() {
                     </thead>
                     <tbody>
                       {filteredShedItems.map((item) => (
-                        <tr key={item.id} className={cn('border-b last:border-0 hover:bg-muted/20 transition-colors', item.status === 'retired' && 'opacity-60')}>
+                        <tr key={item.id} className={cn('border-b last:border-0 transition-colors', shedSelected.has(item.id) ? 'bg-primary/5' : 'hover:bg-muted/20', item.status === 'retired' && 'opacity-60')}>
+                          <td className="px-3 py-2">
+                            {RECERT_TYPES.has(item.type) && item.status !== 'retired' && (
+                              <Checkbox
+                                checked={shedSelected.has(item.id)}
+                                onCheckedChange={() => toggleShedRow(item.id)}
+                                aria-label={`Select tag #${item.tagNumber}`}
+                              />
+                            )}
+                          </td>
                           <td className="px-4 py-2 font-medium">
                             <span className="flex items-center gap-1.5">
                               <Tag className="h-3.5 w-3.5 text-muted-foreground" />
                               {item.tagNumber}
                             </span>
                           </td>
-                          <td className="px-4 py-2">{typeLabel(item.type)}</td>
+                          <td className="px-4 py-2">{typeLabel(item.type, typeLabels)}</td>
                           <td className="px-4 py-2">{item.size}</td>
                           <td className="px-4 py-2"><ShedStatusPill status={item.status} /></td>
                           <td className="px-4 py-2"><RecertBadge item={item} /></td>
@@ -1867,13 +2168,21 @@ export default function EquipmentPage() {
                     <CardContent className="p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="flex items-center gap-1.5 font-semibold text-sm">
+                          {RECERT_TYPES.has(item.type) && item.status !== 'retired' && (
+                            <Checkbox
+                              checked={shedSelected.has(item.id)}
+                              onCheckedChange={() => toggleShedRow(item.id)}
+                              aria-label={`Select tag #${item.tagNumber}`}
+                              className="mr-1"
+                            />
+                          )}
                           <Tag className="h-3.5 w-3.5 text-muted-foreground" />
                           {item.tagNumber}
                         </span>
                         <ShedStatusPill status={item.status} />
                       </div>
                       <div className="flex items-center justify-between gap-2 text-sm">
-                        <span>{typeLabel(item.type)} · {item.size}</span>
+                        <span>{typeLabel(item.type, typeLabels)} · {item.size}</span>
                         <RecertBadge item={item} />
                       </div>
                       {item.status === 'issued' && item.issuedToPlayerId && (
@@ -1951,11 +2260,11 @@ export default function EquipmentPage() {
                 <Select value={addItemForm.type} onValueChange={(v) => setAddItemForm(f => ({ ...f, type: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(Object.entries(SHED_ITEM_TYPES) as [ShedItemType, string][]).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    {(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]).map((k) => (
+                      <SelectItem key={k} value={k}>{typeLabel(k, typeLabels)}</SelectItem>
                     ))}
                     {customTypes.map((value) => (
-                      <SelectItem key={value} value={value}>{typeLabel(value)}</SelectItem>
+                      <SelectItem key={value} value={value}>{typeLabel(value, typeLabels)}</SelectItem>
                     ))}
                     <SelectItem value="__other__">Other…</SelectItem>
                   </SelectContent>
@@ -2008,14 +2317,42 @@ export default function EquipmentPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
-              <p className="text-sm text-muted-foreground">
-                {editDialog.item && typeLabel(editDialog.item.type)}
-              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Tag Number <span className="text-destructive">*</span></Label>
+                  <Input value={editForm.tagNumber} onChange={(e) => setEditForm(f => ({ ...f, tagNumber: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Item Type</Label>
+                  <Select
+                    value={editForm.type}
+                    onValueChange={(v) => setEditForm(f => ({ ...f, type: v }))}
+                    disabled={editDialog.item?.status === 'issued'}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]).map((k) => (
+                        <SelectItem key={k} value={k}>{typeLabel(k, typeLabels)}</SelectItem>
+                      ))}
+                      {customTypes.map((value) => (
+                        <SelectItem key={value} value={value}>{typeLabel(value, typeLabels)}</SelectItem>
+                      ))}
+                      {/* Legacy slug not in the registry or inventory-derived list */}
+                      {editForm.type && !(editForm.type in SHED_ITEM_TYPES) && !customTypes.includes(editForm.type) && (
+                        <SelectItem value={editForm.type}>{typeLabel(editForm.type, typeLabels)}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {editDialog.item?.status === 'issued' && (
+                    <p className="text-xs text-muted-foreground">Return this item before changing its type.</p>
+                  )}
+                </div>
+              </div>
               <div className="space-y-1">
                 <Label>Size <span className="text-destructive">*</span></Label>
                 <Input value={editForm.size} onChange={(e) => setEditForm(f => ({ ...f, size: e.target.value }))} />
               </div>
-              {editDialog.item && RECERT_TYPES.has(editDialog.item.type) && (
+              {editForm.type && RECERT_TYPES.has(editForm.type) && (
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -2056,6 +2393,29 @@ export default function EquipmentPage() {
                 <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
                 <Input value={editForm.notes} onChange={(e) => setEditForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5 text-muted-foreground" /> History
+                </Label>
+                {(historyEvents ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No history recorded yet.</p>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto rounded-lg border divide-y">
+                    {(historyEvents ?? []).map((ev) => (
+                      <div key={ev.id} className="px-3 py-1.5 text-xs flex items-start justify-between gap-2">
+                        <span>
+                          <span className="font-medium capitalize">{ev.event}</span>
+                          {ev.playerName ? <> — {ev.playerName}</> : null}
+                          {ev.actorName ? <span className="text-muted-foreground"> · by {ev.actorName}</span> : null}
+                        </span>
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          {ev.at ? new Date(ev.at).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {editDialog.item && editDialog.item.status !== 'issued' && (
                 <Button
                   type="button"
@@ -2070,7 +2430,7 @@ export default function EquipmentPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditDialog({ open: false, item: null })}>Cancel</Button>
-              <Button onClick={handleEditSave} disabled={editSaving || !editForm.size.trim()}>
+              <Button onClick={handleEditSave} disabled={editSaving || !editForm.size.trim() || !editForm.tagNumber.trim()}>
                 {editSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Save Changes
               </Button>
@@ -2084,7 +2444,7 @@ export default function EquipmentPage() {
             <AlertDialogHeader>
               <AlertDialogTitle>Retire Tag #{retireDialog.item?.tagNumber}?</AlertDialogTitle>
               <AlertDialogDescription>
-                {retireDialog.item && `${typeLabel(retireDialog.item.type)} (Size ${retireDialog.item.size})`} will be
+                {retireDialog.item && `${typeLabel(retireDialog.item.type, typeLabels)} (Size ${retireDialog.item.size})`} will be
                 taken out of circulation — it can no longer be assigned or checked out, but its record and history are
                 preserved. You can restore it later if needed.
               </AlertDialogDescription>
@@ -2132,7 +2492,7 @@ export default function EquipmentPage() {
             </DialogHeader>
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                {checkOutDialog.item && `${typeLabel(checkOutDialog.item.type)} · Size ${checkOutDialog.item.size}`}
+                {checkOutDialog.item && `${typeLabel(checkOutDialog.item.type, typeLabels)} · Size ${checkOutDialog.item.size}`}
               </p>
               <div className="space-y-1">
                 <Label>Assign to Player <span className="text-destructive">*</span></Label>
@@ -2170,7 +2530,7 @@ export default function EquipmentPage() {
               <AlertDialogTitle>Delete Tag #{deleteDialog.item?.tagNumber}?</AlertDialogTitle>
               <AlertDialogDescription>
                 This will permanently remove{' '}
-                {deleteDialog.item && `${typeLabel(deleteDialog.item.type)} (Size ${deleteDialog.item.size})`}{' '}
+                {deleteDialog.item && `${typeLabel(deleteDialog.item.type, typeLabels)} (Size ${deleteDialog.item.size})`}{' '}
                 from the shed inventory. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -2247,7 +2607,7 @@ export default function EquipmentPage() {
                             {importRows.map((row, i) => (
                               <tr key={i} className="border-b last:border-0">
                                 <td className="px-3 py-1.5 font-medium">{row.tagNumber}</td>
-                                <td className="px-3 py-1.5">{typeLabel(row.type)}</td>
+                                <td className="px-3 py-1.5">{typeLabel(row.type, typeLabels)}</td>
                                 <td className="px-3 py-1.5">{row.size}</td>
                                 <td className="px-3 py-1.5 text-muted-foreground">{row.notes ?? '—'}</td>
                               </tr>
@@ -2298,6 +2658,149 @@ export default function EquipmentPage() {
               >
                 {importSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Confirm Import ({importRows.length} item{importRows.length !== 1 ? 's' : ''})
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manage Types Dialog */}
+        <Dialog open={manageTypesDialog} onOpenChange={(open) => { setManageTypesDialog(open); if (!open) { setNewTypeLabel(''); setRenamingSlug(null); setRenameValue(''); } }}>
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Settings2 className="h-5 w-5 text-primary" /> Manage Equipment Types
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                Rename any type to change how it&apos;s shown everywhere — assignments, inventory, coach pages, and print-outs.
+                Custom types are tracked in Shed Inventory but don&apos;t get a Player Assignments column.
+              </p>
+
+              <div className="flex gap-2">
+                <Input
+                  placeholder="New type name, e.g. Mouth Guard"
+                  value={newTypeLabel}
+                  onChange={(e) => setNewTypeLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddType(); }}
+                />
+                <Button onClick={handleAddType} disabled={typeSaving || !newTypeLabel.trim()} className="rounded-xl gap-1.5 shrink-0">
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+              </div>
+
+              <div className="rounded-lg border divide-y">
+                {[
+                  ...(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]).map((slug) => ({ slug: slug as string, isStandard: true })),
+                  ...customTypes.map((slug) => ({ slug, isStandard: false })),
+                ].map(({ slug, isStandard }) => {
+                  const count = typeItemCounts.get(slug) ?? 0;
+                  const isRenaming = renamingSlug === slug;
+                  return (
+                    <div key={slug} className="px-3 py-2 flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        {isRenaming ? (
+                          <Input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameType(slug); if (e.key === 'Escape') { setRenamingSlug(null); setRenameValue(''); } }}
+                            className="h-8 text-sm"
+                          />
+                        ) : (
+                          <>
+                            <p className="text-sm font-medium truncate">{typeLabel(slug, typeLabels)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {count} item{count !== 1 ? 's' : ''}
+                              {isStandard ? ' · standard' : ' · custom'}
+                              {isStandard && typeLabels[slug] ? ` · renamed from “${SHED_ITEM_TYPES[slug as ShedItemType]}”` : ''}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      {isRenaming ? (
+                        <>
+                          <Button size="sm" className="rounded-full h-8 text-xs" onClick={() => handleRenameType(slug)} disabled={typeSaving || !renameValue.trim()}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" className="rounded-full h-8 text-xs" onClick={() => { setRenamingSlug(null); setRenameValue(''); }}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="rounded-full h-8 w-8 p-0 text-muted-foreground"
+                            onClick={() => { setRenamingSlug(slug); setRenameValue(typeLabel(slug, typeLabels)); }}
+                            aria-label={`Rename ${typeLabel(slug, typeLabels)}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          {isStandard && typeLabels[slug] && (
+                            <Button size="sm" variant="ghost" className="rounded-full h-8 text-xs text-muted-foreground" onClick={() => handleResetTypeLabel(slug)} disabled={typeSaving}>
+                              Reset
+                            </Button>
+                          )}
+                          {!isStandard && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="rounded-full h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                      onClick={() => handleDeleteType(slug)}
+                                      disabled={typeSaving || count > 0}
+                                      aria-label={`Delete ${typeLabel(slug, typeLabels)}`}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {count > 0 ? `${count} item${count !== 1 ? 's' : ''} use this type — delete or re-type them first` : 'Delete this type'}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setManageTypesDialog(false)}>Done</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Recert Date Dialog */}
+        <Dialog open={recertDateDialog} onOpenChange={(open) => { if (!open) setRecertDateDialog(false); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CalendarCheck className="h-5 w-5 text-primary" /> Set Recert Date
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                Sets the Last Recert Date on {shedSelected.size} selected item{shedSelected.size !== 1 ? 's' : ''} — use after a batch comes back from reconditioning.
+              </p>
+              <div className="space-y-1">
+                <Label>Recert Date <span className="text-destructive">*</span></Label>
+                <Input type="date" value={recertDateValue} onChange={(e) => setRecertDateValue(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRecertDateDialog(false)}>Cancel</Button>
+              <Button onClick={handleBulkRecert} disabled={recertSaving || !recertDateValue}>
+                {recertSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Apply to {shedSelected.size} item{shedSelected.size !== 1 ? 's' : ''}
               </Button>
             </DialogFooter>
           </DialogContent>

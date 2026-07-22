@@ -24,6 +24,7 @@ import {
   type ShedItem,
   type ShedItemType,
 } from '@/lib/equipment';
+import { useEquipmentTypes } from '@/hooks/use-equipment-types';
 
 interface Team {
   id: string;
@@ -49,8 +50,11 @@ const EQUIP_TYPES = Object.keys(EQUIP_FIELD_MAP) as ShedItemType[];
 export default function CoachEquipmentPage() {
   const db = useFirestore();
   const { user, profile, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { activeSport, isCoach, isBoardMember } = useSport();
   const { toast } = useToast();
+
+  // Admin-editable type display names (e.g. a renamed "Helmet")
+  const { labels: typeLabels } = useEquipmentTypes((isCoach || isBoardMember) && activeSport === 'football');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [teamFilter, setTeamFilter] = useState<string>('all');
@@ -143,17 +147,19 @@ export default function CoachEquipmentPage() {
     setIssueSlot(null);
     setSaving(enrollment.id, true);
     try {
+      const player = playerMap.get(enrollment.playerId);
+      const playerName = player ? `${player.firstName ?? ''} ${player.lastName ?? ''}`.trim() : '';
       await commitAssignItem(
         db,
         { id: enrollment.id, parentUserId: enrollment.parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
         item,
         equipType,
-        { uid: user?.uid ?? '', name: profile?.displayName || profile?.email || '' }
+        { uid: user?.uid ?? '', name: profile?.displayName || profile?.email || '' },
+        playerName
       );
-      const playerName = playerMap.get(enrollment.playerId);
       notifySportAdmins(db, user?.uid ?? '', {
         title: 'Equipment issued by coach',
-        body: `${typeLabel(equipType)} #${item.tagNumber} issued to ${playerName ? `${playerName.firstName} ${playerName.lastName}` : 'player'}.`,
+        body: `${typeLabel(equipType, typeLabels)} #${item.tagNumber} issued to ${playerName || 'player'}.`,
         sport: 'football',
       });
       toast({ title: 'Issued', description: `Tag #${item.tagNumber} issued.` });
@@ -181,19 +187,22 @@ export default function CoachEquipmentPage() {
     }
     setSaving(enrollment.id, true);
     try {
+      const player = playerMap.get(enrollment.playerId);
+      const playerName = player ? `${player.firstName ?? ''} ${player.lastName ?? ''}`.trim() : '';
       await commitReturnItem(
         db,
         { id: enrollment.id, parentUserId: enrollment.parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
         { id: inventoryId, tagNumber, type: equipType, size: '', status: 'issued' },
-        equipType
+        equipType,
+        { uid: user?.uid ?? '', name: profile?.displayName || profile?.email || '' },
+        playerName
       );
-      const playerName = playerMap.get(enrollment.playerId);
       notifySportAdmins(db, user?.uid ?? '', {
         title: 'Equipment returned via coach',
-        body: `${typeLabel(equipType)}${tagNumber ? ` #${tagNumber}` : ''} returned by ${playerName ? `${playerName.firstName} ${playerName.lastName}` : 'player'}.`,
+        body: `${typeLabel(equipType, typeLabels)}${tagNumber ? ` #${tagNumber}` : ''} returned by ${playerName || 'player'}.`,
         sport: 'football',
       });
-      toast({ title: 'Returned', description: `${typeLabel(equipType)} marked returned.` });
+      toast({ title: 'Returned', description: `${typeLabel(equipType, typeLabels)} marked returned.` });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Could not return item', description: err.message });
     } finally {
@@ -207,7 +216,7 @@ export default function CoachEquipmentPage() {
     const row = rows.find(r => r.enrollment.id === issueSlot.enrollmentId);
     notifySportAdmins(db, user?.uid ?? '', {
       title: 'Equipment restock requested',
-      body: `${profile?.displayName || 'A coach'} needs ${typeLabel(equipType).toLowerCase()}${row ? ` for ${row.name}` : ''} — the shed has none available.`,
+      body: `${profile?.displayName || 'A coach'} needs ${typeLabel(equipType, typeLabels).toLowerCase()}${row ? ` for ${row.name}` : ''} — the shed has none available.`,
       sport: 'football',
     });
     setRestockRequested(prev => new Set(prev).add(equipType));
@@ -349,6 +358,7 @@ export default function CoachEquipmentPage() {
           saving={openRow ? savingIds.has(openRow.enrollment.id) : false}
           onIssue={equipType => openRow && setIssueSlot({ enrollmentId: openRow.enrollment.id, equipType })}
           onReturn={handleReturn}
+          labels={typeLabels}
         />
 
         <IssueItemDialog
@@ -357,6 +367,7 @@ export default function CoachEquipmentPage() {
           onSelect={handleIssue}
           onRequestRestock={handleRequestRestock}
           restockRequested={issueSlot ? restockRequested.has(issueSlot.equipType) : false}
+          labels={typeLabels}
         />
       </main>
     </div>

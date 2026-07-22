@@ -426,6 +426,24 @@ service cloud.firestore {
           .hasOnly(['status', 'issuedToPlayerId', 'issuedToParentUserId',
                     'issuedToEnrollmentId', 'issuedAt', 'issuedByUid',
                     'issuedByName', 'returnedAt']));
+
+      // Append-only audit log of issue/return/retire/restore events. Coaches
+      // write events when issuing/returning at the field, always self-attributed.
+      // Board delete exists only so deleting an item can clean up its history.
+      match /history/{eventId} {
+        allow read: if isBoardMember() || isCoach();
+        allow create: if isBoardMember() ||
+          (isCoach() && request.resource.data.get('actorUid', '') == request.auth.uid);
+        allow update: if false;
+        allow delete: if isBoardMember();
+      }
+    }
+
+    // Admin-managed equipment type registry: doc id = type slug, label is the
+    // display name (standard types get a doc only when their label is renamed)
+    match /equipmentTypes/{slug} {
+      allow read: if isBoardMember() || isCoach();
+      allow write: if isBoardMember();
     }
 
     match /sponsors/{sponsorId} {

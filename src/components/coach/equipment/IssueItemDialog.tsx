@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { BellRing, Check, Loader2, PackageOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SHED_ITEM_TYPES, type ShedItem, type ShedItemType } from '@/lib/equipment';
+import { typeLabel, type ShedItem, type ShedItemType, type TypeLabelOverrides } from '@/lib/equipment';
 
 export interface IssueTarget {
   equipType: ShedItemType;
@@ -34,12 +34,14 @@ export function IssueItemDialog({
   onSelect,
   onRequestRestock,
   restockRequested,
+  labels,
 }: {
   target: IssueTarget | null;
   onOpenChange: (open: boolean) => void;
   onSelect: (item: ShedItem) => void;
   onRequestRestock: () => void;
   restockRequested: boolean;
+  labels?: TypeLabelOverrides;
 }) {
   const db = useFirestore();
 
@@ -63,7 +65,7 @@ export function IssueItemDialog({
     };
   }, [availableItems, target?.registeredSize]);
 
-  const typeName = target ? SHED_ITEM_TYPES[target.equipType] : '';
+  const typeName = target ? typeLabel(target.equipType, labels) : '';
 
   const itemRow = (item: ShedItem, highlight: boolean) => (
     <button

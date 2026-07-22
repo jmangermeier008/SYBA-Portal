@@ -18,9 +18,10 @@ import { Loader2, PackagePlus, Undo2 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   EQUIP_FIELD_MAP,
-  SHED_ITEM_TYPES,
+  typeLabel,
   type FootballEquipment,
   type ShedItemType,
+  type TypeLabelOverrides,
 } from '@/lib/equipment';
 
 const EQUIP_TYPES = Object.keys(EQUIP_FIELD_MAP) as ShedItemType[];
@@ -37,6 +38,7 @@ export function PlayerEquipmentSheet({
   saving,
   onIssue,
   onReturn,
+  labels,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,6 +48,7 @@ export function PlayerEquipmentSheet({
   saving: boolean;
   onIssue: (equipType: ShedItemType) => void;
   onReturn: (equipType: ShedItemType) => void;
+  labels?: TypeLabelOverrides;
 }) {
   const isMobile = useIsMobile();
   const fe = footballEquipment ?? {};
@@ -79,7 +82,7 @@ export function PlayerEquipmentSheet({
             return (
               <div key={equipType} className="flex items-center gap-3 p-3 min-h-[64px]">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm">{SHED_ITEM_TYPES[equipType]}</p>
+                  <p className="font-medium text-sm">{typeLabel(equipType, labels)}</p>
                   <p className="text-xs text-muted-foreground truncate">
                     {issued
                       ? `Tag #${tag ?? '—'}${size ? ` · Size ${size}` : ''}`
@@ -113,7 +116,7 @@ export function PlayerEquipmentSheet({
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>
-                          Return {SHED_ITEM_TYPES[equipType]}{tag ? ` #${tag}` : ''}?
+                          Return {typeLabel(equipType, labels)}{tag ? ` #${tag}` : ''}?
                         </AlertDialogTitle>
                         <AlertDialogDescription>
                           It goes back to shed inventory and {playerName} no longer has it checked out.
