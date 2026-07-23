@@ -167,6 +167,15 @@ function normalizeTypeSlug(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, '_');
 }
 
+/** Standard size list for a type slug, or null for custom types (free text). */
+function sizesForType(slug: string): readonly string[] | null {
+  if (slug === 'helmet') return HELMET_SIZES;
+  if (slug === 'shoulder_pads') return PAD_SIZES;
+  if (slug.endsWith('_jersey')) return JERSEY_SIZES;
+  if (slug.endsWith('_pants')) return PANTS_SIZES;
+  return null;
+}
+
 function RecertBadge({ item }: { item: ShedItem }) {
   const state = recertState(item);
   if (state === null) return <span className="text-muted-foreground">—</span>;
@@ -309,6 +318,15 @@ export default function EquipmentPage() {
   const [recertDateDialog, setRecertDateDialog] = useState(false);
   const [recertDateValue, setRecertDateValue] = useState('');
   const [recertSaving, setRecertSaving] = useState(false);
+
+  // Shed list status filter (footer pills) + sortable columns
+  const [shedStatusFilter, setShedStatusFilter] = useState<'all' | 'available' | 'issued' | 'recert-due' | 'retired'>('all');
+  const [shedSort, setShedSort] = useState<{ key: 'tag' | 'type' | 'size' | 'status'; dir: 1 | -1 }>({ key: 'type', dir: 1 });
+
+  // "Other…" size entries when the type has a standard size list
+  const [addItemSizeCustom, setAddItemSizeCustom] = useState('');
+  const [editSizeCustom, setEditSizeCustom] = useState('');
+  const addTagInputRef = useRef<HTMLInputElement>(null);
 
   const searchParams = useSearchParams();
   useEffect(() => {
@@ -766,9 +784,20 @@ export default function EquipmentPage() {
   const filteredShedItems = useMemo(() => {
     if (!shedItems) return [];
     const q = shedSearchQuery.toLowerCase();
+    const byTag = (a: ShedItem, b: ShedItem) => a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true });
     return shedItems
       .filter(item => {
-        if (item.status === 'retired' && !showRetired) return false;
+        if (shedStatusFilter === 'retired') {
+          if (item.status !== 'retired') return false;
+        } else {
+          if (item.status === 'retired' && !showRetired) return false;
+          if (shedStatusFilter === 'available' && item.status !== 'available') return false;
+          if (shedStatusFilter === 'issued' && item.status !== 'issued') return false;
+          if (shedStatusFilter === 'recert-due') {
+            const s = recertState(item);
+            if (s !== 'due' && s !== 'retire') return false;
+          }
+        }
         if (shedTypeFilter !== 'all' && item.type !== shedTypeFilter) return false;
         if (!q) return true;
         return (
@@ -778,13 +807,62 @@ export default function EquipmentPage() {
           (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? '').toLowerCase().includes(q) : false)
         );
       })
-      // Stable, human order: grouped by type name, then numeric-aware tag
-      // number (H-2 before H-10) — same ordering as the inventory export
-      .sort((a, b) =>
-        typeLabel(a.type, typeLabels).localeCompare(typeLabel(b.type, typeLabels)) ||
-        a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true })
-      );
-  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap, showRetired, typeLabels]);
+      // Default: grouped by type name, then numeric-aware tag (H-2 before H-10) —
+      // same ordering as the inventory export. Header clicks re-sort.
+      .sort((a, b) => {
+        let cmp = 0;
+        switch (shedSort.key) {
+          case 'tag': cmp = byTag(a, b); break;
+          case 'type': cmp = typeLabel(a.type, typeLabels).localeCompare(typeLabel(b.type, typeLabels)); break;
+          case 'size': cmp = a.size.localeCompare(b.size, undefined, { numeric: true }); break;
+          case 'status': cmp = a.status.localeCompare(b.status); break;
+        }
+        if (cmp === 0) cmp = byTag(a, b);
+        return cmp * shedSort.dir;
+      });
+  }, [shedItems, shedSearchQuery, shedTypeFilter, playerNameMap, showRetired, typeLabels, shedStatusFilter, shedSort]);
+
+  function toggleShedSort(key: 'tag' | 'type' | 'size' | 'status') {
+    setShedSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: 1 }));
+  }
+
+  // Available stock per type & size for the summary strip; sizes with only
+  // issued stock surface as ×0 so shortages are visible
+  const stockByType = useMemo(() => {
+    const map = new Map<string, { available: number; bySize: Map<string, number> }>();
+    (shedItems ?? []).forEach((item) => {
+      if (item.status === 'retired') return;
+      const entry = map.get(item.type) ?? { available: 0, bySize: new Map<string, number>() };
+      if (item.status === 'available') {
+        entry.available += 1;
+        entry.bySize.set(item.size, (entry.bySize.get(item.size) ?? 0) + 1);
+      } else if (!entry.bySize.has(item.size)) {
+        entry.bySize.set(item.size, 0);
+      }
+      map.set(item.type, entry);
+    });
+    return [...map.entries()]
+      .map(([slug, entry]) => {
+        const list = sizesForType(slug);
+        const sizes = [...entry.bySize.entries()].sort((a, b) => {
+          if (list) {
+            const ia = list.indexOf(a[0]);
+            const ib = list.indexOf(b[0]);
+            if (ia !== -1 || ib !== -1) return (ia === -1 ? list.length : ia) - (ib === -1 ? list.length : ib);
+          }
+          return a[0].localeCompare(b[0], undefined, { numeric: true });
+        });
+        return { slug, available: entry.available, sizes };
+      })
+      .sort((a, b) => typeLabel(a.slug, typeLabels).localeCompare(typeLabel(b.slug, typeLabels)));
+  }, [shedItems, typeLabels]);
+
+  const checkOutPlayerOptions = useMemo<ComboboxOption[]>(
+    () => (enrollments ?? [])
+      .map((e) => ({ value: e.playerId, label: playerNameMap.get(e.playerId) ?? e.playerId }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [enrollments, playerNameMap]
+  );
 
   // Bulk recert selection targets: visible helmets/shoulder pads that aren't retired
   const recertEligibleVisible = useMemo(
@@ -805,10 +883,12 @@ export default function EquipmentPage() {
     setShedSelected(allRecertSelected ? new Set() : new Set(recertEligibleVisible.map((i) => i.id)));
   }
 
-  async function handleAddShedItem() {
-    if (!db || !addItemForm.tagNumber.trim() || !addItemForm.size.trim()) return;
+  async function handleAddShedItem(keepOpen = false) {
+    if (!db || !addItemForm.tagNumber.trim()) return;
     const type = addItemForm.type === '__other__' ? normalizeTypeSlug(addItemCustomType) : addItemForm.type;
     if (!type) return;
+    const size = addItemForm.size === '__other__' ? addItemSizeCustom.trim() : addItemForm.size.trim();
+    if (!size) return;
     if (isDuplicateTag(addItemForm.tagNumber)) {
       toast({ title: 'Duplicate tag number', description: `Tag #${addItemForm.tagNumber.trim()} already exists in inventory.`, variant: 'destructive' });
       return;
@@ -829,7 +909,7 @@ export default function EquipmentPage() {
       batch.set(doc(collection(db, 'equipmentInventory')), {
         tagNumber: addItemForm.tagNumber.trim(),
         type,
-        size: addItemForm.size.trim(),
+        size,
         status: 'available',
         ...(year ? { purchaseYear: Number(year) } : {}),
         ...(addRecert ? { lastRecertDate: addRecert } : {}),
@@ -842,9 +922,16 @@ export default function EquipmentPage() {
       }
       await batch.commit();
       toast({ title: 'Item added', description: `Tag #${addItemForm.tagNumber} added to Shed.` });
-      setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
-      setAddItemCustomType('');
-      setAddItemDialog(false);
+      if (keepOpen) {
+        // Bulk-entry flow: keep type/size/years/condition, clear per-item fields
+        setAddItemForm(f => ({ ...f, tagNumber: '', notes: '' }));
+        setTimeout(() => addTagInputRef.current?.focus(), 0);
+      } else {
+        setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' });
+        setAddItemCustomType('');
+        setAddItemSizeCustom('');
+        setAddItemDialog(false);
+      }
     } catch (err: any) {
       toast({ title: 'Failed to add item', description: err.message, variant: 'destructive' });
     } finally {
@@ -1058,10 +1145,13 @@ export default function EquipmentPage() {
   }
 
   function openEditDialog(item: ShedItem) {
+    const sizeList = sizesForType(item.type);
+    const sizeInList = !sizeList || sizeList.includes(item.size);
+    setEditSizeCustom(sizeInList ? '' : item.size);
     setEditForm({
       tagNumber: item.tagNumber,
       type: item.type,
-      size: item.size,
+      size: sizeInList ? item.size : '__other__',
       notes: item.notes ?? '',
       purchaseYear: item.purchaseYear ? String(item.purchaseYear) : '',
       lastRecertDate: recertYear(item.lastRecertDate) ? String(recertYear(item.lastRecertDate)) : '',
@@ -1071,8 +1161,10 @@ export default function EquipmentPage() {
   }
 
   async function handleEditSave() {
-    if (!db || !editDialog.item || !editForm.size.trim() || !editForm.tagNumber.trim()) return;
+    if (!db || !editDialog.item || !editForm.tagNumber.trim()) return;
     const item = editDialog.item;
+    const editSize = editForm.size === '__other__' ? editSizeCustom.trim() : editForm.size.trim();
+    if (!editSize) return;
     const year = editForm.purchaseYear.trim();
     if (year && !/^\d{4}$/.test(year)) {
       toast({ title: 'Invalid purchase year', description: 'Enter a 4-digit year, e.g. 2024.', variant: 'destructive' });
@@ -1097,7 +1189,7 @@ export default function EquipmentPage() {
       batch.update(doc(db, 'equipmentInventory', item.id), {
         tagNumber: newTag,
         type: newType,
-        size: editForm.size.trim(),
+        size: editSize,
         notes: editForm.notes.trim(),
         purchaseYear: year ? Number(year) : deleteField(),
         lastRecertDate: editRecert || deleteField(),
@@ -2148,6 +2240,32 @@ export default function EquipmentPage() {
               </div>
             </div>
 
+            {/* Stock levels: available count by type & size (issued-out sizes show ×0) */}
+            {stockByType.length > 0 && (
+              <Card className="border-none shadow-md">
+                <CardContent className="p-3 md:p-4 flex flex-wrap gap-x-8 gap-y-3">
+                  {stockByType.map(({ slug, available, sizes }) => (
+                    <div key={slug} className="text-xs min-w-[10rem]">
+                      <p>
+                        <span className="font-semibold">{typeLabel(slug, typeLabels)}</span>{' '}
+                        <span className={cn(available === 0 ? 'text-destructive font-medium' : 'text-muted-foreground')}>
+                          {available} available
+                        </span>
+                      </p>
+                      <p className="text-muted-foreground mt-0.5">
+                        {sizes.map(([size, count], i) => (
+                          <span key={size}>
+                            {i > 0 && ' · '}
+                            <span className={cn(count === 0 && 'text-destructive')}>{size} ×{count}</span>
+                          </span>
+                        ))}
+                      </p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
             {(!shedItems || shedItems.length === 0) && !shedSearchQuery && shedTypeFilter === 'all' && (
               <Card className="border-none shadow-md">
                 <CardContent className="flex flex-col items-center justify-center py-10 text-center">
@@ -2205,10 +2323,17 @@ export default function EquipmentPage() {
                             </TooltipProvider>
                           )}
                         </th>
-                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Tag #</th>
-                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Type</th>
-                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Size</th>
-                        <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Status</th>
+                        {([['tag', 'Tag #'], ['type', 'Type'], ['size', 'Size'], ['status', 'Status']] as const).map(([key, label]) => (
+                          <th key={key} className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => toggleShedSort(key)}
+                              className={cn('flex items-center gap-1 hover:text-foreground', shedSort.key === key && 'text-foreground')}
+                            >
+                              {label}{shedSort.key === key ? (shedSort.dir === 1 ? ' ↑' : ' ↓') : ''}
+                            </button>
+                          </th>
+                        ))}
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap">Recert</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden sm:table-cell">Issued To</th>
                         <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap hidden md:table-cell">Issued At</th>
@@ -2387,18 +2512,43 @@ export default function EquipmentPage() {
               </div>
             )}
 
-            <p className="text-xs text-muted-foreground">
-              {shedItems?.length ?? 0} item{(shedItems?.length ?? 0) !== 1 ? 's' : ''} in inventory
-              {' · '}{shedItems?.filter(i => i.status === 'available').length ?? 0} available
-              {' · '}{shedItems?.filter(i => i.status === 'issued').length ?? 0} issued
-              {' · '}{shedItems?.filter(i => recertState(i) === 'due' || recertState(i) === 'retire').length ?? 0} due for recert
-              {' · '}{shedItems?.filter(i => i.status === 'retired').length ?? 0} retired
-            </p>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="mr-1">{shedItems?.length ?? 0} item{(shedItems?.length ?? 0) !== 1 ? 's' : ''} in inventory ·</span>
+              {([
+                ['available', 'available', shedItems?.filter(i => i.status === 'available').length ?? 0],
+                ['issued', 'issued', shedItems?.filter(i => i.status === 'issued').length ?? 0],
+                ['recert-due', 'due for recert', shedItems?.filter(i => recertState(i) === 'due' || recertState(i) === 'retire').length ?? 0],
+                ['retired', 'retired', shedItems?.filter(i => i.status === 'retired').length ?? 0],
+              ] as const).map(([key, label, count]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setShedStatusFilter(f => f === key ? 'all' : key); setShedSelected(new Set()); }}
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 transition-colors hover:bg-muted',
+                    shedStatusFilter === key
+                      ? 'bg-primary text-primary-foreground border-primary hover:bg-primary'
+                      : 'bg-background'
+                  )}
+                >
+                  {count} {label}
+                </button>
+              ))}
+              {shedStatusFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => { setShedStatusFilter('all'); setShedSelected(new Set()); }}
+                  className="underline underline-offset-2 hover:text-foreground ml-1"
+                >
+                  Clear filter
+                </button>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
 
         {/* Add Item Dialog */}
-        <Dialog open={addItemDialog} onOpenChange={(open) => { setAddItemDialog(open); if (!open) { setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' }); setAddItemCustomType(''); } }}>
+        <Dialog open={addItemDialog} onOpenChange={(open) => { setAddItemDialog(open); if (!open) { setAddItemForm({ tagNumber: '', type: 'helmet', size: '', notes: '', purchaseYear: '', lastRecertDate: '', condition: '' }); setAddItemCustomType(''); setAddItemSizeCustom(''); } }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -2409,14 +2559,18 @@ export default function EquipmentPage() {
               <div className="space-y-1">
                 <Label>Tag Number <span className="text-destructive">*</span></Label>
                 <Input
+                  ref={addTagInputRef}
                   placeholder="e.g. H-042"
                   value={addItemForm.tagNumber}
                   onChange={(e) => setAddItemForm(f => ({ ...f, tagNumber: e.target.value }))}
                 />
+                {isDuplicateTag(addItemForm.tagNumber) && (
+                  <p className="text-xs text-destructive">Tag #{addItemForm.tagNumber.trim()} already exists in inventory.</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Item Type <span className="text-destructive">*</span></Label>
-                <Select value={addItemForm.type} onValueChange={(v) => setAddItemForm(f => ({ ...f, type: v }))}>
+                <Select value={addItemForm.type} onValueChange={(v) => { setAddItemForm(f => ({ ...f, type: v, size: '' })); setAddItemSizeCustom(''); }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(Object.keys(SHED_ITEM_TYPES) as ShedItemType[]).map((k) => (
@@ -2439,11 +2593,37 @@ export default function EquipmentPage() {
               </div>
               <div className="space-y-1">
                 <Label>Size <span className="text-destructive">*</span></Label>
-                <Input
-                  placeholder="e.g. YM, AS, L"
-                  value={addItemForm.size}
-                  onChange={(e) => setAddItemForm(f => ({ ...f, size: e.target.value }))}
-                />
+                {(() => {
+                  const sizeList = addItemForm.type === '__other__' ? null : sizesForType(addItemForm.type);
+                  if (!sizeList) {
+                    return (
+                      <Input
+                        placeholder="e.g. YM, AS, L, One Size"
+                        value={addItemForm.size}
+                        onChange={(e) => setAddItemForm(f => ({ ...f, size: e.target.value }))}
+                      />
+                    );
+                  }
+                  return (
+                    <>
+                      <Select value={addItemForm.size || undefined} onValueChange={(v) => setAddItemForm(f => ({ ...f, size: v }))}>
+                        <SelectTrigger><SelectValue placeholder="Select size…" /></SelectTrigger>
+                        <SelectContent>
+                          {sizeList.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          <SelectItem value="__other__">Other…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {addItemForm.size === '__other__' && (
+                        <Input
+                          placeholder="Custom size"
+                          value={addItemSizeCustom}
+                          onChange={(e) => setAddItemSizeCustom(e.target.value)}
+                          className="mt-2"
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               {RECERT_TYPES.has(addItemForm.type) && (
                 <>
@@ -2491,11 +2671,18 @@ export default function EquipmentPage() {
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button variant="outline" onClick={() => setAddItemDialog(false)}>Cancel</Button>
               <Button
-                onClick={handleAddShedItem}
-                disabled={addItemSaving || !addItemForm.tagNumber.trim() || !addItemForm.size.trim() || (addItemForm.type === '__other__' && !addItemCustomType.trim())}
+                variant="outline"
+                onClick={() => handleAddShedItem(true)}
+                disabled={addItemSaving || !addItemForm.tagNumber.trim() || isDuplicateTag(addItemForm.tagNumber) || (addItemForm.size === '__other__' ? !addItemSizeCustom.trim() : !addItemForm.size.trim()) || (addItemForm.type === '__other__' && !addItemCustomType.trim())}
+              >
+                Save &amp; Add Another
+              </Button>
+              <Button
+                onClick={() => handleAddShedItem(false)}
+                disabled={addItemSaving || !addItemForm.tagNumber.trim() || isDuplicateTag(addItemForm.tagNumber) || (addItemForm.size === '__other__' ? !addItemSizeCustom.trim() : !addItemForm.size.trim()) || (addItemForm.type === '__other__' && !addItemCustomType.trim())}
               >
                 {addItemSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Add Item
@@ -2517,12 +2704,27 @@ export default function EquipmentPage() {
                 <div className="space-y-1">
                   <Label>Tag Number <span className="text-destructive">*</span></Label>
                   <Input value={editForm.tagNumber} onChange={(e) => setEditForm(f => ({ ...f, tagNumber: e.target.value }))} />
+                  {editDialog.item && isDuplicateTag(editForm.tagNumber, editDialog.item.id) && (
+                    <p className="text-xs text-destructive">Tag #{editForm.tagNumber.trim()} already exists in inventory.</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Item Type</Label>
                   <Select
                     value={editForm.type}
-                    onValueChange={(v) => setEditForm(f => ({ ...f, type: v }))}
+                    onValueChange={(v) => {
+                      // Keep the size when it's valid for the new type; otherwise
+                      // carry it into the Other… input rather than losing it
+                      const list = sizesForType(v);
+                      const effective = editForm.size === '__other__' ? editSizeCustom : editForm.size;
+                      if (!list || list.includes(effective)) {
+                        setEditForm(f => ({ ...f, type: v, size: effective }));
+                        setEditSizeCustom('');
+                      } else {
+                        setEditForm(f => ({ ...f, type: v, size: effective ? '__other__' : '' }));
+                        setEditSizeCustom(effective);
+                      }
+                    }}
                     disabled={editDialog.item?.status === 'issued'}
                   >
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -2546,7 +2748,31 @@ export default function EquipmentPage() {
               </div>
               <div className="space-y-1">
                 <Label>Size <span className="text-destructive">*</span></Label>
-                <Input value={editForm.size} onChange={(e) => setEditForm(f => ({ ...f, size: e.target.value }))} />
+                {(() => {
+                  const sizeList = editForm.type ? sizesForType(editForm.type) : null;
+                  if (!sizeList) {
+                    return <Input value={editForm.size} onChange={(e) => setEditForm(f => ({ ...f, size: e.target.value }))} />;
+                  }
+                  return (
+                    <>
+                      <Select value={editForm.size || undefined} onValueChange={(v) => setEditForm(f => ({ ...f, size: v }))}>
+                        <SelectTrigger><SelectValue placeholder="Select size…" /></SelectTrigger>
+                        <SelectContent>
+                          {sizeList.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          <SelectItem value="__other__">Other…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {editForm.size === '__other__' && (
+                        <Input
+                          placeholder="Custom size"
+                          value={editSizeCustom}
+                          onChange={(e) => setEditSizeCustom(e.target.value)}
+                          className="mt-2"
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               {editForm.type && RECERT_TYPES.has(editForm.type) && (
                 <>
@@ -2626,7 +2852,12 @@ export default function EquipmentPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditDialog({ open: false, item: null })}>Cancel</Button>
-              <Button onClick={handleEditSave} disabled={editSaving || !editForm.size.trim() || !editForm.tagNumber.trim()}>
+              <Button
+                onClick={handleEditSave}
+                disabled={editSaving || !editForm.tagNumber.trim() ||
+                  (editDialog.item ? isDuplicateTag(editForm.tagNumber, editDialog.item.id) : false) ||
+                  (editForm.size === '__other__' ? !editSizeCustom.trim() : !editForm.size.trim())}
+              >
                 {editSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Save Changes
               </Button>
@@ -2692,18 +2923,13 @@ export default function EquipmentPage() {
               </p>
               <div className="space-y-1">
                 <Label>Assign to Player <span className="text-destructive">*</span></Label>
-                <Select value={checkOutPlayerId} onValueChange={setCheckOutPlayerId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a player…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(enrollments ?? []).map(e => (
-                      <SelectItem key={e.playerId} value={e.playerId}>
-                        {playerNameMap.get(e.playerId) ?? e.playerId}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={checkOutPlayerOptions}
+                  value={checkOutPlayerId || undefined}
+                  onSelect={setCheckOutPlayerId}
+                  placeholder="Search players…"
+                  className="w-full"
+                />
                 {!selectedSeasonId && (
                   <p className="text-xs text-muted-foreground mt-1">Select a season on the Player Assignments tab to see players.</p>
                 )}
