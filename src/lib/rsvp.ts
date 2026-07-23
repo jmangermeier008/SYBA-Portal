@@ -39,3 +39,22 @@ export function writeRsvp(db: Firestore, target: RsvpTarget): Promise<void> {
 export function addRsvpToBatch(db: Firestore, batch: WriteBatch, target: RsvpTarget): void {
   batch.set(rsvpDocRef(db, target), rsvpDocData(target), { merge: true });
 }
+
+// ─── Custom-event RSVPs ──────────────────────────────────────────────────────
+// Custom events can be league-wide (no team, no roster), so RSVP is one
+// response per parent ACCOUNT (doc id = uid), not per child. Stored at
+// customEvents/{eventId}/rsvps/{uid}; covered by the recursive rsvps rule.
+
+/** Canonical event-RSVP doc ref: id is the responding user's uid. */
+export function eventRsvpDocRef(db: Firestore, eventId: string, uid: string) {
+  return doc(db, 'customEvents', eventId, 'rsvps', uid);
+}
+
+/** Write (or update) the current user's RSVP to a custom event. */
+export function writeEventRsvp(db: Firestore, eventId: string, uid: string, status: RsvpStatus): Promise<void> {
+  return setDoc(
+    eventRsvpDocRef(db, eventId, uid),
+    { id: uid, eventId, parentUserId: uid, status, timestamp: new Date().toISOString() },
+    { merge: true },
+  );
+}

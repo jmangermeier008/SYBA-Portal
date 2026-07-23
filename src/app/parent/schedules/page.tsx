@@ -24,7 +24,7 @@ import { normalizeTeamGame } from '@/lib/game-shape';
 import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data';
 import { useTeamGamesLive } from '@/hooks/use-team-games';
 import { buildDivisionColorMap } from '@/lib/division-colors';
-import { addRsvpToBatch, rsvpDocRef } from '@/lib/rsvp';
+import { addRsvpToBatch, rsvpDocRef, writeEventRsvp } from '@/lib/rsvp';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
@@ -213,6 +213,17 @@ export default function ParentSchedulesPage() {
     }
   };
 
+  // ── Custom-event RSVP (one response per parent account) ─────────────────────
+  const handleEventRsvp = async (eventId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
+    if (!db || !user) return;
+    try {
+      await writeEventRsvp(db, eventId, user.uid, status);
+      toast({ title: 'RSVP Sent', description: `You're marked ${status === 'Attending' ? 'going' : status === 'Not Attending' ? 'not going' : 'maybe'}.` });
+    } catch (err: any) {
+      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+    }
+  };
+
   // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
   // concession stand; football volunteering spans chain gangs, clock, and gate
   // crews, so it uses generic "volunteer" language. Cosmetic only — the data
@@ -277,6 +288,8 @@ export default function ParentSchedulesPage() {
           divisionColors={divisionColors}
           myTeamIds={allTeamIds}
           onRsvp={handleRSVP}
+          onEventRsvp={handleEventRsvp}
+          currentUserId={user?.uid}
           onConcessionViewDetails={() => router.push('/parent/volunteers')}
           childSelector={childSelector}
         />

@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { MapPin, Trophy, Dumbbell, CalendarDays } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { FootballIcon } from '@/components/icons/football-icon';
 import type { CalendarEvent } from '@/types/scheduling';
 
 function formatTime(t?: string): string {
@@ -37,11 +38,13 @@ interface UpcomingEventsListProps {
   limit?: number;
   /** Wrap each row in a link (e.g. the coach dashboard links to /coach/schedules). */
   rowHref?: string;
+  /** Sport of the current view — picks the practice icon (football → football glyph). */
+  sport?: 'football' | 'baseball' | null;
   emptyMessage?: string;
   className?: string;
 }
 
-export function UpcomingEventsList({ events, limit, rowHref, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
+export function UpcomingEventsList({ events, limit, rowHref, sport, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
   const sorted = [...events].sort((a, b) =>
     `${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`)
   );
@@ -81,7 +84,9 @@ export function UpcomingEventsList({ events, limit, rowHref, emptyMessage = 'Not
                     {event.eventType === 'game' ? (
                       <Trophy className="h-4 w-4 text-primary" />
                     ) : event.eventType === 'practice' ? (
-                      <Dumbbell className="h-4 w-4 text-green-600" />
+                      sport === 'football'
+                        ? <FootballIcon className="h-4 w-4 text-green-600" />
+                        : <Dumbbell className="h-4 w-4 text-green-600" />
                     ) : (
                       <CalendarDays className="h-4 w-4 text-purple-600" />
                     )}

@@ -163,7 +163,11 @@ export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
     const teamsList = teams ?? [];
     const events: CalendarEvent[] = [];
-    (games ?? []).forEach(g => events.push(normalizeGame(g)));
+    // Top-level football games/practices don't store divisionId — resolve it
+    // from the team so they color by division like coach/parent views do.
+    (games ?? []).forEach(g => events.push(
+      normalizeGame(g, { divisionId: g.divisionId ?? teamsList.find(t => t.id === g.teamId)?.divisionId })
+    ));
     (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s, teamsList)));
     events.push(...buildConcessionEvents(concessionSlots ?? []));
     (fields ?? []).forEach(f =>
@@ -215,6 +219,7 @@ export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
         }}
         onAddEvent={() => setAddEventOpen(true)}
         onEventDelete={handleEventDelete}
+        showEventResponses
       />
 
       <AddEventDialog

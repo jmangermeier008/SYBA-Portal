@@ -84,8 +84,12 @@ function topLevelGameTitle(g: GameLike): string {
  * Top-level `games/{id}` document → CalendarEvent. Used by all admin/board views
  * (calendar, dashboard, games manager). Umpire fields are included but the
  * LeagueCalendar only surfaces them for Admin/Board/Coach roles.
+ *
+ * Football practices and games don't store `divisionId` on the top-level doc,
+ * so pass `opts.divisionId` (resolved from the game's team) to color them by
+ * division — matching what coach/parent views already do via the team mirror.
  */
-export function normalizeGame(g: GameLike): CalendarEvent {
+export function normalizeGame(g: GameLike, opts?: { divisionId?: string }): CalendarEvent {
   return {
     id: g.id,
     eventType: g.type === 'practice' ? 'practice' : 'game',
@@ -102,7 +106,7 @@ export function normalizeGame(g: GameLike): CalendarEvent {
     teamId: g.teamId,
     teamName: g.teamName,
     division: g.division,
-    divisionId: g.divisionId,
+    divisionId: opts?.divisionId ?? g.divisionId,
     notes: g.scrimmageNote || g.notes,
     umpireName: g.umpireName,
     umpireNotified: g.umpireNotified,

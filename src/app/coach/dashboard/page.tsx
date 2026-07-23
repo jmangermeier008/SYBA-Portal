@@ -596,6 +596,7 @@ export default function CoachDashboard() {
                 <UpcomingEventsList
                   events={scheduleListEvents}
                   rowHref="/coach/schedules"
+                  sport={activeSport}
                   emptyMessage="Your next event is shown above — nothing else scheduled yet."
                 />
               )}

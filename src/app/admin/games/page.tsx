@@ -123,6 +123,9 @@ export default function AdminGamesPage() {
   const [showPast, setShowPast] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'game' | 'practice'>('all');
+  const PAST_PAGE = 20;
+  const [pastLimit, setPastLimit] = useState(PAST_PAGE);
 
   // Reschedule cascade confirmation
   const pendingShiftsRef = useRef<any[]>([]);
@@ -1115,6 +1118,9 @@ export default function AdminGamesPage() {
     if (selectedSeasonId && selectedSeasonId !== 'all-seasons') {
       result = result.filter(g => g.seasonId === selectedSeasonId);
     }
+    if (typeFilter !== 'all') {
+      result = result.filter(g => g.type === typeFilter);
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(g =>
@@ -1125,6 +1131,17 @@ export default function AdminGamesPage() {
       );
     }
     return result;
+  };
+
+  // Group an already-date-sorted list into [dateKey, rows] pairs for day headers.
+  const groupByDate = (list: Game[]): [string, Game[]][] => {
+    const map = new Map<string, Game[]>();
+    for (const g of list) {
+      const rows = map.get(g.date) ?? [];
+      rows.push(g);
+      map.set(g.date, rows);
+    }
+    return [...map.entries()];
   };
 
   return (
@@ -1555,6 +1572,17 @@ export default function AdminGamesPage() {
           <AdminLeagueCalendar />
         ) : (
           <>
+            {/* Type filter — focus on games or practices */}
+            <div className="flex items-center gap-1 mb-4 bg-secondary/40 rounded-full p-1 w-fit text-sm">
+              {([['all', 'All'], ['game', 'Games'], ['practice', 'Practices']] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setTypeFilter(val)}
+                  className={cn('px-3 py-1 rounded-full transition-colors', typeFilter === val ? 'bg-white shadow font-semibold text-foreground' : 'text-muted-foreground')}
+                >{label}</button>
+              ))}
+            </div>
+
             {/* Upcoming */}
             <Card className="border-none shadow-md mb-6">
               <CardHeader className="pb-2">
@@ -1566,15 +1594,24 @@ export default function AdminGamesPage() {
                 ) : filterGames(upcomingGames ?? []).length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">No upcoming games or practices.</p>
                 ) : (
-                  <div className="space-y-2">
-                    {filterGames(upcomingGames ?? []).map(g => (
-                      <GameRow key={g.id} game={g} readOnly={!canEdit}
-                        onEdit={() => handleOpenEdit(g)}
-                        onCancel={() => handleInitiateCancel(g)}
-                        onDelete={() => handleInitiateDelete(g)}
-                        onScore={() => handleOpenScoreDialog(g)}
-                        onUmpireUpdate={(name) => handleUmpireUpdate(g, name)}
-                        onUmpireNotifiedToggle={(checked) => handleUmpireNotifiedToggle(g, checked)} />
+                  <div className="space-y-4">
+                    {groupByDate(filterGames(upcomingGames ?? [])).map(([date, rows]) => (
+                      <div key={date}>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                          {format(parseISO(date), 'EEEE, MMM d')}
+                        </p>
+                        <div className="space-y-1.5">
+                          {rows.map(g => (
+                            <GameRow key={g.id} game={g} readOnly={!canEdit}
+                              onEdit={() => handleOpenEdit(g)}
+                              onCancel={() => handleInitiateCancel(g)}
+                              onDelete={() => handleInitiateDelete(g)}
+                              onScore={() => handleOpenScoreDialog(g)}
+                              onUmpireUpdate={(name) => handleUmpireUpdate(g, name)}
+                              onUmpireNotifiedToggle={(checked) => handleUmpireNotifiedToggle(g, checked)} />
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1582,37 +1619,59 @@ export default function AdminGamesPage() {
             </Card>
 
             <div className="mb-4">
-              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setShowPast(!showPast)}>
+              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => { setShowPast(!showPast); setPastLimit(PAST_PAGE); }}>
                 {showPast ? 'Hide' : 'Show'} past games
               </Button>
             </div>
 
-            {showPast && (
-              <Card className="border-none shadow-md">
-                <CardHeader className="pb-2">
-                  <CardTitle className="font-headline text-muted-foreground">Past</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loadingPast ? (
-                    <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                  ) : filterGames(pastGames ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No past games on record.</p>
-                  ) : (
-                    <div className="space-y-2 opacity-60">
-                      {filterGames(pastGames ?? []).map(g => (
-                        <GameRow key={g.id} game={g} readOnly={!canEdit}
-                          onEdit={() => handleOpenEdit(g)}
-                          onCancel={() => handleInitiateCancel(g)}
-                          onDelete={() => handleInitiateDelete(g)}
-                          onScore={() => handleOpenScoreDialog(g)}
-                          onUmpireUpdate={(name) => handleUmpireUpdate(g, name)}
-                          onUmpireNotifiedToggle={(checked) => handleUmpireNotifiedToggle(g, checked)} />
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+            {showPast && (() => {
+              const past = filterGames(pastGames ?? []);
+              const shown = past.slice(0, pastLimit);
+              return (
+                <Card className="border-none shadow-md">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="font-headline text-muted-foreground">Past</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {loadingPast ? (
+                      <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                    ) : past.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No past games on record.</p>
+                    ) : (
+                      <>
+                        <div className="space-y-4 opacity-70">
+                          {groupByDate(shown).map(([date, rows]) => (
+                            <div key={date}>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                                {format(parseISO(date), 'EEEE, MMM d')}
+                              </p>
+                              <div className="space-y-1.5">
+                                {rows.map(g => (
+                                  <GameRow key={g.id} game={g} readOnly={!canEdit}
+                                    onEdit={() => handleOpenEdit(g)}
+                                    onCancel={() => handleInitiateCancel(g)}
+                                    onDelete={() => handleInitiateDelete(g)}
+                                    onScore={() => handleOpenScoreDialog(g)}
+                                    onUmpireUpdate={(name) => handleUmpireUpdate(g, name)}
+                                    onUmpireNotifiedToggle={(checked) => handleUmpireNotifiedToggle(g, checked)} />
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {past.length > pastLimit && (
+                          <div className="pt-3 text-center">
+                            <Button variant="outline" size="sm" className="rounded-full" onClick={() => setPastLimit(l => l + PAST_PAGE)}>
+                              Load more ({past.length - pastLimit} older)
+                            </Button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
           </>
         )}
       </main>
@@ -1841,9 +1900,9 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
         : isGame ? 'bg-blue-50 border-blue-100'
         : 'bg-green-50 border-green-100'
     )}>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 gap-2 sm:gap-3">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className={cn('p-2 rounded-lg shrink-0', isCancelled ? 'bg-gray-100' : isGame ? 'bg-blue-100' : 'bg-green-100')}>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-3 py-2 gap-1.5 sm:gap-3">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className={cn('p-1.5 rounded-lg shrink-0', isCancelled ? 'bg-gray-100' : isGame ? 'bg-blue-100' : 'bg-green-100')}>
           {isGame
             ? <Trophy className={cn('h-4 w-4', isCancelled ? 'text-gray-400' : 'text-blue-600')} />
             : <Users className={cn('h-4 w-4', isCancelled ? 'text-gray-400' : 'text-green-600')} />
@@ -1870,8 +1929,8 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-            <span className="text-xs text-muted-foreground">{format(parseISO(game.date), 'EEE, MMM d')} · {formatTime(game.time)}{game.endTime ? ` – ${formatTime(game.endTime)}` : ''}</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs text-muted-foreground">{formatTime(game.time)}{game.endTime ? ` – ${formatTime(game.endTime)}` : ''}</span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {game.fieldName}</span>
             {game.notes && <span className="text-xs text-muted-foreground italic truncate">{game.notes}</span>}
           </div>
@@ -1917,7 +1976,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
 
       {/* Umpire row — league games only */}
       {isGame && !isCompleted && (
-        <div className="flex items-center gap-3 px-4 pb-3 border-t border-dashed border-current/10 pt-2">
+        <div className="flex items-center gap-3 px-3 pb-2 border-t border-dashed border-current/10 pt-1.5">
           <UserCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <Input
             className="h-7 text-xs rounded-lg max-w-[200px]"

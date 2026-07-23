@@ -35,6 +35,8 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import Link from 'next/link';
+import { collection } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -189,6 +191,10 @@ export interface LeagueCalendarProps {
   divisionColors?: Record<string, string>;
   // Role-specific action callbacks — undefined = hidden in popover
   onRsvp?: (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => void;
+  // RSVP to a custom event (parent) — enables Yes/No/Maybe buttons in the event popover
+  onEventRsvp?: (eventId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => void;
+  // Show the going/maybe/no response tally in event popovers (coach/admin)
+  showEventResponses?: boolean;
   onWeatherCancel?: (teamId: string, gameId: string) => void;
   onConcessionSignup?: (slotId: string) => void;
   onConcessionCancel?: (slotId: string) => void;
@@ -218,6 +224,8 @@ function EventPopoverContent({
   event,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -226,11 +234,31 @@ function EventPopoverContent({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const { activeSport } = useSport();
   const officialLabel = activeSport === 'football' ? 'Referee' : 'Umpire';
+
+  // Custom-event RSVPs — subscribe only for custom events (one doc per user).
+  // This component mounts when its popover opens, so the subscription is scoped
+  // to the open event.
+  const db = useFirestore();
+  const eventRsvpsQuery = useMemoFirebase(() => {
+    if (!db || event.eventType !== 'event' || (!onEventRsvp && !showEventResponses)) return null;
+    return collection(db, 'customEvents', event.sourceId, 'rsvps');
+  }, [db, event.eventType, event.sourceId, onEventRsvp, showEventResponses]);
+  const { data: eventRsvps } = useCollection<{ id: string; status: string }>(eventRsvpsQuery);
+  const eventTally = useMemo(() => {
+    const t = { going: 0, maybe: 0, no: 0 };
+    for (const r of eventRsvps ?? []) {
+      if (r.status === 'Attending') t.going++;
+      else if (r.status === 'Maybe') t.maybe++;
+      else if (r.status === 'Not Attending') t.no++;
+    }
+    return t;
+  }, [eventRsvps]);
+  const myEventRsvp = eventRsvps?.find(r => r.id === currentUserId)?.status;
 
   const typeLabel =
     event.eventType === 'game'
@@ -321,6 +349,15 @@ function EventPopoverContent({
             </span>
           </div>
         )}
+        {/* Event response tally (coach/admin) */}
+        {showEventResponses && event.eventType === 'event' && (
+          <div className="flex items-center gap-2 text-sm">
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">
+              {eventTally.going} going · {eventTally.maybe} maybe · {eventTally.no} no
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
@@ -338,6 +375,26 @@ function EventPopoverContent({
                     size="sm"
                     className="flex-1 text-xs h-9 px-1"
                     onClick={() => onRsvp(event.sourceId, event.teamId!, s)}
+                  >
+                    {s === 'Attending' ? 'Yes' : s === 'Not Attending' ? 'No' : 'Maybe'}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* RSVP (parent + custom event) */}
+          {onEventRsvp && event.eventType === 'event' && (
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1.5">Your RSVP</p>
+              <div className="flex gap-1.5">
+                {(['Attending', 'Not Attending', 'Maybe'] as const).map(s => (
+                  <Button
+                    key={s}
+                    variant={myEventRsvp === s ? 'default' : 'outline'}
+                    size="sm"
+                    className="flex-1 text-xs h-9 px-1"
+                    onClick={() => onEventRsvp(event.sourceId, s)}
                   >
                     {s === 'Attending' ? 'Yes' : s === 'Not Attending' ? 'No' : 'Maybe'}
                   </Button>
@@ -449,6 +506,8 @@ function EventPill({
   event,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -457,7 +516,7 @@ function EventPill({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const { className: pillCls, style: pillStyle } = getEventStyles(event, divisionColors);
@@ -481,6 +540,8 @@ function EventPill({
           event={event}
           divisionColors={divisionColors}
           onRsvp={onRsvp}
+          onEventRsvp={onEventRsvp}
+          showEventResponses={showEventResponses}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -501,6 +562,8 @@ function EventDot({
   event,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -509,7 +572,7 @@ function EventDot({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   const dotColor = getDotColor(event, divisionColors);
@@ -535,6 +598,8 @@ function EventDot({
           event={event}
           divisionColors={divisionColors}
           onRsvp={onRsvp}
+          onEventRsvp={onEventRsvp}
+          showEventResponses={showEventResponses}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -560,6 +625,8 @@ function MonthGrid({
   isMobile,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -575,6 +642,8 @@ function MonthGrid({
   isMobile?: boolean;
   divisionColors?: LeagueCalendarProps['divisionColors'];
   onRsvp?: LeagueCalendarProps['onRsvp'];
+  onEventRsvp?: LeagueCalendarProps['onEventRsvp'];
+  showEventResponses?: LeagueCalendarProps['showEventResponses'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
@@ -647,6 +716,8 @@ function MonthGrid({
                   event={e}
                   divisionColors={divisionColors}
                   onRsvp={onRsvp}
+                  onEventRsvp={onEventRsvp}
+                  showEventResponses={showEventResponses}
                   onWeatherCancel={onWeatherCancel}
                   onConcessionSignup={onConcessionSignup}
                   onConcessionCancel={onConcessionCancel}
@@ -680,6 +751,8 @@ function WeekStrip({
   eventsByDate,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -694,6 +767,8 @@ function WeekStrip({
   eventsByDate: Map<string, CalendarEvent[]>;
   divisionColors?: LeagueCalendarProps['divisionColors'];
   onRsvp?: LeagueCalendarProps['onRsvp'];
+  onEventRsvp?: LeagueCalendarProps['onEventRsvp'];
+  showEventResponses?: LeagueCalendarProps['showEventResponses'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
@@ -716,6 +791,8 @@ function WeekStrip({
           event={e}
           divisionColors={divisionColors}
           onRsvp={onRsvp}
+          onEventRsvp={onEventRsvp}
+          showEventResponses={showEventResponses}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -825,6 +902,8 @@ function DayEventCard({
   event,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -833,7 +912,7 @@ function DayEventCard({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
   event: CalendarEvent;
 }) {
   return (
@@ -842,6 +921,8 @@ function DayEventCard({
         event={event}
         divisionColors={divisionColors}
         onRsvp={onRsvp}
+        onEventRsvp={onEventRsvp}
+        showEventResponses={showEventResponses}
         onWeatherCancel={onWeatherCancel}
         onConcessionSignup={onConcessionSignup}
         onConcessionCancel={onConcessionCancel}
@@ -860,6 +941,8 @@ function DayView({
   eventsByDate,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -873,6 +956,8 @@ function DayView({
   eventsByDate: Map<string, CalendarEvent[]>;
   divisionColors?: LeagueCalendarProps['divisionColors'];
   onRsvp?: LeagueCalendarProps['onRsvp'];
+  onEventRsvp?: LeagueCalendarProps['onEventRsvp'];
+  showEventResponses?: LeagueCalendarProps['showEventResponses'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
@@ -921,6 +1006,8 @@ function DayView({
               event={e}
               divisionColors={divisionColors}
               onRsvp={onRsvp}
+              onEventRsvp={onEventRsvp}
+              showEventResponses={showEventResponses}
               onWeatherCancel={onWeatherCancel}
               onConcessionSignup={onConcessionSignup}
               onConcessionCancel={onConcessionCancel}
@@ -948,6 +1035,8 @@ export function LeagueCalendar({
   availableDivisions,
   divisionColors,
   onRsvp,
+  onEventRsvp,
+  showEventResponses,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -1271,6 +1360,8 @@ export function LeagueCalendar({
           eventsByDate={eventsByDate}
           divisionColors={divisionColors}
           onRsvp={onRsvp}
+          onEventRsvp={onEventRsvp}
+          showEventResponses={showEventResponses}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -1296,6 +1387,8 @@ export function LeagueCalendar({
           isMobile={isMobile}
           divisionColors={divisionColors}
           onRsvp={onRsvp}
+          onEventRsvp={onEventRsvp}
+          showEventResponses={showEventResponses}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -1311,6 +1404,8 @@ export function LeagueCalendar({
           eventsByDate={eventsByDate}
           divisionColors={divisionColors}
           onRsvp={onRsvp}
+          onEventRsvp={onEventRsvp}
+          showEventResponses={showEventResponses}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}

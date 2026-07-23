@@ -38,9 +38,7 @@ import { Progress } from '@/components/ui/progress';
 import Link from 'next/link';
 import { format, parseISO, addDays } from 'date-fns';
 import { cn } from '@/lib/utils';
-import type { CalendarEvent, PracticeSlot, ConcessionSlot as ConcessionSlotType, CustomEvent } from '@/types/scheduling';
-import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
-import { normalizeGame } from '@/lib/game-shape';
+import type { PracticeSlot } from '@/types/scheduling';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
 import { PushPrompt } from '@/components/pwa/push-prompt';
 

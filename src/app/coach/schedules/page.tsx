@@ -227,6 +227,7 @@ export default function CoachSchedulesPage() {
             onWeatherCancel={handleWeatherCancel}
             onAddEvent={() => setAddEventOpen(true)}
             onEventDelete={handleEventDelete}
+            showEventResponses
             currentUserId={user?.uid}
           />
         ) : (
@@ -241,7 +242,7 @@ export default function CoachSchedulesPage() {
                 {isLoading ? (
                   <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
                 ) : (
-                  <UpcomingEventsList events={upcomingEvents} emptyMessage="No upcoming games or practices." />
+                  <UpcomingEventsList events={upcomingEvents} sport={activeSport} emptyMessage="No upcoming games or practices." />
                 )}
               </CardContent>
             </Card>
@@ -253,7 +254,7 @@ export default function CoachSchedulesPage() {
                 {showPast && (
                   <Card className="border-none shadow-md mt-2">
                     <CardContent className="pt-4">
-                      <UpcomingEventsList events={pastEvents} />
+                      <UpcomingEventsList events={pastEvents} sport={activeSport} />
                     </CardContent>
                   </Card>
                 )}
