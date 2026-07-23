@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
+import type { ComboboxOption } from '@/components/ui/combobox';
+import { PlayerPickList } from '@/components/equipment/PlayerPickList';
 import { Loader2, Tag } from 'lucide-react';
 import { typeLabel, type ShedItem, type TypeLabelOverrides } from '@/lib/equipment';
 
@@ -41,7 +42,7 @@ export function IssueFromShedDialog({
 }) {
   return (
     <Dialog open={!!item} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Tag className="h-5 w-5 text-primary" />
@@ -54,12 +55,10 @@ export function IssueFromShedDialog({
         <div className="space-y-3 py-2">
           <div className="space-y-1">
             <Label>Issue to Player <span className="text-destructive">*</span></Label>
-            <Combobox
+            <PlayerPickList
               options={playerOptions}
-              value={selectedEnrollmentId || undefined}
+              value={selectedEnrollmentId}
               onSelect={onSelectEnrollment}
-              placeholder="Search players…"
-              className="w-full"
             />
           </div>
           {replacesTag && (

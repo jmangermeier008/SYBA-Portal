@@ -74,6 +74,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
+import { PlayerPickList } from '@/components/equipment/PlayerPickList';
 import {
   EQUIP_FIELD_MAP,
   HELMET_SIZES,
@@ -1712,16 +1713,26 @@ export default function EquipmentPage() {
                           const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
                           const fe = enrollment.footballEquipment ?? {};
 
+                          // Compact read-only slot cell — editing happens in the side panel
+                          const slotCell = (slug: ShedItemType) => {
+                            const { statusField, tagField } = EQUIP_FIELD_MAP[slug];
+                            const tag = fe[tagField] as string | undefined;
+                            return fe[statusField] === 'issued' && tag
+                              ? <span className="text-blue-700 font-medium whitespace-nowrap">#{tag}</span>
+                              : <span className="text-muted-foreground">—</span>;
+                          };
+
                           return (
                             <tr
                               key={enrollment.id}
+                              onClick={() => setDrawerEnrollment(enrollment)}
                               className={cn(
-                                'border-b last:border-0 transition-colors',
+                                'border-b last:border-0 transition-colors cursor-pointer',
                                 isSelected ? 'bg-primary/5' : 'hover:bg-muted/20',
                                 isSaving && 'opacity-60'
                               )}
                             >
-                              <td className={cn('px-3 py-2 sticky left-0 z-10', isSelected ? 'bg-primary/5' : 'bg-background')}>
+                              <td className={cn('px-3 py-2 sticky left-0 z-10', isSelected ? 'bg-primary/5' : 'bg-background')} onClick={(e) => e.stopPropagation()}>
                                 <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(enrollment.id)} aria-label={`Select ${playerName}`} />
                               </td>
 
@@ -1744,39 +1755,11 @@ export default function EquipmentPage() {
                               <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{divisionName}</td>
 
                               {/* Helmet Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('helmet', fe.helmetInventoryId)}
-                                  value={fe.helmetInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'helmet');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.helmetInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'helmet');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
+                              <td className="px-4 py-2">{slotCell('helmet')}</td>
                               {/* Pads Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('shoulder_pads', fe.padInventoryId)}
-                                  value={fe.padInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'shoulder_pads');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.padInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'shoulder_pads');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
+                              <td className="px-4 py-2">{slotCell('shoulder_pads')}</td>
                               {/* Jersey # */}
-                              <td className="px-4 py-2">
+                              <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center gap-1.5">
                                   <Input
                                     defaultValue={fe.jerseyNumber ?? ''}
@@ -1805,100 +1788,39 @@ export default function EquipmentPage() {
                               </td>
 
                               {/* Game Jersey Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('game_jersey', fe.gameJerseyInventoryId)}
-                                  value={fe.gameJerseyInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'game_jersey');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.gameJerseyInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'game_jersey');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
-
+                              <td className="px-4 py-2">{slotCell('game_jersey')}</td>
                               {/* Scrimmage Jersey Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('scrimmage_jersey', fe.scrimmageJerseyInventoryId)}
-                                  value={fe.scrimmageJerseyInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'scrimmage_jersey');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.scrimmageJerseyInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'scrimmage_jersey');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
-
+                              <td className="px-4 py-2">{slotCell('scrimmage_jersey')}</td>
                               {/* Practice Jersey Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('practice_jersey', fe.practiceJerseyInventoryId)}
-                                  value={fe.practiceJerseyInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'practice_jersey');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.practiceJerseyInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'practice_jersey');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
-
+                              <td className="px-4 py-2">{slotCell('practice_jersey')}</td>
                               {/* Game Pants Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('game_pants', fe.gamePantsInventoryId)}
-                                  value={fe.gamePantsInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'game_pants');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.gamePantsInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'game_pants');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
+                              <td className="px-4 py-2">{slotCell('game_pants')}</td>
                               {/* Practice Pants Tag */}
-                              <td className="px-4 py-2">
-                                <Combobox
-                                  options={getOptionsForType('practice_pants', fe.practicePantsInventoryId)}
-                                  value={fe.practicePantsInventoryId}
-                                  onSelect={(itemId) => {
-                                    const item = (shedItems ?? []).find(i => i.id === itemId);
-                                    if (item) assignInventoryItem(enrollment, item, 'practice_pants');
-                                  }}
-                                  onClear={() => {
-                                    const item = (shedItems ?? []).find(i => i.id === fe.practicePantsInventoryId);
-                                    if (item) returnInventoryItem(enrollment, item, 'practice_pants');
-                                  }}
-                                  disabled={isSaving}
-                                />
-                              </td>
-                              {/* Return All — pinned to the right edge so it's reachable without horizontal scroll */}
-                              <td className={cn('px-4 py-2 sticky right-0 z-10 border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]', isSelected ? 'bg-primary/5' : 'bg-background')}>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={isSaving}
-                                  onClick={() => returnAll(enrollment)}
-                                  className="rounded-full h-8 gap-1.5 whitespace-nowrap text-xs"
-                                >
-                                  <RotateCcw className="h-3.5 w-3.5" />
-                                  Return All
-                                </Button>
+                              <td className="px-4 py-2">{slotCell('practice_pants')}</td>
+                              {/* Actions — pinned to the right edge so they're reachable without horizontal scroll */}
+                              <td className={cn('px-4 py-2 sticky right-0 z-10 border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]', isSelected ? 'bg-primary/5' : 'bg-background')} onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-1.5">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={isSaving}
+                                    onClick={() => setDrawerEnrollment(enrollment)}
+                                    className="rounded-full h-8 gap-1.5 whitespace-nowrap text-xs"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    Assign
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={isSaving}
+                                    onClick={() => returnAll(enrollment)}
+                                    className="rounded-full h-8 gap-1.5 whitespace-nowrap text-xs"
+                                  >
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                    Return All
+                                  </Button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1961,8 +1883,10 @@ export default function EquipmentPage() {
                     );
                   })}
 
-                  {/* ── Equipment detail Sheet ─────────────────── */}
-                  <Sheet open={!!drawerEnrollment} onOpenChange={(open) => { if (!open) setDrawerEnrollment(null); }}>
+                </div>}
+
+                {/* ── Equipment detail Sheet — the single editing surface for both viewports ── */}
+                <Sheet open={!!drawerEnrollment} onOpenChange={(open) => { if (!open) setDrawerEnrollment(null); }}>
                     <SheetContent side="right" className="w-full sm:max-w-md flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
                       {drawerEnrollment && (() => {
                         const liveEnrollment = filteredEnrollments.find(e => e.id === drawerEnrollment.id) ?? drawerEnrollment;
@@ -2162,10 +2086,9 @@ export default function EquipmentPage() {
                       })()}
                     </SheetContent>
                   </Sheet>
-                </div>}
 
                 <p className="mt-3 text-xs text-muted-foreground">
-                  {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — select a tag to assign gear; changes sync automatically.
+                  {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — click a player to assign gear; changes sync automatically.
                 </p>
               </>
             )}
@@ -2925,12 +2848,10 @@ export default function EquipmentPage() {
               </p>
               <div className="space-y-1">
                 <Label>Assign to Player <span className="text-destructive">*</span></Label>
-                <Combobox
+                <PlayerPickList
                   options={checkOutPlayerOptions}
-                  value={checkOutPlayerId || undefined}
+                  value={checkOutPlayerId}
                   onSelect={setCheckOutPlayerId}
-                  placeholder="Search players…"
-                  className="w-full"
                 />
                 {!selectedSeasonId && (
                   <p className="text-xs text-muted-foreground mt-1">Select a season on the Player Assignments tab to see players.</p>

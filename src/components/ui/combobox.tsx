@@ -5,7 +5,6 @@ import { Check, ChevronsUpDown, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 export interface ComboboxOption {
@@ -86,7 +85,7 @@ export function Combobox({
             className="h-7 text-xs"
           />
         </div>
-        <ScrollArea className="max-h-48">
+        <div className="max-h-48 overflow-y-auto">
           {filtered.length === 0 && (
             <p className="px-3 py-4 text-xs text-muted-foreground text-center">
               No items found.
@@ -123,7 +122,7 @@ export function Combobox({
               )}
             </button>
           ))}
-        </ScrollArea>
+        </div>
         {value && onClear && (
           <div className="border-t p-1.5">
             <button
