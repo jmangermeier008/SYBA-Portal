@@ -5,9 +5,13 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, updateDoc } from 'firebase/firestore';
-import { writeRsvp } from '@/lib/rsvp';
+import { writeRsvp, writeEventRsvp } from '@/lib/rsvp';
 import { syncCoParentOnEnrollments } from '@/lib/family-links';
 import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data';
+import { useTeamGamesLive } from '@/hooks/use-team-games';
+import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
+import { normalizeTeamGame } from '@/lib/game-shape';
+import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { Users, Calendar, Bell, Loader2, Printer } from 'lucide-react';
 import { openPrintTab } from '@/lib/print-job';
 import { TaskCenter } from '@/components/parent/task-center';
@@ -27,7 +31,7 @@ import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compr
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
-import { isAnnouncementActive, type CalendarEvent, type LinkRequest } from '@/types/scheduling';
+import { isAnnouncementActive, type CalendarEvent, type CustomEvent, type LinkRequest } from '@/types/scheduling';
 import { EQUIP_FIELD_MAP, customSlugFromStatusField, slotFieldsForType, typeLabel, type ShedItemType } from '@/lib/equipment';
 import { useEquipmentTypes } from '@/hooks/use-equipment-types';
 
@@ -46,7 +50,7 @@ function pickTeamEnrollment<T extends { teamId?: string; sport?: string; registe
 
 export default function ParentDashboard() {
   const { profile, user, loading: loadingUser } = useUser();
-  const { activeSport } = useSport();
+  const { activeSport, isAdmin } = useSport();
   // Display names for equipment types on the issued-gear card (honors admin renames)
   const { labels: equipmentTypeLabels } = useEquipmentTypes(!!user && activeSport === 'football');
   const db = useFirestore();
@@ -54,7 +58,7 @@ export default function ParentDashboard() {
   const nudgePush = usePushNudge();
   const [resumingPayment, setResumingPayment] = useState(false);
   const [uploadingPhysicalFor, setUploadingPhysicalFor] = useState<string | null>(null);
-  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
+  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false, events: true });
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
 
@@ -219,6 +223,50 @@ export default function ParentDashboard() {
   }, [db, selectedTeamId]);
   const { data: allTeamGames, isLoading: loadingAllTeamGames } = useCollection<{ id: string; dateTime: string; location: string; type: string; opponentName?: string; cancelled?: boolean }>(allTeamGamesQuery);
 
+  // Custom events for the active sport (league-wide + team-scoped)
+  const customEventsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: customEvents } = useCollection<CustomEvent>(customEventsQuery);
+
+  // Family-wide upcoming list — every enrolled team's games/practices + events
+  const familyTeamIds = useMemo(
+    () => [...new Set((enrollments ?? []).map(e => e.teamId).filter(Boolean) as string[])],
+    [enrollments],
+  );
+  const { games: familyGames } = useTeamGamesLive(db, familyTeamIds);
+
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: teams } = useCollection<{ id: string; name: string; divisionId?: string }>(teamsQuery);
+  const teamById = useMemo(() => new Map((teams ?? []).map(t => [t.id, t])), [teams]);
+
+  const todayISO = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+  const upcomingEvents = useMemo<CalendarEvent[]>(() => {
+    const events: CalendarEvent[] = [];
+    for (const g of familyGames) {
+      const team = teamById.get(g._teamId);
+      events.push(normalizeTeamGame(g, g._teamId, { teamName: team?.name, divisionId: team?.divisionId }));
+    }
+    const myEvents = visibleCustomEvents(customEvents ?? [], { isAdmin, teamIds: familyTeamIds });
+    events.push(...myEvents.map(normalizeCustomEvent));
+    return events.filter(e => e.date >= todayISO && e.status !== 'cancelled');
+  }, [familyGames, teamById, customEvents, isAdmin, familyTeamIds, todayISO]);
+
+  // Custom-event RSVP (one response per parent account)
+  const handleEventRsvp = async (eventId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
+    if (!db || !user) return;
+    try {
+      await writeEventRsvp(db, eventId, user.uid, status);
+      toast({ title: 'RSVP Sent', description: `You're marked ${status === 'Attending' ? 'going' : status === 'Not Attending' ? 'not going' : 'maybe'}.` });
+    } catch (err: any) {
+      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+    }
+  };
+
   // RSVP writer for the season-schedule calendar (per selected player); the
   // Next Up cards carry their own per-child writer.
   const handleDashboardRSVP = async (
@@ -237,8 +285,8 @@ export default function ParentDashboard() {
   };
 
   const teamCalendarEvents = useMemo((): CalendarEvent[] => {
-    if (!allTeamGames || !selectedTeamId) return [];
-    return allTeamGames.map(g => {
+    if (!selectedTeamId) return [];
+    const events: CalendarEvent[] = (allTeamGames ?? []).map(g => {
       const dateTime = g.dateTime ?? '';
       return {
         id: g.id,
@@ -253,7 +301,11 @@ export default function ParentDashboard() {
         teamId: selectedTeamId,
       };
     });
-  }, [allTeamGames, selectedTeamId]);
+    // League-wide + this team's custom events
+    const myEvents = visibleCustomEvents(customEvents ?? [], { isAdmin, teamIds: [selectedTeamId] });
+    events.push(...myEvents.map(normalizeCustomEvent));
+    return events;
+  }, [allTeamGames, selectedTeamId, customEvents, isAdmin]);
 
   const handleCalendarRsvp = (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
     handleDashboardRSVP(status, gameId, teamId);
@@ -544,6 +596,27 @@ export default function ParentDashboard() {
             </Card>
           )}
 
+          {/* ── Upcoming — games, practices, and events across the family ── */}
+          {(familyTeamIds.length > 0 || (customEvents?.length ?? 0) > 0) && (
+            <Card className="border shadow-sm mb-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="font-headline flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-primary" /> Upcoming
+                </CardTitle>
+                <CardDescription>Your family&apos;s next games, practices, and events</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <UpcomingEventsList
+                  events={upcomingEvents}
+                  sport={activeSport}
+                  limit={6}
+                  rowHref="/parent/schedules"
+                  emptyMessage="Nothing coming up."
+                />
+              </CardContent>
+            </Card>
+          )}
+
           {/* Announcements */}
           <Card className="border shadow-sm mb-4">
             <CardHeader>
@@ -610,8 +683,10 @@ export default function ParentDashboard() {
                   isLoading={loadingAllTeamGames}
                   filters={calendarFilters}
                   onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
-                  visibleFilters={['games', 'practices']}
+                  visibleFilters={['games', 'practices', 'events']}
                   onRsvp={handleCalendarRsvp}
+                  onEventRsvp={handleEventRsvp}
+                  currentUserId={user?.uid}
                 />
               </CardContent>
             </Card>
