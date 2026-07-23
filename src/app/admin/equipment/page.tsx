@@ -76,11 +76,14 @@ import { cn } from '@/lib/utils';
 import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 import {
   EQUIP_FIELD_MAP,
+  HELMET_SIZES,
+  PAD_SIZES,
   SHED_ITEM_TYPES,
   addEquipmentNotificationToBatch,
   addHistoryToBatch,
   commitAssignItem,
   commitReturnItem,
+  sizesForType,
   typeLabel,
   type EquipmentHistoryEvent,
   type EquipmentStatus,
@@ -91,10 +94,6 @@ import {
 } from '@/lib/equipment';
 import { useEquipmentTypes } from '@/hooks/use-equipment-types';
 
-const HELMET_SIZES = ['XXS/XS', 'S', 'M', 'L', 'XL', '2XL'] as const;
-const PAD_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
-const JERSEY_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
-const PANTS_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
 
 const STATUS_COLORS: Record<EquipmentStatus, string> = {
   not_issued: 'bg-muted text-muted-foreground',
@@ -167,14 +166,6 @@ function normalizeTypeSlug(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, '_');
 }
 
-/** Standard size list for a type slug, or null for custom types (free text). */
-function sizesForType(slug: string): readonly string[] | null {
-  if (slug === 'helmet') return HELMET_SIZES;
-  if (slug === 'shoulder_pads') return PAD_SIZES;
-  if (slug.endsWith('_jersey')) return JERSEY_SIZES;
-  if (slug.endsWith('_pants')) return PANTS_SIZES;
-  return null;
-}
 
 function RecertBadge({ item }: { item: ShedItem }) {
   const state = recertState(item);

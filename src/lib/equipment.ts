@@ -76,6 +76,24 @@ export interface ShedItem {
   notes?: string;
 }
 
+export const HELMET_SIZES = ['XXS/XS', 'S', 'M', 'L', 'XL', '2XL'] as const;
+export const PAD_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+export const JERSEY_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+export const PANTS_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+
+/** Standard size list for a type slug, or null for custom types (free text). */
+export function sizesForType(slug: string): readonly string[] | null {
+  if (slug === 'helmet') return HELMET_SIZES;
+  if (slug === 'shoulder_pads') return PAD_SIZES;
+  if (slug.endsWith('_jersey')) return JERSEY_SIZES;
+  if (slug.endsWith('_pants')) return PANTS_SIZES;
+  return null;
+}
+
+/** Slots whose registered size falls back to the enrollment's top-level
+ *  jerseySize/shirtSize (the only size captured at registration). */
+export const JERSEY_SLOTS = new Set<ShedItemType>(['game_jersey', 'scrimmage_jersey', 'practice_jersey']);
+
 export const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
   helmet: 'Helmet',
   shoulder_pads: 'Shoulder Pads',

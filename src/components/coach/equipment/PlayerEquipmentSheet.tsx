@@ -16,8 +16,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Loader2, PackagePlus, Undo2 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { cn } from '@/lib/utils';
 import {
   EQUIP_FIELD_MAP,
+  JERSEY_SLOTS,
   typeLabel,
   type FootballEquipment,
   type ShedItemType,
@@ -39,6 +41,8 @@ export function PlayerEquipmentSheet({
   onIssue,
   onReturn,
   labels,
+  availableByType,
+  registeredJerseySize,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,6 +53,10 @@ export function PlayerEquipmentSheet({
   onIssue: (equipType: ShedItemType) => void;
   onReturn: (equipType: ShedItemType) => void;
   labels?: TypeLabelOverrides;
+  /** Live available count per type slug from the page's inventory subscription. */
+  availableByType?: Record<string, number>;
+  /** The enrollment's top-level jerseySize/shirtSize — the only size captured at registration. */
+  registeredJerseySize?: string;
 }) {
   const isMobile = useIsMobile();
   const fe = footballEquipment ?? {};
@@ -75,9 +83,11 @@ export function PlayerEquipmentSheet({
             const { statusField, sizeField, tagField } = EQUIP_FIELD_MAP[equipType];
             const status = fe[statusField] as string | undefined;
             const tag = fe[tagField] as string | undefined;
-            const size = sizeField ? (fe[sizeField] as string | undefined) : undefined;
+            const feSize = sizeField ? (fe[sizeField] as string | undefined) : undefined;
+            const size = feSize || (JERSEY_SLOTS.has(equipType) ? registeredJerseySize : undefined);
             const issued = status === 'issued';
             const returned = status === 'returned';
+            const availCount = availableByType?.[equipType];
 
             return (
               <div key={equipType} className="flex items-center gap-3 p-3 min-h-[64px]">
@@ -85,13 +95,18 @@ export function PlayerEquipmentSheet({
                   <p className="font-medium text-sm">{typeLabel(equipType, labels)}</p>
                   <p className="text-xs text-muted-foreground truncate">
                     {issued
-                      ? `Tag #${tag ?? '—'}${size ? ` · Size ${size}` : ''}`
+                      ? `Tag #${tag ?? '—'}${feSize ? ` · Size ${feSize}` : ''}`
                       : returned
                         ? 'Returned'
                         : size
                           ? `Registered size: ${size}`
                           : 'Not issued'}
                   </p>
+                  {!issued && availCount !== undefined && (
+                    <p className={cn('text-xs', availCount === 0 ? 'text-destructive/80' : 'text-muted-foreground')}>
+                      {availCount === 0 ? 'None available' : `${availCount} available`}
+                    </p>
+                  )}
                 </div>
                 <Badge
                   variant="outline"
