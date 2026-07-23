@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Package, Search, PackagePlus, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  EQUIP_FIELD_MAP,
   sizesForType,
   typeLabel,
   type ShedItem,
@@ -194,11 +193,10 @@ export function CoachShedTab({
       ) : (
         <div className="divide-y rounded-xl border bg-card max-w-2xl">
           {filteredItems.map((item) => {
-            const isStandard = item.type in EQUIP_FIELD_MAP;
             const issuedToName = item.issuedToPlayerId
               ? (playerNameById.get(item.issuedToPlayerId) ?? 'another player')
               : '';
-            const canReturn = item.status === 'issued' && isStandard &&
+            const canReturn = item.status === 'issued' &&
               !!item.issuedToEnrollmentId && coachEnrollmentIds.has(item.issuedToEnrollmentId);
             return (
               <div key={item.id} className="flex items-center gap-3 p-3 min-h-[64px]">
@@ -212,7 +210,7 @@ export function CoachShedTab({
                   )}
                 </div>
                 <ShedStatusPill status={item.status} />
-                {item.status === 'available' && isStandard && (
+                {item.status === 'available' && (
                   <Button
                     variant="outline"
                     size="sm"

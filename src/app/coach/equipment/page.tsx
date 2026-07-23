@@ -32,8 +32,10 @@ import type { ComboboxOption } from '@/components/ui/combobox';
 import {
   EQUIP_FIELD_MAP,
   JERSEY_SLOTS,
+  SHED_ITEM_TYPES,
   commitAssignItem,
   commitReturnItem,
+  slotFieldsForType,
   typeLabel,
   type FootballEquipment,
   type ShedItem,
@@ -73,15 +75,24 @@ export default function CoachEquipmentPage() {
 
   const equipmentEnabled = (isCoach || isBoardMember) && activeSport === 'football';
 
-  // Admin-editable type display names (e.g. a renamed "Helmet")
-  const { labels: typeLabels } = useEquipmentTypes(equipmentEnabled);
+  // Admin-editable type display names (e.g. a renamed "Helmet") + custom types
+  const { labels: typeLabels, managedTypes } = useEquipmentTypes(equipmentEnabled);
+
+  // All assignable slots: the 7 standard plus any admin-created custom types
+  const allSlots = useMemo(() => {
+    const customs = managedTypes
+      .map((t) => t.slug)
+      .filter((slug) => !(slug in SHED_ITEM_TYPES))
+      .sort((a, b) => typeLabel(a, {}).localeCompare(typeLabel(b, {})));
+    return [...EQUIP_TYPES, ...customs] as string[];
+  }, [managedTypes]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [teamFilter, setTeamFilter] = useState<string>('all');
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [openEnrollmentId, setOpenEnrollmentId] = useState<string | null>(null);
-  const [issueSlot, setIssueSlot] = useState<{ enrollmentId: string; equipType: ShedItemType } | null>(null);
-  const [restockRequested, setRestockRequested] = useState<Set<ShedItemType>>(new Set());
+  const [issueSlot, setIssueSlot] = useState<{ enrollmentId: string; equipType: string } | null>(null);
+  const [restockRequested, setRestockRequested] = useState<Set<string>>(new Set());
 
   // Shed tab: issue-from-shed and return-from-shed flows
   const [shedIssueItem, setShedIssueItem] = useState<ShedItem | null>(null);
@@ -135,13 +146,13 @@ export default function CoachEquipmentPage() {
   const rows = useMemo(() => {
     const named = (enrollments ?? []).map(e => {
       const p = playerMap.get(e.playerId);
-      const fe = e.footballEquipment ?? {};
+      const fe = (e.footballEquipment ?? {}) as Record<string, unknown>;
       return {
         enrollment: e,
         name: p ? `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() : 'Unknown player',
         firstName: p?.firstName ?? '',
         teamName: e.teamId ? teamNameById[e.teamId] : undefined,
-        issuedCount: EQUIP_TYPES.filter(t => fe[EQUIP_FIELD_MAP[t].statusField] === 'issued').length,
+        issuedCount: Object.entries(fe).filter(([k, v]) => k.endsWith('Status') && v === 'issued').length,
       };
     });
     const q = searchQuery.trim().toLowerCase();
@@ -161,14 +172,14 @@ export default function CoachEquipmentPage() {
     if (!issueSlot) return null;
     const row = rows.find(r => r.enrollment.id === issueSlot.enrollmentId);
     if (!row) return null;
-    const { sizeField } = EQUIP_FIELD_MAP[issueSlot.equipType];
+    const { sizeField } = slotFieldsForType(issueSlot.equipType);
     const feSize = sizeField
-      ? ((row.enrollment.footballEquipment ?? {})[sizeField] as string | undefined)
+      ? (((row.enrollment.footballEquipment ?? {}) as Record<string, unknown>)[sizeField] as string | undefined)
       : undefined;
     // Registration only captures a jersey/shirt size — fall back to it for
     // jersey slots so "matching size" works before anything is issued
     const registeredSize = feSize
-      || (JERSEY_SLOTS.has(issueSlot.equipType)
+      || (JERSEY_SLOTS.has(issueSlot.equipType as ShedItemType)
         ? (row.enrollment.jerseySize || row.enrollment.shirtSize)
         : undefined);
     return {
@@ -183,9 +194,9 @@ export default function CoachEquipmentPage() {
     (inventory ?? []).forEach((i) => {
       if (i.status === 'available') counts[i.type] = (counts[i.type] ?? 0) + 1;
     });
-    EQUIP_TYPES.forEach((t) => { counts[t] = counts[t] ?? 0; });
+    allSlots.forEach((t) => { counts[t] = counts[t] ?? 0; });
     return counts;
-  }, [inventory]);
+  }, [inventory, allSlots]);
 
   const dialogItems = useMemo(() => {
     if (!issueSlot || !inventory) return null;
@@ -211,11 +222,10 @@ export default function CoachEquipmentPage() {
   // Tag the chosen player already has in the slot this shed item would fill
   const replacesTag = useMemo(() => {
     if (!shedIssueItem || !shedIssueEnrollmentId) return undefined;
-    const fieldMap = EQUIP_FIELD_MAP[shedIssueItem.type as ShedItemType];
-    if (!fieldMap) return undefined;
+    const sf = slotFieldsForType(shedIssueItem.type);
     const enrollment = (enrollments ?? []).find((e) => e.id === shedIssueEnrollmentId);
-    const fe = enrollment?.footballEquipment ?? {};
-    return fe[fieldMap.statusField] === 'issued' ? (fe[fieldMap.tagField] as string | undefined) : undefined;
+    const fe = (enrollment?.footballEquipment ?? {}) as Record<string, unknown>;
+    return fe[sf.statusField] === 'issued' ? (fe[sf.tagField] as string | undefined) : undefined;
   }, [shedIssueItem, shedIssueEnrollmentId, enrollments]);
 
   const setSaving = (id: string, on: boolean) =>
@@ -226,7 +236,7 @@ export default function CoachEquipmentPage() {
     });
 
   // Shared commit paths — used by both the player-first and shed-first flows
-  const performIssue = async (enrollment: EnrollmentRow, item: ShedItem, equipType: ShedItemType) => {
+  const performIssue = async (enrollment: EnrollmentRow, item: ShedItem, equipType: string) => {
     if (!db || !enrollment.parentUserId) {
       toast({ variant: 'destructive', title: 'Save failed', description: 'Missing enrollment reference.' });
       return false;
@@ -254,7 +264,7 @@ export default function CoachEquipmentPage() {
     }
   };
 
-  const performReturn = async (enrollment: EnrollmentRow, equipType: ShedItemType, inventoryId: string, tagNumber: string) => {
+  const performReturn = async (enrollment: EnrollmentRow, equipType: string, inventoryId: string, tagNumber: string) => {
     if (!db || !enrollment.parentUserId) {
       toast({ variant: 'destructive', title: 'Return failed', description: 'Missing enrollment reference.' });
       return false;
@@ -293,11 +303,11 @@ export default function CoachEquipmentPage() {
     setSaving(enrollment.id, false);
   };
 
-  const handleReturn = async (equipType: ShedItemType) => {
+  const handleReturn = async (equipType: string) => {
     const enrollment = (enrollments ?? []).find(e => e.id === openEnrollmentId);
     if (!enrollment) return;
-    const { inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
-    const fe = enrollment.footballEquipment ?? {};
+    const { inventoryIdField, tagField } = slotFieldsForType(equipType);
+    const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
     const inventoryId = fe[inventoryIdField] as string | undefined;
     const tagNumber = (fe[tagField] as string | undefined) ?? '';
     if (!inventoryId) {
@@ -312,10 +322,9 @@ export default function CoachEquipmentPage() {
   const handleShedIssueConfirm = async () => {
     if (!shedIssueItem || !shedIssueEnrollmentId) return;
     const enrollment = (enrollments ?? []).find((e) => e.id === shedIssueEnrollmentId);
-    const equipType = shedIssueItem.type in EQUIP_FIELD_MAP ? (shedIssueItem.type as ShedItemType) : null;
-    if (!enrollment || !equipType) return;
+    if (!enrollment) return;
     setShedSaving(true);
-    const ok = await performIssue(enrollment, shedIssueItem, equipType);
+    const ok = await performIssue(enrollment, shedIssueItem, shedIssueItem.type);
     setShedSaving(false);
     if (ok) {
       setShedIssueItem(null);
@@ -327,11 +336,10 @@ export default function CoachEquipmentPage() {
     const item = shedReturnItem;
     if (!item?.issuedToEnrollmentId) return;
     const enrollment = (enrollments ?? []).find((e) => e.id === item.issuedToEnrollmentId);
-    const equipType = item.type in EQUIP_FIELD_MAP ? (item.type as ShedItemType) : null;
-    if (!enrollment || !equipType) return;
+    if (!enrollment) return;
     setShedReturnItem(null);
     setShedSaving(true);
-    await performReturn(enrollment, equipType, item.id, item.tagNumber);
+    await performReturn(enrollment, item.type, item.id, item.tagNumber);
     setShedSaving(false);
   };
 
@@ -448,7 +456,7 @@ export default function CoachEquipmentPage() {
               <div className="divide-y rounded-xl border bg-card max-w-2xl">
                 {rows.map(({ enrollment, name, teamName, issuedCount }) => {
                   const saving = savingIds.has(enrollment.id);
-                  const complete = issuedCount === EQUIP_TYPES.length;
+                  const complete = issuedCount >= allSlots.length;
                   return (
                     <button
                       key={enrollment.id}
@@ -467,11 +475,11 @@ export default function CoachEquipmentPage() {
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm truncate">{name}</p>
                         <p className="text-xs text-muted-foreground truncate">
-                          {issuedCount} of {EQUIP_TYPES.length} issued{(teams ?? []).length > 1 && teamName ? ` · ${teamName}` : ''}
+                          {issuedCount} of {allSlots.length} issued{(teams ?? []).length > 1 && teamName ? ` · ${teamName}` : ''}
                         </p>
                       </div>
                       <Progress
-                        value={(issuedCount / EQUIP_TYPES.length) * 100}
+                        value={(issuedCount / allSlots.length) * 100}
                         className="w-16 h-1.5 shrink-0 hidden sm:block"
                       />
                       {saving
@@ -510,6 +518,7 @@ export default function CoachEquipmentPage() {
           labels={typeLabels}
           availableByType={inventory ? availableByType : undefined}
           registeredJerseySize={openRow ? (openRow.enrollment.jerseySize || openRow.enrollment.shirtSize) : undefined}
+          slots={allSlots}
         />
 
         <IssueItemDialog

@@ -13,10 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BellRing, Check, Loader2, PackageOpen, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { sizesForType, typeLabel, type ShedItem, type ShedItemType, type TypeLabelOverrides } from '@/lib/equipment';
+import { sizesForType, typeLabel, type ShedItem, type TypeLabelOverrides } from '@/lib/equipment';
 
 export interface IssueTarget {
-  equipType: ShedItemType;
+  /** Standard slot slug or an admin-created custom type slug. */
+  equipType: string;
   playerFirstName: string;
   /** The size the family declared at registration, when we have one. */
   registeredSize?: string;

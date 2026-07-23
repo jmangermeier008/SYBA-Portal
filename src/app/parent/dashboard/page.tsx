@@ -26,6 +26,8 @@ import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { isAnnouncementActive, type CalendarEvent, type LinkRequest } from '@/types/scheduling';
+import { EQUIP_FIELD_MAP, customSlugFromStatusField, slotFieldsForType, typeLabel, type ShedItemType } from '@/lib/equipment';
+import { useEquipmentTypes } from '@/hooks/use-equipment-types';
 
 // Pick the enrollment whose team should drive schedules/cards: the active
 // sport's enrollment first, then the most recently registered — never an
@@ -43,6 +45,8 @@ function pickTeamEnrollment<T extends { teamId?: string; sport?: string; registe
 export default function ParentDashboard() {
   const { profile, user, loading: loadingUser } = useUser();
   const { activeSport } = useSport();
+  // Display names for equipment types on the issued-gear card (honors admin renames)
+  const { labels: equipmentTypeLabels } = useEquipmentTypes(!!user && activeSport === 'football');
   const db = useFirestore();
   const { toast } = useToast();
   const nudgePush = usePushNudge();
@@ -97,27 +101,28 @@ export default function ParentDashboard() {
   }, [enrollments]);
 
   // Gear currently checked out to each player — tag numbers are denormalized
-  // onto the enrollment at issue time (admins write them; parents read-only)
+  // onto the enrollment at issue time (admins write them; parents read-only).
+  // Dynamic over the actual fields so admin-created custom types show too.
   const issuedEquipmentByPlayer = useMemo(() => {
-    const slots: { label: string; statusField: string; tagField: string }[] = [
-      { label: 'Helmet', statusField: 'helmetStatus', tagField: 'helmetTagNumber' },
-      { label: 'Shoulder Pads', statusField: 'padStatus', tagField: 'padTagNumber' },
-      { label: 'Game Jersey', statusField: 'gameJerseyStatus', tagField: 'gameJerseyTagNumber' },
-      { label: 'Scrimmage Jersey', statusField: 'scrimmageJerseyStatus', tagField: 'scrimmageJerseyTagNumber' },
-      { label: 'Practice Jersey', statusField: 'practiceJerseyStatus', tagField: 'practiceJerseyTagNumber' },
-      { label: 'Game Pants', statusField: 'gamePantsStatus', tagField: 'gamePantsTagNumber' },
-      { label: 'Practice Pants', statusField: 'practicePantsStatus', tagField: 'practicePantsTagNumber' },
-    ];
     const map = new Map<string, { label: string; tag?: string }[]>();
     footballEnrollmentByPlayer.forEach((enrollment, playerId) => {
-      const fe = enrollment.footballEquipment ?? {};
-      const items = slots
-        .filter((s) => fe[s.statusField] === 'issued')
-        .map((s) => ({ label: s.label, tag: fe[s.tagField] as string | undefined }));
+      const fe = (enrollment.footballEquipment ?? {}) as Record<string, any>;
+      const items: { label: string; tag?: string }[] = [];
+      Object.entries(fe).forEach(([key, val]) => {
+        if (!key.endsWith('Status') || val !== 'issued') return;
+        const stdSlug = (Object.entries(EQUIP_FIELD_MAP) as [ShedItemType, { statusField: string }][])
+          .find(([, f]) => String(f.statusField) === key)?.[0];
+        const slug = stdSlug ?? customSlugFromStatusField(key);
+        if (!slug) return;
+        items.push({
+          label: typeLabel(slug, equipmentTypeLabels),
+          tag: fe[slotFieldsForType(slug).tagField] as string | undefined,
+        });
+      });
       if (items.length > 0) map.set(playerId, items);
     });
     return map;
-  }, [footballEnrollmentByPlayer]);
+  }, [footballEnrollmentByPlayer, equipmentTypeLabels]);
 
 
   // Set initial selected player when players load

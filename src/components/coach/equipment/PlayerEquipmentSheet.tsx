@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import {
   EQUIP_FIELD_MAP,
   JERSEY_SLOTS,
+  slotFieldsForType,
   typeLabel,
   type FootballEquipment,
   type ShedItemType,
@@ -43,6 +44,7 @@ export function PlayerEquipmentSheet({
   labels,
   availableByType,
   registeredJerseySize,
+  slots,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -50,17 +52,20 @@ export function PlayerEquipmentSheet({
   teamName?: string;
   footballEquipment: FootballEquipment | undefined;
   saving: boolean;
-  onIssue: (equipType: ShedItemType) => void;
-  onReturn: (equipType: ShedItemType) => void;
+  onIssue: (equipType: string) => void;
+  onReturn: (equipType: string) => void;
   labels?: TypeLabelOverrides;
   /** Live available count per type slug from the page's inventory subscription. */
   availableByType?: Record<string, number>;
   /** The enrollment's top-level jerseySize/shirtSize — the only size captured at registration. */
   registeredJerseySize?: string;
+  /** Slot slugs to render — the 7 standard plus any admin-created custom types. */
+  slots?: string[];
 }) {
   const isMobile = useIsMobile();
-  const fe = footballEquipment ?? {};
-  const issuedCount = EQUIP_TYPES.filter(t => fe[EQUIP_FIELD_MAP[t].statusField] === 'issued').length;
+  const fe = (footballEquipment ?? {}) as Record<string, unknown>;
+  const slotList = slots ?? EQUIP_TYPES;
+  const issuedCount = Object.entries(fe).filter(([k, v]) => k.endsWith('Status') && v === 'issued').length;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -74,17 +79,17 @@ export function PlayerEquipmentSheet({
             {saving && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
           </SheetTitle>
           <SheetDescription>
-            {teamName ? `${teamName} · ` : ''}{issuedCount} of {EQUIP_TYPES.length} issued
+            {teamName ? `${teamName} · ` : ''}{issuedCount} of {slotList.length} issued
           </SheetDescription>
         </SheetHeader>
 
         <div className="mt-4 divide-y rounded-xl border">
-          {EQUIP_TYPES.map(equipType => {
-            const { statusField, sizeField, tagField } = EQUIP_FIELD_MAP[equipType];
+          {slotList.map(equipType => {
+            const { statusField, sizeField, tagField } = slotFieldsForType(equipType);
             const status = fe[statusField] as string | undefined;
             const tag = fe[tagField] as string | undefined;
             const feSize = sizeField ? (fe[sizeField] as string | undefined) : undefined;
-            const size = feSize || (JERSEY_SLOTS.has(equipType) ? registeredJerseySize : undefined);
+            const size = feSize || (JERSEY_SLOTS.has(equipType as ShedItemType) ? registeredJerseySize : undefined);
             const issued = status === 'issued';
             const returned = status === 'returned';
             const availCount = availableByType?.[equipType];

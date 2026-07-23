@@ -58,7 +58,8 @@ export interface ShedItem {
   id: string;
   tagNumber: string;
   // Standard ShedItemType or a custom type slug introduced via import/Add Item.
-  // Custom types are inventory-only: no assignment column, no EQUIP_FIELD_MAP entry.
+  // Custom types are assignable too via derived x_{slug}* enrollment fields —
+  // see slotFieldsForType().
   type: string;
   size: string;
   status: 'available' | 'issued' | 'retired';
@@ -130,11 +131,46 @@ export const EQUIP_FIELD_MAP: Record<ShedItemType, {
   practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId',   tagField: 'practicePantsTagNumber' },
 };
 
-/** Count of standard-slot items currently issued on an enrollment's mirror fields. */
+/** Field names on footballEquipment for ANY type slug. Standard types use
+ *  their legacy field names; custom types get derived `x_{slug}...` fields so
+ *  they are fully assignable too. All custom-slot writes stay inside the
+ *  footballEquipment map, so no security-rules changes are needed. */
+export interface SlotFields {
+  statusField: string;
+  sizeField: string | null;
+  inventoryIdField: string;
+  tagField: string;
+}
+
+export function slotFieldsForType(slug: string): SlotFields {
+  const std = EQUIP_FIELD_MAP[slug as ShedItemType];
+  if (std) {
+    return {
+      statusField: String(std.statusField),
+      sizeField: std.sizeField ? String(std.sizeField) : null,
+      inventoryIdField: String(std.inventoryIdField),
+      tagField: String(std.tagField),
+    };
+  }
+  return {
+    statusField: `x_${slug}Status`,
+    sizeField: null,
+    inventoryIdField: `x_${slug}InventoryId`,
+    tagField: `x_${slug}TagNumber`,
+  };
+}
+
+/** Slug for a custom-slot status field name (`x_{slug}Status`), else null. */
+export function customSlugFromStatusField(key: string): string | null {
+  return key.startsWith('x_') && key.endsWith('Status') ? key.slice(2, -6) : null;
+}
+
+/** Count of items currently issued on an enrollment's mirror fields —
+ *  covers both standard slots and derived custom slots. */
 export function countIssuedEquipment(fe?: FootballEquipment): number {
   if (!fe) return 0;
-  return Object.values(EQUIP_FIELD_MAP)
-    .filter(({ statusField }) => fe[statusField] === 'issued').length;
+  return Object.entries(fe as Record<string, unknown>)
+    .filter(([key, val]) => key.endsWith('Status') && val === 'issued').length;
 }
 
 export function hasIssuedEquipment(fe?: FootballEquipment): boolean {
@@ -221,7 +257,7 @@ export async function commitAssignItem(
   db: Firestore,
   enrollment: EquipmentEnrollmentRef,
   item: ShedItem,
-  equipType: ShedItemType,
+  equipType: string,
   actor: { uid: string; name: string },
   playerName?: string
 ): Promise<void> {
@@ -232,8 +268,8 @@ export async function commitAssignItem(
     throw new ItemAlreadyIssuedError(item.tagNumber);
   }
 
-  const { statusField, sizeField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
-  const prevInventoryId = (enrollment.footballEquipment ?? {})[inventoryIdField] as string | undefined;
+  const { statusField, sizeField, inventoryIdField, tagField } = slotFieldsForType(equipType);
+  const prevInventoryId = ((enrollment.footballEquipment ?? {}) as Record<string, unknown>)[inventoryIdField] as string | undefined;
 
   const batch = writeBatch(db);
   const now = new Date().toISOString();
@@ -306,11 +342,11 @@ export async function commitReturnItem(
   db: Firestore,
   enrollment: EquipmentEnrollmentRef,
   item: ShedItem,
-  equipType: ShedItemType,
+  equipType: string,
   actor?: { uid: string; name: string },
   playerName?: string
 ): Promise<void> {
-  const { statusField, inventoryIdField, tagField } = EQUIP_FIELD_MAP[equipType];
+  const { statusField, inventoryIdField, tagField } = slotFieldsForType(equipType);
 
   const batch = writeBatch(db);
   const now = new Date().toISOString();

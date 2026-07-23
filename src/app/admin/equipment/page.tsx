@@ -84,7 +84,9 @@ import {
   addHistoryToBatch,
   commitAssignItem,
   commitReturnItem,
+  customSlugFromStatusField,
   sizesForType,
+  slotFieldsForType,
   typeLabel,
   type EquipmentHistoryEvent,
   type EquipmentStatus,
@@ -215,16 +217,6 @@ interface ImportError {
   rawData: Record<string, string>;
 }
 
-const ALL_STATUS_FIELDS: (keyof FootballEquipment)[] = [
-  'helmetStatus',
-  'padStatus',
-  'gameJerseyStatus',
-  'scrimmageJerseyStatus',
-  'practiceJerseyStatus',
-  'gamePantsStatus',
-  'practicePantsStatus',
-];
-
 const ALL_INVENTORY_ID_FIELDS: (keyof FootballEquipment)[] = [
   'helmetInventoryId',
   'padInventoryId',
@@ -235,25 +227,16 @@ const ALL_INVENTORY_ID_FIELDS: (keyof FootballEquipment)[] = [
   'practicePantsInventoryId',
 ];
 
-const ALL_TAG_FIELDS: (keyof FootballEquipment)[] = [
-  'helmetTagNumber',
-  'padTagNumber',
-  'gameJerseyTagNumber',
-  'scrimmageJerseyTagNumber',
-  'practiceJerseyTagNumber',
-  'gamePantsTagNumber',
-  'practicePantsTagNumber',
-];
-
-function getEquippedStatus(enrollment: EnrollmentRow) {
-  const fe = enrollment.footballEquipment ?? {};
-  const count = ALL_INVENTORY_ID_FIELDS.filter((f) => Boolean(fe[f])).length;
-  return { count, total: ALL_INVENTORY_ID_FIELDS.length, isComplete: count === ALL_INVENTORY_ID_FIELDS.length };
+function getEquippedStatus(enrollment: EnrollmentRow, customSlotCount = 0) {
+  const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
+  const count = Object.entries(fe).filter(([k, v]) => k.endsWith('InventoryId') && Boolean(v)).length;
+  const total = ALL_INVENTORY_ID_FIELDS.length + customSlotCount;
+  return { count, total, isComplete: count >= total };
 }
 
 function hasOutstandingGear(enrollment: EnrollmentRow): boolean {
-  const fe = enrollment.footballEquipment ?? {};
-  return ALL_STATUS_FIELDS.some((f) => fe[f] === 'issued');
+  const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
+  return Object.entries(fe).some(([k, v]) => k.endsWith('Status') && v === 'issued');
 }
 
 export default function EquipmentPage() {
@@ -484,29 +467,28 @@ export default function EquipmentPage() {
     return dupes;
   }, [enrollments, playerNameMap]);
 
-  // Pre-build combobox options per type from the live shed subscription
+  // Pre-build combobox options per type (standard AND custom) from the live shed subscription
   const inventoryOptionsByType = useMemo(() => {
-    const result = {} as Record<ShedItemType, ComboboxOption[]>;
-    const types = Object.keys(SHED_ITEM_TYPES) as ShedItemType[];
-    for (const type of types) {
-      result[type] = (shedItems ?? [])
-        .filter((item) => item.type === type && item.status !== 'retired')
-        .sort((a, b) => a.tagNumber.localeCompare(b.tagNumber))
-        .map((item) => ({
-          value: item.id,
-          label: `#${item.tagNumber} · ${item.size}`,
-          sublabel: item.status === 'issued'
-            ? (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? 'Issued') : 'Issued')
-            : undefined,
-          disabled: item.status === 'issued',
-        }));
-    }
+    const result: Record<string, ComboboxOption[]> = {};
+    (shedItems ?? []).forEach((item) => {
+      if (item.status === 'retired') return;
+      (result[item.type] ??= []).push({
+        value: item.id,
+        label: `#${item.tagNumber} · ${item.size}`,
+        sublabel: item.status === 'issued'
+          ? (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? 'Issued') : 'Issued')
+          : undefined,
+        disabled: item.status === 'issued',
+      });
+    });
+    Object.values(result).forEach((opts) =>
+      opts.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true })));
     return result;
   }, [shedItems, playerNameMap]);
 
   // Per-row: re-enable the item currently assigned to this enrollment so it still shows
-  function getOptionsForType(type: ShedItemType, currentInventoryId: string | undefined): ComboboxOption[] {
-    return inventoryOptionsByType[type].map((opt) =>
+  function getOptionsForType(type: string, currentInventoryId: string | undefined): ComboboxOption[] {
+    return (inventoryOptionsByType[type] ?? []).map((opt) =>
       opt.value === currentInventoryId
         ? { ...opt, disabled: false, sublabel: 'Assigned' }
         : opt
@@ -553,7 +535,7 @@ export default function EquipmentPage() {
     }
   }
 
-  async function assignInventoryItem(enrollment: EnrollmentRow, item: ShedItem, equipType: ShedItemType) {
+  async function assignInventoryItem(enrollment: EnrollmentRow, item: ShedItem, equipType: string) {
     if (!db) return;
     const { parentUserId, id: enrollmentId } = enrollment;
     if (!parentUserId || !enrollmentId) {
@@ -583,7 +565,7 @@ export default function EquipmentPage() {
     }
   }
 
-  async function returnInventoryItem(enrollment: EnrollmentRow, item: ShedItem, equipType: ShedItemType) {
+  async function returnInventoryItem(enrollment: EnrollmentRow, item: ShedItem, equipType: string) {
     if (!db) return;
     const { parentUserId, id: enrollmentId } = enrollment;
     if (!parentUserId || !enrollmentId) return;
@@ -621,18 +603,23 @@ export default function EquipmentPage() {
     try {
       const batch = writeBatch(db);
       const now = new Date().toISOString();
-      const fe = enrollment.footballEquipment ?? {};
+      const fe = (enrollment.footballEquipment ?? {}) as Record<string, any>;
 
+      // Dynamic over the actual fields so custom slots (x_{slug}*) return too
       const enrollmentUpdates: Record<string, any> = {};
-      ALL_STATUS_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = 'returned'; });
-      ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
-      ALL_TAG_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
+      const linkedIds: string[] = [];
+      Object.entries(fe).forEach(([key, val]) => {
+        if (key.endsWith('Status')) enrollmentUpdates[`footballEquipment.${key}`] = 'returned';
+        else if (key.endsWith('InventoryId')) {
+          if (val) linkedIds.push(val as string);
+          enrollmentUpdates[`footballEquipment.${key}`] = deleteField();
+        } else if (key.endsWith('TagNumber')) enrollmentUpdates[`footballEquipment.${key}`] = deleteField();
+      });
+      if (Object.keys(enrollmentUpdates).length === 0) {
+        toast({ title: 'Nothing to return', description: 'No equipment recorded for this player.' });
+        return;
+      }
       batch.update(doc(db, 'userProfiles', parentUserId, 'enrollments', id), enrollmentUpdates);
-
-      // Return each linked shed item
-      const linkedIds = ALL_INVENTORY_ID_FIELDS
-        .map((f) => fe[f] as string | undefined)
-        .filter(Boolean) as string[];
 
       for (const itemId of linkedIds) {
         batch.update(doc(db, 'equipmentInventory', itemId), {
@@ -683,23 +670,26 @@ export default function EquipmentPage() {
       const targets = (enrollments ?? []).filter((e) => selectedIds.has(e.id));
       const now = new Date().toISOString();
 
-      const enrollmentUpdates: Record<string, any> = {};
-      ALL_STATUS_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = 'returned'; });
-      ALL_INVENTORY_ID_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
-      ALL_TAG_FIELDS.forEach((f) => { enrollmentUpdates[`footballEquipment.${f}`] = deleteField(); });
-
-      // Chunk to stay under the 500-op batch limit: each player is 1 enrollment
-      // update + up to 7 item updates + 7 history events
+      // Chunk to stay under the 500-op batch limit; per-enrollment updates are
+      // built dynamically so custom slots (x_{slug}*) return too
       const returnedByParent = new Map<string, { count: number; playerNames: Set<string> }>();
       for (let i = 0; i < targets.length; i += 25) {
         const batch = writeBatch(db);
         targets.slice(i, i + 25).forEach((e) => {
           if (!e.parentUserId || !e.id) return;
+          const fe = (e.footballEquipment ?? {}) as Record<string, any>;
+          const enrollmentUpdates: Record<string, any> = {};
+          const linkedIds: string[] = [];
+          Object.entries(fe).forEach(([key, val]) => {
+            if (key.endsWith('Status')) enrollmentUpdates[`footballEquipment.${key}`] = 'returned';
+            else if (key.endsWith('InventoryId')) {
+              if (val) linkedIds.push(val as string);
+              enrollmentUpdates[`footballEquipment.${key}`] = deleteField();
+            } else if (key.endsWith('TagNumber')) enrollmentUpdates[`footballEquipment.${key}`] = deleteField();
+          });
+          if (Object.keys(enrollmentUpdates).length === 0) return;
           batch.update(doc(db, 'userProfiles', e.parentUserId, 'enrollments', e.id), enrollmentUpdates);
-          const fe = e.footballEquipment ?? {};
-          ALL_INVENTORY_ID_FIELDS.forEach((f) => {
-            const itemId = fe[f] as string | undefined;
-            if (!itemId) return;
+          linkedIds.forEach((itemId) => {
             batch.update(doc(db, 'equipmentInventory', itemId), {
               status: 'available',
               issuedToPlayerId: '',
@@ -1035,18 +1025,18 @@ export default function EquipmentPage() {
         });
       }
 
-      // Custom types have no enrollment slot — only the shed item tracks the assignment
-      const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
-      if (enrollment?.parentUserId && enrollment?.id && fieldMap) {
-        const { statusField, sizeField, inventoryIdField, tagField } = fieldMap;
+      // Standard and custom types both mirror to the enrollment (custom types
+      // use derived x_{slug}* fields)
+      if (enrollment?.parentUserId && enrollment?.id) {
+        const { statusField, sizeField, inventoryIdField, tagField } = slotFieldsForType(item.type);
         const enrollmentUpdates: Record<string, any> = {
-          [`footballEquipment.${String(statusField)}`]: 'issued',
-          [`footballEquipment.${String(inventoryIdField)}`]: item.id,
-          [`footballEquipment.${String(tagField)}`]: item.tagNumber,
+          [`footballEquipment.${statusField}`]: 'issued',
+          [`footballEquipment.${inventoryIdField}`]: item.id,
+          [`footballEquipment.${tagField}`]: item.tagNumber,
           'footballEquipment.issuedAt': now,
         };
         if (sizeField) {
-          enrollmentUpdates[`footballEquipment.${String(sizeField)}`] = item.size;
+          enrollmentUpdates[`footballEquipment.${sizeField}`] = item.size;
         }
         batch.update(
           doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id),
@@ -1102,16 +1092,15 @@ export default function EquipmentPage() {
       // Only touch the enrollment mirror if the enrollment still exists — the
       // record may have been deleted while gear was out (pre-guard data), and a
       // batch update on a missing doc would fail the whole return
-      const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
-      if (item.issuedToParentUserId && item.issuedToEnrollmentId && fieldMap) {
+      if (item.issuedToParentUserId && item.issuedToEnrollmentId) {
         const enrollRef = doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId);
         const enrollSnap = await getDoc(enrollRef);
         if (enrollSnap.exists()) {
-          const { statusField, inventoryIdField, tagField } = fieldMap;
+          const { statusField, inventoryIdField, tagField } = slotFieldsForType(item.type);
           batch.update(enrollRef, {
-            [`footballEquipment.${String(statusField)}`]: 'returned',
-            [`footballEquipment.${String(inventoryIdField)}`]: deleteField(),
-            [`footballEquipment.${String(tagField)}`]: deleteField(),
+            [`footballEquipment.${statusField}`]: 'returned',
+            [`footballEquipment.${inventoryIdField}`]: deleteField(),
+            [`footballEquipment.${tagField}`]: deleteField(),
           });
         }
       }
@@ -1187,15 +1176,14 @@ export default function EquipmentPage() {
         lastRecertDate: editRecert || deleteField(),
         condition: editForm.condition || deleteField(),
       });
-      // Issued item with a standard slot: keep the enrollment's mirrored tag in sync
-      const fieldMap = EQUIP_FIELD_MAP[item.type as ShedItemType];
+      // Issued item: keep the enrollment's mirrored tag in sync (standard or custom slot)
       if (
-        item.status === 'issued' && newTag !== item.tagNumber && fieldMap &&
+        item.status === 'issued' && newTag !== item.tagNumber &&
         item.issuedToParentUserId && item.issuedToEnrollmentId
       ) {
         batch.update(
           doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId),
-          { [`footballEquipment.${String(fieldMap.tagField)}`]: newTag }
+          { [`footballEquipment.${slotFieldsForType(item.type).tagField}`]: newTag }
         );
       }
       await batch.commit();
@@ -1291,14 +1279,16 @@ export default function EquipmentPage() {
     const rows: EquipmentChaseRow[] = filteredEnrollments
       .filter(hasOutstandingGear)
       .map((e) => {
-        const fe = e.footballEquipment ?? {};
+        const fe = (e.footballEquipment ?? {}) as Record<string, any>;
         const items: string[] = [];
-        (Object.keys(EQUIP_FIELD_MAP) as ShedItemType[]).forEach((type) => {
-          const { statusField, tagField } = EQUIP_FIELD_MAP[type];
-          if (fe[statusField] === 'issued') {
-            const tag = fe[tagField] as string | undefined;
-            items.push(`${typeLabel(type, typeLabels)}${tag ? ` #${tag}` : ''}`);
-          }
+        Object.entries(fe).forEach(([key, val]) => {
+          if (!key.endsWith('Status') || val !== 'issued') return;
+          const stdSlug = (Object.entries(EQUIP_FIELD_MAP) as [ShedItemType, { statusField: string }][])
+            .find(([, f]) => String(f.statusField) === key)?.[0];
+          const slug = stdSlug ?? customSlugFromStatusField(key);
+          if (!slug) return;
+          const tag = fe[slotFieldsForType(slug).tagField] as string | undefined;
+          items.push(`${typeLabel(slug, typeLabels)}${tag ? ` #${tag}` : ''}`);
         });
         const parent = e.parentUserId ? profileMap.get(e.parentUserId) : undefined;
         return {
@@ -1836,7 +1826,7 @@ export default function EquipmentPage() {
                     const isSelected = selectedIds.has(enrollment.id);
                     const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
                     const divisionName = divisionMap.get(enrollment.divisionId) ?? '';
-                    const { count, total, isComplete } = getEquippedStatus(enrollment);
+                    const { count, total, isComplete } = getEquippedStatus(enrollment, customTypes.length);
 
                     return (
                       <Card
@@ -1972,7 +1962,7 @@ export default function EquipmentPage() {
                                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Jerseys</p>
                                 <div className="space-y-2">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">Game</span>
+                                    <span className="text-xs w-28 shrink-0">{typeLabel('game_jersey', typeLabels)}</span>
                                     <Combobox
                                       options={getOptionsForType('game_jersey', fe.gameJerseyInventoryId)}
                                       value={fe.gameJerseyInventoryId}
@@ -1989,7 +1979,7 @@ export default function EquipmentPage() {
                                     />
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">Scrimmage</span>
+                                    <span className="text-xs w-28 shrink-0">{typeLabel('scrimmage_jersey', typeLabels)}</span>
                                     <Combobox
                                       options={getOptionsForType('scrimmage_jersey', fe.scrimmageJerseyInventoryId)}
                                       value={fe.scrimmageJerseyInventoryId}
@@ -2006,7 +1996,7 @@ export default function EquipmentPage() {
                                     />
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">Practice</span>
+                                    <span className="text-xs w-28 shrink-0">{typeLabel('practice_jersey', typeLabels)}</span>
                                     <Combobox
                                       options={getOptionsForType('practice_jersey', fe.practiceJerseyInventoryId)}
                                       value={fe.practiceJerseyInventoryId}
@@ -2030,7 +2020,7 @@ export default function EquipmentPage() {
                                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pants</p>
                                 <div className="space-y-2">
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">Game</span>
+                                    <span className="text-xs w-28 shrink-0">{typeLabel('game_pants', typeLabels)}</span>
                                     <Combobox
                                       options={getOptionsForType('game_pants', fe.gamePantsInventoryId)}
                                       value={fe.gamePantsInventoryId}
@@ -2047,7 +2037,7 @@ export default function EquipmentPage() {
                                     />
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">Practice</span>
+                                    <span className="text-xs w-28 shrink-0">{typeLabel('practice_pants', typeLabels)}</span>
                                     <Combobox
                                       options={getOptionsForType('practice_pants', fe.practicePantsInventoryId)}
                                       value={fe.practicePantsInventoryId}
@@ -2066,6 +2056,38 @@ export default function EquipmentPage() {
                                 </div>
                               </div>
 
+                              {/* Custom equipment types — assignable via derived x_{slug}* fields */}
+                              {customTypes.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Other Equipment</p>
+                                  <div className="space-y-2">
+                                    {customTypes.map((slug) => {
+                                      const sf = slotFieldsForType(slug);
+                                      const feAny = fe as Record<string, any>;
+                                      const invId = feAny[sf.inventoryIdField] as string | undefined;
+                                      return (
+                                        <div key={slug} className="flex items-center gap-2">
+                                          <span className="text-xs w-28 shrink-0">{typeLabel(slug, typeLabels)}</span>
+                                          <Combobox
+                                            options={getOptionsForType(slug, invId)}
+                                            value={invId}
+                                            onSelect={(itemId) => {
+                                              const item = (shedItems ?? []).find(i => i.id === itemId);
+                                              if (item) assignInventoryItem(liveEnrollment, item, slug);
+                                            }}
+                                            onClear={() => {
+                                              const item = (shedItems ?? []).find(i => i.id === invId);
+                                              if (item) returnInventoryItem(liveEnrollment, item, slug);
+                                            }}
+                                            disabled={isSaving}
+                                            className="flex-1"
+                                          />
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             {/* Pinned footer — always reachable without scrolling the equipment list */}
