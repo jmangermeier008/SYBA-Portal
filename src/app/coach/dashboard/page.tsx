@@ -14,7 +14,9 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { notifyTeamParents } from '@/lib/coach-notifications';
-import { nowDateTime } from '@/lib/game-shape';
+import { nowDateTime, normalizeTeamGame } from '@/lib/game-shape';
+import { useTeamGamesLive } from '@/hooks/use-team-games';
+import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
 import { useToast } from '@/hooks/use-toast';
 import { isAnnouncementActive, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
@@ -92,27 +94,9 @@ export default function CoachDashboard() {
 
   // Fetch games for every team the coach is on (same pattern as coach/schedules);
   // the pills then filter client-side so every card stays in sync with the selection.
-  const [allTeamGames, setAllTeamGames] = useState<TeamGameEvent[]>([]);
-  const [loadingGames, setLoadingGames] = useState(true);
-  const teamIdsKey = teamIds.join(',');
-  useEffect(() => {
-    if (!db || teamIds.length === 0) {
-      setAllTeamGames([]);
-      if (!loadingTeams) setLoadingGames(false);
-      return;
-    }
-    setLoadingGames(true);
-    Promise.all(
-      teamIds.map(teamId =>
-        getDocs(collection(db, 'teams', teamId, 'games'))
-          .then(snap => snap.docs.map(d => ({ ...(d.data() as GameEvent), id: d.id, _teamId: teamId })))
-      )
-    ).then(results => {
-      setAllTeamGames(results.flat());
-      setLoadingGames(false);
-    }).catch(() => setLoadingGames(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, teamIdsKey, loadingTeams]);
+  // Live subscription — admin edits and cancellations appear without a refresh
+  const { games: allTeamGames, isLoading: loadingLiveGames } = useTeamGamesLive(db, teamIds);
+  const loadingGames = loadingTeams || loadingLiveGames;
 
   // Scope to the selected pill (or all teams), sorted chronologically
   const visibleGames = useMemo(() => {
@@ -126,6 +110,20 @@ export default function CoachDashboard() {
 
   // Skip cancelled events so a rained-out game doesn't drive the next-event card
   const nextGame = upcomingGames.find(g => !g.cancelled);
+
+  // Team Schedule card — shared agenda list, skipping the event NextEventCard
+  // already shows so the same game isn't rendered twice.
+  const scheduleListEvents = useMemo(() => {
+    return upcomingGames
+      .filter(g => !(nextGame && g.id === nextGame.id && g._teamId === nextGame._teamId))
+      .slice(0, 5)
+      .map(g => {
+        const team = (teams ?? []).find(t => t.id === g._teamId);
+        const ev = normalizeTeamGame(g, g._teamId, { teamName: team?.name, divisionId: team?.divisionId });
+        if (isAllTeamsView && ev.eventType === 'game' && team?.name) ev.title = `${team.name} ${ev.title}`;
+        return ev;
+      });
+  }, [upcomingGames, nextGame, teams, isAllTeamsView]);
   const playerCount = selectedTeamId
     ? enrollments?.filter(e => e.teamId === selectedTeamId).length ?? 0
     : enrollments?.length ?? 0;
@@ -264,10 +262,6 @@ export default function CoachDashboard() {
         cancelled: true,
         cancellationReason: 'Weather',
       });
-      // Games are fetched one-shot (not a live subscription), so reflect the change locally
-      setAllTeamGames(prev => prev.map(g =>
-        g.id === gameId && g._teamId === teamId ? { ...g, cancelled: true, cancellationReason: 'Weather' } : g
-      ));
       const game = allTeamGames.find(g => g.id === gameId && g._teamId === teamId);
       if (activeSport) {
         notifyTeamParents(db, [teamId], user?.uid ?? '', {
@@ -599,30 +593,11 @@ export default function CoachDashboard() {
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {upcomingGames.slice(0, 5).map((game) => (
-                    <div key={`${game._teamId}-${game.id}`} className="flex items-center justify-between px-3 py-2 rounded-lg bg-secondary/20">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-sm shrink-0",
-                          game.type === 'Game' ? "bg-primary" : "bg-accent"
-                        )}>
-                          {game.type[0]}
-                        </div>
-                        <div>
-                          <p className={cn("text-sm font-semibold leading-tight", game.cancelled && "line-through text-muted-foreground")}>
-                            {game.type === 'Game' ? `vs ${game.opponentName || 'TBD'}` : 'Team Practice'}
-                            {game.cancelled ? ' (cancelled)' : ''}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(game.dateTime), 'EEE, MMM d')} · {format(new Date(game.dateTime), 'h:mm a')}
-                            {isAllTeamsView && teamNameById[game._teamId] ? ` · ${teamNameById[game._teamId]}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <UpcomingEventsList
+                  events={scheduleListEvents}
+                  rowHref="/coach/schedules"
+                  emptyMessage="Your next event is shown above — nothing else scheduled yet."
+                />
               )}
             </CardContent>
           </Card>

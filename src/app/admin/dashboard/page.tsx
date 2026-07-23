@@ -6,7 +6,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
+import { AdminLeagueCalendar } from '@/components/calendar/AdminLeagueCalendar';
 import { useFirestore, useCollection, useUser } from '@/firebase';
 import { useMemoFirebase } from '@/firebase/provider';
 import { useSport } from '@/firebase/sport-context';
@@ -126,27 +126,6 @@ function formatTime(t: string) {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-// ─── Calendar event normalizers ─────────────────────────────────────────────
-// normalizeGame is shared from @/lib/game-shape.
-
-function normalizePracticeSlot(s: PracticeSlot): CalendarEvent {
-  return {
-    id: s.id,
-    eventType: 'practice',
-    date: s.date,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    title: s.teamName ? `${s.teamName} Practice` : `${s.fieldName} Practice`,
-    status: s.status,
-    fieldName: s.fieldName,
-    sourceType: 'practice-slot',
-    sourceId: s.id,
-    teamId: s.teamId,
-    teamName: s.teamName,
-    notes: s.notes,
-  };
-}
-
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard({
@@ -236,31 +215,17 @@ export default function AdminDashboard({
     return query(collection(db, 'inquiries'), where('status', 'in', ['open', 'in_progress']));
   }, [db, isAdmin, isBoardMember]);
 
-  // All games, practice slots, all concession slots — for the Calendar tab only
-  const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
-    return query(collection(db, 'games'), where('sport', '==', activeSport));
-  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
-
+  // Practice slots feed the practice-coverage alert (calendar data now lives
+  // in the shared AdminLeagueCalendar component)
   const practiceSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
+    if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
     return query(collection(db, 'practiceSlots'), where('sport', '==', activeSport));
-  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
+  }, [db, isAdmin, isBoardMember, activeSport]);
 
   const allTeamsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
     return query(collection(db, 'teams'), where('sport', '==', activeSport));
   }, [db, isAdmin, isBoardMember, activeSport]);
-
-  const allConcessionSlotsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
-    return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
-  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
-
-  const customEventsQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || activeTab !== 'calendar' || !activeSport) return null;
-    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
-  }, [db, isAdmin, isBoardMember, activeTab, activeSport]);
 
   const allPlayersQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember)) return null;
@@ -274,10 +239,7 @@ export default function AdminDashboard({
   const { data: boardMeetings } = useCollection<BoardMeeting>(boardMeetingsQuery);
   const { data: thisWeekGames } = useCollection<Game>(gamesQuery);
   const { data: openInquiries } = useCollection<{ id: string; status: string }>(inquiriesQuery);
-  const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
-  const { data: practiceSlots, isLoading: loadingPracticeSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
-  const { data: allConcessionSlots, isLoading: loadingAllConcessions } = useCollection<ConcessionSlotType>(allConcessionSlotsQuery);
-  const { data: allCustomEvents } = useCollection<CustomEvent>(customEventsQuery);
+  const { data: practiceSlots } = useCollection<PracticeSlot>(practiceSlotsQuery);
   const { data: allTeams } = useCollection<{ id: string; name: string }>(allTeamsQuery);
   const { data: allPlayers } = useCollection<{ id: string; firstName?: string; lastName?: string; compliance?: { verificationStatus?: string; birthCertificateVerified?: boolean; physicalVerified?: boolean } }>(allPlayersQuery);
 
@@ -449,22 +411,6 @@ export default function AdminDashboard({
 
     return items;
   }, [undercoveredSlots, fieldsWithClosures, pendingPaymentCount, waitlistedCount, openInquiries, thisWeekGames, todayISO, activeSport, seasonEnrollments, allPlayers]);
-
-  // Calendar tab events
-  const calendarEvents = useMemo<CalendarEvent[]>(() => {
-    const events: CalendarEvent[] = [];
-    (allGames ?? []).forEach(g => events.push(normalizeGame(g)));
-    (practiceSlots ?? []).forEach(s => events.push(normalizePracticeSlot(s)));
-    events.push(...buildConcessionEvents(allConcessionSlots ?? []));
-    (allCustomEvents ?? []).forEach(e => events.push(normalizeCustomEvent(e)));
-    return events.sort((a, b) => {
-      const dateComp = a.date.localeCompare(b.date);
-      if (dateComp !== 0) return dateComp;
-      return (a.startTime ?? '').localeCompare(b.startTime ?? '');
-    });
-  }, [allGames, practiceSlots, allConcessionSlots, allCustomEvents]);
-
-  const calendarLoading = loadingAllGames || loadingPracticeSlots || loadingAllConcessions;
 
   // Sport-scoped volunteer terminology. Baseball matchday volunteering is the
   // concession stand; football volunteering spans chain gangs, clock, and gate
@@ -1035,22 +981,9 @@ export default function AdminDashboard({
                 </div>
               </TabsContent>
 
-              {/* Tab: Calendar */}
+              {/* Tab: Calendar — the one shared admin calendar */}
               <TabsContent value="calendar" className="mt-0">
-                <LeagueCalendar
-                  events={calendarEvents}
-                  isLoading={calendarLoading}
-                  filters={calendarFilters}
-                  onFilterChange={(key, val) => setCalendarFilters(f => ({ ...f, [key]: val }))}
-                  visibleFilters={['games', 'practices', 'concessions', 'events']}
-                  defaultView="week"
-                  showUmpire
-                  onViewRecord={(event) => {
-                    if (event.sourceType === 'global-game' || event.sourceType === 'practice-slot') {
-                      router.push(`/admin/games/${event.sourceId}`);
-                    }
-                  }}
-                />
+                <AdminLeagueCalendar defaultView="week" />
               </TabsContent>
 
             </Tabs>

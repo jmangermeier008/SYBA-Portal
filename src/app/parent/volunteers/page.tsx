@@ -4,7 +4,8 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, collectionGroup, doc, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, runTransaction, query, where, addDoc, Timestamp } from 'firebase/firestore';
+import { useFamilyEnrollments } from '@/hooks/use-family-data';
 import type { Season, VolunteerShiftType } from '@/types/scheduling';
 import { computeFamilyFootballCompliance } from '@/lib/volunteer-compliance';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -252,15 +253,13 @@ export default function ParentVolunteersPage() {
 
   const { data: slots, isLoading, error: slotsError } = useCollection<ConcessionSlot>(slotsQuery);
 
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !profile || !activeSeason) return null;
-    return query(
-      collectionGroup(db, 'enrollments'),
-      where('parentUserId', '==', profile.id),
-      where('seasonId', '==', activeSeason.id),
-    );
-  }, [db, profile?.id, activeSeason?.id]);
-  const { data: enrollments } = useCollection<{ seasonId: string; parentUserId: string }>(enrollmentsQuery);
+  // Family-wide enrollments (includes co-parent links), filtered to the active
+  // season client-side — the family hook can't compound extra where clauses.
+  const { data: familyEnrollments } = useFamilyEnrollments<{ id: string; seasonId: string; parentUserId: string }>(db, profile?.id);
+  const enrollments = useMemo(
+    () => (activeSeason ? (familyEnrollments ?? []).filter(e => e.seasonId === activeSeason.id) : null),
+    [familyEnrollments, activeSeason],
+  );
 
   // Only show upcoming, active slots (filter out cancelled shifts)
   const upcomingSlots = useMemo(() =>

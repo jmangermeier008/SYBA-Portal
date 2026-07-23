@@ -30,15 +30,17 @@ export async function GET(
     }
     const userId = tokenSnap.data()!.userId as string;
 
-    const [profileSnap, enrollmentsSnap] = await Promise.all([
+    const [profileSnap, enrollmentsSnap, linkedEnrollmentsSnap] = await Promise.all([
       db.collection('userProfiles').doc(userId).get(),
       db.collectionGroup('enrollments').where('parentUserId', '==', userId).get(),
+      // Enrollments where this user is a linked co-parent
+      db.collectionGroup('enrollments').where('additionalParentUids', 'array-contains', userId).get(),
     ]);
     const profile = profileSnap.data() ?? {};
 
-    // Family teams from enrollments, plus coached teams from the profile.
+    // Family teams from enrollments (both parent roles), plus coached teams from the profile.
     const teamIds = new Set<string>();
-    for (const doc of enrollmentsSnap.docs) {
+    for (const doc of [...enrollmentsSnap.docs, ...linkedEnrollmentsSnap.docs]) {
       const teamId = doc.data().teamId;
       if (teamId) teamIds.add(teamId);
     }

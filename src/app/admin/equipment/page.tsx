@@ -96,6 +96,7 @@ import {
   type ShedItemType,
 } from '@/lib/equipment';
 import { useEquipmentTypes } from '@/hooks/use-equipment-types';
+import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 
 
 const STATUS_COLORS: Record<EquipmentStatus, string> = {
@@ -114,6 +115,7 @@ const STATUS_LABELS: Record<EquipmentStatus, string> = {
 interface EnrollmentRow {
   id: string;
   parentUserId?: string;
+  additionalParentUids?: string[];
   playerId: string;
   seasonId: string;
   divisionId: string;
@@ -639,10 +641,12 @@ export default function EquipmentPage() {
         });
       }
 
+      let equipNotif: { recipients: string[]; title: string; body: string } | null = null;
       if (linkedIds.length > 0) {
         const playerName = playerNameMap.get(enrollment.playerId) ?? 'your player';
-        addEquipmentNotificationToBatch(batch, db, {
+        equipNotif = addEquipmentNotificationToBatch(batch, db, {
           parentUserId,
+          additionalParentUids: enrollment.additionalParentUids,
           actorUid: currentActor.uid,
           event: 'returned',
           itemLabel: '',
@@ -651,6 +655,7 @@ export default function EquipmentPage() {
       }
 
       await batch.commit();
+      if (equipNotif) pushToUsersBestEffort(equipNotif.recipients, { title: equipNotif.title, body: equipNotif.body, url: '/parent/dashboard' });
       toast({ title: 'Equipment returned', description: 'All items marked as returned.' });
     } catch (err: any) {
       toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
@@ -672,7 +677,7 @@ export default function EquipmentPage() {
 
       // Chunk to stay under the 500-op batch limit; per-enrollment updates are
       // built dynamically so custom slots (x_{slug}*) return too
-      const returnedByParent = new Map<string, { count: number; playerNames: Set<string> }>();
+      const returnedByParent = new Map<string, { count: number; playerNames: Set<string>; extraUids: Set<string> }>();
       for (let i = 0; i < targets.length; i += 25) {
         const batch = writeBatch(db);
         targets.slice(i, i + 25).forEach((e) => {
@@ -705,9 +710,10 @@ export default function EquipmentPage() {
               actorUid: currentActor.uid,
               actorName: currentActor.name,
             });
-            const agg = returnedByParent.get(e.parentUserId!) ?? { count: 0, playerNames: new Set<string>() };
+            const agg = returnedByParent.get(e.parentUserId!) ?? { count: 0, playerNames: new Set<string>(), extraUids: new Set<string>() };
             agg.count += 1;
             agg.playerNames.add(playerNameMap.get(e.playerId) ?? 'your player');
+            for (const uid of e.additionalParentUids ?? []) agg.extraUids.add(uid);
             returnedByParent.set(e.parentUserId!, agg);
           });
         });
@@ -718,16 +724,21 @@ export default function EquipmentPage() {
       // fire-and-forget so a notification hiccup doesn't fail the bulk return
       if (returnedByParent.size > 0) {
         const notifBatch = writeBatch(db);
-        returnedByParent.forEach(({ count, playerNames }, parentUserId) => {
-          addEquipmentNotificationToBatch(notifBatch, db, {
+        const pushRecipients: string[] = [];
+        returnedByParent.forEach(({ count, playerNames, extraUids }, parentUserId) => {
+          const notif = addEquipmentNotificationToBatch(notifBatch, db, {
             parentUserId,
+            additionalParentUids: [...extraUids],
             actorUid: currentActor.uid,
             event: 'returned',
             itemLabel: '',
             body: `${count} item${count !== 1 ? 's' : ''} marked returned for ${[...playerNames].join(', ')}.`,
           });
+          if (notif) pushRecipients.push(...notif.recipients);
         });
-        notifBatch.commit().catch(console.error);
+        notifBatch.commit()
+          .then(() => pushToUsersBestEffort(pushRecipients, { title: 'Equipment returned', body: 'Equipment was marked returned for your player(s).', url: '/parent/dashboard' }))
+          .catch(console.error);
       }
       toast({ title: 'Equipment marked as Returned', description: `${targets.length} player(s) updated.` });
       setSelectedIds(new Set());
@@ -1014,9 +1025,11 @@ export default function EquipmentPage() {
         actorName: currentActor.name,
       });
 
+      let issueNotif: { recipients: string[]; title: string; body: string } | null = null;
       if (enrollment?.parentUserId) {
-        addEquipmentNotificationToBatch(batch, db, {
+        issueNotif = addEquipmentNotificationToBatch(batch, db, {
           parentUserId: enrollment.parentUserId,
+          additionalParentUids: enrollment.additionalParentUids,
           actorUid: currentActor.uid,
           event: 'issued',
           itemLabel: typeLabel(item.type, typeLabels),
@@ -1045,6 +1058,7 @@ export default function EquipmentPage() {
       }
 
       await batch.commit();
+      if (issueNotif) pushToUsersBestEffort(issueNotif.recipients, { title: issueNotif.title, body: issueNotif.body, url: '/parent/dashboard' });
       toast({ title: 'Checked out', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(checkOutPlayerId) ?? checkOutPlayerId}.` });
       setCheckOutDialog({ open: false, item: null });
       setCheckOutPlayerId('');
@@ -1078,24 +1092,16 @@ export default function EquipmentPage() {
         actorName: currentActor.name,
       });
 
-      if (item.issuedToParentUserId) {
-        addEquipmentNotificationToBatch(batch, db, {
-          parentUserId: item.issuedToParentUserId,
-          actorUid: currentActor.uid,
-          event: 'returned',
-          itemLabel: typeLabel(item.type, typeLabels),
-          tagNumber: item.tagNumber,
-          playerName: item.issuedToPlayerId ? playerNameMap.get(item.issuedToPlayerId) : undefined,
-        });
-      }
-
       // Only touch the enrollment mirror if the enrollment still exists — the
       // record may have been deleted while gear was out (pre-guard data), and a
-      // batch update on a missing doc would fail the whole return
+      // batch update on a missing doc would fail the whole return. Fetched
+      // before the notification so linked co-parents get notified too.
+      let returnEnrollment: { additionalParentUids?: string[] } | null = null;
       if (item.issuedToParentUserId && item.issuedToEnrollmentId) {
         const enrollRef = doc(db, 'userProfiles', item.issuedToParentUserId, 'enrollments', item.issuedToEnrollmentId);
         const enrollSnap = await getDoc(enrollRef);
         if (enrollSnap.exists()) {
+          returnEnrollment = enrollSnap.data() as { additionalParentUids?: string[] };
           const { statusField, inventoryIdField, tagField } = slotFieldsForType(item.type);
           batch.update(enrollRef, {
             [`footballEquipment.${statusField}`]: 'returned',
@@ -1105,7 +1111,21 @@ export default function EquipmentPage() {
         }
       }
 
+      let returnNotif: { recipients: string[]; title: string; body: string } | null = null;
+      if (item.issuedToParentUserId) {
+        returnNotif = addEquipmentNotificationToBatch(batch, db, {
+          parentUserId: item.issuedToParentUserId,
+          additionalParentUids: returnEnrollment?.additionalParentUids,
+          actorUid: currentActor.uid,
+          event: 'returned',
+          itemLabel: typeLabel(item.type, typeLabels),
+          tagNumber: item.tagNumber,
+          playerName: item.issuedToPlayerId ? playerNameMap.get(item.issuedToPlayerId) : undefined,
+        });
+      }
+
       await batch.commit();
+      if (returnNotif) pushToUsersBestEffort(returnNotif.recipients, { title: returnNotif.title, body: returnNotif.body, url: '/parent/dashboard' });
       toast({ title: 'Item returned', description: `Tag #${item.tagNumber} is now available.` });
       setConditionDialog({ open: true, item });
     } catch (err: any) {

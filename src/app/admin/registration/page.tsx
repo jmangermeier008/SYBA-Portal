@@ -35,6 +35,7 @@ import { CoachComplianceTable } from '@/components/admin/registration/coach-comp
 import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
 import type { Division } from '@/types/scheduling';
 import { countIssuedEquipment } from '@/lib/equipment';
+import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 
 interface Enrollment {
   id: string;
@@ -518,20 +519,24 @@ export default function RegistrationDashboardPage() {
   ) => {
     if (!db) return;
     const label = ALL_CLEARANCE_DOCS.find(c => c.id === clearanceId)?.label ?? clearanceId;
+    const title = status === 'Approved' ? 'Clearance Approved' : 'Clearance Needs Attention';
+    const body = status === 'Approved'
+      ? overall === 'approved'
+        ? `Your ${label} was approved. All clearances are complete — your coach tools are now unlocked.`
+        : `Your ${label} was approved. Coach tools unlock once your remaining clearance is approved.`
+      : `Your ${label} was not approved: ${reason?.trim() || 'see the Compliance page for details'}. Please upload a corrected document from the Compliance page.`;
     await setDoc(doc(db, 'notifications', crypto.randomUUID()), {
       userId,
       type: status === 'Approved' ? 'clearanceApproved' : 'clearanceRejected',
-      title: status === 'Approved' ? 'Clearance Approved' : 'Clearance Needs Attention',
-      body: status === 'Approved'
-        ? overall === 'approved'
-          ? `Your ${label} was approved. All clearances are complete — your coach tools are now unlocked.`
-          : `Your ${label} was approved. Coach tools unlock once your remaining clearance is approved.`
-        : `Your ${label} was not approved: ${reason?.trim() || 'see the Compliance page for details'}. Please upload a corrected document from the Compliance page.`,
+      title,
+      body,
       relatedDocId: clearanceId,
       relatedDocType: 'clearance',
       read: false,
       createdAt: Timestamp.now(),
     });
+    // Clearance decisions gate the coach portal — buzz opted-in devices too
+    pushToUsersBestEffort([userId], { title, body, url: '/coach/compliance' });
   };
 
   const handleUpdateClearanceStatus = async (

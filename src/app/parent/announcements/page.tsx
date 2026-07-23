@@ -6,7 +6,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
-import { collection, collectionGroup, query, orderBy, where } from 'firebase/firestore';
+import { collection, query, orderBy, where } from 'firebase/firestore';
+import { useFamilyEnrollments } from '@/hooks/use-family-data';
 import { Megaphone, Loader2, Clock, Pin, Search, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { isAnnouncementActive, type Announcement } from '@/types/scheduling';
@@ -34,12 +35,9 @@ export default function ParentAnnouncementsPage() {
 
   const { data: announcements, isLoading } = useCollection<Announcement>(announcementsQuery);
 
-  // The family's teams — coach team announcements are shown only to those families
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
-  }, [db, user?.uid]);
-  const { data: myEnrollments } = useCollection<{ id: string; teamId?: string }>(enrollmentsQuery);
+  // The family's teams — coach team announcements are shown only to those
+  // families (family-wide, includes co-parent links)
+  const { data: myEnrollments } = useFamilyEnrollments<{ id: string; teamId?: string }>(db, user?.uid);
   const myTeamIds = useMemo(
     () => new Set((myEnrollments ?? []).map(e => e.teamId).filter(Boolean)),
     [myEnrollments]

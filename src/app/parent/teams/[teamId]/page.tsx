@@ -5,6 +5,7 @@ import { use } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { useFamilyEnrollments } from '@/hooks/use-family-data';
 import { AlertTriangle } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -88,13 +89,12 @@ export default function ParentTeamDirectoryPage({ params }: { params: Promise<{ 
     .map(uid => allUsers?.find(u => u.id === uid))
     .filter((c): c is UserProfile => !!c);
 
-  // C4: Only show the directory if the current user has an enrollment on this team
-  const userEnrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid), where('teamId', '==', teamId));
-  }, [db, user, teamId]);
-  const { data: userEnrollments, isLoading: loadingUserEnrollments } = useCollection<{ id: string }>(userEnrollmentsQuery);
-  const isAuthorized = (userEnrollments?.length ?? 0) > 0;
+  // C4: Only show the directory if the current user's family has an enrollment
+  // on this team (family-wide — includes co-parent links; filtered client-side
+  // to avoid a composite array-contains index)
+  const { data: familyEnrollments, isLoading: loadingUserEnrollments } =
+    useFamilyEnrollments<{ id: string; teamId?: string }>(db, user?.uid);
+  const isAuthorized = (familyEnrollments ?? []).some(e => e.teamId === teamId);
 
   if (loadingEnrollments || loadingUserEnrollments) {
     return (

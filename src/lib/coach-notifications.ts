@@ -97,8 +97,8 @@ export function notifyUsers(
 }
 
 /** Notify the parents of every player enrolled on the given team(s) — e.g. a
- *  cancellation, reschedule, or team announcement. Only the primary parent on
- *  each enrollment is reached (enrollments don't carry secondary parents). */
+ *  cancellation, reschedule, or team announcement. Reaches the registering
+ *  parent (parentUserId) plus any linked co-parents (additionalParentUids). */
 export function notifyTeamParents(
   db: Firestore,
   teamIds: string[],
@@ -115,7 +115,10 @@ export function notifyTeamParents(
     .then(snaps => {
       const parentIds = snaps.flatMap(snap =>
         snap.docs
-          .map(d => (d.data() as { parentUserId?: string }).parentUserId ?? '')
+          .flatMap(d => {
+            const e = d.data() as { parentUserId?: string; additionalParentUids?: string[] };
+            return [e.parentUserId ?? '', ...(e.additionalParentUids ?? [])];
+          })
           .filter(Boolean)
       );
       return notifyUsers(db, parentIds, actorUid, payload);

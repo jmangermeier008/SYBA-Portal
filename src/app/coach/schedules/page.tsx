@@ -1,45 +1,36 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, query, doc, updateDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
-import { ShieldAlert, Loader2 } from 'lucide-react';
+import { collection, query, doc, updateDoc, deleteDoc, where } from 'firebase/firestore';
+import { ShieldAlert, Loader2, CalendarDays, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { AddEventDialog } from '@/components/calendar/AddEventDialog';
 import { SchedulePracticeDialog } from '@/components/coach/SchedulePracticeDialog';
-import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
+import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
+import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
+import { buildDivisionColorMap } from '@/lib/division-colors';
+import { useTeamGamesLive } from '@/hooks/use-team-games';
 import { notifyTeamParents } from '@/lib/coach-notifications';
-import { format } from 'date-fns';
-import type { CalendarEvent, CustomEvent } from '@/types/scheduling';
+import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-
-interface GameEvent {
-  id: string;
-  type: string;
-  opponentName?: string;
-  location: string;
-  dateTime: string;
-  endTime?: string;
-  fieldId?: string | null;
-  cancelled?: boolean;
-  cancellationReason?: string;
-}
 
 interface Team {
   id: string;
   name: string;
   seasonId?: string;
+  divisionId?: string;
 }
-
-// normalizeTeamGame is shared from @/lib/game-shape.
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
@@ -49,12 +40,12 @@ export default function CoachSchedulesPage() {
   const { activeSport, isAdmin } = useSport();
   const { toast } = useToast();
 
-  // ── Filter state ────────────────────────────────────────────────────────────
+  // ── View + filter state ─────────────────────────────────────────────────────
+  const [view, setView] = useState<'list' | 'calendar'>('calendar');
+  const [showPast, setShowPast] = useState(false);
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: false, events: true });
   const [addEventOpen, setAddEventOpen] = useState(false);
   const [schedulePracticeOpen, setSchedulePracticeOpen] = useState(false);
-  const [allTeamGames, setAllTeamGames] = useState<(GameEvent & { _teamId: string })[]>([]);
-  const [loadingGames, setLoadingGames] = useState(false);
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const teamsQuery = useMemoFirebase(() => {
@@ -65,41 +56,54 @@ export default function CoachSchedulesPage() {
   const { data: userTeams, isLoading: loadingTeams } = useCollection<Team>(teamsQuery);
   const activeTeam = userTeams?.[0];
   const coachTeamIds = useMemo(() => (userTeams ?? []).map(t => t.id), [userTeams]);
-  const coachTeamIdsKey = coachTeamIds.join(',');
 
-  // Fetch games for every team the coach is on (a coach may have multiple teams).
-  useEffect(() => {
-    if (!db || coachTeamIds.length === 0) {
-      setAllTeamGames([]);
-      return;
-    }
-    setLoadingGames(true);
-    Promise.all(
-      coachTeamIds.map(teamId =>
-        getDocs(collection(db, 'teams', teamId, 'games'))
-          .then(snap => snap.docs.map(d => ({ ...(d.data() as GameEvent), id: d.id, _teamId: teamId })))
-      )
-    ).then(results => {
-      setAllTeamGames(results.flat());
-      setLoadingGames(false);
-    }).catch(() => setLoadingGames(false));
-  }, [db, coachTeamIdsKey]);
+  // Live subscription — admin edits and cancellations show up without a refresh
+  const { games: allTeamGames, isLoading: loadingGames } = useTeamGamesLive(db, coachTeamIds);
 
   const customEventsQuery = useMemoFirebase(() => {
     if (!db || !activeSport) return null;
     return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
   }, [db, activeSport]);
-
   const { data: customEvents } = useCollection<CustomEvent>(customEventsQuery);
 
+  // Volunteer shifts — coaches see the shifts attached to their games
+  const concessionSlotsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'concessionSlots'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: concessionSlots } = useCollection<ConcessionSlot>(concessionSlotsQuery);
+
+  // Divisions of the active season — powers the shared division color map
+  const divisionsQuery = useMemoFirebase(() => {
+    if (!db || !activeTeam?.seasonId) return null;
+    return collection(db, 'seasons', activeTeam.seasonId, 'divisions');
+  }, [db, activeTeam?.seasonId]);
+  const { data: divisions } = useCollection<{ id: string; name: string }>(divisionsQuery);
+  const divisionColors = useMemo(() => buildDivisionColorMap(divisions), [divisions]);
+
   // ── Normalize to CalendarEvent ──────────────────────────────────────────────
+  const teamById = useMemo(() => new Map((userTeams ?? []).map(t => [t.id, t])), [userTeams]);
+
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
     const events: CalendarEvent[] = [];
-    events.push(...allTeamGames.map(g => normalizeTeamGame(g, g._teamId)));
+    events.push(...allTeamGames.map(g => {
+      const team = teamById.get(g._teamId);
+      return normalizeTeamGame(g, g._teamId, { teamName: team?.name, divisionId: team?.divisionId });
+    }));
+    events.push(...buildConcessionEvents(concessionSlots ?? []));
     const myEvents = visibleCustomEvents(customEvents ?? [], { isAdmin, teamIds: coachTeamIds });
     events.push(...myEvents.map(normalizeCustomEvent));
     return events;
-  }, [allTeamGames, customEvents, isAdmin, coachTeamIds]);
+  }, [allTeamGames, concessionSlots, customEvents, isAdmin, coachTeamIds, teamById]);
+
+  // ── List view slices ────────────────────────────────────────────────────────
+  const todayISO = format(new Date(), 'yyyy-MM-dd');
+  const listEvents = useMemo(
+    () => calendarEvents.filter(e => e.eventType === 'game' || e.eventType === 'practice' || e.eventType === 'event'),
+    [calendarEvents],
+  );
+  const upcomingEvents = useMemo(() => listEvents.filter(e => e.date >= todayISO), [listEvents, todayISO]);
+  const pastEvents = useMemo(() => listEvents.filter(e => e.date < todayISO), [listEvents, todayISO]);
 
   // ── Weather cancel (passed to calendar via onWeatherCancel) ─────────────────
   const handleWeatherCancel = async (teamId: string, gameId: string) => {
@@ -168,18 +172,37 @@ export default function CoachSchedulesPage() {
                 : "View your team's practices and games. To add a practice, use the Practice Slots page."}
             </p>
           </div>
-          {activeSport === 'football' && activeTeam && (
-            <div className="flex items-center gap-2">
-              {isAdmin && (
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/admin/games">Add game (admin)</Link>
-                </Button>
-              )}
-              <Button size="sm" onClick={() => setSchedulePracticeOpen(true)}>
-                Schedule Practice
-              </Button>
+          <div className="flex items-center gap-2">
+            {/* List | Calendar toggle — same pattern as the admin games page */}
+            <div className="flex rounded-full border p-0.5">
+              <button
+                onClick={() => setView('list')}
+                className={cn('flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors',
+                  view === 'list' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground')}
+              >
+                <List className="h-3.5 w-3.5" /> List
+              </button>
+              <button
+                onClick={() => setView('calendar')}
+                className={cn('flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors',
+                  view === 'calendar' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground')}
+              >
+                <CalendarDays className="h-3.5 w-3.5" /> Calendar
+              </button>
             </div>
-          )}
+            {activeSport === 'football' && activeTeam && (
+              <>
+                {isAdmin && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/admin/games">Add game (admin)</Link>
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => setSchedulePracticeOpen(true)}>
+                  Schedule Practice
+                </Button>
+              </>
+            )}
+          </div>
         </header>
 
         {!activeTeam && !loadingTeams ? (
@@ -192,18 +215,51 @@ export default function CoachSchedulesPage() {
               </p>
             </CardContent>
           </Card>
-        ) : (
+        ) : view === 'calendar' ? (
           <LeagueCalendar
             events={calendarEvents}
             isLoading={isLoading}
             filters={filters}
             onFilterChange={handleFilterChange}
-            visibleFilters={['games', 'practices', 'events']}
+            visibleFilters={['games', 'practices', 'concessions', 'events']}
+            availableDivisions={divisions ?? []}
+            divisionColors={divisionColors}
             onWeatherCancel={handleWeatherCancel}
             onAddEvent={() => setAddEventOpen(true)}
             onEventDelete={handleEventDelete}
             currentUserId={user?.uid}
           />
+        ) : (
+          <>
+            <Card className="border-none shadow-md mb-6">
+              <CardHeader className="pb-2">
+                <CardTitle className="font-headline flex items-center gap-2">
+                  <CalendarDays className="h-5 w-5 text-primary" /> Upcoming
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                ) : (
+                  <UpcomingEventsList events={upcomingEvents} emptyMessage="No upcoming games or practices." />
+                )}
+              </CardContent>
+            </Card>
+            {pastEvents.length > 0 && (
+              <div className="mb-6">
+                <Button variant="ghost" size="sm" onClick={() => setShowPast(v => !v)}>
+                  {showPast ? 'Hide past events' : `Show past events (${pastEvents.length})`}
+                </Button>
+                {showPast && (
+                  <Card className="border-none shadow-md mt-2">
+                    <CardContent className="pt-4">
+                      <UpcomingEventsList events={pastEvents} />
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         <AddEventDialog
@@ -223,10 +279,6 @@ export default function CoachSchedulesPage() {
             db={db}
             teams={userTeams ?? []}
             actorUid={user?.uid ?? ''}
-            onCreated={mirror => {
-              // Games are fetched one-shot, so reflect the new practice locally
-              setAllTeamGames(prev => [...prev, { ...mirror, _teamId: mirror.teamId } as GameEvent & { _teamId: string }]);
-            }}
           />
         )}
       </main>

@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Shirt, Trash2, UserCheck } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Shirt, Trash2, UserCheck, CreditCard } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo, useState } from 'react';
@@ -32,7 +32,8 @@ function NotifIcon({ type }: { type: NotificationType }) {
       type === 'concessionShiftReminder') {
     return <ShoppingCart className={cn(base, 'text-amber-500')} />;
   }
-  if (type === 'practiceSlotCancelled' || type === 'practiceSlotChanged') {
+  if (type === 'practiceSlotCancelled' || type === 'practiceSlotChanged' ||
+      type === 'practiceSlotRequestApproved' || type === 'practiceSlotRequestDenied') {
     return <Dumbbell className={cn(base, 'text-blue-500')} />;
   }
   if (type === 'announcement') {
@@ -62,6 +63,9 @@ function NotifIcon({ type }: { type: NotificationType }) {
   if (type === 'equipment') {
     return <Shirt className={cn(base, 'text-primary')} />;
   }
+  if (type === 'paymentConfirmed') {
+    return <CreditCard className={cn(base, 'text-green-600')} />;
+  }
   return <CalendarDays className={cn(base, 'text-primary')} />;
 }
 
@@ -79,6 +83,8 @@ function getNotifRoute(
 ): string | null {
   // Parent dashboard shows the issued-gear card with tag numbers
   if (type === 'equipment') return '/parent/dashboard';
+  // Payment confirmations — the dashboard shows enrollment/payment status
+  if (relatedDocType === 'enrollment') return '/parent/dashboard';
   if (relatedDocType === 'concessionSlot') return '/parent/volunteers';
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
   if (relatedDocType === 'game') {

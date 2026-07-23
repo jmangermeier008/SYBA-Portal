@@ -24,6 +24,7 @@ import { ShieldCheck, Save, Loader2, User as UserIcon, Phone, Mail, Users, Check
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { stripPhone } from '@/lib/utils';
+import { syncCoParentOnEnrollments } from '@/lib/family-links';
 import { useSport } from '@/firebase/sport-context';
 import { canBrowserInstall, isIosBrowser, isStandalone } from '@/lib/pwa';
 import { enablePush, disablePush, getStoredPushToken, isPushSupported } from '@/lib/push-client';
@@ -220,9 +221,12 @@ export default function ParentSettingsPage() {
   const handleUnlinkSecondParent = async (player: Player) => {
     if (!user || !db || !player.secondaryParentId) return;
     try {
+      const removedUid = player.secondaryParentId;
       const playerRef = doc(db, 'userProfiles', user.uid, 'players', player.id);
       // Reset parentIds to mirror what link-request approval writes
       await updateDoc(playerRef, { secondaryParentId: null, parentIds: [user.uid] });
+      // Revoke the enrollment-side access that approval granted
+      await syncCoParentOnEnrollments(db, user.uid, player.id, removedUid, 'remove');
       setLinkedParents(prev => ({ ...prev, [player.id]: null }));
       toast({ title: "Second Parent Removed", description: `Co-management access for ${player.firstName} has been revoked.` });
     } catch (error: any) {

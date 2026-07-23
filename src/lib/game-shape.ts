@@ -127,9 +127,16 @@ export interface TeamGameLike {
 
 /**
  * Team-subcollection game → CalendarEvent. Shared by coach and parent schedule
- * views so both render identically.
+ * views so both render identically. Mirror docs carry no team/division context,
+ * so pass `opts` from the team doc at the call site — it names the practice
+ * ("Pee Wees Practice" instead of a bare "Practice") and enables division
+ * coloring on the calendar.
  */
-export function normalizeTeamGame(g: TeamGameLike, teamId: string): CalendarEvent {
+export function normalizeTeamGame(
+  g: TeamGameLike,
+  teamId: string,
+  opts?: { teamName?: string; divisionId?: string },
+): CalendarEvent {
   const { date, time } = splitDateTime(g.dateTime);
   return {
     id: g.id,
@@ -137,12 +144,16 @@ export function normalizeTeamGame(g: TeamGameLike, teamId: string): CalendarEven
     date,
     startTime: time,
     endTime: g.endTime || undefined,
-    title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
+    title: g.type === 'Game'
+      ? `vs ${g.opponentName || 'TBD'}`
+      : opts?.teamName ? `${opts.teamName} Practice` : 'Practice',
     status: g.cancelled === true ? 'cancelled' : 'scheduled',
     fieldName: g.location,
     sourceType: 'team-game',
     sourceId: g.id,
     teamId,
+    teamName: opts?.teamName,
+    divisionId: opts?.divisionId,
     notes: g.cancellationReason,
   };
 }

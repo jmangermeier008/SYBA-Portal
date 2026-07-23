@@ -308,6 +308,14 @@
       ]
     },
     {
+      "collectionGroup": "enrollments",
+      "fieldPath": "additionalParentUids",
+      "indexes": [
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
       "collectionGroup": "players",
       "fieldPath": "lastName",
       "indexes": [

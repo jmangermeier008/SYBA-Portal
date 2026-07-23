@@ -62,7 +62,7 @@ export function NextUpCard({
     );
   }, [db, teamId, now]);
   const { data: nextGames, isLoading: loadingGames } = useCollection<{
-    id: string; dateTime: string; location: string; type: string; opponentName?: string;
+    id: string; dateTime: string; endTime?: string; location: string; type: string; opponentName?: string;
   }>(nextGameQuery);
   const nextGame = nextGames?.[0];
 
@@ -122,7 +122,9 @@ export function NextUpCard({
                 : nextGame.type === 'Game' ? 'Game' : 'Team Practice'}
             </p>
             <p className="text-sm text-muted-foreground">
-              {format(new Date(nextGame.dateTime), 'h:mm a')}{nextGame.location ? ` · ${nextGame.location}` : ''}
+              {format(new Date(nextGame.dateTime), 'h:mm a')}
+              {nextGame.endTime ? ` – ${format(new Date(`2000-01-01T${nextGame.endTime}`), 'h:mm a')}` : ''}
+              {nextGame.location ? ` · ${nextGame.location}` : ''}
             </p>
             {rsvps && (
               <div className="flex gap-2 mt-2 flex-wrap">

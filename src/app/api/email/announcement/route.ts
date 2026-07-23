@@ -60,6 +60,7 @@ async function resolveAudienceEmails(
     const e = doc.data();
     if (audience.type === 'division' && e.divisionId !== audience.divisionId) continue;
     if (e.parentUserId) parentUids.add(e.parentUserId as string);
+    for (const uid of (e.additionalParentUids as string[] | undefined) ?? []) parentUids.add(uid);
   }
   if (parentUids.size === 0) return [];
 

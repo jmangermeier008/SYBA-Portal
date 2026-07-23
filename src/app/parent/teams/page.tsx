@@ -4,7 +4,8 @@
 import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { collection, collectionGroup } from 'firebase/firestore';
+import { useFamilyEnrollments } from '@/hooks/use-family-data';
 import { Users, ChevronRight, Loader2, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -43,11 +44,8 @@ export default function ParentTeamsPage() {
   const { user } = useUser();
   const db = useFirestore();
 
-  // Get all enrollments for this parent
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
-  }, [db, user]);
+  // All enrollments for this family — includes players shared via co-parent links
+  const { data: enrollments, isLoading: loadingEnrollments } = useFamilyEnrollments<Enrollment>(db, user?.uid);
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -62,7 +60,6 @@ export default function ParentTeamsPage() {
     return collection(db, 'userProfiles');
   }, [db, user]);
 
-  const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allTeams } = useCollection<Team>(teamsQuery);
   const { data: allPlayers } = useCollection<Player>(playersQuery);
   const { data: allUsers } = useCollection<UserProfile>(usersQuery);

@@ -228,12 +228,15 @@ async function runReminders(req: Request) {
         const respondedPlayerIds = new Set(rsvpSnap.docs.map(r => r.data().playerId));
 
         // parent → do any of their players on this team still need to RSVP?
+        // Includes linked co-parents (additionalParentUids), not just the registering parent.
         const parentNeedsRsvp = new Map<string, boolean>();
         for (const e of enrollSnap.docs) {
-          const { parentUserId, playerId } = e.data();
-          if (!parentUserId) continue;
+          const { parentUserId, playerId, additionalParentUids } = e.data();
+          const uids = [parentUserId, ...(additionalParentUids ?? [])].filter(Boolean);
           const needs = !respondedPlayerIds.has(playerId);
-          parentNeedsRsvp.set(parentUserId, (parentNeedsRsvp.get(parentUserId) ?? false) || needs);
+          for (const uid of uids) {
+            parentNeedsRsvp.set(uid, (parentNeedsRsvp.get(uid) ?? false) || needs);
+          }
         }
         if (parentNeedsRsvp.size === 0) continue;
 

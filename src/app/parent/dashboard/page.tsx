@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, updateDoc } from 'firebase/firestore';
 import { writeRsvp } from '@/lib/rsvp';
+import { syncCoParentOnEnrollments } from '@/lib/family-links';
+import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data';
 import { Users, Calendar, Bell, Loader2, Printer } from 'lucide-react';
 import { openPrintTab } from '@/lib/print-job';
 import { TaskCenter } from '@/components/parent/task-center';
@@ -56,12 +58,8 @@ export default function ParentDashboard() {
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
 
-  // Real player count
-  const playersQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return collection(db, 'userProfiles', user.uid, 'players');
-  }, [db, user?.uid]);
-  const { data: players } = useCollection<{
+  // Real player count — family-wide, includes players shared via co-parent links
+  const { data: players } = useFamilyPlayers<{
     id: string;
     firstName?: string;
     lastName?: string;
@@ -81,14 +79,10 @@ export default function ParentDashboard() {
       rejectionReason?: string;
       parentalAgreementSigned?: boolean;
     };
-  }>(playersQuery);
+  }>(db, user?.uid);
 
-  // Enrollments to derive team assignment + payment status
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
-  }, [db, user?.uid]);
-  const { data: enrollments } = useCollection<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string; emergencyContacts?: { name: string; phone: string; relationship: string }[]; footballEquipment?: Record<string, string | number | undefined> }>(enrollmentsQuery);
+  // Enrollments to derive team assignment + payment status (family-wide)
+  const { data: enrollments } = useFamilyEnrollments<{ id: string; playerId: string; teamId?: string; paymentStatus?: string; payment_status?: string; divisionId?: string; seasonId?: string; registrationFeeAmount?: number; sport?: string; parentWeightEstimate?: number; registered_at?: string; emergencyContacts?: { name: string; phone: string; relationship: string }[]; footballEquipment?: Record<string, string | number | undefined> }>(db, user?.uid);
 
   // Most recent football enrollment per player — drives the league waiver print action
   const footballEnrollmentByPlayer = useMemo(() => {
@@ -346,6 +340,9 @@ export default function ParentDashboard() {
           parentIds: [req.primaryParentUid, req.requestingParentUid],
         }
       );
+      // Enrollments drive schedule/team visibility everywhere — stamp the
+      // co-parent there too, or they still see an empty app.
+      await syncCoParentOnEnrollments(db, req.primaryParentUid, req.playerId, req.requestingParentUid, 'add');
       await updateDoc(doc(db, 'linkRequests', req.id), { status: 'approved' });
       toast({ title: "Access Approved", description: `${req.playerSnapshot.firstName} is now shared with the co-parent.` });
     } catch (err: any) {

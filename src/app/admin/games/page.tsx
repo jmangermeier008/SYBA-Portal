@@ -12,8 +12,7 @@ import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from 
 import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, type WriteBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { CalendarEvent } from '@/types/scheduling';
+import { AdminLeagueCalendar } from '@/components/calendar/AdminLeagueCalendar';
 import {
   Plus, Trash2, CalendarDays, Loader2, Lock, MapPin, Users, Trophy,
   Upload, Download, AlertCircle, CheckCircle2, ShoppingCart, XCircle, Pencil,
@@ -22,7 +21,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { normalizeGame, toDateTime } from '@/lib/game-shape';
+import { toDateTime } from '@/lib/game-shape';
 import { expandRecurrence, MAX_RECURRENCE_DATES } from '@/lib/recurrence';
 import {
   parseGameScheduleCSV, validateGameRows, downloadGameTemplate,
@@ -30,7 +29,7 @@ import {
 } from '@/lib/csv-import';
 import type { ConcessionSlot } from '@/types/scheduling';
 import { writeAuditLog } from '@/firebase/firestore/audit-log';
-import { notifyTeamParents } from '@/lib/coach-notifications';
+import { notifyTeamParents, pushToUsersBestEffort } from '@/lib/coach-notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -154,7 +153,6 @@ export default function AdminGamesPage() {
 
   // View toggle
   const [view, setView] = useState<'list' | 'calendar'>('list');
-  const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false });
 
   // CSV Import
   const [importOpen, setImportOpen] = useState(false);
@@ -180,20 +178,6 @@ export default function AdminGamesPage() {
     if (!db || (!isAdmin && !isBoardMember) || !showPast || !activeSport) return null;
     return query(collection(db, 'games'), where('sport', '==', activeSport), where('date', '<', todayISO), orderBy('date', 'desc'), orderBy('time', 'desc'));
   }, [db, isAdmin, isBoardMember, showPast, activeSport, todayISO]);
-
-  const allGamesQuery = useMemoFirebase(() => {
-    if (!db || (!isAdmin && !isBoardMember) || view !== 'calendar' || !activeSport) return null;
-    return query(collection(db, 'games'), where('sport', '==', activeSport), orderBy('date', 'asc'));
-  }, [db, isAdmin, isBoardMember, view, activeSport]);
-  const { data: allGames, isLoading: loadingAllGames } = useCollection<Game>(allGamesQuery);
-
-  const calendarEvents = useMemo((): CalendarEvent[] => {
-    if (!allGames) return [];
-    const scoped = selectedSeasonId && selectedSeasonId !== 'all-seasons'
-      ? allGames.filter(g => g.seasonId === selectedSeasonId)
-      : allGames;
-    return scoped.map(normalizeGame);
-  }, [allGames, selectedSeasonId]);
 
   const teamsQuery = useMemoFirebase(() => {
     if (!db || (!isAdmin && !isBoardMember) || !activeSport) return null;
@@ -231,18 +215,6 @@ export default function AdminGamesPage() {
   }, [db, selectedSeasonId]);
   const { data: divisions } = useCollection<Division>(divisionsQuery);
 
-  // Fixed palette — assigned to divisions by index (must match admin/calendar/page.tsx)
-  const DIVISION_COLOR_PALETTE = [
-    '#3b82f6', '#a855f7', '#6366f1', '#f59e0b',
-    '#10b981', '#ef4444', '#ec4899', '#14b8a6',
-  ];
-
-  const divisionColors = useMemo<Record<string, string>>(() => {
-    if (!divisions) return {};
-    return Object.fromEntries(
-      divisions.map((div, i) => [div.id, DIVISION_COLOR_PALETTE[i % DIVISION_COLOR_PALETTE.length]])
-    );
-  }, [divisions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: upcomingGames, isLoading: loadingUpcoming } = useCollection<Game>(upcomingQuery);
   const { data: pastGames, isLoading: loadingPast } = useCollection<Game>(pastQuery);
@@ -693,6 +665,15 @@ export default function AdminGamesPage() {
 
       await batch.commit();
 
+      // Volunteers get the same push treatment team parents already get below
+      if (affectedParentIds.size > 0) {
+        pushToUsersBestEffort([...affectedParentIds], {
+          title: 'Concession Shift Rescheduled',
+          body: `Your shift for ${label} has moved from ${oldDateLabel} to ${newDateLabel}.`,
+          url: '/parent/volunteers',
+        });
+      }
+
       // Tell the affected families in-app (volunteers get their own shift notice above).
       if (activeSport) {
         notifyTeamParents(
@@ -784,6 +765,15 @@ export default function AdminGamesPage() {
       });
 
       await batch.commit();
+
+      // Volunteers get the same push treatment team parents already get below
+      if (affectedParentIds.size > 0) {
+        pushToUsersBestEffort([...affectedParentIds], {
+          title: 'Concession Shift Cancelled',
+          body: `Your shift on ${dateLabel} (${label}) has been cancelled.`,
+          url: '/parent/volunteers',
+        });
+      }
 
       // Tell every affected family in-app (volunteers get their own shift notice above).
       if (activeSport) {
@@ -1562,17 +1552,7 @@ export default function AdminGamesPage() {
         </header>
 
         {view === 'calendar' ? (
-          <LeagueCalendar
-            events={calendarEvents}
-            isLoading={loadingAllGames}
-            filters={calendarFilters}
-            onFilterChange={(key, val) => setCalendarFilters(prev => ({ ...prev, [key]: val }))}
-            visibleFilters={['games', 'practices']}
-            onViewRecord={(event) => router.push(`/admin/games/${event.id}`)}
-            availableDivisions={divisions ?? []}
-            divisionColors={divisionColors}
-            showUmpire
-          />
+          <AdminLeagueCalendar />
         ) : (
           <>
             {/* Upcoming */}

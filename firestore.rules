@@ -100,11 +100,13 @@ service cloud.firestore {
     }
 
     // Enrollments: board members can read all; parents can read their own (filtered by parentUserId)
+    // Linked co-parents can read via additionalParentUids (see src/lib/family-links.ts)
     // Coaches read all: roster queries use where('teamId','in',...) which per-team
     // get()-based rules cannot prove
     match /{path=**}/enrollments/{enrollmentId} {
       allow read: if isBoardMember() || isCoach() ||
-        (isSignedIn() && resource.data.parentUserId == request.auth.uid);
+        (isSignedIn() && resource.data.parentUserId == request.auth.uid) ||
+        (isSignedIn() && request.auth.uid in resource.data.get('additionalParentUids', []));
     }
 
     match /{path=**}/clearances/{clearanceId} {
@@ -172,7 +174,8 @@ service cloud.firestore {
       }
 
       match /enrollments/{enrollmentId} {
-        allow read: if isUser(userId) || isBoardMember();
+        allow read: if isUser(userId) || isBoardMember() ||
+          (isSignedIn() && request.auth.uid in resource.data.get('additionalParentUids', []));
         // Parents may only create enrollments that are not yet paid — payment
         // fields are set exclusively by the server (Stripe webhook/confirm).
         allow create: if isAdmin() || (

@@ -8,12 +8,8 @@ import { useSport } from '@/firebase/sport-context';
 import {
   collection,
   query,
-  orderBy,
-  doc,
   writeBatch,
   where,
-  collectionGroup,
-  getDocs,
 } from 'firebase/firestore';
 import { Users } from 'lucide-react';
 import { format } from 'date-fns';
@@ -25,20 +21,13 @@ import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
 import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
+import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data';
+import { useTeamGamesLive } from '@/hooks/use-team-games';
+import { buildDivisionColorMap } from '@/lib/division-colors';
 import { addRsvpToBatch, rsvpDocRef } from '@/lib/rsvp';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
-
-interface TeamGame {
-  id: string;
-  teamId: string;
-  opponentName?: string;
-  location: string;
-  dateTime: string;
-  type: 'Game' | 'Practice';
-  cancelled?: boolean;
-}
 
 interface Player {
   id: string;
@@ -47,6 +36,7 @@ interface Player {
 }
 
 interface Enrollment {
+  id: string;
   playerId: string;
   teamId: string;
 }
@@ -68,28 +58,15 @@ export default function ParentSchedulesPage() {
   const [activeTeamId, setActiveTeamId] = useState<string>('');
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: true, events: true });
   const [rsvpLoading, setRsvpLoading] = useState(false);
-  const [allTeamGames, setAllTeamGames] = useState<(TeamGame & { _teamId: string })[]>([]);
-  const [loadingAllTeams, setLoadingAllTeams] = useState(false);
 
-  // ── Fetch players + enrollments ─────────────────────────────────────────────
-  const playersQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return collection(db, 'userProfiles', user.uid, 'players');
-  }, [db, user?.uid]);
-
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', user.uid));
-  }, [db, user?.uid]);
-
-  const { data: players } = useCollection<Player>(playersQuery);
-  const { data: enrollments } = useCollection<Enrollment>(enrollmentsQuery);
+  // ── Fetch players + enrollments (family-wide — includes co-parent links) ────
+  const { data: players } = useFamilyPlayers<Player>(db, user?.uid);
+  const { data: enrollments } = useFamilyEnrollments<Enrollment>(db, user?.uid);
 
   const allTeamIds = useMemo(
     () => [...new Set((enrollments ?? []).map(e => e.teamId).filter(Boolean))],
     [enrollments]
   );
-  const allTeamIdsKey = allTeamIds.join(',');
 
   useEffect(() => {
     if (players && players.length > 0 && !selectedPlayerId) {
@@ -108,31 +85,31 @@ export default function ParentSchedulesPage() {
     }
   }, [selectedPlayerId, enrollments]);
 
-  // ── Team games (per-player view) ────────────────────────────────────────────
-  const teamGamesQuery = useMemoFirebase(() => {
-    if (!db || !activeTeamId || selectedPlayerId === 'all') return null;
-    return query(collection(db, 'teams', activeTeamId, 'games'), orderBy('dateTime', 'asc'));
-  }, [db, activeTeamId, selectedPlayerId]);
+  // ── Team games — one live subscription across every family team, so admin
+  // edits and cancellations appear without a refresh in both views ────────────
+  const { games: allTeamGames, isLoading: loadingTeamGames } = useTeamGamesLive(db, allTeamIds);
 
-  const { data: teamGames, isLoading: loadingTeamGames } = useCollection<TeamGame>(teamGamesQuery);
+  // Team docs — names + divisionIds label and color the events
+  const teamsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'teams'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: teams } = useCollection<{ id: string; name: string; divisionId?: string }>(teamsQuery);
+  const teamById = useMemo(() => new Map((teams ?? []).map(t => [t.id, t])), [teams]);
 
-  // ── All Players view — fetch each team's subcollection imperatively ──────────
-  useEffect(() => {
-    if (!db || selectedPlayerId !== 'all' || allTeamIds.length === 0) {
-      setAllTeamGames([]);
-      return;
-    }
-    setLoadingAllTeams(true);
-    Promise.all(
-      allTeamIds.map(teamId =>
-        getDocs(collection(db, 'teams', teamId, 'games'))
-          .then(snap => snap.docs.map(d => ({ ...(d.data() as TeamGame), id: d.id, _teamId: teamId })))
-      )
-    ).then(results => {
-      setAllTeamGames(results.flat());
-      setLoadingAllTeams(false);
-    }).catch(() => setLoadingAllTeams(false));
-  }, [db, selectedPlayerId, allTeamIdsKey]);
+  // Active season's divisions — powers the shared division color map
+  const activeSeasonsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'seasons'), where('status', '==', 'active'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: activeSeasons } = useCollection<{ id: string }>(activeSeasonsQuery);
+  const divisionsQuery = useMemoFirebase(() => {
+    const seasonId = activeSeasons?.[0]?.id;
+    if (!db || !seasonId) return null;
+    return collection(db, 'seasons', seasonId, 'divisions');
+  }, [db, activeSeasons?.[0]?.id]);
+  const { data: divisions } = useCollection<{ id: string; name: string }>(divisionsQuery);
+  const divisionColors = useMemo(() => buildDivisionColorMap(divisions), [divisions]);
 
   // ── Concession slots ────────────────────────────────────────────────────────
   const concessionsQuery = useMemoFirebase(() => {
@@ -158,19 +135,24 @@ export default function ParentSchedulesPage() {
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
     const events: CalendarEvent[] = [];
 
+    const normalize = (g: typeof allTeamGames[number]) => {
+      const team = teamById.get(g._teamId);
+      return normalizeTeamGame(g, g._teamId, { teamName: team?.name, divisionId: team?.divisionId });
+    };
+
     if (selectedPlayerId === 'all') {
-      // Combined team subcollection games across all enrolled teams (dedup, exclude cancelled)
+      // Combined games across all enrolled teams (dedup — baseball games mirror to both teams)
       const seen = new Set<string>();
       for (const g of allTeamGames) {
-        if (!seen.has(g.id) && !g.cancelled) {
+        if (!seen.has(g.id)) {
           seen.add(g.id);
-          events.push(normalizeTeamGame(g, g._teamId));
+          events.push(normalize(g));
         }
       }
-    } else if (activeTeamId && teamGames) {
-      // Per-player team games
-      for (const g of teamGames) {
-        events.push(normalizeTeamGame(g, activeTeamId));
+    } else if (activeTeamId) {
+      // Per-player view — just that child's team
+      for (const g of allTeamGames) {
+        if (g._teamId === activeTeamId) events.push(normalize(g));
       }
     }
 
@@ -191,9 +173,9 @@ export default function ParentSchedulesPage() {
     events.push(...myEvents.map(normalizeCustomEvent));
 
     return events;
-  }, [selectedPlayerId, teamGames, allTeamGames, concessionSlots, activeTeamId, user, customEvents, isAdmin, allTeamIds]);
+  }, [selectedPlayerId, allTeamGames, concessionSlots, activeTeamId, user, customEvents, isAdmin, allTeamIds, teamById]);
 
-  const isLoading = loadingTeamGames || loadingAllTeams;
+  const isLoading = loadingTeamGames;
 
   // ── RSVP handler ────────────────────────────────────────────────────────────
   const handleRSVP = async (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => {
@@ -291,6 +273,9 @@ export default function ParentSchedulesPage() {
           filters={filters}
           onFilterChange={handleFilterChange}
           visibleFilters={['games', 'practices', 'concessions', 'events']}
+          availableDivisions={divisions ?? []}
+          divisionColors={divisionColors}
+          myTeamIds={allTeamIds}
           onRsvp={handleRSVP}
           onConcessionViewDetails={() => router.push('/parent/volunteers')}
           childSelector={childSelector}

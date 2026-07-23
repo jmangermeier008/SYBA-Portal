@@ -745,6 +745,12 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
         enrollmentIds.push(enrollmentId);
         const paymentStatus = item.isWaitlisted ? 'waitlisted' : 'pending_payment';
 
+        // A previously linked co-parent must be able to see this new
+        // enrollment too — inherit the link from the player doc.
+        const linkedCoParent = !item.isNewPlayer
+          ? players?.find(p => p.id === item.playerId)?.secondaryParentId
+          : undefined;
+
         const enrollmentData: Record<string, unknown> = {
           id: enrollmentId,
           playerId,
@@ -752,6 +758,7 @@ export function EnrollmentStepper({ initialPlayerId }: { initialPlayerId: string
           divisionId: item.divisionId,
           ...(resolvedTeamId ? { teamId: resolvedTeamId } : {}),
           parentUserId: user.uid,
+          ...(linkedCoParent ? { additionalParentUids: [linkedCoParent] } : {}),
           shirtSize: item.shirtSize,
           jerseySize: item.shirtSize,
           uniformNumberPreference: item.uniformNumberPreference,

@@ -24,6 +24,7 @@ interface NextEventGame {
   opponentName?: string;
   location: string;
   dateTime: string;
+  endTime?: string; // HH:MM
   cancelled?: boolean;
   locationType?: 'home' | 'away';
 }
@@ -56,6 +57,7 @@ export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }
           )}
           <span className="text-xs text-muted-foreground ml-auto">
             {format(new Date(game.dateTime), 'EEE, MMM d @ h:mm a')}
+            {game.endTime ? ` – ${format(new Date(`2000-01-01T${game.endTime}`), 'h:mm a')}` : ''}
           </span>
         </div>
 

@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { collection, collectionGroup, query, where } from 'firebase/firestore';
+import { collection, query, where } from 'firebase/firestore';
+import { useFamilyEnrollments } from '@/hooks/use-family-data';
 import { Lock, HeartHandshake, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -62,15 +63,13 @@ export function FamilyComplianceTracker() {
   }, [db, isFootball, activeSport]);
   const { data: slots, isLoading: loadingSlots } = useCollection<ConcessionSlot>(slotsQuery);
 
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || !profile || !activeSeason) return null;
-    return query(
-      collectionGroup(db, 'enrollments'),
-      where('parentUserId', '==', profile.id),
-      where('seasonId', '==', activeSeason.id),
-    );
-  }, [db, profile?.id, activeSeason?.id]);
-  const { data: enrollments, isLoading: loadingEnrollments } = useCollection<{ seasonId: string; parentUserId: string }>(enrollmentsQuery);
+  // Family-wide enrollments (includes co-parent links), season-filtered client-side
+  const { data: familyEnrollments, isLoading: loadingEnrollments } =
+    useFamilyEnrollments<{ id: string; seasonId: string; parentUserId: string }>(db, profile?.id);
+  const enrollments = useMemo(
+    () => (activeSeason ? (familyEnrollments ?? []).filter(e => e.seasonId === activeSeason.id) : null),
+    [familyEnrollments, activeSeason],
+  );
 
   const enrolledCount = enrollments?.length ?? 0;
   const compliance = useMemo(

@@ -344,14 +344,16 @@ export type NotificationType =
   | 'gameCancelled'
   | 'gameRescheduled'
   | 'rsvpNudge'
-  | 'equipment';
+  | 'equipment'
+  | 'paymentConfirmed';
 
 export type NotificationRelatedDocType =
   | 'game'
   | 'concessionSlot'
   | 'practiceSlot'
   | 'clearance'
-  | 'announcement';
+  | 'announcement'
+  | 'enrollment';
 
 /** An in-app notification written to the notifications collection when league events occur. */
 export interface Notification {
@@ -520,7 +522,8 @@ export interface Enrollment {
   playerId: string;
   seasonId: string;
   divisionId: string;
-  parentUserId: string;
+  parentUserId: string;         // Registering (primary) parent — single-valued
+  additionalParentUids?: string[]; // Linked co-parents — grants them read access + team resolution
   // Uniform / sizing
   shirtSize: string;
   jerseySize: string;          // Backward-compat alias for shirtSize — keep in sync

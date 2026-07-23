@@ -86,22 +86,20 @@ function getEventStyles(
     };
   }
 
-  const divColor = event.divisionId ? (divisionColors[event.divisionId] ?? FALLBACK_GAME_COLOR) : FALLBACK_GAME_COLOR;
-
   if (event.eventType === 'game') {
+    const divColor = event.divisionId ? (divisionColors[event.divisionId] ?? FALLBACK_GAME_COLOR) : FALLBACK_GAME_COLOR;
     return {
       className: 'text-white',
       style: { backgroundColor: divColor },
     };
   }
 
-  // Practice: green bg + colored left border
+  // Practice: full division-color fill (same as games — the title carries the
+  // "Practice" label). Practices without a resolvable division stay green.
+  const practiceColor = event.divisionId ? (divisionColors[event.divisionId] ?? PRACTICE_BG_COLOR) : PRACTICE_BG_COLOR;
   return {
     className: 'text-white',
-    style: {
-      backgroundColor: PRACTICE_BG_COLOR,
-      borderLeft: `4px solid ${divColor}`,
-    },
+    style: { backgroundColor: practiceColor },
   };
 }
 
@@ -115,8 +113,8 @@ function getDotColor(event: CalendarEvent, divisionColors?: Record<string, strin
   if (!divisionColors) {
     return event.eventType === 'game' ? FALLBACK_GAME_COLOR : PRACTICE_BG_COLOR;
   }
-  const divColor = event.divisionId ? (divisionColors[event.divisionId] ?? FALLBACK_GAME_COLOR) : FALLBACK_GAME_COLOR;
-  return event.eventType === 'practice' ? PRACTICE_BG_COLOR : divColor;
+  const fallback = event.eventType === 'practice' ? PRACTICE_BG_COLOR : FALLBACK_GAME_COLOR;
+  return event.divisionId ? (divisionColors[event.divisionId] ?? fallback) : fallback;
 }
 
 // Filter keys are plural; map them to CalendarEventType for color lookups
@@ -181,13 +179,12 @@ function getWeekDays(focusDate: Date): Date[] {
 export interface LeagueCalendarProps {
   events: CalendarEvent[];
   isLoading: boolean;
-  filters: { games: boolean; practices: boolean; concessions: boolean; events?: boolean; divisions?: string[] };
+  filters: { games: boolean; practices: boolean; concessions: boolean; events?: boolean };
   onFilterChange: (key: 'games' | 'practices' | 'concessions' | 'events', val: boolean) => void;
   // Which filter checkboxes to show (undefined = show all)
   visibleFilters?: ('games' | 'practices' | 'concessions' | 'events')[];
-  // Division filter — optional; renders checkboxes when provided
+  // Division filter — optional; renders checkboxes when provided (state is internal)
   availableDivisions?: Array<{ id: string; name: string }>;
-  onDivisionFilterChange?: (divisionIds: string[]) => void;
   // Division color map: divisionId → hex color (admin only; omit for coach/parent views)
   divisionColors?: Record<string, string>;
   // Role-specific action callbacks — undefined = hidden in popover
@@ -949,7 +946,6 @@ export function LeagueCalendar({
   onFilterChange,
   visibleFilters,
   availableDivisions,
-  onDivisionFilterChange,
   divisionColors,
   onRsvp,
   onWeatherCancel,
@@ -993,6 +989,8 @@ export function LeagueCalendar({
   const effectiveView = !hasUserSetView && isMobile ? 'day' : view;
   const [focusDate, setFocusDate] = useState<Date>(new Date());
   const [showMyKidsOnly, setShowMyKidsOnly] = useState(false);
+  // Division filter is calendar-internal: empty = show all divisions
+  const [divisionFilter, setDivisionFilter] = useState<string[]>([]);
 
   // Apply filters — includes a sport safety net to prevent cross-sport data bleed
   const filteredEvents = useMemo(() => {
@@ -1005,17 +1003,22 @@ export function LeagueCalendar({
       }
       if (e.eventType === 'game') {
         if (!filters.games) return false;
-        if (filters.divisions && filters.divisions.length > 0) {
-          if (!e.divisionId || !filters.divisions.includes(e.divisionId)) return false;
+        if (divisionFilter.length > 0) {
+          if (!e.divisionId || !divisionFilter.includes(e.divisionId)) return false;
         }
         return true;
       }
-      if (e.eventType === 'practice') return filters.practices;
+      if (e.eventType === 'practice') {
+        if (!filters.practices) return false;
+        // Lenient for practices: legacy mirrors without a divisionId stay visible
+        if (divisionFilter.length > 0 && e.divisionId && !divisionFilter.includes(e.divisionId)) return false;
+        return true;
+      }
       if (e.eventType === 'concession') return filters.concessions;
       if (e.eventType === 'event') return filters.events !== false;
       return true;
     });
-  }, [events, filters, activeSport, showMyKidsOnly, myTeamIds]);
+  }, [events, filters, activeSport, showMyKidsOnly, myTeamIds, divisionFilter]);
 
   const eventsByDate = useMemo(() => groupByDate(filteredEvents), [filteredEvents]);
 
@@ -1166,9 +1169,9 @@ export function LeagueCalendar({
                   <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs rounded-full">
                     <SlidersHorizontal className="h-3.5 w-3.5" />
                     Divisions
-                    {filters.divisions && filters.divisions.length > 0 && filters.divisions.length < availableDivisions.length && (
+                    {divisionFilter.length > 0 && divisionFilter.length < availableDivisions.length && (
                       <span className="ml-1 bg-primary text-white text-[10px] rounded-full px-1.5 py-0.5 font-bold">
-                        {filters.divisions.length}
+                        {divisionFilter.length}
                       </span>
                     )}
                   </Button>
@@ -1177,7 +1180,7 @@ export function LeagueCalendar({
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Filter by Division</p>
                   <div className="space-y-1.5">
                     {availableDivisions.map(div => {
-                      const isChecked = !filters.divisions || filters.divisions.length === 0 || filters.divisions.includes(div.id);
+                      const isChecked = divisionFilter.length === 0 || divisionFilter.includes(div.id);
                       return (
                         <div key={div.id} className="flex items-center gap-2">
                           <Checkbox
@@ -1185,9 +1188,9 @@ export function LeagueCalendar({
                             checked={isChecked}
                             onCheckedChange={(v) => {
                               const allIds = availableDivisions.map(d => d.id);
-                              const current = filters.divisions && filters.divisions.length > 0 ? filters.divisions : allIds;
+                              const current = divisionFilter.length > 0 ? divisionFilter : allIds;
                               const next = v ? [...current, div.id] : current.filter(id => id !== div.id);
-                              onDivisionFilterChange?.(next);
+                              setDivisionFilter(next.length === allIds.length ? [] : next);
                             }}
                           />
                           <Label htmlFor={`div-filter-mobile-${div.id}`} className="text-sm cursor-pointer">
@@ -1202,7 +1205,7 @@ export function LeagueCalendar({
             ) : (
               /* Desktop: inline checkboxes */
               availableDivisions.map(div => {
-                const isChecked = !filters.divisions || filters.divisions.length === 0 || filters.divisions.includes(div.id);
+                const isChecked = divisionFilter.length === 0 || divisionFilter.includes(div.id);
                 return (
                   <div key={div.id} className="flex items-center gap-1.5">
                     <Checkbox
@@ -1210,9 +1213,9 @@ export function LeagueCalendar({
                       checked={isChecked}
                       onCheckedChange={(v) => {
                         const allIds = availableDivisions.map(d => d.id);
-                        const current = filters.divisions && filters.divisions.length > 0 ? filters.divisions : allIds;
+                        const current = divisionFilter.length > 0 ? divisionFilter : allIds;
                         const next = v ? [...current, div.id] : current.filter(id => id !== div.id);
-                        onDivisionFilterChange?.(next);
+                        setDivisionFilter(next.length === allIds.length ? [] : next);
                       }}
                     />
                     <Label htmlFor={`div-filter-${div.id}`} className="text-sm cursor-pointer">
@@ -1244,17 +1247,10 @@ export function LeagueCalendar({
             if (!color) return null;
             return (
               <div key={div.id} className="flex items-center gap-2">
-                {/* Game swatch */}
                 <span
                   className="w-3 h-3 rounded-sm shrink-0"
                   style={{ backgroundColor: color }}
-                  title={`${div.name} — Game color`}
-                />
-                {/* Practice swatch: green with left border */}
-                <span
-                  className="w-3 h-3 rounded-sm shrink-0"
-                  style={{ backgroundColor: PRACTICE_BG_COLOR, borderLeft: `3px solid ${color}` }}
-                  title={`${div.name} — Practice color`}
+                  title={`${div.name} color`}
                 />
                 <span className="text-xs text-muted-foreground">{div.name}</span>
               </div>

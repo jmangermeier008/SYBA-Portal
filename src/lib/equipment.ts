@@ -179,39 +179,50 @@ export function hasIssuedEquipment(fe?: FootballEquipment): boolean {
 
 export interface EquipmentNotifyInfo {
   parentUserId: string;
+  /** Linked co-parents on the enrollment — notified alongside the primary. */
+  additionalParentUids?: string[];
   actorUid: string;
   event: 'issued' | 'returned';
   itemLabel: string;
   tagNumber?: string;
   playerName?: string;
+  /** Sport tag on the notification (inbox filters by active sport). */
+  sport?: 'baseball' | 'football';
   /** Overrides the composed body — used for consolidated bulk-return messages. */
   body?: string;
 }
 
-/** Adds the parent-facing in-app notification to an existing equipment batch,
- *  matching the doc shape of coach-notifications' batchNotifications. No-ops
- *  when the parent is missing or is the actor (no self-notification).
- *  Limitation: enrollments carry only the primary parentUserId — a second
- *  parent on two-parent families is not notified. */
+/** Adds the parent-facing in-app notifications (primary parent + linked
+ *  co-parents) to an existing equipment batch, matching the doc shape of
+ *  coach-notifications' batchNotifications. Skips missing parents and the
+ *  actor (no self-notification). Returns the notified uids + the composed
+ *  payload so callers can push AFTER the batch commits. */
 export function addEquipmentNotificationToBatch(
   batch: WriteBatch,
   db: Firestore,
   info: EquipmentNotifyInfo
-): void {
-  if (!info.parentUserId || info.parentUserId === info.actorUid) return;
+): { recipients: string[]; title: string; body: string } | null {
+  const recipients = [...new Set([info.parentUserId, ...(info.additionalParentUids ?? [])])]
+    .filter(uid => uid && uid !== info.actorUid);
+  if (recipients.length === 0) return null;
   const tag = info.tagNumber ? ` #${info.tagNumber}` : '';
   const who = info.playerName || 'your player';
-  batch.set(doc(db, 'notifications', crypto.randomUUID()), {
-    userId: info.parentUserId,
-    type: 'equipment',
-    title: info.event === 'issued' ? 'Equipment issued' : 'Equipment returned',
-    body: info.body ?? (info.event === 'issued'
-      ? `${info.itemLabel}${tag} was issued to ${who}.`
-      : `${info.itemLabel}${tag} was returned for ${who}.`),
-    read: false,
-    createdAt: Timestamp.now(),
-    sport: 'football',
-  });
+  const title = info.event === 'issued' ? 'Equipment issued' : 'Equipment returned';
+  const body = info.body ?? (info.event === 'issued'
+    ? `${info.itemLabel}${tag} was issued to ${who}.`
+    : `${info.itemLabel}${tag} was returned for ${who}.`);
+  for (const uid of recipients) {
+    batch.set(doc(db, 'notifications', crypto.randomUUID()), {
+      userId: uid,
+      type: 'equipment',
+      title,
+      body,
+      read: false,
+      createdAt: Timestamp.now(),
+      sport: info.sport ?? 'football',
+    });
+  }
+  return { recipients, title, body };
 }
 
 export interface EquipmentEnrollmentRef {

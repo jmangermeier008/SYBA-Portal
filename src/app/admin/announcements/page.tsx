@@ -118,40 +118,52 @@ export default function AdminAnnouncementsPage() {
     if (!db) return;
     const usersSnap = await getDocs(collection(db, 'userProfiles'));
     if (usersSnap.empty) return;
-    const notifBatch = writeBatch(db);
     const bodyPreview = body.length > 120 ? body.slice(0, 120) + '…' : body;
-    usersSnap.forEach(userDoc => {
-      notifBatch.set(doc(db, 'notifications', crypto.randomUUID()), {
-        userId: userDoc.id,
-        type: 'announcement',
-        title,
-        body: bodyPreview,
-        relatedDocId: announcementId,
-        relatedDocType: 'announcement',
-        read: false,
-        createdAt: Timestamp.now(),
-        isGlobal,
-        ...(isGlobal ? {} : { sport: activeSport }),
-      });
-    });
-    await notifBatch.commit();
+    // Firestore caps a write batch at 500 ops — chunk so the fan-out keeps
+    // working once the league passes 500 accounts.
+    const CHUNK = 400;
+    const userDocs = usersSnap.docs;
+    for (let i = 0; i < userDocs.length; i += CHUNK) {
+      const notifBatch = writeBatch(db);
+      for (const userDoc of userDocs.slice(i, i + CHUNK)) {
+        notifBatch.set(doc(db, 'notifications', crypto.randomUUID()), {
+          userId: userDoc.id,
+          type: 'announcement',
+          title,
+          body: bodyPreview,
+          relatedDocId: announcementId,
+          relatedDocType: 'announcement',
+          read: false,
+          createdAt: Timestamp.now(),
+          isGlobal,
+          ...(isGlobal ? {} : { sport: activeSport }),
+        });
+      }
+      await notifBatch.commit();
+    }
 
     // Urgent announcements additionally buzz opted-in devices via web push.
+    // Chunked to /api/push/send's 500-recipient cap (it silently truncates).
     // Fire-and-forget: a push failure never blocks the published announcement.
     if (isUrgent && user) {
+      const allUserIds = userDocs.map(d => d.id);
       user
         .getIdToken()
         .then(idToken =>
-          fetch('/api/push/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-            body: JSON.stringify({
-              userIds: usersSnap.docs.map(d => d.id),
-              title,
-              body: bodyPreview,
-              url: '/parent/announcements',
-            }),
-          })
+          Promise.all(
+            Array.from({ length: Math.ceil(allUserIds.length / 500) }, (_, i) =>
+              fetch('/api/push/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+                body: JSON.stringify({
+                  userIds: allUserIds.slice(i * 500, (i + 1) * 500),
+                  title,
+                  body: bodyPreview,
+                  url: '/parent/announcements',
+                }),
+              })
+            )
+          )
         )
         .catch(() => undefined);
     }
