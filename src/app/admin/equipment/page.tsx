@@ -91,10 +91,10 @@ import {
 } from '@/lib/equipment';
 import { useEquipmentTypes } from '@/hooks/use-equipment-types';
 
-const HELMET_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'S', 'M', 'L', 'XL', '2XL'] as const;
-const PAD_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
-const JERSEY_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
-const PANTS_SIZES = ['YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+const HELMET_SIZES = ['XXS/XS', 'S', 'M', 'L', 'XL', '2XL'] as const;
+const PAD_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+const JERSEY_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
+const PANTS_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
 
 const STATUS_COLORS: Record<EquipmentStatus, string> = {
   not_issued: 'bg-muted text-muted-foreground',
@@ -2246,20 +2246,25 @@ export default function EquipmentPage() {
                 <CardContent className="p-3 md:p-4 flex flex-wrap gap-x-8 gap-y-3">
                   {stockByType.map(({ slug, available, sizes }) => (
                     <div key={slug} className="text-xs min-w-[10rem]">
-                      <p>
+                      <p className="mb-1.5">
                         <span className="font-semibold">{typeLabel(slug, typeLabels)}</span>{' '}
                         <span className={cn(available === 0 ? 'text-destructive font-medium' : 'text-muted-foreground')}>
-                          {available} available
+                          · {available} available
                         </span>
                       </p>
-                      <p className="text-muted-foreground mt-0.5">
-                        {sizes.map(([size, count], i) => (
-                          <span key={size}>
-                            {i > 0 && ' · '}
-                            <span className={cn(count === 0 && 'text-destructive')}>{size} ×{count}</span>
+                      <div className="flex flex-wrap gap-1">
+                        {sizes.map(([size, count]) => (
+                          <span
+                            key={size}
+                            className={cn(
+                              'rounded-md px-1.5 py-0.5 whitespace-nowrap',
+                              count === 0 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'
+                            )}
+                          >
+                            {size} × {count}
                           </span>
                         ))}
-                      </p>
+                      </div>
                     </div>
                   ))}
                 </CardContent>
@@ -2503,6 +2508,12 @@ export default function EquipmentPage() {
                           <Button size="sm" variant="ghost" className="rounded-full h-8 w-8 p-0 text-muted-foreground"
                             onClick={() => setRetireDialog({ open: true, item })} aria-label={`Retire tag #${item.tagNumber}`}>
                             <Archive className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {item.status !== 'issued' && (
+                          <Button size="sm" variant="ghost" className="rounded-full h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteDialog({ open: true, item })} aria-label={`Delete tag #${item.tagNumber}`}>
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         )}
                       </div>
