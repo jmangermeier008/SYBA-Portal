@@ -11,6 +11,8 @@ export interface FeedEvent {
   type: 'Game' | 'Practice';
   /** Naive Eastern-local datetime, e.g. "2026-05-01T18:00:00" — never UTC. */
   dateTime: string;
+  /** HH:MM local end time on the same day; absent → 2-hour default duration. */
+  endTime?: string;
   opponentName?: string;
   location?: string;
   cancelled?: boolean;
@@ -86,12 +88,15 @@ function buildEvent(ev: FeedEvent, dtstamp: string): string[] {
     ? `${ev.teamName} vs ${ev.opponentName || 'TBD'}`
     : `${ev.teamName} Practice`;
   const summary = ev.cancelled ? `[CANCELLED] ${summaryBase}` : summaryBase;
+  const end = ev.endTime
+    ? `${ev.dateTime.slice(0, 10)}T${ev.endTime}:00`
+    : addHoursNaive(ev.dateTime, 2);
   const lines = [
     'BEGIN:VEVENT',
     `UID:${ev.teamId}-${ev.gameId}@sybaportal`,
     `DTSTAMP:${dtstamp}`,
     `DTSTART;TZID=${TZID}:${toIcsLocal(ev.dateTime)}`,
-    `DTEND;TZID=${TZID}:${toIcsLocal(addHoursNaive(ev.dateTime, 2))}`,
+    `DTEND;TZID=${TZID}:${toIcsLocal(end)}`,
     `SUMMARY:${escapeText(summary)}`,
   ];
   if (ev.location) lines.push(`LOCATION:${escapeText(ev.location)}`);

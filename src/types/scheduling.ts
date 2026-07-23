@@ -128,6 +128,7 @@ export interface Game {
   type: GameType;
   date: string;   // YYYY-MM-DD
   time: string;   // HH:MM
+  endTime?: string; // HH:MM — optional, must be after `time`; same-day only
   status: GameStatus;
   // League games:
   homeTeamId?: string;
@@ -175,6 +176,7 @@ export interface TeamGame {
   seasonId: string;
   type: 'Game' | 'Practice';    // Always capitalized — differs from top-level GameType
   dateTime: string;              // ISO combined: "YYYY-MM-DDTHH:MM:00"
+  endTime?: string;              // HH:MM — optional; start stays inside dateTime
   location: string;              // fieldName
   fieldId: string;
   opponentName?: string;         // The OTHER team's name (only for 'Game' type)
@@ -182,6 +184,8 @@ export interface TeamGame {
   cancelled: boolean;
   cancellationReason?: string;
   practiceSlotId?: string;       // Links to practiceSlots/{id} when applicable
+  isRecurring?: boolean;         // True when created as part of a recurring series
+  recurrenceId?: string;         // Shared UUID across all games in the same recurring series
   coachUserId?: string;
   umpireName?: string;
   createdAt?: string;

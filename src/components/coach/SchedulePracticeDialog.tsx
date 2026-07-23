@@ -16,13 +16,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, TriangleAlert } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useCollection, useMemoFirebase } from '@/firebase';
-import { buildFootballPracticeDocs } from '@/lib/game-write';
+import { buildFootballPracticeDocs, buildFootballPracticeSeriesDocs } from '@/lib/game-write';
+import { expandRecurrence, MAX_RECURRENCE_DATES } from '@/lib/recurrence';
 import { notifySportAdmins } from '@/lib/coach-notifications';
 import type { Field } from '@/types/scheduling';
 
 const OTHER_LOCATION = '__other__';
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 interface SchedulePracticeDialogProps {
   open: boolean;
@@ -32,12 +35,21 @@ interface SchedulePracticeDialogProps {
   teams: { id: string; name: string; seasonId?: string }[];
   actorUid: string;
   /** Called with the new mirror doc so the page can update its one-shot game list. */
-  onCreated?: (mirror: { id: string; teamId: string; type: string; dateTime: string; location: string; cancelled: boolean }) => void;
+  onCreated?: (mirror: { id: string; teamId: string; type: string; dateTime: string; endTime?: string; location: string; cancelled: boolean }) => void;
 }
 
-/** Football coaches schedule their own practices. Writes both game models with
- *  one shared ID (top-level for admin calendar/oversight, team mirror for
- *  coach/parent schedules) and pings sport admins. */
+/** Minimal top-level games row for the field-conflict check. */
+interface FieldGameRow {
+  id: string;
+  date: string;
+  time: string;
+  status?: string;
+}
+
+/** Football coaches schedule their own practices — one-off or weekly recurring.
+ *  Writes both game models with one shared ID per practice (top-level for admin
+ *  calendar/oversight, team mirror for coach/parent schedules) and pings sport
+ *  admins once per save. */
 export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid, onCreated }: SchedulePracticeDialogProps) {
   const { toast } = useToast();
   const [teamId, setTeamId] = useState(teams.length === 1 ? teams[0].id : '');
@@ -46,6 +58,10 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
   const [endTime, setEndTime] = useState('');
   const [fieldChoice, setFieldChoice] = useState('');
   const [customLocation, setCustomLocation] = useState('');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
   const [saving, setSaving] = useState(false);
 
   const fieldsQuery = useMemoFirebase(() => {
@@ -57,12 +73,44 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
   const selectedTeam = teams.find(t => t.id === teamId) ?? (teams.length === 1 ? teams[0] : undefined);
   const selectedField = fieldChoice !== OTHER_LOCATION ? fields?.find(f => f.id === fieldChoice) : undefined;
 
-  // Soft warning only — matches the admin scheduling page, which never hard-blocks
-  const closureWarning = useMemo(() => {
-    if (!selectedField || !date) return null;
-    const closure = (selectedField.maintenanceClosures ?? []).find(c => c.date === date);
-    return closure ? (closure.reason || 'Field is marked closed for maintenance that day.') : null;
-  }, [selectedField, date]);
+  const previewDates = useMemo(() => {
+    if (!isRecurring || weekdays.length === 0) return [];
+    return expandRecurrence(weekdays, rangeStart, rangeEnd);
+  }, [isRecurring, weekdays, rangeStart, rangeEnd]);
+
+  /** Every date this save would create a practice on. */
+  const datesToCheck = useMemo(
+    () => (isRecurring ? previewDates : date ? [date] : []),
+    [isRecurring, previewDates, date]
+  );
+
+  // Field-conflict check against the (publicly readable) top-level games
+  // collection — same field + date + exact start time, like the admin page.
+  const fieldGamesQuery = useMemoFirebase(() => {
+    if (!db || !open || !fieldChoice || fieldChoice === OTHER_LOCATION) return null;
+    return query(collection(db, 'games'), where('fieldId', '==', fieldChoice));
+  }, [db, open, fieldChoice]);
+  const { data: fieldGames } = useCollection<FieldGameRow>(fieldGamesQuery);
+
+  // Soft warnings only — matches the admin scheduling page, which never hard-blocks
+  const conflictDates = useMemo(() => {
+    if (!time || !selectedField || !fieldGames) return [];
+    const dateSet = new Set(datesToCheck);
+    return [...new Set(
+      fieldGames
+        .filter(g => dateSet.has(g.date) && g.time === time && g.status !== 'cancelled')
+        .map(g => g.date)
+    )].sort();
+  }, [fieldGames, datesToCheck, time, selectedField]);
+
+  const closureDates = useMemo(() => {
+    if (!selectedField) return [];
+    const closed = new Set((selectedField.maintenanceClosures ?? []).map(c => c.date));
+    return datesToCheck.filter(d => closed.has(d));
+  }, [selectedField, datesToCheck]);
+
+  const formatDateList = (dates: string[]) =>
+    dates.map(d => format(parseISO(d), 'EEE, MMM d')).join('; ');
 
   const reset = () => {
     setTeamId(teams.length === 1 ? teams[0].id : '');
@@ -71,6 +119,10 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
     setEndTime('');
     setFieldChoice('');
     setCustomLocation('');
+    setIsRecurring(false);
+    setWeekdays([]);
+    setRangeStart('');
+    setRangeEnd('');
   };
 
   const handleClose = (next: boolean) => {
@@ -80,8 +132,20 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
 
   const handleSave = async () => {
     if (!db || !selectedTeam) return;
-    if (!date || !time) {
+    if (!time || (!isRecurring && !date)) {
       toast({ variant: 'destructive', title: 'Missing info', description: 'A date and start time are required.' });
+      return;
+    }
+    if (endTime && endTime <= time) {
+      toast({ variant: 'destructive', title: 'Invalid end time', description: 'End time must be after the start time.' });
+      return;
+    }
+    if (isRecurring && previewDates.length === 0) {
+      toast({ variant: 'destructive', title: 'No dates generated', description: 'Pick at least one weekday and a valid date range.' });
+      return;
+    }
+    if (previewDates.length > MAX_RECURRENCE_DATES) {
+      toast({ variant: 'destructive', title: 'Too many practices', description: `That's ${previewDates.length} practices — shorten the date range (max ${MAX_RECURRENCE_DATES}).` });
       return;
     }
     const locationName = fieldChoice === OTHER_LOCATION ? customLocation.trim() : selectedField?.name ?? '';
@@ -91,32 +155,60 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
     }
     setSaving(true);
     try {
-      const gameId = crypto.randomUUID();
-      const { topLevel, mirror } = buildFootballPracticeDocs({
-        gameId,
+      const baseInput = {
         seasonId: selectedTeam.seasonId ?? '',
         teamId: selectedTeam.id,
         teamName: selectedTeam.name,
-        date,
         time,
         ...(endTime ? { endTime } : {}),
         fieldId: selectedField?.id ?? '',
         fieldName: locationName,
         createdByUid: actorUid,
-      });
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'games', gameId), topLevel);
-      batch.set(doc(db, 'teams', selectedTeam.id, 'games', gameId), mirror);
-      await batch.commit();
-      notifySportAdmins(db, actorUid, {
-        title: 'Practice scheduled by coach',
-        body: `${selectedTeam.name} — ${format(parseISO(date), 'EEE, MMM d')} at ${format(new Date(`${date}T${time}:00`), 'h:mm a')}, ${locationName}`,
-        sport: 'football',
-        relatedDocId: gameId,
-        relatedDocType: 'game',
-      });
-      toast({ title: 'Practice scheduled', description: `${format(parseISO(date), 'EEE, MMM d')} · ${locationName}` });
-      onCreated?.({ id: gameId, teamId: selectedTeam.id, type: 'Practice', dateTime: mirror.dateTime, location: locationName, cancelled: false });
+      };
+
+      if (isRecurring) {
+        const seriesDocs = buildFootballPracticeSeriesDocs(baseInput, previewDates);
+        // Each practice generates 2 writes (games/ + teams/{id}/games/), so chunk at 249 to stay under Firestore's 500-write-per-batch limit.
+        const CHUNK = 249;
+        for (let i = 0; i < seriesDocs.length; i += CHUNK) {
+          const batch = writeBatch(db);
+          for (const d of seriesDocs.slice(i, i + CHUNK)) {
+            batch.set(doc(db, 'games', d.gameId), d.topLevel);
+            batch.set(doc(db, 'teams', selectedTeam.id, 'games', d.gameId), d.mirror);
+          }
+          await batch.commit();
+        }
+        const dayLabels = [...weekdays].sort().map(w => DAY_LABELS[w]).join('/');
+        const first = previewDates[0];
+        const last = previewDates[previewDates.length - 1];
+        notifySportAdmins(db, actorUid, {
+          title: 'Recurring practices scheduled by coach',
+          body: `${selectedTeam.name} — ${seriesDocs.length} practices (${dayLabels}) from ${format(parseISO(first), 'MMM d')} to ${format(parseISO(last), 'MMM d')}, ${locationName}`,
+          sport: 'football',
+          relatedDocId: seriesDocs[0].gameId,
+          relatedDocType: 'game',
+        });
+        toast({ title: `${seriesDocs.length} practices scheduled`, description: `Every ${dayLabels} · ${locationName}` });
+        for (const d of seriesDocs) {
+          onCreated?.({ id: d.gameId, teamId: selectedTeam.id, type: 'Practice', dateTime: d.mirror.dateTime, ...(endTime ? { endTime } : {}), location: locationName, cancelled: false });
+        }
+      } else {
+        const gameId = crypto.randomUUID();
+        const { topLevel, mirror } = buildFootballPracticeDocs({ ...baseInput, gameId, date });
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'games', gameId), topLevel);
+        batch.set(doc(db, 'teams', selectedTeam.id, 'games', gameId), mirror);
+        await batch.commit();
+        notifySportAdmins(db, actorUid, {
+          title: 'Practice scheduled by coach',
+          body: `${selectedTeam.name} — ${format(parseISO(date), 'EEE, MMM d')} at ${format(new Date(`${date}T${time}:00`), 'h:mm a')}, ${locationName}`,
+          sport: 'football',
+          relatedDocId: gameId,
+          relatedDocType: 'game',
+        });
+        toast({ title: 'Practice scheduled', description: `${format(parseISO(date), 'EEE, MMM d')} · ${locationName}` });
+        onCreated?.({ id: gameId, teamId: selectedTeam.id, type: 'Practice', dateTime: mirror.dateTime, ...(endTime ? { endTime } : {}), location: locationName, cancelled: false });
+      }
       reset();
       onOpenChange(false);
     } catch (err: any) {
@@ -126,9 +218,11 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
     }
   };
 
+  const canSubmit = !!selectedTeam && !!time && (isRecurring ? previewDates.length > 0 : !!date);
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Schedule Practice</DialogTitle>
           <DialogDescription>
@@ -153,10 +247,57 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="practice-date">Date *</Label>
-            <Input id="practice-date" type="date" value={date} onChange={e => setDate(e.target.value)} />
-          </div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              onChange={e => setIsRecurring(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm font-medium">Repeat weekly</span>
+          </label>
+
+          {isRecurring ? (
+            <>
+              <div className="space-y-1.5">
+                <Label>Day(s) of week *</Label>
+                <div className="flex flex-wrap gap-2">
+                  {DAY_LABELS.map((day, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setWeekdays(prev =>
+                        prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i]
+                      )}
+                      className={cn(
+                        'px-3 py-1.5 rounded-full text-sm border transition-colors',
+                        weekdays.includes(i)
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-foreground border-border hover:border-primary'
+                      )}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="practice-range-start">First week *</Label>
+                  <Input id="practice-range-start" type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="practice-range-end">Last week *</Label>
+                  <Input id="practice-range-end" type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="practice-date">Date *</Label>
+              <Input id="practice-date" type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -196,19 +337,37 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
             </div>
           )}
 
-          {closureWarning && (
+          {isRecurring && previewDates.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">Creates {previewDates.length} practice{previewDates.length !== 1 ? 's' : ''}</p>
+              <div className="max-h-40 overflow-y-auto rounded-lg border p-2 space-y-1">
+                {previewDates.map(d => (
+                  <p key={d} className="text-sm text-muted-foreground">{format(parseISO(d), 'EEE, MMM d, yyyy')}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {closureDates.length > 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
               <TriangleAlert className="h-4 w-4 shrink-0 mt-0.5" />
-              <p>This field is marked closed on that date: {closureWarning}. You can still schedule, but double-check with the league.</p>
+              <p>This field is marked closed for maintenance on: {formatDateList(closureDates)}. You can still schedule, but double-check with the league.</p>
+            </div>
+          )}
+
+          {conflictDates.length > 0 && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+              <TriangleAlert className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>Something else is already scheduled at this field and start time on: {formatDateList(conflictDates)}. You can still schedule, but double-check with the league.</p>
             </div>
           )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => handleClose(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving || !selectedTeam || !date || !time}>
+          <Button onClick={handleSave} disabled={saving || !canSubmit}>
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Schedule Practice
+            {isRecurring && previewDates.length > 0 ? `Schedule ${previewDates.length} Practices` : 'Schedule Practice'}
           </Button>
         </DialogFooter>
       </DialogContent>

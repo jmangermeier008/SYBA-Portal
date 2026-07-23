@@ -27,6 +27,7 @@ interface GameEvent {
   opponentName?: string;
   location: string;
   dateTime: string;
+  endTime?: string;
   fieldId?: string | null;
   cancelled?: boolean;
   cancellationReason?: string;

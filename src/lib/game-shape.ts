@@ -52,6 +52,7 @@ export interface GameLike {
   type: 'game' | 'practice' | string;
   date: string;
   time: string;
+  endTime?: string;
   fieldName?: string;
   homeTeamName?: string;
   awayTeamName?: string;
@@ -90,6 +91,7 @@ export function normalizeGame(g: GameLike): CalendarEvent {
     eventType: g.type === 'practice' ? 'practice' : 'game',
     date: g.date,
     startTime: g.time,
+    endTime: g.endTime || undefined,
     title: topLevelGameTitle(g),
     status: g.status ?? 'scheduled',
     fieldName: g.fieldName,
@@ -116,6 +118,7 @@ export interface TeamGameLike {
   id: string;
   type: 'Game' | 'Practice' | string;
   dateTime?: string;
+  endTime?: string;
   opponentName?: string;
   location?: string;
   cancelled?: boolean;
@@ -133,6 +136,7 @@ export function normalizeTeamGame(g: TeamGameLike, teamId: string): CalendarEven
     eventType: g.type === 'Game' ? 'game' : 'practice',
     date,
     startTime: time,
+    endTime: g.endTime || undefined,
     title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice',
     status: g.cancelled === true ? 'cancelled' : 'scheduled',
     fieldName: g.location,

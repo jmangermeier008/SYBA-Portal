@@ -407,6 +407,7 @@ function EventPopoverContent({
                 const ics = generateICS({
                   title: event.title,
                   start: new Date(`${event.date}T${event.startTime}`),
+                  end: event.endTime ? new Date(`${event.date}T${event.endTime}`) : undefined,
                   location: event.fieldName,
                 });
                 downloadICS(ics, `syba-${event.eventType}-${event.sourceId}.ics`);

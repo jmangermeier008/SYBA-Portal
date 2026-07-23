@@ -47,10 +47,32 @@ export function buildFootballPracticeDocs(input: FootballPracticeInput) {
       teamId: input.teamId,
       type: 'Practice' as const,
       dateTime: toDateTime(input.date, input.time),
+      ...(input.endTime ? { endTime: input.endTime } : {}),
       location: input.fieldName,
       fieldId: input.fieldId,
       cancelled: false,
       createdAt,
     },
   };
+}
+
+/** Both shapes for every practice in a weekly recurring series. Each practice
+ *  gets its own shared-across-both-shapes ID; the whole series shares one
+ *  recurrenceId so admin tooling can group it (same tagging as the admin
+ *  bulk-create flow). */
+export function buildFootballPracticeSeriesDocs(
+  input: Omit<FootballPracticeInput, 'gameId' | 'date'>,
+  dates: string[],
+) {
+  const recurrenceId = crypto.randomUUID();
+  return dates.map(date => {
+    const gameId = crypto.randomUUID();
+    const { topLevel, mirror } = buildFootballPracticeDocs({ ...input, gameId, date });
+    return {
+      gameId,
+      teamId: input.teamId,
+      topLevel: { ...topLevel, isRecurring: true, recurrenceId },
+      mirror: { ...mirror, isRecurring: true, recurrenceId },
+    };
+  });
 }

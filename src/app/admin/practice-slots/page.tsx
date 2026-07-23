@@ -26,12 +26,10 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { pushToUsersBestEffort } from '@/lib/coach-notifications';
-import {
-  format, parseISO, eachWeekOfInterval, addDays, isAfter,
-  isBefore, startOfDay, startOfWeek, endOfWeek,
-} from 'date-fns';
+import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toDateTime } from '@/lib/game-shape';
+import { getDatesForWeekday } from '@/lib/recurrence';
 import type { PracticeSlot } from '@/types/scheduling';
 import { BulkApproveDialog } from '@/components/admin/practice-slots/bulk-approve-dialog';
 
@@ -61,20 +59,6 @@ function formatTime(t: string) {
   const [h, m] = t.split(':').map(Number);
   const ampm = h >= 12 ? 'PM' : 'AM';
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
-}
-
-/** Returns all dates between startDate and endDate (inclusive) that fall on the given weekday (0=Sun). */
-function getDatesForWeekday(startDate: string, endDate: string, weekday: number): string[] {
-  if (!startDate || !endDate) return [];
-  const start = startOfDay(parseISO(startDate));
-  const end = startOfDay(parseISO(endDate));
-  if (isAfter(start, end)) return [];
-
-  const weeks = eachWeekOfInterval({ start, end }, { weekStartsOn: 0 });
-  return weeks
-    .map(weekStart => addDays(weekStart, weekday))
-    .filter(d => !isBefore(d, start) && !isAfter(d, end))
-    .map(d => format(d, 'yyyy-MM-dd'));
 }
 
 /** Splits a time window into teamsPerDate equal sub-slots with staggered start/end times.

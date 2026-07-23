@@ -64,6 +64,7 @@ export async function GET(
             teamName,
             type: g.type === 'Game' ? 'Game' : 'Practice',
             dateTime: g.dateTime,
+            endTime: g.endTime,
             opponentName: g.opponentName,
             location: g.location,
             cancelled: g.cancelled === true,

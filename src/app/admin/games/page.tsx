@@ -20,9 +20,10 @@ import {
   ArrowRight, UserCheck,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { format, parseISO, startOfDay, eachWeekOfInterval, addDays, isBefore, isAfter } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { normalizeGame, toDateTime } from '@/lib/game-shape';
+import { expandRecurrence, MAX_RECURRENCE_DATES } from '@/lib/recurrence';
 import {
   parseGameScheduleCSV, validateGameRows, downloadGameTemplate,
   type ParsedGame, type ValidationError,
@@ -41,6 +42,7 @@ interface Game {
   type: GameType;
   date: string;
   time: string;
+  endTime?: string;
   fieldId: string;
   fieldName: string;
   homeTeamId?: string;
@@ -70,19 +72,6 @@ interface Season { id: string; name: string; status: string; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Returns all dates between startDate and endDate (inclusive) that fall on the given weekday (0=Sun). */
-function getDatesForWeekday(startDate: string, endDate: string, weekday: number): string[] {
-  if (!startDate || !endDate) return [];
-  const start = startOfDay(parseISO(startDate));
-  const end = startOfDay(parseISO(endDate));
-  if (isAfter(start, end)) return [];
-  const weeks = eachWeekOfInterval({ start, end }, { weekStartsOn: 0 });
-  return weeks
-    .map(weekStart => addDays(weekStart, weekday))
-    .filter(d => !isBefore(d, start) && !isAfter(d, end))
-    .map(d => format(d, 'yyyy-MM-dd'));
-}
-
 function formatTime(t: string) {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
@@ -92,7 +81,7 @@ function formatTime(t: string) {
 
 const EMPTY_FORM = {
   type: 'game' as GameType,
-  date: '', time: '', fieldId: '',
+  date: '', time: '', endTime: '', fieldId: '',
   divisionId: '',
   homeTeamId: '', awayTeamId: '', teamId: '', notes: '', scrimmageNote: '',
   opponentName: '',
@@ -177,11 +166,7 @@ export default function AdminGamesPage() {
   const [recurringStep, setRecurringStep] = useState<'configure' | 'preview'>('configure');
   const previewDates = useMemo(() => {
     if (!form.isRecurring || form.recurringWeekdays.length === 0) return [];
-    const allDates: string[] = [];
-    for (const wd of form.recurringWeekdays) {
-      allDates.push(...getDatesForWeekday(form.recurringStartDate, form.recurringEndDate, wd));
-    }
-    return allDates.sort();
+    return expandRecurrence(form.recurringWeekdays, form.recurringStartDate, form.recurringEndDate);
   }, [form.isRecurring, form.recurringWeekdays, form.recurringStartDate, form.recurringEndDate]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
@@ -290,6 +275,7 @@ export default function AdminGamesPage() {
       type: form.type,
       date: form.date,
       time: form.time,
+      endTime: form.endTime || null,
       fieldId: isAwayGame ? '' : form.fieldId,
       fieldName: isAwayGame ? form.awayLocation : fieldMap[form.fieldId] ?? '',
       notes: form.notes,
@@ -333,6 +319,7 @@ export default function AdminGamesPage() {
       seasonId: game.seasonId ?? activeSeason?.id ?? '',
       type: form.type === 'game' ? 'Game' : 'Practice',
       dateTime: toDateTime(form.date, form.time),
+      endTime: form.endTime || null,
       location: isFootballAway ? form.awayLocation : fieldMap[form.fieldId] ?? '',
       fieldId: isFootballAway ? '' : form.fieldId,
       cancelled: game.status === 'cancelled',
@@ -386,6 +373,14 @@ export default function AdminGamesPage() {
       toast({ title: 'Missing fields', description: 'Time, field, and team are required.', variant: 'destructive' });
       return;
     }
+    if (form.endTime && form.endTime <= form.time) {
+      toast({ title: 'Invalid end time', description: 'End time must be after the start time.', variant: 'destructive' });
+      return;
+    }
+    if (previewDates.length > MAX_RECURRENCE_DATES) {
+      toast({ title: 'Too many practices', description: `That's ${previewDates.length} practices — shorten the date range (max ${MAX_RECURRENCE_DATES}).`, variant: 'destructive' });
+      return;
+    }
     setIsSaving(true);
     try {
       // Each practice generates 2 writes (games/ + teams/{id}/games/), so chunk at 249 to stay under Firestore's 500-write-per-batch limit.
@@ -395,6 +390,7 @@ export default function AdminGamesPage() {
       const baseFields = {
         type: 'practice' as GameType,
         time: form.time,
+        ...(form.endTime ? { endTime: form.endTime } : {}),
         fieldId: form.fieldId,
         fieldName: fieldMap[form.fieldId] ?? '',
         teamId: form.teamId,
@@ -424,6 +420,7 @@ export default function AdminGamesPage() {
             batch.set(doc(db, 'teams', form.teamId, 'games', practiceId), {
               id: practiceId, seasonId: activeSeason.id, teamId: form.teamId,
               type: 'Practice', dateTime: toDateTime(date, form.time),
+              ...(form.endTime ? { endTime: form.endTime } : {}),
               location: fieldMap[form.fieldId] ?? '', fieldId: form.fieldId,
               cancelled: false, isRecurring: true, recurrenceId, createdAt: Timestamp.now(),
             });
@@ -446,6 +443,7 @@ export default function AdminGamesPage() {
       type: game.type,
       date: game.date,
       time: game.time,
+      endTime: game.endTime ?? '',
       fieldId: game.fieldId ?? '',
       divisionId: game.divisionId ?? '',
       homeTeamId: game.homeTeamId ?? game.teamId ?? '',
@@ -471,6 +469,10 @@ export default function AdminGamesPage() {
     const isFootballAway = isFootballGame && form.locationType === 'away';
     if (!form.date || !form.time || (!form.fieldId && !isFootballAway)) {
       toast({ title: 'Missing fields', description: 'Date, time, and field are required.', variant: 'destructive' });
+      return;
+    }
+    if (form.endTime && form.endTime <= form.time) {
+      toast({ title: 'Invalid end time', description: 'End time must be after the start time.', variant: 'destructive' });
       return;
     }
     if (form.type === 'game' && !isFootballGame && !form.divisionId) {
@@ -594,11 +596,12 @@ export default function AdminGamesPage() {
 
         // Dual Game Model: mirror to team subcollections so coaches/parents can see this game.
         const dateTime = `${form.date}T${form.time}:00`;
+        const mirrorEndTime = form.endTime ? { endTime: form.endTime } : {};
         if (form.type === 'game' && activeSport === 'football' && form.homeTeamId) {
           const location = form.locationType === 'away' ? form.awayLocation : fieldMap[form.fieldId] ?? '';
           batch.set(doc(db, 'teams', form.homeTeamId, 'games', gameId), {
             id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.homeTeamId,
-            type: 'Game', dateTime, location,
+            type: 'Game', dateTime, ...mirrorEndTime, location,
             fieldId: form.locationType === 'home' ? form.fieldId : '',
             opponentName: form.opponentName,
             locationType: form.locationType,
@@ -607,20 +610,20 @@ export default function AdminGamesPage() {
         } else if (form.type === 'game' && form.homeTeamId && form.awayTeamId) {
           batch.set(doc(db, 'teams', form.homeTeamId, 'games', gameId), {
             id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.homeTeamId,
-            type: 'Game', dateTime, location: fieldMap[form.fieldId] ?? '',
+            type: 'Game', dateTime, ...mirrorEndTime, location: fieldMap[form.fieldId] ?? '',
             fieldId: form.fieldId, opponentName: teamMap[form.awayTeamId] ?? '',
             cancelled: false, createdAt: Timestamp.now(),
           });
           batch.set(doc(db, 'teams', form.awayTeamId, 'games', gameId), {
             id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.awayTeamId,
-            type: 'Game', dateTime, location: fieldMap[form.fieldId] ?? '',
+            type: 'Game', dateTime, ...mirrorEndTime, location: fieldMap[form.fieldId] ?? '',
             fieldId: form.fieldId, opponentName: teamMap[form.homeTeamId] ?? '',
             cancelled: false, createdAt: Timestamp.now(),
           });
         } else if (form.type === 'practice' && form.teamId) {
           batch.set(doc(db, 'teams', form.teamId, 'games', gameId), {
             id: gameId, seasonId: activeSeason?.id ?? '', teamId: form.teamId,
-            type: 'Practice', dateTime, location: fieldMap[form.fieldId] ?? '',
+            type: 'Practice', dateTime, ...mirrorEndTime, location: fieldMap[form.fieldId] ?? '',
             fieldId: form.fieldId, cancelled: false, createdAt: Timestamp.now(),
           });
         }
@@ -1274,9 +1277,15 @@ export default function AdminGamesPage() {
                             <Input type="date" className="rounded-xl" value={form.recurringEndDate} onChange={e => setForm(prev => ({ ...prev, recurringEndDate: e.target.value }))} />
                           </div>
                         </div>
-                        <div className="space-y-1.5">
-                          <Label>Time</Label>
-                          <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label>Start Time</Label>
+                            <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>End Time <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                            <Input type="time" className="rounded-xl" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} />
+                          </div>
                         </div>
                       </div>
                     ) : (
@@ -1285,23 +1294,29 @@ export default function AdminGamesPage() {
                         <p className="text-sm font-medium">Preview — {previewDates.length} practice{previewDates.length !== 1 ? 's' : ''}</p>
                         <div className="max-h-40 overflow-y-auto rounded-xl border p-2 space-y-1">
                           {previewDates.map(d => (
-                            <p key={d} className="text-sm text-muted-foreground">{format(parseISO(d), 'EEE, MMM d, yyyy')} at {form.time ? format(new Date(`2000-01-01T${form.time}`), 'h:mm a') : '—'}</p>
+                            <p key={d} className="text-sm text-muted-foreground">{format(parseISO(d), 'EEE, MMM d, yyyy')} at {form.time ? format(new Date(`2000-01-01T${form.time}`), 'h:mm a') : '—'}{form.endTime ? ` – ${format(new Date(`2000-01-01T${form.endTime}`), 'h:mm a')}` : ''}</p>
                           ))}
                         </div>
                       </div>
                     )
                   ) : (
                     /* Single date / time */
-                    <div className="grid grid-cols-2 gap-3">
+                    <>
                       <div className="space-y-1.5">
                         <Label>Date</Label>
                         <Input type="date" className="rounded-xl" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
                       </div>
-                      <div className="space-y-1.5">
-                        <Label>Time</Label>
-                        <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>Start Time</Label>
+                          <Input type="time" className="rounded-xl" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>End Time <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                          <Input type="time" className="rounded-xl" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} />
+                        </div>
                       </div>
-                    </div>
+                    </>
                   )}
 
                   {conflictingGame && !form.isRecurring && (
@@ -1876,7 +1891,7 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
             )}
           </div>
           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-            <span className="text-xs text-muted-foreground">{format(parseISO(game.date), 'EEE, MMM d')} · {formatTime(game.time)}</span>
+            <span className="text-xs text-muted-foreground">{format(parseISO(game.date), 'EEE, MMM d')} · {formatTime(game.time)}{game.endTime ? ` – ${formatTime(game.endTime)}` : ''}</span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {game.fieldName}</span>
             {game.notes && <span className="text-xs text-muted-foreground italic truncate">{game.notes}</span>}
           </div>
