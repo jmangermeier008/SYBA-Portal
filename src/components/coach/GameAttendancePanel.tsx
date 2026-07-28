@@ -1,30 +1,14 @@
 "use client";
 
 import { useMemo, useState } from 'react';
-import { collection, query, where, orderBy } from 'firebase/firestore';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { useSport } from '@/firebase/sport-context';
+import { collection, query, orderBy } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { BellRing, CalendarCheck, Check, Loader2 } from 'lucide-react';
+import { CalendarCheck, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
-import { useToast } from '@/hooks/use-toast';
-import { notifyUsers } from '@/lib/coach-notifications';
 import { nowDateTime } from '@/lib/game-shape';
-
-interface AttendanceEnrollment {
-  id: string;
-  playerId: string;
-  parentUserId: string;
-  jerseyNumber?: string;
-}
-
-interface AttendancePlayer {
-  firstName: string;
-  lastName: string;
-}
+import { AttendanceRoster } from '@/components/attendance/AttendanceRoster';
 
 interface TeamGame {
   id: string;
@@ -34,60 +18,30 @@ interface TeamGame {
   cancelled?: boolean;
 }
 
-interface Rsvp {
-  id: string;
-  playerId: string;
-  status: 'Attending' | 'Not Attending' | 'Maybe';
-}
-
-const STATUS_STYLES: Record<Rsvp['status'], string> = {
-  'Attending': 'bg-green-100 text-green-800 border-green-200',
-  'Maybe': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  'Not Attending': 'bg-red-100 text-red-800 border-red-200',
-};
-
-function eventLabel(g: TeamGame) {
-  const when = g.dateTime ? format(new Date(g.dateTime), 'EEE, MMM d h:mm a') : '';
+function eventLabel(g: TeamGame): string {
+  const when = g.dateTime ? format(new Date(g.dateTime), 'EEE, MMM d · h:mm a') : '';
   const what = g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Practice';
-  return `${what} · ${when}${g.cancelled ? ' (cancelled)' : ''}`;
+  return `${what} — ${when}`;
 }
 
-/** Per-game RSVP roll call for coaches: who's in, who's out, who hasn't
- *  replied — with a one-tap nudge to the families that haven't answered. */
-export function GameAttendancePanel({
-  teamId,
-  enrollments,
-  playerMap,
-}: {
-  teamId: string;
-  enrollments: AttendanceEnrollment[];
-  playerMap: Map<string, AttendancePlayer>;
-}) {
+/** Per-event RSVP roll call for coaches: who's in, who's out, who hasn't
+ *  replied — with a one-tap nudge to the families that haven't answered.
+ *  The roll call itself is AttendanceRoster, shared with the dialog that opens
+ *  from the calendar and schedule lists. */
+export function GameAttendancePanel({ teamId }: { teamId: string }) {
   const db = useFirestore();
-  const { user } = useUser();
-  const { activeSport } = useSport();
-  const { toast } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [nudging, setNudging] = useState(false);
-  const [nudgedGameIds, setNudgedGameIds] = useState<Set<string>>(new Set());
 
-  // Include today's earlier events, not just future ones — the dashboard's
-  // 'Take Attendance' CTA deep-links here up to 2 hours after kickoff, and an
-  // in-progress game must still be selectable.
-  const startOfToday = useMemo(() => `${nowDateTime().slice(0, 10)}T00:00:00`, []);
-
+  // Past events included on purpose — a coach looking back at who said they'd
+  // come to last week's practice had no way to see it before.
   const gamesQuery = useMemoFirebase(() => {
     if (!db || !teamId) return null;
-    return query(
-      collection(db, 'teams', teamId, 'games'),
-      where('dateTime', '>=', startOfToday),
-      orderBy('dateTime', 'asc')
-    );
-  }, [db, teamId, startOfToday]);
+    return query(collection(db, 'teams', teamId, 'games'), orderBy('dateTime', 'asc'));
+  }, [db, teamId]);
   const { data: games, isLoading: loadingGames } = useCollection<TeamGame>(gamesQuery);
 
   // Default to the event the coach most likely came for: the first one that
-  // started less than 2 hours ago or is still ahead; else today's last event.
+  // started less than 2 hours ago or is still ahead; else the most recent.
   const defaultGameId = useMemo(() => {
     const current = (games ?? []).filter(g => !g.cancelled);
     const cutoff = nowDateTime(-2 * 60 * 60 * 1000);
@@ -95,69 +49,6 @@ export function GameAttendancePanel({
   }, [games]);
   const effectiveGameId = selectedId ?? defaultGameId;
   const selectedGame = games?.find(g => g.id === effectiveGameId) ?? null;
-
-  const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || !teamId || !effectiveGameId) return null;
-    return collection(db, 'teams', teamId, 'games', effectiveGameId, 'rsvps');
-  }, [db, teamId, effectiveGameId]);
-  const { data: rsvps } = useCollection<Rsvp>(rsvpsQuery);
-
-  const rows = useMemo(() => {
-    const byPlayer = new Map<string, Rsvp['status']>();
-    (rsvps ?? []).forEach(r => {
-      // Prefer the playerId field; fall back to the {playerId}_{gameId} doc id
-      const pid = r.playerId ?? r.id.split('_')[0];
-      if (pid) byPlayer.set(pid, r.status);
-    });
-    return enrollments
-      .map(e => ({
-        enrollment: e,
-        player: playerMap.get(e.playerId),
-        status: byPlayer.get(e.playerId) ?? null,
-      }))
-      .filter(r => r.player)
-      .sort((a, b) => (a.player!.lastName ?? '').localeCompare(b.player!.lastName ?? ''));
-  }, [enrollments, playerMap, rsvps]);
-
-  const tally = useMemo(() => ({
-    attending: rows.filter(r => r.status === 'Attending').length,
-    maybe: rows.filter(r => r.status === 'Maybe').length,
-    out: rows.filter(r => r.status === 'Not Attending').length,
-    unreplied: rows.filter(r => !r.status),
-  }), [rows]);
-
-  const handleNudge = async () => {
-    if (!db || !user || !activeSport || !selectedGame || tally.unreplied.length === 0) return;
-    setNudging(true);
-    try {
-      const parentIds = [...new Set(tally.unreplied.map(r => r.enrollment.parentUserId).filter(Boolean))];
-      const when = selectedGame.dateTime ? format(new Date(selectedGame.dateTime), 'EEE, MMM d h:mm a') : '';
-      // Await the write: only claim success (and disable retry) once the
-      // notifications actually landed.
-      await notifyUsers(db, parentIds, user.uid, {
-        type: 'rsvpNudge',
-        title: 'RSVP needed',
-        body: `Coach is asking: can your player make the ${selectedGame.type === 'Game' ? `game vs ${selectedGame.opponentName || 'TBD'}` : 'practice'} on ${when}? Open your schedule to reply.`,
-        sport: activeSport,
-        relatedDocId: selectedGame.id,
-        relatedDocType: 'game',
-      });
-      setNudgedGameIds(prev => new Set(prev).add(selectedGame.id));
-      toast({
-        title: 'Nudge sent',
-        description: `${parentIds.length} famil${parentIds.length === 1 ? 'y' : 'ies'} asked to RSVP.`,
-      });
-    } catch (err) {
-      console.error('RSVP nudge failed:', err);
-      toast({
-        title: 'Nudge failed',
-        description: "The reminders couldn't be sent. Please try again.",
-        variant: 'destructive',
-      });
-    } finally {
-      setNudging(false);
-    }
-  };
 
   if (loadingGames) {
     return (
@@ -172,21 +63,19 @@ export function GameAttendancePanel({
       <Card className="border-none shadow-md py-12 text-center">
         <CardContent>
           <CalendarCheck className="h-16 w-16 text-muted mx-auto mb-4" />
-          <h3 className="text-xl font-bold font-headline">No Upcoming Events</h3>
+          <h3 className="text-xl font-bold font-headline">No Events Yet</h3>
           <p className="text-sm text-muted-foreground">Attendance shows up here once games or practices are on the schedule.</p>
         </CardContent>
       </Card>
     );
   }
 
-  const alreadyNudged = selectedGame ? nudgedGameIds.has(selectedGame.id) : false;
-
   return (
     <Card className="border-none shadow-md">
       <CardHeader className="space-y-4">
         <div>
           <CardTitle className="text-lg font-headline">Attendance</CardTitle>
-          <CardDescription>Who's coming, based on family RSVPs. Updates live.</CardDescription>
+          <CardDescription>Who&apos;s coming, based on family RSVPs. Updates live.</CardDescription>
         </div>
         <Select value={effectiveGameId ?? undefined} onValueChange={setSelectedId}>
           <SelectTrigger className="w-full sm:max-w-md min-h-[44px]">
@@ -198,53 +87,17 @@ export function GameAttendancePanel({
             ))}
           </SelectContent>
         </Select>
-        {selectedGame && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">{tally.attending} in</Badge>
-            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">{tally.out} out</Badge>
-            <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">{tally.maybe} maybe</Badge>
-            <Badge variant="outline" className="text-muted-foreground">{tally.unreplied.length} no reply</Badge>
-            <div className="flex-1" />
-            <Button
-              size="sm"
-              variant={alreadyNudged ? 'outline' : 'default'}
-              className="min-h-[40px] rounded-xl"
-              disabled={nudging || tally.unreplied.length === 0 || alreadyNudged}
-              onClick={handleNudge}
-            >
-              {nudging ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : alreadyNudged ? (
-                <Check className="mr-2 h-4 w-4" />
-              ) : (
-                <BellRing className="mr-2 h-4 w-4" />
-              )}
-              {alreadyNudged ? 'Nudged' : `Nudge ${tally.unreplied.length} parent${tally.unreplied.length === 1 ? '' : 's'}`}
-            </Button>
-          </div>
-        )}
       </CardHeader>
       <CardContent>
-        <div className="divide-y rounded-xl border">
-          {rows.map(({ enrollment, player, status }) => (
-            <div key={enrollment.id} className="flex items-center gap-3 p-3">
-              <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xs shrink-0">
-                {enrollment.jerseyNumber || player!.firstName?.[0] || '?'}
-              </div>
-              <p className="flex-1 min-w-0 font-medium text-sm truncate">
-                {player!.firstName} {player!.lastName}
-              </p>
-              {status ? (
-                <Badge variant="outline" className={STATUS_STYLES[status]}>{status}</Badge>
-              ) : (
-                <Badge variant="outline" className="text-muted-foreground">No reply</Badge>
-              )}
-            </div>
-          ))}
-          {rows.length === 0 && (
-            <p className="p-6 text-center text-sm text-muted-foreground">No players on this roster yet.</p>
-          )}
-        </div>
+        {selectedGame && (
+          <AttendanceRoster
+            teamIds={[teamId]}
+            gameId={selectedGame.id}
+            eventTitle={selectedGame.type === 'Game' ? `game vs ${selectedGame.opponentName || 'TBD'}` : 'practice'}
+            eventDateTime={selectedGame.dateTime}
+            isPractice={selectedGame.type === 'Practice'}
+          />
+        )}
       </CardContent>
     </Card>
   );

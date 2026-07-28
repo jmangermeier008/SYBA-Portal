@@ -395,11 +395,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
 
           {/* ── ATTENDANCE TAB ── */}
           <TabsContent value="attendance">
-            <GameAttendancePanel
-              teamId={teamId}
-              enrollments={enrollments ?? []}
-              playerMap={playerMap}
-            />
+            <GameAttendancePanel teamId={teamId} />
           </TabsContent>
 
           {/* ── WEIGHT TRACKER TAB ── */}

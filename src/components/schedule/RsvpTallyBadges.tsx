@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * RSVP headcount badges — the single rendering of "who's coming", so the
- * agenda list, calendar popover, and attendance panel all read the same.
+ * RSVP headcount row — the single rendering of "who's coming", so the agenda
+ * list, calendar popover, and attendance panel all read the same.
  *
  * Coach/admin surfaces only. Parents are gated out by their call sites simply
  * not supplying a tally, so there is no role check in here.
@@ -11,38 +11,23 @@
  * so "no reply" is omitted rather than guessed.
  */
 import { cn } from '@/lib/utils';
+import { formatTally } from '@/lib/rsvp-labels';
 import type { RsvpTally } from '@/hooks/use-rsvp-tallies';
 
 interface RsvpTallyBadgesProps {
-  tally: RsvpTally;
+  tally?: RsvpTally;
   /** Team roster size. Omit when there's no defined invitee list. */
   rosterCount?: number;
   className?: string;
 }
 
+const ZERO: RsvpTally = { attending: 0, maybe: 0, notAttending: 0, responded: 0 };
+
 export function RsvpTallyBadges({ tally, rosterCount, className }: RsvpTallyBadgesProps) {
-  const noReply = rosterCount != null ? Math.max(0, rosterCount - tally.responded) : null;
-
-  // Nothing to report yet — don't clutter the row with four zeroes.
-  if (tally.responded === 0 && !noReply) return null;
-
+  // Always renders — "0 of 12 replied" is the state a coach most needs to see.
   return (
-    <p className={cn('flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs mt-0.5', className)}>
-      <span className="font-medium text-green-700 dark:text-green-500">{tally.attending} in</span>
-      <span className="text-muted-foreground/50">·</span>
-      <span className="text-red-700 dark:text-red-500">{tally.notAttending} out</span>
-      {tally.maybe > 0 && (
-        <>
-          <span className="text-muted-foreground/50">·</span>
-          <span className="text-yellow-700 dark:text-yellow-500">{tally.maybe} maybe</span>
-        </>
-      )}
-      {noReply != null && noReply > 0 && (
-        <>
-          <span className="text-muted-foreground/50">·</span>
-          <span className="text-muted-foreground">{noReply} no reply</span>
-        </>
-      )}
+    <p className={cn('text-xs text-muted-foreground mt-0.5', className)}>
+      {formatTally(tally ?? ZERO, rosterCount)}
     </p>
   );
 }

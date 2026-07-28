@@ -25,6 +25,7 @@ import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data'
 import { useTeamGamesLive } from '@/hooks/use-team-games';
 import { buildDivisionColorMap } from '@/lib/division-colors';
 import { addRsvpToBatch, rsvpDocRef, writeEventRsvp } from '@/lib/rsvp';
+import { RSVP_LABEL } from '@/lib/rsvp-labels';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
 // ─── Local Types ───────────────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ export default function ParentSchedulesPage() {
       ? [selectedPlayerId]
       : [...new Set((enrollments ?? []).filter(e => e.teamId === teamId).map(e => e.playerId))];
     if (playerIds.length === 0) {
-      toast({ title: 'RSVP Failed', description: 'No enrolled player found for this team.', variant: 'destructive' });
+      toast({ title: "RSVP didn't save", description: 'No enrolled player found for this team.', variant: 'destructive' });
       return;
     }
     setRsvpLoading(true);
@@ -200,9 +201,9 @@ export default function ParentSchedulesPage() {
         .map(id => players?.find(p => p.id === id)?.firstName)
         .filter(Boolean)
         .join(', ');
-      toast({ title: 'RSVP Sent', description: `${names ? `${names} updated` : 'Availability updated'} to ${status}.` });
+      toast({ title: 'RSVP saved', description: `${names ? `${names}: ` : ''}${RSVP_LABEL[status]}.` });
     } catch (err: any) {
-      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+      toast({ title: "RSVP didn't save", description: err.message, variant: 'destructive' });
       errorEmitter.emit('permission-error', new FirestorePermissionError({
         path: firstRef.path,
         operation: 'write',
@@ -218,9 +219,9 @@ export default function ParentSchedulesPage() {
     if (!db || !user) return;
     try {
       await writeEventRsvp(db, eventId, user.uid, status);
-      toast({ title: 'RSVP Sent', description: `You're marked ${status === 'Attending' ? 'going' : status === 'Not Attending' ? 'not going' : 'maybe'}.` });
+      toast({ title: 'RSVP saved', description: `${RSVP_LABEL[status]}.` });
     } catch (err: any) {
-      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+      toast({ title: "RSVP didn't save", description: err.message, variant: 'destructive' });
     }
   };
 

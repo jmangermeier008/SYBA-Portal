@@ -10,12 +10,15 @@
  */
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, doc, query, where, deleteDoc } from 'firebase/firestore';
+import { collection, collectionGroup, doc, query, where, deleteDoc } from 'firebase/firestore';
+import { format } from 'date-fns';
 import { useFirestore, useMemoFirebase, useCollection, useDoc, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { useToast } from '@/hooks/use-toast';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { AddEventDialog } from '@/components/calendar/AddEventDialog';
+import { WhoIsComingDialog, attendanceTargetFor } from '@/components/attendance/WhoIsComingDialog';
+import { useRsvpTallies, useEventRsvpTallies } from '@/hooks/use-rsvp-tallies';
 import { buildConcessionEvents, normalizeCustomEvent } from '@/lib/calendar-events';
 import { normalizeGame } from '@/lib/game-shape';
 import { buildDivisionColorMap } from '@/lib/division-colors';
@@ -95,6 +98,7 @@ export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
   const { toast } = useToast();
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: true, events: true });
   const [addEventOpen, setAddEventOpen] = useState(false);
+  const [attendanceTarget, setAttendanceTarget] = useState<ReturnType<typeof attendanceTargetFor> | null>(null);
 
   // ── Fetch all collections ────────────────────────────────────────────────────
   const gamesQuery = useMemoFirebase(() => {
@@ -159,6 +163,35 @@ export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
   const divisionColors = useMemo<Record<string, string>>(() => buildDivisionColorMap(divisions), [divisions]);
   const availableDivisions = useMemo(() => divisions ?? [], [divisions]);
 
+  // ── RSVP headcounts (league-wide) ───────────────────────────────────────────
+  // Passing these in rather than letting the popover query per-event is what
+  // makes counts work here at all: admin events normalize to 'global-game',
+  // which the old per-popover path refused to resolve.
+  const allTeamIds = useMemo(() => (teams ?? []).map(t => t.id), [teams]);
+  const gameTallies = useRsvpTallies(allTeamIds);
+  const upcomingEventIds = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return (customEvents ?? []).filter(e => e.date >= today).map(e => e.id);
+  }, [customEvents]);
+  const eventTallies = useEventRsvpTallies(upcomingEventIds);
+  const tallyByEventId = useMemo(
+    () => new Map([...gameTallies, ...eventTallies]),
+    [gameTallies, eventTallies],
+  );
+
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !activeSeason?.id) return null;
+    return query(collectionGroup(db, 'enrollments'), where('seasonId', '==', activeSeason.id));
+  }, [db, activeSeason?.id]);
+  const { data: enrollments } = useCollection<{ id: string; teamId?: string }>(enrollmentsQuery);
+  const rosterCountByTeamId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (enrollments ?? []).forEach(e => {
+      if (e.teamId) counts[e.teamId] = (counts[e.teamId] ?? 0) + 1;
+    });
+    return counts;
+  }, [enrollments]);
+
   // ── Normalize to CalendarEvent[] ────────────────────────────────────────────
   const calendarEvents = useMemo<CalendarEvent[]>(() => {
     const teamsList = teams ?? [];
@@ -220,6 +253,14 @@ export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
         onAddEvent={() => setAddEventOpen(true)}
         onEventDelete={handleEventDelete}
         showEventResponses
+        tallyByEventId={tallyByEventId}
+        rosterCountByTeamId={rosterCountByTeamId}
+        onViewAttendance={e => setAttendanceTarget(attendanceTargetFor(e))}
+      />
+
+      <WhoIsComingDialog
+        target={attendanceTarget}
+        onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
       />
 
       <AddEventDialog

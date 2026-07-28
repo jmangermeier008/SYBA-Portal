@@ -8,8 +8,9 @@
  */
 import { format, parseISO } from 'date-fns';
 import Link from 'next/link';
-import { MapPin, Trophy, Dumbbell, CalendarDays } from 'lucide-react';
+import { MapPin, Trophy, Dumbbell, CalendarDays, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FootballIcon } from '@/components/icons/football-icon';
 import type { CalendarEvent } from '@/types/scheduling';
@@ -49,11 +50,13 @@ interface UpcomingEventsListProps {
   tallyByEventId?: Map<string, RsvpTally>;
   /** Roster size per team, for the "no reply" figure. */
   rosterCountByTeamId?: Record<string, number>;
+  /** Open the "who's coming" roster (coach/admin). Omitted on parent surfaces. */
+  onViewAttendance?: (event: CalendarEvent) => void;
   emptyMessage?: string;
   className?: string;
 }
 
-export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEventId, rosterCountByTeamId, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
+export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEventId, rosterCountByTeamId, onViewAttendance, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
   const sorted = [...events].sort((a, b) =>
     `${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`)
   );
@@ -82,10 +85,16 @@ export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEvent
             {dayEvents.map(event => {
               const badge = STATUS_BADGE[event.status ?? ''];
               // Concessions and field closures have no attendee list.
-              const tally = event.eventType === 'game' || event.eventType === 'practice' || event.eventType === 'event'
-                ? tallyByEventId?.get(event.sourceId)
+              const tracksRsvps = event.eventType === 'game' || event.eventType === 'practice' || event.eventType === 'event';
+              // showCounts is the coach/admin gate — parent call sites pass no map.
+              const showCounts = tracksRsvps && !!tallyByEventId;
+              const tally = tracksRsvps ? tallyByEventId?.get(event.sourceId) : undefined;
+              // Baseball games have two rosters; football games and practices one.
+              const rosterCount = rosterCountByTeamId
+                ? [event.teamId, event.homeTeamId, event.awayTeamId]
+                    .filter(Boolean)
+                    .reduce<number | undefined>((sum, id) => (sum ?? 0) + (rosterCountByTeamId[id as string] ?? 0), undefined)
                 : undefined;
-              const rosterCount = event.teamId ? rosterCountByTeamId?.[event.teamId] : undefined;
               const row = (
                 <div
                   className={cn(
@@ -122,10 +131,21 @@ export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEvent
                         </>
                       )}
                     </p>
-                    {tally && event.status !== 'cancelled' && (
+                    {showCounts && event.status !== 'cancelled' && (
                       <RsvpTallyBadges tally={tally} rosterCount={rosterCount} />
                     )}
                   </div>
+                  {onViewAttendance && tracksRsvps && event.status !== 'cancelled' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0 h-8 text-xs"
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); onViewAttendance(event); }}
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                      <span className="sr-only sm:not-sr-only sm:ml-1.5">Who&apos;s coming</span>
+                    </Button>
+                  )}
                 </div>
               );
               return rowHref

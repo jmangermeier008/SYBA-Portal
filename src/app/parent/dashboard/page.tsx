@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, query, where, orderBy, collectionGroup, limit, doc, updateDoc } from 'firebase/firestore';
 import { writeRsvp, writeEventRsvp } from '@/lib/rsvp';
+import { RSVP_LABEL } from '@/lib/rsvp-labels';
 import { syncCoParentOnEnrollments } from '@/lib/family-links';
 import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data';
 import { useTeamGamesLive } from '@/hooks/use-team-games';
@@ -261,9 +262,9 @@ export default function ParentDashboard() {
     if (!db || !user) return;
     try {
       await writeEventRsvp(db, eventId, user.uid, status);
-      toast({ title: 'RSVP Sent', description: `You're marked ${status === 'Attending' ? 'going' : status === 'Not Attending' ? 'not going' : 'maybe'}.` });
+      toast({ title: 'RSVP saved', description: `${RSVP_LABEL[status]}.` });
     } catch (err: any) {
-      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+      toast({ title: "RSVP didn't save", description: err.message, variant: 'destructive' });
     }
   };
 
@@ -277,10 +278,10 @@ export default function ParentDashboard() {
     if (!user || !db || !teamId || !selectedPlayerId || !gameId) return;
     try {
       await writeRsvp(db, { teamId, gameId, playerId: selectedPlayerId, parentUserId: user.uid, status });
-      toast({ title: "RSVP Updated", description: `Marked as ${status}.` });
+      toast({ title: 'RSVP saved', description: `${RSVP_LABEL[status]}.` });
       nudgePush('Turn on notifications and this device gets a game-day reminder.');
     } catch (err: any) {
-      toast({ title: "RSVP Failed", description: err.message, variant: "destructive" });
+      toast({ title: "RSVP didn't save", description: err.message, variant: "destructive" });
     }
   };
 

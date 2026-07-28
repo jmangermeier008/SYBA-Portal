@@ -15,13 +15,13 @@
  *
  * Requires the collection-group index on rsvps.teamId (firestore.indexes.json).
  */
-import { useMemo } from 'react';
-import { collectionGroup, query, where } from 'firebase/firestore';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useEffect, useMemo, useState } from 'react';
+import { collectionGroup, onSnapshot, query, where } from 'firebase/firestore';
+import { useFirestore } from '@/firebase';
 import type { RsvpStatus } from '@/lib/rsvp';
 
-/** Firestore caps `in` filters at 30 values. */
-const MAX_TEAM_IDS = 30;
+/** Firestore caps `in` filters at 30 values — queries are chunked, not truncated. */
+const MAX_IN_VALUES = 30;
 
 export interface RsvpTally {
   attending: number;
@@ -58,23 +58,53 @@ function tallyBy(rows: RsvpRow[] | null, key: (r: RsvpRow) => string | undefined
 }
 
 /**
- * Returns a map of gameId → tally. Pass the teams the current user coaches.
- * Returns an empty map while loading or when the user has no teams.
+ * Live RSVP rows matching `field in values`, chunked past Firestore's 30-value
+ * `in` limit. A coach has one or two teams, but an admin query spans a whole
+ * season — silently slicing at 30 (the old behavior) would have dropped teams
+ * without any sign that numbers were wrong.
+ */
+function useChunkedRsvps(field: 'teamId' | 'eventId', values: string[]): RsvpRow[] {
+  const db = useFirestore();
+  const valuesKey = values.join(',');
+  const [byChunk, setByChunk] = useState<Record<number, RsvpRow[]>>({});
+
+  useEffect(() => {
+    setByChunk({});
+    if (!db || values.length === 0) return;
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < values.length; i += MAX_IN_VALUES) {
+      chunks.push(values.slice(i, i + MAX_IN_VALUES));
+    }
+
+    const unsubs = chunks.map((chunk, index) =>
+      onSnapshot(
+        query(collectionGroup(db, 'rsvps'), where(field, 'in', chunk)),
+        snap => {
+          const rows = snap.docs.map(d => ({ ...(d.data() as RsvpRow), id: d.id }));
+          setByChunk(prev => ({ ...prev, [index]: rows }));
+        },
+        () => {
+          // One chunk failing (permissions, missing index) must not blank the rest
+          setByChunk(prev => ({ ...prev, [index]: [] }));
+        },
+      )
+    );
+    return () => unsubs.forEach(u => u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, field, valuesKey]);
+
+  return useMemo(() => Object.values(byChunk).flat(), [byChunk]);
+}
+
+/**
+ * Returns a map of gameId → tally. Pass the teams to report on — the coach's
+ * teams, or every team in the season for an admin view.
  */
 export function useRsvpTallies(teamIds: string[]): Map<string, RsvpTally> {
-  const db = useFirestore();
-  const teamIdsKey = teamIds.join(',');
-
-  const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || teamIds.length === 0) return null;
-    return query(collectionGroup(db, 'rsvps'), where('teamId', 'in', teamIds.slice(0, MAX_TEAM_IDS)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, teamIdsKey]);
-
-  const { data: rsvps } = useCollection<RsvpRow>(rsvpsQuery);
-
+  const rsvps = useChunkedRsvps('teamId', teamIds);
   // Doc id is `{playerId}_{gameId}`; fall back to it if gameId is missing,
-  // mirroring the defensive read in GameAttendancePanel.
+  // mirroring the defensive read in AttendanceRoster.
   return useMemo(() => tallyBy(rsvps, r => r.gameId ?? r.id.split('_')[1]), [rsvps]);
 }
 
@@ -86,16 +116,6 @@ export function useRsvpTallies(teamIds: string[]): Map<string, RsvpTally> {
  * Requires the collection-group index on rsvps.eventId.
  */
 export function useEventRsvpTallies(eventIds: string[]): Map<string, RsvpTally> {
-  const db = useFirestore();
-  const idsKey = eventIds.join(',');
-
-  const eventRsvpsQuery = useMemoFirebase(() => {
-    if (!db || eventIds.length === 0) return null;
-    return query(collectionGroup(db, 'rsvps'), where('eventId', 'in', eventIds.slice(0, MAX_TEAM_IDS)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, idsKey]);
-
-  const { data: rsvps } = useCollection<RsvpRow>(eventRsvpsQuery);
-
+  const rsvps = useChunkedRsvps('eventId', eventIds);
   return useMemo(() => tallyBy(rsvps, r => r.eventId), [rsvps]);
 }

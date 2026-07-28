@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, orderBy, limit } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { writeRsvp, type RsvpStatus } from '@/lib/rsvp';
+import { RSVP_LABEL } from '@/lib/rsvp-labels';
 import { nowDateTime } from '@/lib/game-shape';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -87,10 +88,10 @@ export function NextUpCard({
     setRsvpLoading(true);
     try {
       await writeRsvp(db, { teamId, gameId: nextGame.id, playerId: player.id, parentUserId: user.uid, status });
-      toast({ title: 'RSVP Updated', description: `${showPlayerName && player.firstName ? `${player.firstName} marked` : 'Marked'} as ${status}.` });
+      toast({ title: 'RSVP saved', description: `${showPlayerName && player.firstName ? `${player.firstName}: ` : ''}${RSVP_LABEL[status]}.` });
       nudgePush('Turn on notifications and this device gets a game-day reminder.');
     } catch (err: any) {
-      toast({ title: 'RSVP Failed', description: err.message, variant: 'destructive' });
+      toast({ title: "RSVP didn't save", description: err.message, variant: 'destructive' });
     } finally {
       setRsvpLoading(false);
     }
@@ -126,13 +127,6 @@ export function NextUpCard({
               {nextGame.endTime ? ` – ${format(new Date(`2000-01-01T${nextGame.endTime}`), 'h:mm a')}` : ''}
               {nextGame.location ? ` · ${nextGame.location}` : ''}
             </p>
-            {rsvps && (
-              <div className="flex gap-2 mt-2 flex-wrap">
-                <span className="text-xs px-2 py-1 bg-secondary rounded-full text-muted-foreground">
-                  👥 {rsvps.filter(r => r.status === 'Attending').length} attending
-                </span>
-              </div>
-            )}
             <div className={cn("mt-3", isMobile ? "flex gap-2" : "flex gap-1.5")}>
               {rsvpLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -151,7 +145,7 @@ export function NextUpCard({
                     )}
                   >
                     <Check className={isMobile ? "h-4 w-4" : "h-3 w-3"} />
-                    {isMobile ? "I'll be there" : "Yes"}
+                    {RSVP_LABEL['Attending']}
                   </button>
                   <button
                     onClick={() => handleRsvp('Maybe')}
@@ -165,7 +159,7 @@ export function NextUpCard({
                         : "border-yellow-300 text-yellow-700 hover:bg-yellow-50"
                     )}
                   >
-                    <HelpCircle className={isMobile ? "h-4 w-4" : "h-3 w-3"} /> Maybe
+                    <HelpCircle className={isMobile ? "h-4 w-4" : "h-3 w-3"} /> {RSVP_LABEL['Maybe']}
                   </button>
                   <button
                     onClick={() => handleRsvp('Not Attending')}
@@ -180,7 +174,7 @@ export function NextUpCard({
                     )}
                   >
                     <X className={isMobile ? "h-4 w-4" : "h-3 w-3"} />
-                    {isMobile ? "Can't make it" : "No"}
+                    {RSVP_LABEL['Not Attending']}
                   </button>
                 </>
               )}

@@ -652,6 +652,10 @@ export interface CalendarEvent {
   // Game-specific
   homeTeamName?: string;
   awayTeamName?: string;
+  // Baseball games have no single teamId — both teams RSVP into the same game
+  // id, so RSVP denominators sum both rosters. Football games/practices use teamId.
+  homeTeamId?: string;
+  awayTeamId?: string;
   teamId?: string;
   teamName?: string;
   division?: string;

@@ -56,6 +56,8 @@ export interface GameLike {
   fieldName?: string;
   homeTeamName?: string;
   awayTeamName?: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
   teamId?: string;
   teamName?: string;
   opponentName?: string;
@@ -103,6 +105,8 @@ export function normalizeGame(g: GameLike, opts?: { divisionId?: string }): Cale
     sourceId: g.id,
     homeTeamName: g.homeTeamName,
     awayTeamName: g.awayTeamName,
+    homeTeamId: g.homeTeamId,
+    awayTeamId: g.awayTeamId,
     teamId: g.teamId,
     teamName: g.teamName,
     division: g.division,

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from 'next/link';
 import { format } from 'date-fns';
+import { formatTally } from '@/lib/rsvp-labels';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -36,9 +36,11 @@ interface NextEventCardProps {
   game: NextEventGame;
   tally: { attending: number; maybe: number; notAttending: number; unreplied: number };
   onWeatherCancel: (gameId: string) => void | Promise<void>;
+  /** Opens the "who's coming" roster for this event. */
+  onViewAttendance: () => void;
 }
 
-export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }: NextEventCardProps) {
+export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel, onViewAttendance }: NextEventCardProps) {
   const isGame = game.type === 'Game';
   const totalRsvps = tally.attending + tally.maybe + tally.notAttending;
 
@@ -73,16 +75,14 @@ export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }
 
         {/* Practices need a headcount as much as games do — the coach is
             deciding whether to run drills that need a full squad. */}
-        {!game.cancelled && (totalRsvps > 0 || tally.unreplied > 0) && (
+        {!game.cancelled && (
           <div className="mb-3">
             <div className="flex items-center justify-between mb-1">
-              <p className="text-xs font-semibold">
-                {tally.unreplied > 0
-                  ? `${tally.unreplied} haven't replied`
-                  : `${tally.attending} confirmed`}
-              </p>
               <p className="text-xs text-muted-foreground">
-                {tally.attending} in · {tally.notAttending} out{tally.maybe > 0 ? ` · ${tally.maybe} maybe` : ''}
+                {formatTally(
+                  { attending: tally.attending, maybe: tally.maybe, notAttending: tally.notAttending, responded: totalRsvps },
+                  totalRsvps + tally.unreplied,
+                )}
               </p>
             </div>
             {/* RSVP bar: attending / maybe / no / unreplied */}
@@ -102,11 +102,9 @@ export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <Button asChild size="sm" variant="outline" className="text-xs">
-              <Link href={`/coach/teams/${teamId}?tab=attendance`}>
-                <UserCheck className="h-3.5 w-3.5 mr-1.5" />
-                Nudge Parents
-              </Link>
+            <Button size="sm" variant="outline" className="text-xs" onClick={onViewAttendance}>
+              <UserCheck className="h-3.5 w-3.5 mr-1.5" />
+              See who&apos;s coming
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>

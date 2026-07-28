@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
+import { AttendanceRoster } from '@/components/attendance/AttendanceRoster';
 import { doc, collection, query, where, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   CalendarDays,
@@ -212,6 +213,11 @@ export default function GameDetailPage({
       ? `${game.teamName} Practice`
       : 'Practice';
 
+  // Baseball games have two rosters; football games and practices one.
+  const attendanceTeamIds = [...new Set(
+    [game.teamId, game.homeTeamId, game.awayTeamId].filter(Boolean) as string[]
+  )];
+
   const statusCfg = STATUS_CONFIG[game.status] ?? STATUS_CONFIG.scheduled;
   const dateLabel = game.date ? format(parseISO(game.date), 'EEEE, MMMM d, yyyy') : '';
   const hasScore = game.homeScore != null && game.awayScore != null;
@@ -402,6 +408,25 @@ export default function GameDetailPage({
             </CardContent>
           </Card>
         )}
+
+        {/* Player attendance — this page showed volunteer coverage but not
+            whether the players were actually coming. */}
+        <Card className="border-none shadow-md">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-base font-headline flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" /> Who&apos;s coming
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-5">
+            <AttendanceRoster
+              teamIds={attendanceTeamIds}
+              gameId={game.id}
+              eventTitle={title}
+              eventDateTime={`${game.date}T${game.time || '00:00'}:00`}
+              isPractice={game.type === 'practice'}
+            />
+          </CardContent>
+        </Card>
 
         {/* Concession coverage */}
         {concessionSlots && concessionSlots.length > 0 && (

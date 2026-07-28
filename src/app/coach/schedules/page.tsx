@@ -16,6 +16,7 @@ import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { AddEventDialog } from '@/components/calendar/AddEventDialog';
 import { SchedulePracticeDialog } from '@/components/coach/SchedulePracticeDialog';
 import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
+import { WhoIsComingDialog, attendanceTargetFor } from '@/components/attendance/WhoIsComingDialog';
 import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { normalizeTeamGame } from '@/lib/game-shape';
 import { buildDivisionColorMap } from '@/lib/division-colors';
@@ -47,6 +48,7 @@ export default function CoachSchedulesPage() {
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: false, events: true });
   const [addEventOpen, setAddEventOpen] = useState(false);
   const [schedulePracticeOpen, setSchedulePracticeOpen] = useState(false);
+  const [attendanceTarget, setAttendanceTarget] = useState<ReturnType<typeof attendanceTargetFor> | null>(null);
 
   // ── Data queries ────────────────────────────────────────────────────────────
   const teamsQuery = useMemoFirebase(() => {
@@ -257,6 +259,9 @@ export default function CoachSchedulesPage() {
             onAddEvent={() => setAddEventOpen(true)}
             onEventDelete={handleEventDelete}
             showEventResponses
+            tallyByEventId={tallyByEventId}
+            rosterCountByTeamId={rosterCountByTeamId}
+            onViewAttendance={e => setAttendanceTarget(attendanceTargetFor(e))}
             currentUserId={user?.uid}
           />
         ) : (
@@ -276,6 +281,7 @@ export default function CoachSchedulesPage() {
                     sport={activeSport}
                     tallyByEventId={tallyByEventId}
                     rosterCountByTeamId={rosterCountByTeamId}
+                    onViewAttendance={e => setAttendanceTarget(attendanceTargetFor(e))}
                     emptyMessage="No upcoming games or practices."
                   />
                 )}
@@ -294,6 +300,7 @@ export default function CoachSchedulesPage() {
                         sport={activeSport}
                         tallyByEventId={tallyByEventId}
                         rosterCountByTeamId={rosterCountByTeamId}
+                        onViewAttendance={e => setAttendanceTarget(attendanceTargetFor(e))}
                       />
                     </CardContent>
                   </Card>
@@ -322,6 +329,11 @@ export default function CoachSchedulesPage() {
             actorUid={user?.uid ?? ''}
           />
         )}
+
+        <WhoIsComingDialog
+          target={attendanceTarget}
+          onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+        />
       </main>
     </div>
   );

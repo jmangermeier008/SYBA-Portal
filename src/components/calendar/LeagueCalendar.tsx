@@ -43,6 +43,8 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { generateICS, downloadICS } from '@/lib/ics';
+import { RSVP_LABEL, RSVP_ORDER, formatTally, needsAttention } from '@/lib/rsvp-labels';
+import { EMPTY_TALLY, type RsvpTally } from '@/hooks/use-rsvp-tallies';
 import type { CalendarEvent, CalendarEventType } from '@/types/scheduling';
 
 // ─── Color config ──────────────────────────────────────────────────────────────
@@ -193,8 +195,19 @@ export interface LeagueCalendarProps {
   onRsvp?: (gameId: string, teamId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => void;
   // RSVP to a custom event (parent) — enables Yes/No/Maybe buttons in the event popover
   onEventRsvp?: (eventId: string, status: 'Attending' | 'Not Attending' | 'Maybe') => void;
-  // Show the going/maybe/no response tally in event popovers (coach/admin)
+  // Show the RSVP response tally in event popovers (coach/admin)
   showEventResponses?: boolean;
+  /**
+   * RSVP headcounts keyed by event source id, and roster size per team.
+   * Supplied by coach/admin pages that already compute them (useRsvpTallies);
+   * parent pages omit them, which is what keeps counts off parent views.
+   * Passing them in rather than querying per popover is what lets the admin
+   * calendar work at all — its events are 'global-game', not 'team-game'.
+   */
+  tallyByEventId?: Map<string, RsvpTally>;
+  rosterCountByTeamId?: Record<string, number>;
+  // Open the "who's coming" roster for an event (coach/admin)
+  onViewAttendance?: (event: CalendarEvent) => void;
   onWeatherCancel?: (teamId: string, gameId: string) => void;
   onConcessionSignup?: (slotId: string) => void;
   onConcessionCancel?: (slotId: string) => void;
@@ -218,6 +231,56 @@ export interface LeagueCalendarProps {
   myTeamIds?: string[];
 }
 
+/**
+ * Roster size an event's RSVPs are measured against.
+ *
+ * Baseball games are the awkward case: both teams RSVP into the same game id
+ * (one mirror each), so the denominator is both rosters combined. Football
+ * games and practices carry a single teamId. Custom events have no roster at
+ * all, so this returns undefined and the "no reply" count is omitted.
+ */
+function rosterCountForEvent(
+  event: CalendarEvent,
+  rosterCountByTeamId?: Record<string, number>,
+): number | undefined {
+  if (!rosterCountByTeamId) return undefined;
+  const ids = [event.teamId, event.homeTeamId, event.awayTeamId].filter(Boolean) as string[];
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return undefined;
+  const total = unique.reduce((sum, id) => sum + (rosterCountByTeamId[id] ?? 0), 0);
+  return total > 0 ? total : undefined;
+}
+
+/**
+ * Whether to flag a calendar tile as needing chasing: an upcoming event where
+ * fewer than half the roster has replied. Coach/admin only — parents pass no
+ * tally map, so this is always false for them.
+ */
+function needsRsvpAttention(
+  event: CalendarEvent,
+  showEventResponses?: boolean,
+  tallyByEventId?: Map<string, RsvpTally>,
+  rosterCountByTeamId?: Record<string, number>,
+): boolean {
+  if (!showEventResponses || !tallyByEventId) return false;
+  if (event.eventType !== 'game' && event.eventType !== 'practice') return false;
+  if (event.status === 'cancelled') return false;
+  if (event.date < format(new Date(), 'yyyy-MM-dd')) return false;
+  return needsAttention(tallyByEventId.get(event.sourceId), rosterCountForEvent(event, rosterCountByTeamId));
+}
+
+/**
+ * The props every event-rendering layer forwards down to the popover.
+ * Named once so adding an action doesn't mean editing four identical Picks.
+ */
+type EventPopoverProps = Pick<
+  LeagueCalendarProps,
+  | 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel'
+  | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails'
+  | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'
+  | 'tallyByEventId' | 'rosterCountByTeamId' | 'onViewAttendance'
+>;
+
 // ─── Event Popover Content ─────────────────────────────────────────────────────
 
 function EventPopoverContent({
@@ -226,6 +289,9 @@ function EventPopoverContent({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -234,50 +300,30 @@ function EventPopoverContent({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: EventPopoverProps & {
   event: CalendarEvent;
 }) {
   const { activeSport } = useSport();
   const officialLabel = activeSport === 'football' ? 'Referee' : 'Umpire';
 
-  // Custom-event RSVPs — subscribe only for custom events (one doc per user).
-  // This component mounts when its popover opens, so the subscription is scoped
-  // to the open event.
+  // Custom-event RSVPs — subscribed lazily on popover open purely to resolve
+  // MY OWN response, which highlights the selected button. Counts come from
+  // tallyByEventId like everything else.
   const db = useFirestore();
   const eventRsvpsQuery = useMemoFirebase(() => {
-    if (!db || event.eventType !== 'event' || (!onEventRsvp && !showEventResponses)) return null;
+    if (!db || event.eventType !== 'event' || !onEventRsvp) return null;
     return collection(db, 'customEvents', event.sourceId, 'rsvps');
-  }, [db, event.eventType, event.sourceId, onEventRsvp, showEventResponses]);
+  }, [db, event.eventType, event.sourceId, onEventRsvp]);
   const { data: eventRsvps } = useCollection<{ id: string; status: string }>(eventRsvpsQuery);
-  const eventTally = useMemo(() => {
-    const t = { going: 0, maybe: 0, no: 0 };
-    for (const r of eventRsvps ?? []) {
-      if (r.status === 'Attending') t.going++;
-      else if (r.status === 'Maybe') t.maybe++;
-      else if (r.status === 'Not Attending') t.no++;
-    }
-    return t;
-  }, [eventRsvps]);
   const myEventRsvp = eventRsvps?.find(r => r.id === currentUserId)?.status;
 
-  // Game/practice RSVPs — same lazy-on-open approach, one doc per player.
-  // Only resolvable for team-sourced events; the admin league-wide calendar
-  // normalizes from top-level `games`, which carries no teamId.
-  const gameRsvpsQuery = useMemoFirebase(() => {
-    if (!db || !showEventResponses || event.sourceType !== 'team-game' || !event.teamId) return null;
-    return collection(db, 'teams', event.teamId, 'games', event.sourceId, 'rsvps');
-  }, [db, showEventResponses, event.sourceType, event.teamId, event.sourceId]);
-  const { data: gameRsvps } = useCollection<{ id: string; status: string }>(gameRsvpsQuery);
-  const gameTally = useMemo(() => {
-    const t = { going: 0, maybe: 0, no: 0 };
-    for (const r of gameRsvps ?? []) {
-      if (r.status === 'Attending') t.going++;
-      else if (r.status === 'Maybe') t.maybe++;
-      else if (r.status === 'Not Attending') t.no++;
-    }
-    return t;
-  }, [gameRsvps]);
-  const hasGameResponses = gameTally.going + gameTally.maybe + gameTally.no > 0;
+  // Headcounts come from the page-level maps — no per-popover query, and no
+  // sourceType gate, so admin ('global-game') events resolve the same as coach
+  // ('team-game') ones. Top-level and mirror docs share one game id.
+  const tally = tallyByEventId?.get(event.sourceId);
+  const rosterCount = rosterCountForEvent(event, rosterCountByTeamId);
+  const showTally = showEventResponses &&
+    (event.eventType === 'game' || event.eventType === 'practice' || event.eventType === 'event');
 
   const typeLabel =
     event.eventType === 'game'
@@ -368,22 +414,12 @@ function EventPopoverContent({
             </span>
           </div>
         )}
-        {/* Event response tally (coach/admin) */}
-        {showEventResponses && event.eventType === 'event' && (
+        {/* RSVP tally (coach/admin) — always rendered, including "0 of 12 replied" */}
+        {showTally && (
           <div className="flex items-center gap-2 text-sm">
             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="text-muted-foreground">
-              {eventTally.going} going · {eventTally.maybe} maybe · {eventTally.no} no
-            </span>
-          </div>
-        )}
-        {/* Game/practice RSVP tally (coach/admin) */}
-        {showEventResponses && hasGameResponses && (
-          <div className="flex items-center gap-2 text-sm">
-            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="text-muted-foreground">
-              {gameTally.going} in · {gameTally.no} out
-              {gameTally.maybe > 0 ? ` · ${gameTally.maybe} maybe` : ''}
+              {formatTally(tally ?? EMPTY_TALLY, rosterCount)}
             </span>
           </div>
         )}
@@ -397,7 +433,7 @@ function EventPopoverContent({
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1.5">Your RSVP</p>
               <div className="flex gap-1.5">
-                {(['Attending', 'Not Attending', 'Maybe'] as const).map(s => (
+                {RSVP_ORDER.map(s => (
                   <Button
                     key={s}
                     variant={event.myRsvpStatus === s ? 'default' : 'outline'}
@@ -405,7 +441,7 @@ function EventPopoverContent({
                     className="flex-1 text-xs h-9 px-1"
                     onClick={() => onRsvp(event.sourceId, event.teamId!, s)}
                   >
-                    {s === 'Attending' ? 'Yes' : s === 'Not Attending' ? 'No' : 'Maybe'}
+                    {RSVP_LABEL[s]}
                   </Button>
                 ))}
               </div>
@@ -417,7 +453,7 @@ function EventPopoverContent({
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1.5">Your RSVP</p>
               <div className="flex gap-1.5">
-                {(['Attending', 'Not Attending', 'Maybe'] as const).map(s => (
+                {RSVP_ORDER.map(s => (
                   <Button
                     key={s}
                     variant={myEventRsvp === s ? 'default' : 'outline'}
@@ -425,11 +461,23 @@ function EventPopoverContent({
                     className="flex-1 text-xs h-9 px-1"
                     onClick={() => onEventRsvp(event.sourceId, s)}
                   >
-                    {s === 'Attending' ? 'Yes' : s === 'Not Attending' ? 'No' : 'Maybe'}
+                    {RSVP_LABEL[s]}
                   </Button>
                 ))}
               </div>
             </div>
+          )}
+
+          {/* See who's coming (coach/admin) */}
+          {onViewAttendance && showTally && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => onViewAttendance(event)}
+            >
+              <Users className="h-3.5 w-3.5 mr-1.5" /> See who&apos;s coming
+            </Button>
           )}
 
           {/* Weather cancel (coach) */}
@@ -537,6 +585,9 @@ function EventPill({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -545,7 +596,7 @@ function EventPill({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: EventPopoverProps & {
   event: CalendarEvent;
 }) {
   const { className: pillCls, style: pillStyle } = getEventStyles(event, divisionColors);
@@ -561,6 +612,12 @@ function EventPill({
           style={pillStyle}
         >
           <span className="flex-1 truncate">{event.title}</span>
+          {needsRsvpAttention(event, showEventResponses, tallyByEventId, rosterCountByTeamId) && (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/90 ring-1 ring-black/20"
+              title="Most families haven't replied yet"
+            />
+          )}
           <ChevronRight className="h-2.5 w-2.5 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -571,6 +628,9 @@ function EventPill({
           onRsvp={onRsvp}
           onEventRsvp={onEventRsvp}
           showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -593,6 +653,9 @@ function EventDot({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -601,7 +664,7 @@ function EventDot({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: EventPopoverProps & {
   event: CalendarEvent;
 }) {
   const dotColor = getDotColor(event, divisionColors);
@@ -629,6 +692,9 @@ function EventDot({
           onRsvp={onRsvp}
           onEventRsvp={onEventRsvp}
           showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -656,6 +722,9 @@ function MonthGrid({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -673,6 +742,9 @@ function MonthGrid({
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onEventRsvp?: LeagueCalendarProps['onEventRsvp'];
   showEventResponses?: LeagueCalendarProps['showEventResponses'];
+  tallyByEventId?: LeagueCalendarProps['tallyByEventId'];
+  rosterCountByTeamId?: LeagueCalendarProps['rosterCountByTeamId'];
+  onViewAttendance?: LeagueCalendarProps['onViewAttendance'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
@@ -747,6 +819,9 @@ function MonthGrid({
                   onRsvp={onRsvp}
                   onEventRsvp={onEventRsvp}
                   showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
                   onWeatherCancel={onWeatherCancel}
                   onConcessionSignup={onConcessionSignup}
                   onConcessionCancel={onConcessionCancel}
@@ -782,6 +857,9 @@ function WeekStrip({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -798,6 +876,9 @@ function WeekStrip({
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onEventRsvp?: LeagueCalendarProps['onEventRsvp'];
   showEventResponses?: LeagueCalendarProps['showEventResponses'];
+  tallyByEventId?: LeagueCalendarProps['tallyByEventId'];
+  rosterCountByTeamId?: LeagueCalendarProps['rosterCountByTeamId'];
+  onViewAttendance?: LeagueCalendarProps['onViewAttendance'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
@@ -822,6 +903,9 @@ function WeekStrip({
           onRsvp={onRsvp}
           onEventRsvp={onEventRsvp}
           showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -933,6 +1017,9 @@ function DayEventCard({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -941,7 +1028,7 @@ function DayEventCard({
   currentUserId,
   onViewRecord,
   showUmpire,
-}: Pick<LeagueCalendarProps, 'onRsvp' | 'onEventRsvp' | 'showEventResponses' | 'onWeatherCancel' | 'onConcessionSignup' | 'onConcessionCancel' | 'onConcessionViewDetails' | 'onEventDelete' | 'currentUserId' | 'onViewRecord' | 'divisionColors' | 'showUmpire'> & {
+}: EventPopoverProps & {
   event: CalendarEvent;
 }) {
   return (
@@ -952,6 +1039,9 @@ function DayEventCard({
         onRsvp={onRsvp}
         onEventRsvp={onEventRsvp}
         showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
         onWeatherCancel={onWeatherCancel}
         onConcessionSignup={onConcessionSignup}
         onConcessionCancel={onConcessionCancel}
@@ -972,6 +1062,9 @@ function DayView({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -987,6 +1080,9 @@ function DayView({
   onRsvp?: LeagueCalendarProps['onRsvp'];
   onEventRsvp?: LeagueCalendarProps['onEventRsvp'];
   showEventResponses?: LeagueCalendarProps['showEventResponses'];
+  tallyByEventId?: LeagueCalendarProps['tallyByEventId'];
+  rosterCountByTeamId?: LeagueCalendarProps['rosterCountByTeamId'];
+  onViewAttendance?: LeagueCalendarProps['onViewAttendance'];
   onWeatherCancel?: LeagueCalendarProps['onWeatherCancel'];
   onConcessionSignup?: LeagueCalendarProps['onConcessionSignup'];
   onConcessionCancel?: LeagueCalendarProps['onConcessionCancel'];
@@ -1037,6 +1133,9 @@ function DayView({
               onRsvp={onRsvp}
               onEventRsvp={onEventRsvp}
               showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
               onWeatherCancel={onWeatherCancel}
               onConcessionSignup={onConcessionSignup}
               onConcessionCancel={onConcessionCancel}
@@ -1066,6 +1165,9 @@ export function LeagueCalendar({
   onRsvp,
   onEventRsvp,
   showEventResponses,
+  tallyByEventId,
+  rosterCountByTeamId,
+  onViewAttendance,
   onWeatherCancel,
   onConcessionSignup,
   onConcessionCancel,
@@ -1391,6 +1493,9 @@ export function LeagueCalendar({
           onRsvp={onRsvp}
           onEventRsvp={onEventRsvp}
           showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -1418,6 +1523,9 @@ export function LeagueCalendar({
           onRsvp={onRsvp}
           onEventRsvp={onEventRsvp}
           showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}
@@ -1435,6 +1543,9 @@ export function LeagueCalendar({
           onRsvp={onRsvp}
           onEventRsvp={onEventRsvp}
           showEventResponses={showEventResponses}
+          tallyByEventId={tallyByEventId}
+          rosterCountByTeamId={rosterCountByTeamId}
+          onViewAttendance={onViewAttendance}
           onWeatherCancel={onWeatherCancel}
           onConcessionSignup={onConcessionSignup}
           onConcessionCancel={onConcessionCancel}

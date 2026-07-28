@@ -19,6 +19,7 @@ import { useTeamGamesLive } from '@/hooks/use-team-games';
 import { useRsvpTallies, EMPTY_TALLY } from '@/hooks/use-rsvp-tallies';
 import { useSportConfig } from '@/config/sports';
 import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
+import { WhoIsComingDialog, attendanceTargetFor } from '@/components/attendance/WhoIsComingDialog';
 import { useToast } from '@/hooks/use-toast';
 import { isAnnouncementActive, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
@@ -62,6 +63,7 @@ export default function CoachDashboard() {
 
   // -1 = "All Teams" combined view (the default for multi-team coaches)
   const [selectedTeamIndex, setSelectedTeamIndex] = useState(-1);
+  const [attendanceTarget, setAttendanceTarget] = useState<ReturnType<typeof attendanceTargetFor> | null>(null);
 
   // Query teams assigned to this coach, scoped to the active sport
   const teamsQuery = useMemoFirebase(() => {
@@ -477,6 +479,13 @@ export default function CoachDashboard() {
                 unreplied: unrepliedCount,
               }}
               onWeatherCancel={(gameId) => handleWeatherCancel(nextGame._teamId, gameId)}
+              onViewAttendance={() => setAttendanceTarget({
+                teamIds: [nextGame._teamId],
+                gameId: nextGame.id,
+                title: nextGame.type === 'Game' ? `vs ${nextGame.opponentName || 'TBD'}` : 'Team Practice',
+                isPractice: nextGame.type === 'Practice',
+                eventDateTime: nextGame.dateTime,
+              })}
             />
           ) : (
             <Card className="border shadow-sm">
@@ -613,6 +622,7 @@ export default function CoachDashboard() {
                   sport={activeSport}
                   tallyByEventId={tallyByEventId}
                   rosterCountByTeamId={rosterCountByTeamId}
+                  onViewAttendance={e => setAttendanceTarget(attendanceTargetFor(e))}
                   emptyMessage="Your next event is shown above — nothing else scheduled yet."
                 />
               )}
@@ -668,6 +678,11 @@ export default function CoachDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        <WhoIsComingDialog
+          target={attendanceTarget}
+          onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+        />
 
         {db && user && (
           <LogScoreDialog

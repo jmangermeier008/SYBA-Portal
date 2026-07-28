@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collection, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, type WriteBatch } from 'firebase/firestore';
+import { collection, collectionGroup, doc, setDoc, query, orderBy, where, Timestamp, writeBatch, getDocs, updateDoc, type WriteBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { AdminLeagueCalendar } from '@/components/calendar/AdminLeagueCalendar';
@@ -22,6 +22,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toDateTime } from '@/lib/game-shape';
+import { useRsvpTallies, EMPTY_TALLY, type RsvpTally } from '@/hooks/use-rsvp-tallies';
+import { formatRepliedRatio } from '@/lib/rsvp-labels';
+import { WhoIsComingDialog } from '@/components/attendance/WhoIsComingDialog';
 import { expandRecurrence, MAX_RECURRENCE_DATES } from '@/lib/recurrence';
 import {
   parseGameScheduleCSV, validateGameRows, downloadGameTemplate,
@@ -117,6 +120,7 @@ export default function AdminGamesPage() {
   // Dialog state
   const [open, setOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [attendanceTarget, setAttendanceTarget] = useState<ReturnType<typeof attendanceTargetForGame> | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [shiftForm, setShiftForm] = useState(EMPTY_SHIFT_FORM);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
@@ -239,6 +243,22 @@ export default function AdminGamesPage() {
 
   const fieldMap = Object.fromEntries((fields ?? []).map((f) => [f.id, f.name]));
   const teamMap = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name]));
+
+  // ── RSVP headcounts ────────────────────────────────────────────────────────
+  const allTeamIds = useMemo(() => (teams ?? []).map(t => t.id), [teams]);
+  const tallyByEventId = useRsvpTallies(allTeamIds);
+  const rosterEnrollmentsQuery = useMemoFirebase(() => {
+    if (!db || !selectedSeasonId) return null;
+    return query(collectionGroup(db, 'enrollments'), where('seasonId', '==', selectedSeasonId));
+  }, [db, selectedSeasonId]);
+  const { data: rosterEnrollments } = useCollection<{ id: string; teamId?: string }>(rosterEnrollmentsQuery);
+  const rosterCountByTeamId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (rosterEnrollments ?? []).forEach(e => {
+      if (e.teamId) counts[e.teamId] = (counts[e.teamId] ?? 0) + 1;
+    });
+    return counts;
+  }, [rosterEnrollments]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1669,6 +1689,9 @@ export default function AdminGamesPage() {
                         <div className="space-y-1.5">
                           {rows.map(g => (
                             <GameRow key={g.id} game={g} readOnly={!canEdit}
+                              tally={tallyByEventId.get(g.id)}
+                              rosterCount={rosterCountForGame(g, rosterCountByTeamId)}
+                              onViewAttendance={() => setAttendanceTarget(attendanceTargetForGame(g))}
                               onEdit={() => handleOpenEdit(g)}
                               onCancel={() => handleInitiateCancel(g)}
                               onDelete={() => handleInitiateDelete(g)}
@@ -1714,6 +1737,9 @@ export default function AdminGamesPage() {
                               <div className="space-y-1.5">
                                 {rows.map(g => (
                                   <GameRow key={g.id} game={g} readOnly={!canEdit}
+                                    tally={tallyByEventId.get(g.id)}
+                                    rosterCount={rosterCountForGame(g, rosterCountByTeamId)}
+                                    onViewAttendance={() => setAttendanceTarget(attendanceTargetForGame(g))}
                                     onEdit={() => handleOpenEdit(g)}
                                     onCancel={() => handleInitiateCancel(g)}
                                     onDelete={() => handleInitiateDelete(g)}
@@ -1936,13 +1962,41 @@ export default function AdminGamesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WhoIsComingDialog
+        target={attendanceTarget}
+        onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+      />
     </div>
   );
 }
 
+/** Roster the game's RSVPs are measured against — both teams for baseball. */
+function rosterCountForGame(g: Game, rosterCountByTeamId: Record<string, number>): number | undefined {
+  const ids = [...new Set([g.teamId, g.homeTeamId, g.awayTeamId].filter(Boolean) as string[])];
+  if (ids.length === 0) return undefined;
+  const total = ids.reduce((sum, id) => sum + (rosterCountByTeamId[id] ?? 0), 0);
+  return total > 0 ? total : undefined;
+}
+
+/** Top-level game → the "who's coming" dialog target (mirror ids match). */
+function attendanceTargetForGame(g: Game) {
+  return {
+    teamIds: [...new Set([g.teamId, g.homeTeamId, g.awayTeamId].filter(Boolean) as string[])],
+    gameId: g.id,
+    title: g.opponentName && g.teamName
+      ? `${g.teamName} vs. ${g.opponentName}`
+      : g.homeTeamName && g.awayTeamName
+        ? `${g.homeTeamName} vs. ${g.awayTeamName}`
+        : `${g.teamName ?? ''} Practice`.trim(),
+    isPractice: g.type === 'practice',
+    eventDateTime: `${g.date}T${g.time || '00:00'}:00`,
+  };
+}
+
 // ─── Game Row ─────────────────────────────────────────────────────────────────
 
-function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, onUmpireNotifiedToggle, readOnly = false }: {
+function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, onUmpireNotifiedToggle, readOnly = false, tally, rosterCount, onViewAttendance }: {
   game: Game;
   onEdit: () => void;
   onCancel: () => void;
@@ -1951,6 +2005,9 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
   onUmpireUpdate: (umpireName: string) => Promise<void>;
   onUmpireNotifiedToggle: (checked: boolean) => Promise<void>;
   readOnly?: boolean;
+  tally?: RsvpTally;
+  rosterCount?: number;
+  onViewAttendance: () => void;
 }) {
   const [localUmpire, setLocalUmpire] = useState(game.umpireName ?? '');
   const isGame = game.type === 'game';
@@ -1998,6 +2055,15 @@ function GameRow({ game, onEdit, onCancel, onDelete, onScore, onUmpireUpdate, on
           <div className="flex items-center gap-3 flex-wrap">
             <span className="text-xs text-muted-foreground">{formatTime(game.time)}{game.endTime ? ` – ${formatTime(game.endTime)}` : ''}</span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {game.fieldName}</span>
+            {!isCancelled && (
+              <button
+                type="button"
+                onClick={onViewAttendance}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                <Users className="h-3 w-3" /> {formatRepliedRatio(tally ?? EMPTY_TALLY, rosterCount)}
+              </button>
+            )}
             {game.notes && <span className="text-xs text-muted-foreground italic truncate">{game.notes}</span>}
           </div>
         </div>
