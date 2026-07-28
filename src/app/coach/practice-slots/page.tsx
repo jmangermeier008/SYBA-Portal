@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
+import { useSportConfig } from '@/config/sports';
 import {
   collection, doc, query, where, orderBy, limit,
   runTransaction, Timestamp, deleteField,
@@ -53,6 +55,7 @@ export default function CoachPracticeSlotsPage() {
   const db = useFirestore();
   const { user, profile, loading: loadingUser } = useUser();
   const { activeSport, isCoach } = useSport();
+  const sportConfig = useSportConfig();
   const { toast } = useToast();
 
   const [claimingId, setClaimingId] = useState<string | null>(null);
@@ -302,6 +305,32 @@ export default function CoachPracticeSlotsPage() {
               <ShieldAlert className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-xl font-bold font-headline mb-2">Access Denied</h3>
               <p className="text-muted-foreground text-sm">You must have the Coach role to view practice slots.</p>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // Practice slots are the baseball claim/approval system. Football coaches
+  // schedule their own practices from /coach/schedules instead — check this
+  // before the "No Active Team" guard, which football would always trip
+  // (football uses division-as-team, so the teams query returns nothing).
+  if (!sportConfig.hasPracticeSlots) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardContent className="py-12">
+              <CalendarDays className="h-12 w-12 text-muted-foreground/40 mx-auto mb-4" />
+              <h3 className="text-xl font-bold font-headline mb-2">Not used in {sportConfig.label}</h3>
+              <p className="text-muted-foreground text-sm mb-4">
+                {sportConfig.label} coaches schedule their own practices directly from the schedule page.
+              </p>
+              <Button asChild>
+                <Link href="/coach/schedules">Go to Schedule</Link>
+              </Button>
             </CardContent>
           </Card>
         </main>

@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useCollection, useMemoFirebase } from '@/firebase';
 import { buildFootballPracticeDocs, buildFootballPracticeSeriesDocs } from '@/lib/game-write';
 import { expandRecurrence, MAX_RECURRENCE_DATES } from '@/lib/recurrence';
-import { notifySportAdmins } from '@/lib/coach-notifications';
+import { notifySportAdmins, notifyTeamParents } from '@/lib/coach-notifications';
 import type { Field } from '@/types/scheduling';
 
 const OTHER_LOCATION = '__other__';
@@ -188,6 +188,15 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
           relatedDocId: seriesDocs[0].gameId,
           relatedDocType: 'game',
         });
+        // Families need this as much as admins do — one digest for the series.
+        notifyTeamParents(db, [selectedTeam.id], actorUid, {
+          type: 'eventAdded',
+          title: `${seriesDocs.length} Practices Added`,
+          body: `${seriesDocs.length} practices added to the ${selectedTeam.name} schedule — every ${dayLabels} from ${format(parseISO(first), 'MMM d')} to ${format(parseISO(last), 'MMM d')} at ${locationName}.`,
+          sport: 'football',
+          relatedDocId: seriesDocs[0].gameId,
+          relatedDocType: 'game',
+        });
         toast({ title: `${seriesDocs.length} practices scheduled`, description: `Every ${dayLabels} · ${locationName}` });
         for (const d of seriesDocs) {
           onCreated?.({ id: d.gameId, teamId: selectedTeam.id, type: 'Practice', dateTime: d.mirror.dateTime, ...(endTime ? { endTime } : {}), location: locationName, cancelled: false });
@@ -202,6 +211,14 @@ export function SchedulePracticeDialog({ open, onOpenChange, db, teams, actorUid
         notifySportAdmins(db, actorUid, {
           title: 'Practice scheduled by coach',
           body: `${selectedTeam.name} — ${format(parseISO(date), 'EEE, MMM d')} at ${format(new Date(`${date}T${time}:00`), 'h:mm a')}, ${locationName}`,
+          sport: 'football',
+          relatedDocId: gameId,
+          relatedDocType: 'game',
+        });
+        notifyTeamParents(db, [selectedTeam.id], actorUid, {
+          type: 'eventAdded',
+          title: 'New Practice Scheduled',
+          body: `${selectedTeam.name} practice — ${format(parseISO(date), 'EEE, MMM d')} at ${format(new Date(`${date}T${time}:00`), 'h:mm a')}, ${locationName}.`,
           sport: 'football',
           relatedDocId: gameId,
           relatedDocType: 'game',

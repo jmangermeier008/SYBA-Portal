@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Shirt, Trash2, UserCheck, CreditCard } from 'lucide-react';
+import { Bell, Loader2, CheckCheck, ShoppingCart, Dumbbell, CalendarDays, CalendarPlus, CalendarX, Megaphone, ShieldCheck, ShieldAlert, Shirt, Trash2, UserCheck, CreditCard } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useMemo, useState } from 'react';
@@ -57,6 +57,9 @@ function NotifIcon({ type }: { type: NotificationType }) {
   if (type === 'gameRescheduled') {
     return <CalendarDays className={cn(base, 'text-amber-500')} />;
   }
+  if (type === 'eventAdded') {
+    return <CalendarPlus className={cn(base, 'text-green-600')} />;
+  }
   if (type === 'rsvpNudge') {
     return <UserCheck className={cn(base, 'text-primary')} />;
   }
@@ -74,7 +77,7 @@ function NotifIcon({ type }: { type: NotificationType }) {
 // Parent-directed types route to the parent schedule even for coaches — a
 // coach-parent's child RSVP nudge is about their kid's team, not the one they
 // coach.
-const PARENT_DIRECTED_TYPES: NotificationType[] = ['rsvpNudge', 'gameCancelled', 'gameRescheduled'];
+const PARENT_DIRECTED_TYPES: NotificationType[] = ['rsvpNudge', 'gameCancelled', 'gameRescheduled', 'eventAdded'];
 
 function getNotifRoute(
   relatedDocType: NotificationRelatedDocType | undefined,
@@ -87,7 +90,7 @@ function getNotifRoute(
   if (relatedDocType === 'enrollment') return '/parent/dashboard';
   if (relatedDocType === 'concessionSlot') return '/parent/volunteers';
   if (relatedDocType === 'practiceSlot') return isCoach ? '/coach/practice-slots' : '/parent/schedules';
-  if (relatedDocType === 'game') {
+  if (relatedDocType === 'game' || relatedDocType === 'customEvent') {
     if (type && PARENT_DIRECTED_TYPES.includes(type)) return '/parent/schedules';
     return isCoach ? '/coach/schedules' : '/parent/schedules';
   }

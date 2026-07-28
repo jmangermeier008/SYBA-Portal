@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
-import { collection, query, doc, updateDoc, deleteDoc, where } from 'firebase/firestore';
+import { collection, collectionGroup, query, doc, updateDoc, deleteDoc, where } from 'firebase/firestore';
 import { ShieldAlert, Loader2, CalendarDays, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import { buildConcessionEvents, normalizeCustomEvent, visibleCustomEvents } from
 import { normalizeTeamGame } from '@/lib/game-shape';
 import { buildDivisionColorMap } from '@/lib/division-colors';
 import { useTeamGamesLive } from '@/hooks/use-team-games';
+import { useRsvpTallies, useEventRsvpTallies } from '@/hooks/use-rsvp-tallies';
 import { notifyTeamParents } from '@/lib/coach-notifications';
 import type { CalendarEvent, ConcessionSlot, CustomEvent } from '@/types/scheduling';
 
@@ -80,6 +81,34 @@ export default function CoachSchedulesPage() {
   }, [db, activeTeam?.seasonId]);
   const { data: divisions } = useCollection<{ id: string; name: string }>(divisionsQuery);
   const divisionColors = useMemo(() => buildDivisionColorMap(divisions), [divisions]);
+
+  // RSVP headcounts + roster denominators for the list view. Games/practices
+  // and custom events are two different RSVP stores, so they're merged here.
+  const gameTallies = useRsvpTallies(coachTeamIds);
+  const enrollmentsQuery = useMemoFirebase(() => {
+    if (!db || coachTeamIds.length === 0) return null;
+    return query(collectionGroup(db, 'enrollments'), where('teamId', 'in', coachTeamIds));
+  }, [db, coachTeamIds]);
+  const { data: enrollments } = useCollection<{ id: string; teamId?: string }>(enrollmentsQuery);
+  const rosterCountByTeamId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (enrollments ?? []).forEach(e => {
+      if (e.teamId) counts[e.teamId] = (counts[e.teamId] ?? 0) + 1;
+    });
+    return counts;
+  }, [enrollments]);
+
+  // Custom events RSVP separately (one response per parent account, no roster).
+  // Scoped to upcoming events — the `in` filter caps at 30 values.
+  const upcomingEventIds = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return (customEvents ?? []).filter(e => e.date >= today).map(e => e.id);
+  }, [customEvents]);
+  const eventTallies = useEventRsvpTallies(upcomingEventIds);
+  const tallyByEventId = useMemo(
+    () => new Map([...gameTallies, ...eventTallies]),
+    [gameTallies, eventTallies],
+  );
 
   // ── Normalize to CalendarEvent ──────────────────────────────────────────────
   const teamById = useMemo(() => new Map((userTeams ?? []).map(t => [t.id, t])), [userTeams]);
@@ -242,7 +271,13 @@ export default function CoachSchedulesPage() {
                 {isLoading ? (
                   <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
                 ) : (
-                  <UpcomingEventsList events={upcomingEvents} sport={activeSport} emptyMessage="No upcoming games or practices." />
+                  <UpcomingEventsList
+                    events={upcomingEvents}
+                    sport={activeSport}
+                    tallyByEventId={tallyByEventId}
+                    rosterCountByTeamId={rosterCountByTeamId}
+                    emptyMessage="No upcoming games or practices."
+                  />
                 )}
               </CardContent>
             </Card>
@@ -254,7 +289,12 @@ export default function CoachSchedulesPage() {
                 {showPast && (
                   <Card className="border-none shadow-md mt-2">
                     <CardContent className="pt-4">
-                      <UpcomingEventsList events={pastEvents} sport={activeSport} />
+                      <UpcomingEventsList
+                        events={pastEvents}
+                        sport={activeSport}
+                        tallyByEventId={tallyByEventId}
+                        rosterCountByTeamId={rosterCountByTeamId}
+                      />
                     </CardContent>
                   </Card>
                 )}

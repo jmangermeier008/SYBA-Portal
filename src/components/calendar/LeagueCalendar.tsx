@@ -260,6 +260,25 @@ function EventPopoverContent({
   }, [eventRsvps]);
   const myEventRsvp = eventRsvps?.find(r => r.id === currentUserId)?.status;
 
+  // Game/practice RSVPs — same lazy-on-open approach, one doc per player.
+  // Only resolvable for team-sourced events; the admin league-wide calendar
+  // normalizes from top-level `games`, which carries no teamId.
+  const gameRsvpsQuery = useMemoFirebase(() => {
+    if (!db || !showEventResponses || event.sourceType !== 'team-game' || !event.teamId) return null;
+    return collection(db, 'teams', event.teamId, 'games', event.sourceId, 'rsvps');
+  }, [db, showEventResponses, event.sourceType, event.teamId, event.sourceId]);
+  const { data: gameRsvps } = useCollection<{ id: string; status: string }>(gameRsvpsQuery);
+  const gameTally = useMemo(() => {
+    const t = { going: 0, maybe: 0, no: 0 };
+    for (const r of gameRsvps ?? []) {
+      if (r.status === 'Attending') t.going++;
+      else if (r.status === 'Maybe') t.maybe++;
+      else if (r.status === 'Not Attending') t.no++;
+    }
+    return t;
+  }, [gameRsvps]);
+  const hasGameResponses = gameTally.going + gameTally.maybe + gameTally.no > 0;
+
   const typeLabel =
     event.eventType === 'game'
       ? 'League Game'
@@ -355,6 +374,16 @@ function EventPopoverContent({
             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="text-muted-foreground">
               {eventTally.going} going · {eventTally.maybe} maybe · {eventTally.no} no
+            </span>
+          </div>
+        )}
+        {/* Game/practice RSVP tally (coach/admin) */}
+        {showEventResponses && hasGameResponses && (
+          <div className="flex items-center gap-2 text-sm">
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">
+              {gameTally.going} in · {gameTally.no} out
+              {gameTally.maybe > 0 ? ` · ${gameTally.maybe} maybe` : ''}
             </span>
           </div>
         )}

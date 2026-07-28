@@ -17,8 +17,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { notifyTeamParents, notifyAllSeasonParents } from '@/lib/coach-notifications';
 import type { CustomEvent, Sport } from '@/types/scheduling';
+
+function formatTime(t: string) {
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
 
 interface AddEventDialogProps {
   open: boolean;
@@ -100,7 +108,25 @@ export function AddEventDialog({
 
     setSaving(true);
     try {
-      await addDoc(collection(db, 'customEvents'), payload);
+      const created = await addDoc(collection(db, 'customEvents'), payload);
+
+      // Tell families the event exists — otherwise it only appears to those who
+      // happen to open the calendar. Team events fan out through the roster;
+      // league-wide events go to every family enrolled this season.
+      const notifyPayload = {
+        type: 'eventAdded' as const,
+        title: 'New Event Added',
+        body: `${payload.title} — ${format(parseISO(date), 'EEE, MMM d')}${startTime ? ` at ${formatTime(startTime)}` : ''}${location.trim() ? ` at ${location.trim()}` : ''}.`,
+        sport,
+        relatedDocId: created.id,
+        relatedDocType: 'customEvent' as const,
+      };
+      if (visibility === 'team' && team) {
+        notifyTeamParents(db, [team.id], creator.uid, notifyPayload);
+      } else if (seasonId) {
+        notifyAllSeasonParents(db, seasonId, creator.uid, notifyPayload);
+      }
+
       toast({ title: 'Event added', description: `"${payload.title}" is on the calendar.` });
       reset();
       onOpenChange(false);

@@ -343,12 +343,14 @@ export type NotificationType =
   | 'coachActivity'
   | 'gameCancelled'
   | 'gameRescheduled'
+  | 'eventAdded'
   | 'rsvpNudge'
   | 'equipment'
   | 'paymentConfirmed';
 
 export type NotificationRelatedDocType =
   | 'game'
+  | 'customEvent'
   | 'concessionSlot'
   | 'practiceSlot'
   | 'clearance'

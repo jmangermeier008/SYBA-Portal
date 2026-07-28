@@ -409,10 +409,10 @@ service cloud.firestore {
       allow create: if isBoardMember() ||
         (isSignedIn() && request.resource.data.userId == request.auth.uid) ||
         // Coaches fan out activity pings (to admins), team-facing notifications
-        // (announcements, weather cancellations, RSVP nudges), and parent-facing
-        // equipment issue/return notices
+        // (announcements, weather cancellations, RSVP nudges, newly scheduled
+        // practices), and parent-facing equipment issue/return notices
         (isCoach() && request.resource.data.get('type', '') in
-          ['coachActivity', 'announcement', 'gameCancelled', 'rsvpNudge', 'equipment']);
+          ['coachActivity', 'announcement', 'gameCancelled', 'eventAdded', 'rsvpNudge', 'equipment']);
       allow delete: if isBoardMember();
     }
 

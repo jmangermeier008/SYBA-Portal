@@ -403,6 +403,18 @@ export default function AdminGamesPage() {
         }
         await batch.commit();
       }
+      // One digest, not one per date — a 30-date series would otherwise bury
+      // the inbox and blow past the push recipient cap.
+      if (activeSport && form.teamId) {
+        const first = previewDates[0];
+        const last = previewDates[previewDates.length - 1];
+        notifyTeamParents(db, [form.teamId], user?.uid ?? '', {
+          type: 'eventAdded',
+          title: `${previewDates.length} Practices Added`,
+          body: `${previewDates.length} practices added to the ${teamMap[form.teamId] ?? 'team'} schedule, ${format(parseISO(first), 'MMM d')}–${format(parseISO(last), 'MMM d')} at ${formatTime(form.time)}.`,
+          sport: activeSport,
+        });
+      }
       toast({ title: `${previewDates.length} Practices Created`, description: `Recurring practices added across ${previewDates.length} dates.` });
       closeDialog();
     } catch (err: any) {
@@ -486,6 +498,10 @@ export default function AdminGamesPage() {
       if (editingGame) {
         const payload = { ...buildGamePayload(), updatedAt: Timestamp.now() };
         const dateTimeChanged = form.date !== editingGame.date || form.time !== editingGame.time;
+        // Moving a game to a different field is as disruptive as moving the time.
+        const locationChanged =
+          form.fieldId !== (editingGame.fieldId ?? '') ||
+          (activeSport === 'football' && form.locationType !== editingGame.locationType);
 
         if (dateTimeChanged) {
           // Check for linked concession shifts
@@ -517,16 +533,25 @@ export default function AdminGamesPage() {
         writeMirrorUpdates(editBatch, editingGame);
         await editBatch.commit();
 
-        // A date/time change is a reschedule — tell the affected families in-app.
-        if (dateTimeChanged && activeSport) {
+        // A date/time OR venue change is disruptive — tell the affected families
+        // in-app. Both changing sends one combined message, not two.
+        if ((dateTimeChanged || locationChanged) && activeSport) {
+          const label = gameLabel(editingGame);
+          const movedTo = fieldMap[form.fieldId] ?? form.awayLocation ?? '';
+          const whenPart = dateTimeChanged
+            ? `has moved from ${format(parseISO(editingGame.date), 'EEE, MMM d')} ${editingGame.time} to ${format(parseISO(form.date), 'EEE, MMM d')} ${form.time}`
+            : `on ${format(parseISO(form.date), 'EEE, MMM d')} has a new location`;
+          const wherePart = locationChanged && movedTo ? `, now at ${movedTo}` : '';
           notifyTeamParents(
             db,
             [editingGame.homeTeamId, editingGame.awayTeamId, editingGame.teamId].filter((t): t is string => !!t),
             user?.uid ?? '',
             {
               type: 'gameRescheduled',
-              title: editingGame.type === 'game' ? 'Game Rescheduled' : 'Practice Rescheduled',
-              body: `${gameLabel(editingGame)} has moved from ${format(parseISO(editingGame.date), 'EEE, MMM d')} ${editingGame.time} to ${format(parseISO(form.date), 'EEE, MMM d')} ${form.time}.`,
+              title: dateTimeChanged
+                ? (editingGame.type === 'game' ? 'Game Rescheduled' : 'Practice Rescheduled')
+                : (editingGame.type === 'game' ? 'Game Location Changed' : 'Practice Location Changed'),
+              body: `${label} ${whenPart}${wherePart}.`,
               sport: activeSport,
               relatedDocId: editingGame.id,
               relatedDocType: 'game',
@@ -617,6 +642,23 @@ export default function AdminGamesPage() {
         }
 
         await batch.commit();
+
+        // Tell the families on the affected team(s) — a new game appearing on
+        // the schedule is news, not just a calendar row.
+        if (activeSport) {
+          const notifyTeamIds = form.type === 'practice'
+            ? [form.teamId]
+            : [form.homeTeamId, ...(activeSport === 'football' ? [] : [form.awayTeamId])];
+          notifyTeamParents(db, notifyTeamIds.filter(Boolean), user?.uid ?? '', {
+            type: 'eventAdded',
+            title: form.type === 'game' ? 'New Game Scheduled' : 'New Practice Scheduled',
+            body: `${gameLabel(createPayload as unknown as Game)} — ${format(parseISO(form.date), 'EEE, MMM d')} at ${formatTime(form.time)}${fieldMap[form.fieldId] ? ` at ${fieldMap[form.fieldId]}` : ''}.`,
+            sport: activeSport,
+            relatedDocId: gameId,
+            relatedDocType: 'game',
+          });
+        }
+
         if (user) writeAuditLog(db, auditCreateOpts);
         toast({ title: 'Saved', description: shiftForm.enabled && form.type === 'game' ? 'Game and concession shift added.' : `${form.type === 'game' ? 'Game' : 'Practice'} added.` });
       }
@@ -1019,6 +1061,9 @@ export default function AdminGamesPage() {
       // Each row generates up to 3 writes (games/ + up to 2 team mirrors), so
       // chunk at 160 rows to stay under Firestore's 500-write-per-batch limit.
       const CHUNK = 160;
+      // teamId → how many rows landed on that team, for the post-import digest
+      const importedPerTeam = new Map<string, number>();
+      const bumpTeam = (teamId: string) => importedPerTeam.set(teamId, (importedPerTeam.get(teamId) ?? 0) + 1);
       for (let i = 0; i < importRows.length; i += CHUNK) {
         const batch = writeBatch(db);
         for (const row of importRows.slice(i, i + CHUNK)) {
@@ -1058,6 +1103,7 @@ export default function AdminGamesPage() {
                 opponentName: row.opponentName ?? '',
                 locationType: (row.locationType ?? 'home').toLowerCase(),
               });
+              bumpTeam(team.id);
             } else {
               const home = matchTeam(row.homeTeam)!;
               const away = matchTeam(row.awayTeam)!;
@@ -1071,6 +1117,8 @@ export default function AdminGamesPage() {
                 ...mirrorBase, teamId: away.id, type: 'Game',
                 opponentName: home.name,
               });
+              bumpTeam(home.id);
+              bumpTeam(away.id);
             }
           } else {
             const team = matchTeam(row.teamName)!;
@@ -1078,12 +1126,30 @@ export default function AdminGamesPage() {
             batch.set(doc(db, 'teams', team.id, 'games', id), {
               ...mirrorBase, teamId: team.id, type: 'Practice',
             });
+            bumpTeam(team.id);
           }
 
           batch.set(doc(db, 'games', id), payload);
         }
         await batch.commit();
       }
+
+      // One digest per team — a 60-row season import must not send 60 pushes.
+      if (activeSport) {
+        const dates = importRows.map(r => r.date).sort();
+        const range = dates.length > 0
+          ? ` (${format(parseISO(dates[0]), 'MMM d')}–${format(parseISO(dates[dates.length - 1]), 'MMM d')})`
+          : '';
+        importedPerTeam.forEach((count, teamId) => {
+          notifyTeamParents(db, [teamId], user?.uid ?? '', {
+            type: 'eventAdded',
+            title: 'Schedule Updated',
+            body: `${count} event${count !== 1 ? 's have' : ' has'} been added to the ${teamMap[teamId] ?? 'team'} schedule${range}.`,
+            sport: activeSport,
+          });
+        });
+      }
+
       toast({ title: `Imported ${importRows.length} item${importRows.length !== 1 ? 's' : ''}` });
       setImportOpen(false); setImportRows([]); setImportErrors([]);
     } catch (err: any) {

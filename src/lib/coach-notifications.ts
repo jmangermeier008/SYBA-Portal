@@ -126,6 +126,31 @@ export function notifyTeamParents(
     .catch(err => console.error('Team parent notification fan-out failed:', err));
 }
 
+/** Notify every parent with a player enrolled in the given season — for
+ *  league-wide announcements-by-event (a custom event with visibility 'all',
+ *  which has no team to fan out through). Season-scoped so archived families
+ *  aren't pinged. Note /api/push/send caps push at 500 recipients; the in-app
+ *  notification still reaches everyone. */
+export function notifyAllSeasonParents(
+  db: Firestore,
+  seasonId: string,
+  actorUid: string,
+  payload: NotifyPayload
+): void {
+  if (!seasonId) return;
+  getDocs(query(collectionGroup(db, 'enrollments'), where('seasonId', '==', seasonId)))
+    .then(snap => {
+      const parentIds = snap.docs
+        .flatMap(d => {
+          const e = d.data() as { parentUserId?: string; additionalParentUids?: string[] };
+          return [e.parentUserId ?? '', ...(e.additionalParentUids ?? [])];
+        })
+        .filter(Boolean);
+      return notifyUsers(db, parentIds, actorUid, payload);
+    })
+    .catch(err => console.error('Season parent notification fan-out failed:', err));
+}
+
 /** Notify every Admin of the given sport that a coach took an action
  *  (guardrail visibility — actions are immediate, admins get a ping). */
 export function notifySportAdmins(

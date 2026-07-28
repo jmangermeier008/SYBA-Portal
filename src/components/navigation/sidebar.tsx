@@ -301,6 +301,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { profile } = useUser();
   const { activeSport, isAdmin, isSiteAdmin, isBoardMember, isCoach, isParent, logoUrl } = useSport();
+  const sportConfig = SPORT_CONFIG[activeSport ?? 'baseball'];
 
   // Derive a roles array from sport context for sidebar context-switching logic
   const roles: string[] = [
@@ -647,7 +648,7 @@ export function Sidebar() {
               label="Season Operations"
               sectionIcon={CalendarDays}
               items={adminOperationsItems.filter(item =>
-                !(activeSport === 'football' && item.href === '/admin/practice-slots')
+                !(item.href === '/admin/practice-slots' && !sportConfig.hasPracticeSlots)
               )}
               pathname={pathname}
               onNavigate={closeMenu}
@@ -673,7 +674,10 @@ export function Sidebar() {
           <NavSection
             label="Coaching"
             items={[
-              ...coachItems.filter(item => !(activeSport === 'football' && (item.href === '/coach/practice-slots' || item.href === '/coach/drills'))),
+              ...coachItems.filter(item =>
+                !(item.href === '/coach/practice-slots' && !sportConfig.hasPracticeSlots) &&
+                !(activeSport === 'football' && item.href === '/coach/drills')
+              ),
               // Equipment tracking is football-only (mirrors the admin Equipment gate)
               ...(activeSport === 'football' ? [{ label: 'Equipment', icon: ShieldCheck, href: '/coach/equipment' }] : []),
             ]

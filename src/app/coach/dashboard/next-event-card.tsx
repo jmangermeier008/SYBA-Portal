@@ -71,7 +71,9 @@ export function NextEventCard({ teamId, teamName, game, tally, onWeatherCancel }
           </p>
         )}
 
-        {isGame && !game.cancelled && (totalRsvps > 0 || tally.unreplied > 0) && (
+        {/* Practices need a headcount as much as games do — the coach is
+            deciding whether to run drills that need a full squad. */}
+        {!game.cancelled && (totalRsvps > 0 || tally.unreplied > 0) && (
           <div className="mb-3">
             <div className="flex items-center justify-between mb-1">
               <p className="text-xs font-semibold">

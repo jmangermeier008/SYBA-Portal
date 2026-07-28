@@ -16,6 +16,8 @@ import { format } from 'date-fns';
 import { notifyTeamParents } from '@/lib/coach-notifications';
 import { nowDateTime, normalizeTeamGame } from '@/lib/game-shape';
 import { useTeamGamesLive } from '@/hooks/use-team-games';
+import { useRsvpTallies, EMPTY_TALLY } from '@/hooks/use-rsvp-tallies';
+import { useSportConfig } from '@/config/sports';
 import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
 import { useToast } from '@/hooks/use-toast';
 import { isAnnouncementActive, type Game } from '@/types/scheduling';
@@ -56,6 +58,7 @@ export default function CoachDashboard() {
   const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
   const { activeSport } = useSport();
+  const sportConfig = useSportConfig();
 
   // -1 = "All Teams" combined view (the default for multi-team coaches)
   const [selectedTeamIndex, setSelectedTeamIndex] = useState(-1);
@@ -128,18 +131,22 @@ export default function CoachDashboard() {
     ? enrollments?.filter(e => e.teamId === selectedTeamId).length ?? 0
     : enrollments?.length ?? 0;
 
-  // RSVP attendance rate for the next game (keyed to that game's own team)
-  const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || !nextGame?.id || !nextGame?._teamId) return null;
-    return collection(db, 'teams', nextGame._teamId, 'games', nextGame.id, 'rsvps');
-  }, [db, nextGame?._teamId, nextGame?.id]);
-  const { data: rsvps } = useCollection(rsvpsQuery);
+  // RSVP headcounts for every event on the coach's teams — one collection-group
+  // query, so the next-event card and the schedule list share the same data.
+  const tallyByEventId = useRsvpTallies(teamIds);
+  const rosterCountByTeamId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (enrollments ?? []).forEach(e => {
+      if (e.teamId) counts[e.teamId] = (counts[e.teamId] ?? 0) + 1;
+    });
+    return counts;
+  }, [enrollments]);
 
-  const attendingCount = rsvps?.filter((r: any) => r.status === 'Attending').length ?? 0;
-  const maybeCount = rsvps?.filter((r: any) => r.status === 'Maybe').length ?? 0;
-  const notAttendingCount = rsvps?.filter((r: any) => r.status === 'Not Attending').length ?? 0;
-  const totalRsvpCount = rsvps?.length ?? 0;
-  const unrepliedCount = Math.max(0, (enrollments?.filter(e => e.teamId === nextGame?._teamId).length ?? 0) - totalRsvpCount);
+  const nextGameTally = (nextGame && tallyByEventId.get(nextGame.id)) ?? EMPTY_TALLY;
+  const unrepliedCount = Math.max(
+    0,
+    (nextGame?._teamId ? rosterCountByTeamId[nextGame._teamId] ?? 0 : 0) - nextGameTally.responded
+  );
 
   // Football games that have started but never got a final score — the coach
   // can log these directly (scores live on top-level games, which standings read)
@@ -171,14 +178,16 @@ export default function CoachDashboard() {
     const now = new Date();
     const eventTime = new Date(nextGame.dateTime);
     const hoursDiff = (eventTime.getTime() - now.getTime()) / 3600000;
-    if (nextGame.type === 'Practice' && hoursDiff > 0 && hoursDiff <= 24) {
+    // Slot claiming is baseball-only — football coaches schedule their own
+    // practices, so this CTA would point them at a page they can't use.
+    if (sportConfig.hasPracticeSlots && nextGame.type === 'Practice' && hoursDiff > 0 && hoursDiff <= 24) {
       return { label: 'Claim Practice Slot', href: '/coach/practice-slots', icon: ClipboardList };
     }
     if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
       return { label: 'Take Attendance', href: `/coach/teams/${nextGame._teamId}?tab=attendance`, icon: UserCheck };
     }
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
-  }, [nextGame, unscoredGames]) as {
+  }, [nextGame, unscoredGames, sportConfig.hasPracticeSlots]) as {
     label: string;
     icon: typeof Calendar;
     href?: string;
@@ -461,7 +470,12 @@ export default function CoachDashboard() {
               teamId={nextGame._teamId}
               teamName={isAllTeamsView ? teamNameById[nextGame._teamId] : undefined}
               game={nextGame}
-              tally={{ attending: attendingCount, maybe: maybeCount, notAttending: notAttendingCount, unreplied: unrepliedCount }}
+              tally={{
+                attending: nextGameTally.attending,
+                maybe: nextGameTally.maybe,
+                notAttending: nextGameTally.notAttending,
+                unreplied: unrepliedCount,
+              }}
               onWeatherCancel={(gameId) => handleWeatherCancel(nextGame._teamId, gameId)}
             />
           ) : (
@@ -597,6 +611,8 @@ export default function CoachDashboard() {
                   events={scheduleListEvents}
                   rowHref="/coach/schedules"
                   sport={activeSport}
+                  tallyByEventId={tallyByEventId}
+                  rosterCountByTeamId={rosterCountByTeamId}
                   emptyMessage="Your next event is shown above — nothing else scheduled yet."
                 />
               )}

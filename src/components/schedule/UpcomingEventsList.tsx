@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { FootballIcon } from '@/components/icons/football-icon';
 import type { CalendarEvent } from '@/types/scheduling';
+import type { RsvpTally } from '@/hooks/use-rsvp-tallies';
+import { RsvpTallyBadges } from './RsvpTallyBadges';
 
 function formatTime(t?: string): string {
   if (!t) return '';
@@ -40,11 +42,18 @@ interface UpcomingEventsListProps {
   rowHref?: string;
   /** Sport of the current view — picks the practice icon (football → football glyph). */
   sport?: 'football' | 'baseball' | null;
+  /**
+   * RSVP headcounts keyed by event source id. Coach/admin surfaces pass this;
+   * parent surfaces omit it, which is what keeps counts off parent views.
+   */
+  tallyByEventId?: Map<string, RsvpTally>;
+  /** Roster size per team, for the "no reply" figure. */
+  rosterCountByTeamId?: Record<string, number>;
   emptyMessage?: string;
   className?: string;
 }
 
-export function UpcomingEventsList({ events, limit, rowHref, sport, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
+export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEventId, rosterCountByTeamId, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
   const sorted = [...events].sort((a, b) =>
     `${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`)
   );
@@ -72,6 +81,11 @@ export function UpcomingEventsList({ events, limit, rowHref, sport, emptyMessage
           <div className="space-y-1.5">
             {dayEvents.map(event => {
               const badge = STATUS_BADGE[event.status ?? ''];
+              // Concessions and field closures have no attendee list.
+              const tally = event.eventType === 'game' || event.eventType === 'practice' || event.eventType === 'event'
+                ? tallyByEventId?.get(event.sourceId)
+                : undefined;
+              const rosterCount = event.teamId ? rosterCountByTeamId?.[event.teamId] : undefined;
               const row = (
                 <div
                   className={cn(
@@ -108,6 +122,9 @@ export function UpcomingEventsList({ events, limit, rowHref, sport, emptyMessage
                         </>
                       )}
                     </p>
+                    {tally && event.status !== 'cancelled' && (
+                      <RsvpTallyBadges tally={tally} rosterCount={rosterCount} />
+                    )}
                   </div>
                 </div>
               );

@@ -4,11 +4,12 @@ import { useState, useMemo } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
+import { useSportConfig } from '@/config/sports';
 import {
   collection, doc, query, orderBy, where, limit,
   Timestamp, writeBatch, runTransaction, deleteField, updateDoc,
 } from 'firebase/firestore';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -106,6 +107,7 @@ export default function PracticeSlotsAdminPage() {
   const db = useFirestore();
   const { profile, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
+  const sportConfig = useSportConfig();
   const { toast } = useToast();
 
   const [addDialog, setAddDialog] = useState(false);
@@ -304,6 +306,9 @@ export default function PracticeSlotsAdminPage() {
       const subSlots = calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate);
       const batch = writeBatch(db);
       const baseFields = {
+        // sport is required — the list query filters on it, so a slot written
+        // without it is invisible in the page that created it.
+        sport: activeSport,
         seasonId: activeSeason.id,
         fieldId: form.fieldId,
         fieldName: fieldMap[form.fieldId] ?? '',
@@ -348,6 +353,8 @@ export default function PracticeSlotsAdminPage() {
       const subSlots = calculateSubSlotTimes(form.startTime, form.endTime, form.slotsPerDate);
       const batch = writeBatch(db);
       const baseFields = {
+        // sport is required — see handleAdd.
+        sport: activeSport,
         seasonId: activeSeason.id,
         fieldId: form.fieldId,
         fieldName: fieldMap[form.fieldId] ?? '',
@@ -703,6 +710,27 @@ export default function PracticeSlotsAdminPage() {
             <CardHeader>
               <Lock className="h-12 w-12 text-destructive mx-auto mb-4" />
               <CardTitle>Access Denied</CardTitle>
+            </CardHeader>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // The claim/approval slot system is baseball-only; football coaches schedule
+  // their own practices, so there is nothing for an admin to pre-allot here.
+  if (!sportConfig.hasPracticeSlots) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <Sidebar />
+        <main className="flex-1 md:ml-64 p-3 pt-16 flex items-center justify-center">
+          <Card className="max-w-md text-center border-none shadow-xl">
+            <CardHeader>
+              <CalendarDays className="h-12 w-12 text-muted-foreground/40 mx-auto mb-4" />
+              <CardTitle>Not used in {sportConfig.label}</CardTitle>
+              <CardDescription>
+                {sportConfig.label} coaches schedule their own practices, so there are no slots to pre-allot.
+              </CardDescription>
             </CardHeader>
           </Card>
         </main>
