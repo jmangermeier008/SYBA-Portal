@@ -52,11 +52,16 @@ interface UpcomingEventsListProps {
   rosterCountByTeamId?: Record<string, number>;
   /** Open the "who's coming" roster (coach/admin). Omitted on parent surfaces. */
   onViewAttendance?: (event: CalendarEvent) => void;
+  /**
+   * Act on the row that was actually tapped. Takes precedence over rowHref,
+   * which sends every row to the same page regardless of what was clicked.
+   */
+  onSelectEvent?: (event: CalendarEvent) => void;
   emptyMessage?: string;
   className?: string;
 }
 
-export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEventId, rosterCountByTeamId, onViewAttendance, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
+export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEventId, rosterCountByTeamId, onViewAttendance, onSelectEvent, emptyMessage = 'Nothing scheduled.', className }: UpcomingEventsListProps) {
   const sorted = [...events].sort((a, b) =>
     `${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`)
   );
@@ -99,7 +104,7 @@ export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEvent
                 <div
                   className={cn(
                     'flex items-center gap-3 rounded-lg border p-2.5',
-                    rowHref && 'hover:bg-muted/50 transition-colors',
+                    (rowHref || onSelectEvent) && 'hover:bg-muted/50 transition-colors',
                     event.status === 'cancelled' && 'opacity-60',
                   )}
                 >
@@ -148,6 +153,20 @@ export function UpcomingEventsList({ events, limit, rowHref, sport, tallyByEvent
                   )}
                 </div>
               );
+              // A per-event handler beats rowHref, which sends every row to the
+              // same page no matter which one was tapped.
+              if (onSelectEvent) {
+                return (
+                  <button
+                    key={event.id}
+                    type="button"
+                    className="block w-full text-left"
+                    onClick={() => onSelectEvent(event)}
+                  >
+                    {row}
+                  </button>
+                );
+              }
               return rowHref
                 ? <Link key={event.id} href={rowHref} className="block">{row}</Link>
                 : <div key={event.id}>{row}</div>;

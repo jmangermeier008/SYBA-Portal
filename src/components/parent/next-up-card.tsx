@@ -1,20 +1,29 @@
 "use client";
 
+/**
+ * "Next Up" — everything the family has on the next day anything is scheduled.
+ *
+ * Replaces the old one-game-per-child card, which queried with limit(1) on
+ * team games only. That hid the common real case: a practice and an equipment
+ * handout on the same Saturday, where the parent could see one and not respond
+ * to the other at all.
+ *
+ * Rows are grouped by child for team events, with custom events in their own
+ * section since those are answered once per family, not per player.
+ */
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, orderBy, limit } from 'firebase/firestore';
+import { collectionGroup, query, where } from 'firebase/firestore';
 import { useUser, useFirestore, useMemoFirebase, useCollection } from '@/firebase';
-import { writeRsvp, type RsvpStatus } from '@/lib/rsvp';
-import { RSVP_LABEL } from '@/lib/rsvp-labels';
-import { nowDateTime } from '@/lib/game-shape';
 import { Card, CardContent } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Check, X, HelpCircle, Loader2 } from 'lucide-react';
-import { format } from 'date-fns';
-import { useToast } from '@/hooks/use-toast';
-import { usePushNudge } from '@/hooks/use-push-nudge';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Calendar, MapPin, Trophy, Dumbbell, CalendarDays, ChevronRight } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { RSVP_LABEL } from '@/lib/rsvp-labels';
+import type { RsvpStatus } from '@/lib/rsvp';
+import type { RsvpChild } from './RsvpSheet';
+import type { CalendarEvent } from '@/types/scheduling';
 
 function useCountdown(targetDate: string | undefined) {
   const [label, setLabel] = useState('');
@@ -34,163 +43,195 @@ function useCountdown(targetDate: string | undefined) {
   return label;
 }
 
-/** "Next Up" hero for one child's team: next event, countdown, and RSVP
- *  buttons that write that child's RSVP. Rendered once per enrolled child. */
-export function NextUpCard({
-  player,
-  teamId,
-  showPlayerName,
+function formatTime(t?: string): string {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+const STATUS_STYLES: Record<RsvpStatus, string> = {
+  'Attending': 'bg-green-50 text-green-700 border-green-200',
+  'Maybe': 'bg-yellow-50 text-yellow-700 border-yellow-200',
+  'Not Attending': 'bg-red-50 text-red-700 border-red-200',
+};
+
+function EventRow({
+  event,
+  status,
+  onSelect,
 }: {
-  player: { id: string; firstName?: string };
-  teamId: string;
-  showPlayerName: boolean;
+  event: CalendarEvent;
+  status: RsvpStatus | null;
+  onSelect: () => void;
 }) {
-  const { user } = useUser();
+  const Icon = event.eventType === 'game' ? Trophy : event.eventType === 'practice' ? Dumbbell : CalendarDays;
+  return (
+    <button
+      onClick={onSelect}
+      className="w-full flex items-center gap-3 rounded-lg border p-2.5 text-left hover:bg-muted/50 transition-colors min-h-[52px]"
+    >
+      <div className="shrink-0 rounded-md bg-muted p-1.5">
+        <Icon className="h-4 w-4 text-primary" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium truncate">{event.title}</p>
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <span>{formatTime(event.startTime)}</span>
+          {event.fieldName && (
+            <>
+              <span>·</span>
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate">{event.fieldName}</span>
+            </>
+          )}
+        </p>
+      </div>
+      <Badge
+        variant="outline"
+        className={cn('shrink-0 text-[10px]', status ? STATUS_STYLES[status] : 'text-muted-foreground')}
+      >
+        {status ? RSVP_LABEL[status] : 'Tap to RSVP'}
+      </Badge>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+    </button>
+  );
+}
+
+export function NextUpCard({
+  events,
+  familyChildren,
+  isLoading,
+  onSelectEvent,
+}: {
+  /** The family's upcoming events (games, practices, custom events). */
+  events: CalendarEvent[];
+  familyChildren: RsvpChild[];
+  isLoading?: boolean;
+  onSelectEvent: (event: CalendarEvent) => void;
+}) {
   const db = useFirestore();
-  const { toast } = useToast();
-  const nudgePush = usePushNudge();
-  const isMobile = useIsMobile();
-  const [rsvpLoading, setRsvpLoading] = useState(false);
+  const { user } = useUser();
 
-  const now = useMemo(() => nowDateTime(), []);
-  const nextGameQuery = useMemoFirebase(() => {
-    if (!db || !teamId) return null;
-    return query(
-      collection(db, 'teams', teamId, 'games'),
-      where('dateTime', '>=', now),
-      orderBy('dateTime', 'asc'),
-      limit(1)
+  // Every RSVP this parent has written, in one query — cheaper and simpler
+  // than subscribing per event just to show which rows still need an answer.
+  const myRsvpsQuery = useMemoFirebase(() => {
+    if (!db || !user) return null;
+    return query(collectionGroup(db, 'rsvps'), where('parentUserId', '==', user.uid));
+  }, [db, user?.uid]);
+  const { data: myRsvps } = useCollection<{
+    id: string; status?: RsvpStatus; playerId?: string; gameId?: string; eventId?: string;
+  }>(myRsvpsQuery);
+
+  // The next day anything is scheduled, and everything on it.
+  const { dayEvents, dayDate } = useMemo(() => {
+    const sorted = [...events].sort((a, b) =>
+      `${a.date}T${a.startTime ?? ''}`.localeCompare(`${b.date}T${b.startTime ?? ''}`)
     );
-  }, [db, teamId, now]);
-  const { data: nextGames, isLoading: loadingGames } = useCollection<{
-    id: string; dateTime: string; endTime?: string; location: string; type: string; opponentName?: string;
-  }>(nextGameQuery);
-  const nextGame = nextGames?.[0];
+    const first = sorted[0];
+    if (!first) return { dayEvents: [] as CalendarEvent[], dayDate: undefined };
+    return { dayEvents: sorted.filter(e => e.date === first.date), dayDate: first.date };
+  }, [events]);
 
-  const countdown = useCountdown(nextGame?.dateTime);
+  const countdown = useCountdown(
+    dayEvents[0] ? `${dayEvents[0].date}T${dayEvents[0].startTime || '00:00'}:00` : undefined
+  );
 
-  const rsvpsQuery = useMemoFirebase(() => {
-    if (!db || !teamId || !nextGame?.id) return null;
-    return collection(db, 'teams', teamId, 'games', nextGame.id, 'rsvps');
-  }, [db, teamId, nextGame?.id]);
-  const { data: rsvps } = useCollection<{ id: string; status: string; playerId: string; gameId?: string }>(rsvpsQuery);
-  // Check by canonical doc ID first (which encodes gameId), then fall back to
-  // playerId+gameId match for older records that lack a composite doc ID.
-  const currentRsvp = nextGame
-    ? rsvps?.find(r =>
-        r.id === `${player.id}_${nextGame.id}` ||
-        (r.playerId === player.id && r.gameId === nextGame.id)
-      )
-    : undefined;
-
-  const handleRsvp = async (status: RsvpStatus) => {
-    if (!user || !db || !teamId || !nextGame?.id) return;
-    setRsvpLoading(true);
-    try {
-      await writeRsvp(db, { teamId, gameId: nextGame.id, playerId: player.id, parentUserId: user.uid, status });
-      toast({ title: 'RSVP saved', description: `${showPlayerName && player.firstName ? `${player.firstName}: ` : ''}${RSVP_LABEL[status]}.` });
-      nudgePush('Turn on notifications and this device gets a game-day reminder.');
-    } catch (err: any) {
-      toast({ title: "RSVP didn't save", description: err.message, variant: 'destructive' });
-    } finally {
-      setRsvpLoading(false);
+  const statusFor = (event: CalendarEvent, playerId?: string): RsvpStatus | null => {
+    if (!myRsvps) return null;
+    if (event.eventType === 'event') {
+      return myRsvps.find(r => r.eventId === event.sourceId)?.status ?? null;
     }
+    const hit = myRsvps.find(r =>
+      r.id === `${playerId}_${event.sourceId}` ||
+      (r.playerId === playerId && r.gameId === event.sourceId)
+    );
+    return hit?.status ?? null;
   };
 
-  return (
-    <Card className="border shadow-sm">
-      <CardContent className="pt-4 pb-4">
-        {loadingGames ? (
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-4 w-36" />
-            <Skeleton className="h-12 w-full mt-2" />
-          </div>
-        ) : nextGame ? (
-          <>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-xs font-bold uppercase tracking-widest text-primary">
-                {format(new Date(nextGame.dateTime), 'EEEE')} · {countdown}
-              </p>
-              {showPlayerName && player.firstName && (
-                <Badge variant="secondary" className="text-[10px]">{player.firstName}</Badge>
-              )}
-            </div>
-            <p className="text-2xl font-bold tracking-tight mb-0.5">
-              {nextGame.type === 'Game' && nextGame.opponentName
-                ? `vs ${nextGame.opponentName}`
-                : nextGame.type === 'Game' ? 'Game' : 'Team Practice'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {format(new Date(nextGame.dateTime), 'h:mm a')}
-              {nextGame.endTime ? ` – ${format(new Date(`2000-01-01T${nextGame.endTime}`), 'h:mm a')}` : ''}
-              {nextGame.location ? ` · ${nextGame.location}` : ''}
-            </p>
-            <div className={cn("mt-3", isMobile ? "flex gap-2" : "flex gap-1.5")}>
-              {rsvpLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              ) : (
-                <>
-                  <button
-                    onClick={() => handleRsvp('Attending')}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 border transition-colors font-semibold",
-                      isMobile
-                        ? "flex-1 min-h-[48px] rounded-xl text-sm px-3"
-                        : "px-3 py-2 min-h-[40px] rounded-full text-xs",
-                      currentRsvp?.status === 'Attending'
-                        ? "bg-green-500 text-white border-green-500"
-                        : "border-green-300 text-green-700 hover:bg-green-50"
-                    )}
-                  >
-                    <Check className={isMobile ? "h-4 w-4" : "h-3 w-3"} />
-                    {RSVP_LABEL['Attending']}
-                  </button>
-                  <button
-                    onClick={() => handleRsvp('Maybe')}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 border transition-colors font-semibold",
-                      isMobile
-                        ? "flex-1 min-h-[48px] rounded-xl text-sm px-3"
-                        : "px-3 py-2 min-h-[40px] rounded-full text-xs",
-                      currentRsvp?.status === 'Maybe'
-                        ? "bg-yellow-400 text-white border-yellow-400"
-                        : "border-yellow-300 text-yellow-700 hover:bg-yellow-50"
-                    )}
-                  >
-                    <HelpCircle className={isMobile ? "h-4 w-4" : "h-3 w-3"} /> {RSVP_LABEL['Maybe']}
-                  </button>
-                  <button
-                    onClick={() => handleRsvp('Not Attending')}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 border transition-colors font-semibold",
-                      isMobile
-                        ? "flex-1 min-h-[48px] rounded-xl text-sm px-3"
-                        : "px-3 py-2 min-h-[40px] rounded-full text-xs",
-                      currentRsvp?.status === 'Not Attending'
-                        ? "bg-red-500 text-white border-red-500"
-                        : "border-red-300 text-red-700 hover:bg-red-50"
-                    )}
-                  >
-                    <X className={isMobile ? "h-4 w-4" : "h-3 w-3"} />
-                    {RSVP_LABEL['Not Attending']}
-                  </button>
-                </>
-              )}
-            </div>
-          </>
-        ) : (
+  // Team events group under the child they apply to; custom events are answered
+  // once per family, so they get their own section rather than being repeated
+  // under every child.
+  const sections = useMemo(() => {
+    const out: { key: string; label: string; rows: { event: CalendarEvent; playerId?: string }[] }[] = [];
+
+    for (const child of familyChildren) {
+      const rows = dayEvents
+        .filter(e => e.eventType !== 'event' && e.teamId === child.teamId)
+        .map(e => ({ event: e, playerId: child.player.id }));
+      if (rows.length > 0) {
+        out.push({
+          key: child.player.id,
+          label: `${child.player.firstName ?? ''} ${child.player.lastName ?? ''}`.trim() || 'Player',
+          rows,
+        });
+      }
+    }
+
+    const familyRows = dayEvents.filter(e => e.eventType === 'event').map(e => ({ event: e }));
+    if (familyRows.length > 0) {
+      out.push({ key: '__family', label: 'Everyone', rows: familyRows });
+    }
+    return out;
+  }, [dayEvents, familyChildren]);
+
+  if (isLoading) {
+    return (
+      <Card className="border shadow-sm mb-4">
+        <CardContent className="pt-4 pb-4 space-y-2">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (sections.length === 0) {
+    return (
+      <Card className="border shadow-sm mb-4">
+        <CardContent className="pt-4 pb-4">
           <div className="flex items-center gap-3 py-2">
             <Calendar className="h-8 w-8 text-muted-foreground/40" />
             <div>
-              <p className="font-semibold text-sm">
-                No upcoming games{showPlayerName && player.firstName ? ` for ${player.firstName}` : ''}
+              <p className="font-semibold text-sm">Nothing coming up</p>
+              <p className="text-xs text-muted-foreground">
+                Your schedule will appear here once games and practices are posted.
               </p>
-              <p className="text-xs text-muted-foreground">Your schedule will appear here once the league publishes games.</p>
             </div>
           </div>
-        )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border shadow-sm mb-4">
+      <CardContent className="pt-4 pb-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-primary">
+            Next Up · {dayDate ? format(parseISO(dayDate), 'EEEE, MMM d') : ''}
+          </p>
+          {countdown && <Badge variant="secondary" className="text-[10px]">{countdown}</Badge>}
+        </div>
+
+        <div className="space-y-3">
+          {sections.map(section => (
+            <div key={section.key} className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {section.label}
+              </p>
+              {section.rows.map(({ event, playerId }) => (
+                <EventRow
+                  key={`${event.sourceId}-${playerId ?? 'family'}`}
+                  event={event}
+                  status={statusFor(event, playerId)}
+                  onSelect={() => onSelectEvent(event)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );

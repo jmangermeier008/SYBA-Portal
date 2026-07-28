@@ -16,12 +16,13 @@ import { format } from 'date-fns';
 import { notifyTeamParents } from '@/lib/coach-notifications';
 import { nowDateTime, normalizeTeamGame } from '@/lib/game-shape';
 import { useTeamGamesLive } from '@/hooks/use-team-games';
-import { useRsvpTallies, EMPTY_TALLY } from '@/hooks/use-rsvp-tallies';
+import { useRsvpTallies, useEventRsvpTallies, EMPTY_TALLY } from '@/hooks/use-rsvp-tallies';
+import { visibleCustomEvents, normalizeCustomEvent } from '@/lib/calendar-events';
 import { useSportConfig } from '@/config/sports';
 import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
 import { WhoIsComingDialog, attendanceTargetFor } from '@/components/attendance/WhoIsComingDialog';
 import { useToast } from '@/hooks/use-toast';
-import { isAnnouncementActive, type Game } from '@/types/scheduling';
+import { isAnnouncementActive, type CalendarEvent, type CustomEvent, type Game } from '@/types/scheduling';
 import { NextEventCard } from './next-event-card';
 import { LogScoreDialog } from '@/components/coach/LogScoreDialog';
 import { InstallPrompt } from '@/components/pwa/install-prompt';
@@ -58,7 +59,7 @@ type TeamGameEvent = GameEvent & { _teamId: string };
 export default function CoachDashboard() {
   const { user, profile, loading: loadingUser } = useUser();
   const db = useFirestore();
-  const { activeSport } = useSport();
+  const { activeSport, isAdmin } = useSport();
   const sportConfig = useSportConfig();
 
   // -1 = "All Teams" combined view (the default for multi-team coaches)
@@ -113,29 +114,62 @@ export default function CoachDashboard() {
     [visibleGames, nowLocal]
   );
 
-  // Skip cancelled events so a rained-out game doesn't drive the next-event card
-  const nextGame = upcomingGames.find(g => !g.cancelled);
+  // Skip cancelled events so a rained-out game doesn't drive a next-event card.
+  // One card per type, so a practice on Tuesday no longer hides Saturday's game.
+  const nextGameEvent = upcomingGames.find(g => !g.cancelled && g.type === 'Game');
+  const nextPractice = upcomingGames.find(g => !g.cancelled && g.type === 'Practice');
+  // Drives the contextual CTA only — soonest of either type.
+  const soonestEvent = upcomingGames.find(g => !g.cancelled);
 
-  // Team Schedule card — shared agenda list, skipping the event NextEventCard
-  // already shows so the same game isn't rendered twice.
+  // Custom events (equipment handout, tagging night…) live outside the team
+  // subcollections, so they need their own subscription — same shape the coach
+  // schedules page uses.
+  const customEventsQuery = useMemoFirebase(() => {
+    if (!db || !activeSport) return null;
+    return query(collection(db, 'customEvents'), where('sport', '==', activeSport));
+  }, [db, activeSport]);
+  const { data: customEvents } = useCollection<CustomEvent>(customEventsQuery);
+
+  const upcomingCustomEvents = useMemo(() => {
+    const visible = visibleCustomEvents(customEvents ?? [], { isAdmin, teamIds });
+    return visible
+      .filter(e => e.status !== 'cancelled' && `${e.date}T${e.startTime || '00:00'}:00` >= nowLocal)
+      .map(normalizeCustomEvent)
+      .sort((a, b) => `${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`));
+  }, [customEvents, isAdmin, teamIds, nowLocal]);
+  const nextCustomEvent = upcomingCustomEvents[0];
+
+  // Team Schedule card — shared agenda list, skipping the events already shown
+  // in the cards above so nothing is rendered twice.
+  const cardedEventIds = useMemo(
+    () => new Set([nextGameEvent?.id, nextPractice?.id, nextCustomEvent?.sourceId].filter(Boolean) as string[]),
+    [nextGameEvent?.id, nextPractice?.id, nextCustomEvent?.sourceId],
+  );
   const scheduleListEvents = useMemo(() => {
-    return upcomingGames
-      .filter(g => !(nextGame && g.id === nextGame.id && g._teamId === nextGame._teamId))
-      .slice(0, 5)
-      .map(g => {
-        const team = (teams ?? []).find(t => t.id === g._teamId);
-        const ev = normalizeTeamGame(g, g._teamId, { teamName: team?.name, divisionId: team?.divisionId });
-        if (isAllTeamsView && ev.eventType === 'game' && team?.name) ev.title = `${team.name} ${ev.title}`;
-        return ev;
-      });
-  }, [upcomingGames, nextGame, teams, isAllTeamsView]);
+    const teamRows = upcomingGames.map(g => {
+      const team = (teams ?? []).find(t => t.id === g._teamId);
+      const ev = normalizeTeamGame(g, g._teamId, { teamName: team?.name, divisionId: team?.divisionId });
+      if (isAllTeamsView && ev.eventType === 'game' && team?.name) ev.title = `${team.name} ${ev.title}`;
+      return ev;
+    });
+    return [...teamRows, ...upcomingCustomEvents]
+      .filter(ev => !cardedEventIds.has(ev.sourceId))
+      .sort((a, b) => `${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`))
+      .slice(0, 5);
+  }, [upcomingGames, upcomingCustomEvents, cardedEventIds, teams, isAllTeamsView]);
   const playerCount = selectedTeamId
     ? enrollments?.filter(e => e.teamId === selectedTeamId).length ?? 0
     : enrollments?.length ?? 0;
 
   // RSVP headcounts for every event on the coach's teams — one collection-group
-  // query, so the next-event card and the schedule list share the same data.
-  const tallyByEventId = useRsvpTallies(teamIds);
+  // query, so the cards and the schedule list share the same data. Custom events
+  // RSVP per parent account and are tallied separately.
+  const gameTallies = useRsvpTallies(teamIds);
+  const eventTallies = useEventRsvpTallies(useMemo(() => upcomingCustomEvents.map(e => e.sourceId), [upcomingCustomEvents]));
+  const tallyByEventId = useMemo(
+    () => new Map([...gameTallies, ...eventTallies]),
+    [gameTallies, eventTallies],
+  );
   const rosterCountByTeamId = useMemo(() => {
     const counts: Record<string, number> = {};
     (enrollments ?? []).forEach(e => {
@@ -144,11 +178,61 @@ export default function CoachDashboard() {
     return counts;
   }, [enrollments]);
 
-  const nextGameTally = (nextGame && tallyByEventId.get(nextGame.id)) ?? EMPTY_TALLY;
-  const unrepliedCount = Math.max(
-    0,
-    (nextGame?._teamId ? rosterCountByTeamId[nextGame._teamId] ?? 0 : 0) - nextGameTally.responded
-  );
+  // The up-to-three "what's next" cards, soonest first. Built as data so the
+  // three types share one set of props rather than three near-identical JSX
+  // blocks.
+  const nextEventCards = useMemo(() => {
+    const cards: { key: string; sortKey: string; props: React.ComponentProps<typeof NextEventCard> }[] = [];
+
+    for (const g of [nextGameEvent, nextPractice]) {
+      if (!g) continue;
+      cards.push({
+        key: g.id,
+        sortKey: g.dateTime ?? '',
+        props: {
+          teamId: g._teamId,
+          teamName: isAllTeamsView ? teamNameById[g._teamId] : undefined,
+          game: g,
+          tally: tallyByEventId.get(g.id) ?? EMPTY_TALLY,
+          rosterCount: rosterCountByTeamId[g._teamId],
+          onWeatherCancel: (gameId: string) => handleWeatherCancel(g._teamId, gameId),
+          onViewAttendance: () => setAttendanceTarget({
+            teamIds: [g._teamId],
+            gameId: g.id,
+            title: g.type === 'Game' ? `vs ${g.opponentName || 'TBD'}` : 'Team Practice',
+            isPractice: g.type === 'Practice',
+            eventDateTime: g.dateTime,
+          }),
+        },
+      });
+    }
+
+    if (nextCustomEvent) {
+      const ev = nextCustomEvent;
+      cards.push({
+        key: ev.sourceId,
+        sortKey: `${ev.date}T${ev.startTime ?? '00:00'}:00`,
+        props: {
+          teamId: ev.teamId ?? '',
+          teamName: isAllTeamsView ? (ev.teamName ?? undefined) : undefined,
+          game: {
+            id: ev.sourceId,
+            type: 'Event',
+            location: ev.fieldName ?? '',
+            dateTime: `${ev.date}T${ev.startTime ?? '00:00'}:00`,
+            endTime: ev.endTime,
+          },
+          title: ev.title,
+          tally: tallyByEventId.get(ev.sourceId) ?? EMPTY_TALLY,
+          // No rosterCount — a custom event has no invitee list to count against.
+          onViewAttendance: () => setAttendanceTarget(attendanceTargetFor(ev)),
+        },
+      });
+    }
+
+    return cards.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextGameEvent, nextPractice, nextCustomEvent, tallyByEventId, rosterCountByTeamId, teamNameById, isAllTeamsView]);
 
   // Football games that have started but never got a final score — the coach
   // can log these directly (scores live on top-level games, which standings read)
@@ -176,20 +260,20 @@ export default function CoachDashboard() {
     if (unscoredGames.length > 0) {
       return { label: 'Log Score', icon: ClipboardList, logScore: unscoredGames[0] };
     }
-    if (!nextGame) return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
+    if (!soonestEvent) return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
     const now = new Date();
-    const eventTime = new Date(nextGame.dateTime);
+    const eventTime = new Date(soonestEvent.dateTime);
     const hoursDiff = (eventTime.getTime() - now.getTime()) / 3600000;
     // Slot claiming is baseball-only — football coaches schedule their own
     // practices, so this CTA would point them at a page they can't use.
-    if (sportConfig.hasPracticeSlots && nextGame.type === 'Practice' && hoursDiff > 0 && hoursDiff <= 24) {
+    if (sportConfig.hasPracticeSlots && soonestEvent.type === 'Practice' && hoursDiff > 0 && hoursDiff <= 24) {
       return { label: 'Claim Practice Slot', href: '/coach/practice-slots', icon: ClipboardList };
     }
-    if (nextGame.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
-      return { label: 'Take Attendance', href: `/coach/teams/${nextGame._teamId}?tab=attendance`, icon: UserCheck };
+    if (soonestEvent.type === 'Game' && hoursDiff >= -2 && hoursDiff <= 4) {
+      return { label: 'Take Attendance', href: `/coach/teams/${soonestEvent._teamId}?tab=attendance`, icon: UserCheck };
     }
     return { label: 'View Schedule', href: '/coach/schedules', icon: Calendar };
-  }, [nextGame, unscoredGames, sportConfig.hasPracticeSlots]) as {
+  }, [soonestEvent, unscoredGames, sportConfig.hasPracticeSlots]) as {
     label: string;
     icon: typeof Calendar;
     href?: string;
@@ -457,9 +541,11 @@ export default function CoachDashboard() {
           </Card>
         )}
 
-        {/* Next event — opponent, RSVP tally, and one-tap actions in one place */}
-        <div className="mb-5">
-          {loadingGames ? (
+        {/* What's next — one card per type, soonest first. flex (not grid) so
+            two cards split the row instead of leaving a hole where a third
+            would go. */}
+        {loadingGames ? (
+          <div className="mb-5">
             <Card className="border shadow-sm">
               <CardContent className="p-4 space-y-2">
                 <Skeleton className="h-4 w-40" />
@@ -467,27 +553,17 @@ export default function CoachDashboard() {
                 <Skeleton className="h-3 w-32" />
               </CardContent>
             </Card>
-          ) : nextGame ? (
-            <NextEventCard
-              teamId={nextGame._teamId}
-              teamName={isAllTeamsView ? teamNameById[nextGame._teamId] : undefined}
-              game={nextGame}
-              tally={{
-                attending: nextGameTally.attending,
-                maybe: nextGameTally.maybe,
-                notAttending: nextGameTally.notAttending,
-                unreplied: unrepliedCount,
-              }}
-              onWeatherCancel={(gameId) => handleWeatherCancel(nextGame._teamId, gameId)}
-              onViewAttendance={() => setAttendanceTarget({
-                teamIds: [nextGame._teamId],
-                gameId: nextGame.id,
-                title: nextGame.type === 'Game' ? `vs ${nextGame.opponentName || 'TBD'}` : 'Team Practice',
-                isPractice: nextGame.type === 'Practice',
-                eventDateTime: nextGame.dateTime,
-              })}
-            />
-          ) : (
+          </div>
+        ) : nextEventCards.length > 0 ? (
+          <div className="flex flex-col md:flex-row gap-3 mb-5">
+            {nextEventCards.map(card => (
+              <div key={card.key} className="flex-1 min-w-0">
+                <NextEventCard {...card.props} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mb-5">
             <Card className="border shadow-sm">
               <CardContent className="p-4 flex items-center gap-3">
                 <Calendar className="h-8 w-8 text-muted shrink-0" />
@@ -499,8 +575,8 @@ export default function CoachDashboard() {
                 </div>
               </CardContent>
             </Card>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Stats strip — My Teams / Players / Record */}
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">

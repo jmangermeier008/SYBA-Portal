@@ -11,6 +11,7 @@ import { syncCoParentOnEnrollments } from '@/lib/family-links';
 import { useFamilyEnrollments, useFamilyPlayers } from '@/hooks/use-family-data';
 import { useTeamGamesLive } from '@/hooks/use-team-games';
 import { UpcomingEventsList } from '@/components/schedule/UpcomingEventsList';
+import { RsvpSheet } from '@/components/parent/RsvpSheet';
 import { normalizeTeamGame } from '@/lib/game-shape';
 import { normalizeCustomEvent, visibleCustomEvents } from '@/lib/calendar-events';
 import { Users, Calendar, Bell, Loader2, Printer } from 'lucide-react';
@@ -62,6 +63,8 @@ export default function ParentDashboard() {
   const [calendarFilters, setCalendarFilters] = useState({ games: true, practices: true, concessions: false, events: true });
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
+  // The event whose RSVP sheet is open — one surface for every event row.
+  const [rsvpEvent, setRsvpEvent] = useState<CalendarEvent | null>(null);
 
   // Real player count — family-wide, includes players shared via co-parent links
   const { data: players } = useFamilyPlayers<{
@@ -268,17 +271,33 @@ export default function ParentDashboard() {
     }
   };
 
-  // RSVP writer for the season-schedule calendar (per selected player); the
-  // Next Up cards carry their own per-child writer.
+  // RSVP writer for the season-schedule calendar.
+  //
+  // Resolves the child from the EVENT'S team, not from whichever player happens
+  // to be selected in the dropdown — that mismatch silently filed a two-child
+  // family's RSVP against the wrong kid. Where several children share the team,
+  // all of them are written, matching the sheet's "same for everyone" default.
   const handleDashboardRSVP = async (
     status: 'Attending' | 'Maybe' | 'Not Attending',
     gameId: string,
     teamId: string
   ) => {
-    if (!user || !db || !teamId || !selectedPlayerId || !gameId) return;
+    if (!user || !db || !teamId || !gameId) return;
+    const childrenOnTeam = enrolledChildren.filter(c => c.teamId === teamId);
+    if (childrenOnTeam.length === 0) {
+      toast({ title: "RSVP didn't save", description: 'No enrolled player found for this team.', variant: 'destructive' });
+      return;
+    }
     try {
-      await writeRsvp(db, { teamId, gameId, playerId: selectedPlayerId, parentUserId: user.uid, status });
-      toast({ title: 'RSVP saved', description: `${RSVP_LABEL[status]}.` });
+      await Promise.all(childrenOnTeam.map(c =>
+        writeRsvp(db, { teamId, gameId, playerId: c.player.id, parentUserId: user.uid, status })
+      ));
+      toast({
+        title: 'RSVP saved',
+        description: childrenOnTeam.length > 1
+          ? `All ${childrenOnTeam.length} children: ${RSVP_LABEL[status]}.`
+          : `${RSVP_LABEL[status]}.`,
+      });
       nudgePush('Turn on notifications and this device gets a game-day reminder.');
     } catch (err: any) {
       toast({ title: "RSVP didn't save", description: err.message, variant: "destructive" });
@@ -571,18 +590,13 @@ export default function ParentDashboard() {
             </div>
           )}
 
-          {/* ── Next Up — one card per enrolled child ── */}
+          {/* ── Next Up — everything on the family's next active day ── */}
           {enrolledChildren.length > 0 ? (
-            <div className="space-y-3 mb-4">
-              {enrolledChildren.map(({ player, teamId }) => (
-                <NextUpCard
-                  key={player.id}
-                  player={player}
-                  teamId={teamId}
-                  showPlayerName={enrolledChildren.length > 1}
-                />
-              ))}
-            </div>
+            <NextUpCard
+              events={upcomingEvents}
+              familyChildren={enrolledChildren}
+              onSelectEvent={setRsvpEvent}
+            />
           ) : (
             <Card className="border shadow-sm mb-4">
               <CardContent className="pt-4 pb-4">
@@ -611,7 +625,7 @@ export default function ParentDashboard() {
                   events={upcomingEvents}
                   sport={activeSport}
                   limit={6}
-                  rowHref="/parent/schedules"
+                  onSelectEvent={setRsvpEvent}
                   emptyMessage="Nothing coming up."
                 />
               </CardContent>
@@ -693,6 +707,12 @@ export default function ParentDashboard() {
             </Card>
           )}
         </div>
+
+        <RsvpSheet
+          event={rsvpEvent}
+          familyChildren={enrolledChildren}
+          onOpenChange={open => { if (!open) setRsvpEvent(null); }}
+        />
       </main>
     </div>
   );
