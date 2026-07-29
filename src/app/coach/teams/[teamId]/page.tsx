@@ -32,6 +32,7 @@ import Link from 'next/link';
 import { calculateLeagueAge } from '@/lib/utils';
 import { format } from 'date-fns';
 import { GameAttendancePanel } from '@/components/coach/GameAttendancePanel';
+import { useAttendanceTotals, formatAttendanceRatio } from '@/hooks/use-attendance-totals';
 import {
   Dialog,
   DialogContent,
@@ -134,6 +135,10 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
   const { data: enrollments, isLoading: loadingEnrollments } = useCollection<Enrollment>(enrollmentsQuery);
   const { data: allPlayers, isLoading: loadingPlayers } = useCollection<Player>(playersQuery);
   const { data: allUsers, isLoading: loadingUsers } = useCollection<UserProfile>(usersQuery);
+
+  // Season attendance, so the roster answers "who's been missing?" without
+  // opening every event. Coach-visible only — never surfaced to parents.
+  const { totals: attendanceTotals } = useAttendanceTotals(teamId);
 
   const playerMap = useMemo(() => {
     const m = new Map<string, Player>();
@@ -303,6 +308,7 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                   const player = playerMap.get(enrollment.playerId);
                   const parent = allUsers?.find(u => u.id === enrollment.parentUserId);
                   const phone = parent?.phoneNumber ?? enrollment.emergencyContacts?.[0]?.phone;
+                  const attendance = attendanceTotals.get(enrollment.playerId);
 
                   if (!player) return null;
 
@@ -385,6 +391,13 @@ export default function TeamRosterPage({ params }: { params: Promise<{ teamId: s
                             {enrollment.divisionId}
                           </Badge>
                         </div>
+
+                        {attendance && attendance.eligible > 0 && (
+                          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            <span>Attendance</span>
+                            <span className="tabular-nums">{formatAttendanceRatio(attendance)}</span>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   );

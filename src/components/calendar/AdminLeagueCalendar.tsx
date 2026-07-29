@@ -93,7 +93,7 @@ interface AdminLeagueCalendarProps {
 export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
   const db = useFirestore();
   const router = useRouter();
-  const { activeSport } = useSport();
+  const { activeSport, isAdmin, isBoardMember } = useSport();
   const { user, profile } = useUser();
   const { toast } = useToast();
   const [filters, setFilters] = useState({ games: true, practices: true, concessions: true, events: true });
@@ -261,6 +261,7 @@ export function AdminLeagueCalendar({ defaultView }: AdminLeagueCalendarProps) {
       <WhoIsComingDialog
         target={attendanceTarget}
         onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+        canRecord={isAdmin || isBoardMember}
       />
 
       <AddEventDialog

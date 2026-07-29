@@ -333,6 +333,8 @@ export default function CoachSchedulesPage() {
         <WhoIsComingDialog
           target={attendanceTarget}
           onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+          myTeamIds={coachTeamIds}
+          canRecord
         />
       </main>
     </div>

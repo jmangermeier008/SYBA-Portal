@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CalendarCheck, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { nowDateTime } from '@/lib/game-shape';
-import { AttendanceRoster } from '@/components/attendance/AttendanceRoster';
+import { AttendanceView } from '@/components/attendance/AttendanceView';
+import { SeasonAttendanceCard } from '@/components/coach/SeasonAttendanceCard';
 
 interface TeamGame {
   id: string;
@@ -24,10 +25,11 @@ function eventLabel(g: TeamGame): string {
   return `${what} — ${when}`;
 }
 
-/** Per-event RSVP roll call for coaches: who's in, who's out, who hasn't
- *  replied — with a one-tap nudge to the families that haven't answered.
- *  The roll call itself is AttendanceRoster, shared with the dialog that opens
- *  from the calendar and schedule lists. */
+/** Per-event attendance for coaches, both halves of it: who said they're
+ *  coming (with a one-tap nudge to the families that haven't answered) and who
+ *  actually showed up. The panel owns the event picker; AttendanceView owns
+ *  both lists and is shared with the dialog that opens from the calendar and
+ *  schedule lists. Season totals sit underneath. */
 export function GameAttendancePanel({ teamId }: { teamId: string }) {
   const db = useFirestore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -71,11 +73,14 @@ export function GameAttendancePanel({ teamId }: { teamId: string }) {
   }
 
   return (
+    <div className="space-y-6">
     <Card className="border-none shadow-md">
       <CardHeader className="space-y-4">
         <div>
           <CardTitle className="text-lg font-headline">Attendance</CardTitle>
-          <CardDescription>Who&apos;s coming, based on family RSVPs. Updates live.</CardDescription>
+          <CardDescription>
+            Family RSVPs and your roll call, for any event this season. Only coaches and admins see this.
+          </CardDescription>
         </div>
         <Select value={effectiveGameId ?? undefined} onValueChange={setSelectedId}>
           <SelectTrigger className="w-full sm:max-w-md min-h-[44px]">
@@ -90,15 +95,21 @@ export function GameAttendancePanel({ teamId }: { teamId: string }) {
       </CardHeader>
       <CardContent>
         {selectedGame && (
-          <AttendanceRoster
+          <AttendanceView
+            key={selectedGame.id}
             teamIds={[teamId]}
             gameId={selectedGame.id}
             eventTitle={selectedGame.type === 'Game' ? `game vs ${selectedGame.opponentName || 'TBD'}` : 'practice'}
             eventDateTime={selectedGame.dateTime}
             isPractice={selectedGame.type === 'Practice'}
+            myTeamIds={[teamId]}
+            canRecord
           />
         )}
       </CardContent>
     </Card>
+
+    <SeasonAttendanceCard teamId={teamId} />
+    </div>
   );
 }

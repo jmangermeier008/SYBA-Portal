@@ -758,6 +758,8 @@ export default function CoachDashboard() {
         <WhoIsComingDialog
           target={attendanceTarget}
           onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+          myTeamIds={teamIds}
+          canRecord
         />
 
         {db && user && (

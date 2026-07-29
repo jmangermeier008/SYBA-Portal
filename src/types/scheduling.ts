@@ -163,6 +163,25 @@ export interface Game {
   originalFieldName?: string;
 }
 
+/** Coach-recorded attendance status for one player at one event. */
+export type AttendanceStatus = 'present' | 'late' | 'absent';
+
+/**
+ * The roll call stored on a team-mirror game doc.
+ *
+ * `recordedBy` / `recordedAt` live INSIDE this map rather than as sibling
+ * top-level fields on purpose — firestore.rules only lets a coach update the
+ * game doc when the changed top-level keys are whitelisted, and 'attendance'
+ * is the only one available. Hoisting them out would break coach writes.
+ * Behavior lives in src/lib/attendance.ts.
+ */
+export interface AttendanceRecord {
+  /** playerId -> status. A missing key means "not marked". */
+  marks?: Record<string, AttendanceStatus>;
+  recordedBy?: string;           // uid of the last coach/admin to touch it
+  recordedAt?: string;           // naive-local "YYYY-MM-DDTHH:MM:SS"
+}
+
 /**
  * A game or practice event in the `teams/{teamId}/games` subcollection (coach/parent-facing).
  * IMPORTANT: Different shape from the top-level `Game` type:
@@ -183,6 +202,14 @@ export interface TeamGame {
   locationType?: 'home' | 'away'; // Football: whether game is at home or away
   cancelled: boolean;
   cancellationReason?: string;
+  /**
+   * Coach-recorded roll call — who actually showed up. NOT the same thing as
+   * the `rsvps` subcollection, which is a parent stating intent beforehand.
+   * Coach/admin visible only; never rendered to parents.
+   * Owned by src/lib/attendance.ts — see the note there on why recordedBy /
+   * recordedAt live inside this map instead of as sibling fields.
+   */
+  attendance?: AttendanceRecord;
   practiceSlotId?: string;       // Links to practiceSlots/{id} when applicable
   isRecurring?: boolean;         // True when created as part of a recurring series
   recurrenceId?: string;         // Shared UUID across all games in the same recurring series
@@ -584,6 +611,10 @@ export interface Enrollment {
   shirtSize: string;
   jerseySize: string;          // Backward-compat alias for shirtSize — keep in sync
   uniformNumberPreference: string;
+  // Assigned uniform number. Written by the admin roster CSV import and read by
+  // the coach/parent team pages and roll calls. Distinct from
+  // footballEquipment.jerseyNumber, which tracks the issued football jersey.
+  jerseyNumber?: string;
   // Medical / safety
   emergencyContacts: EmergencyContact[];
   medicalNotes: string;

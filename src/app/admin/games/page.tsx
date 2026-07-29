@@ -1966,6 +1966,7 @@ export default function AdminGamesPage() {
       <WhoIsComingDialog
         target={attendanceTarget}
         onOpenChange={open => { if (!open) setAttendanceTarget(null); }}
+        canRecord={isAdmin || isBoardMember}
       />
     </div>
   );

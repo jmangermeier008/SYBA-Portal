@@ -19,7 +19,7 @@
  */
 import { useMemo, useState } from 'react';
 import { collection, collectionGroup, documentId, query, where } from 'firebase/firestore';
-import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
+import { useFirestore, useCollection, useMemoFirebase, useUser, useRosterData, sortedPlayerRows, playerDisplayName } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,20 +33,6 @@ import type { RsvpStatus } from '@/lib/rsvp';
 import type { RsvpTally } from '@/hooks/use-rsvp-tallies';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface EnrollmentRow {
-  id: string;
-  playerId: string;
-  parentUserId: string;
-  teamId?: string;
-  jerseyNumber?: string;
-}
-
-interface PlayerRow {
-  id: string;
-  firstName?: string;
-  lastName?: string;
-}
 
 interface RsvpRow {
   id: string;
@@ -128,17 +114,12 @@ function TeamAttendance({ teamIds, gameId, eventTitle, eventDateTime, isPractice
   const { toast } = useToast();
   const [nudging, setNudging] = useState(false);
   const [nudged, setNudged] = useState(false);
-  const teamIdsKey = teamIds.join(',');
 
-  const enrollmentsQuery = useMemoFirebase(() => {
-    if (!db || teamIds.length === 0) return null;
-    return query(collectionGroup(db, 'enrollments'), where('teamId', 'in', teamIds.slice(0, 30)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, teamIdsKey]);
-  const { data: enrollments, isLoading: loadingEnrollments } = useCollection<EnrollmentRow>(enrollmentsQuery);
-
-  const playersQuery = useMemoFirebase(() => (db ? collectionGroup(db, 'players') : null), [db]);
-  const { data: players } = useCollection<PlayerRow>(playersQuery);
+  // includeParents: false — a roll call needs parent UIDs (already on the
+  // enrollment, for the nudge) but not their profiles, so opening this from a
+  // calendar popover shouldn't read every userProfile.
+  const { rows: rawRows, isLoading: loadingRoster } = useRosterData({ teamIds, includeParents: false });
+  const roster = useMemo(() => sortedPlayerRows(rawRows), [rawRows]);
 
   // One query across every mirror of this game — a baseball game writes RSVPs
   // under both teams, and both carry the same gameId.
@@ -148,12 +129,6 @@ function TeamAttendance({ teamIds, gameId, eventTitle, eventDateTime, isPractice
   }, [db, gameId]);
   const { data: rsvps, isLoading: loadingRsvps } = useCollection<RsvpRow>(rsvpsQuery);
 
-  const playerMap = useMemo(() => {
-    const m = new Map<string, PlayerRow>();
-    (players ?? []).forEach(p => m.set(p.id, p));
-    return m;
-  }, [players]);
-
   const rows = useMemo(() => {
     const byPlayer = new Map<string, RsvpStatus>();
     (rsvps ?? []).forEach(r => {
@@ -161,19 +136,11 @@ function TeamAttendance({ teamIds, gameId, eventTitle, eventDateTime, isPractice
       const pid = r.playerId ?? r.id.split('_')[0];
       if (pid && r.status) byPlayer.set(pid, r.status);
     });
-    return (enrollments ?? [])
-      .map(e => ({
-        enrollment: e,
-        player: playerMap.get(e.playerId),
-        status: byPlayer.get(e.playerId) ?? null,
-      }))
-      .filter(r => r.player)
-      .sort((a, b) => (a.player!.lastName ?? '').localeCompare(b.player!.lastName ?? ''));
-  }, [enrollments, playerMap, rsvps]);
+    return roster.map(r => ({ ...r, status: byPlayer.get(r.enrollment.playerId) ?? null }));
+  }, [roster, rsvps]);
 
   const noReply = rows.filter(r => !r.status);
-  const nameOf = (r: (typeof rows)[number]) =>
-    `${r.player!.firstName ?? ''} ${r.player!.lastName ?? ''}`.trim() || 'Unnamed player';
+  const nameOf = (r: (typeof rows)[number]) => playerDisplayName(r.player);
 
   const tally: RsvpTally = useMemo(() => {
     const t = { attending: 0, maybe: 0, notAttending: 0, responded: 0 };
@@ -217,7 +184,7 @@ function TeamAttendance({ teamIds, gameId, eventTitle, eventDateTime, isPractice
     }
   };
 
-  if (loadingEnrollments || loadingRsvps) {
+  if (loadingRoster || loadingRsvps) {
     return <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
   }
 
