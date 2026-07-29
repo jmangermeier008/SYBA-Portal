@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { ArrowUpCircle, BadgeCheck, CheckCircle2, Circle, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload } from 'lucide-react';
+import { ArrowUpCircle, BadgeCheck, CheckCircle2, Circle, History, Loader2, Download, Maximize2, MoreHorizontal, Trash2, Printer, Upload, XCircle, Wallet } from 'lucide-react';
 import { getLeagueAge } from '@/lib/registration-logic';
 import { openPrintTab } from '@/lib/print-job';
 import { openDocumentPacket } from '@/lib/document-packet';
@@ -39,6 +39,7 @@ export interface PlayerWithDocs {
   waiverSignedRelationship?: string;
   waiverSignedName?: string;
   parentUserId?: string;
+  secondaryParentId?: string;
   divisionId?: string;
   birthCertificateUrl?: string;
   physicalFormUrl?: string;
@@ -53,6 +54,13 @@ export interface PlayerWithDocs {
     verifiedAt?: string;
     verificationStatus?: 'pending' | 'approved' | 'rejected';
     rejectionReason?: string;
+    birthCertificateRejected?: boolean;
+    birthCertificateRejectionReason?: string;
+    physicalRejected?: boolean;
+    physicalRejectionReason?: string;
+    rejectedBy?: string;
+    rejectedByName?: string;
+    rejectedAt?: string;
     leagueFormSigned?: boolean;
     parentalAgreementSigned?: boolean;
   };
@@ -72,13 +80,25 @@ export interface EnrollmentRecord {
   registrationFeeAmount?: number;
   parentWeightEstimate?: number;
   emergencyContacts?: { name: string; phone: string; relationship: string }[];
+  volunteerDepositStatus?: DepositStatus;
+  volunteerDepositReceivedAt?: string;
+  volunteerDepositReceivedByName?: string;
+  volunteerDepositReturnedAt?: string;
+  volunteerDepositReturnedByName?: string;
 }
+
+/** Absent = no check received. Held = league has it. Returned = handed back. */
+export type DepositStatus = 'held' | 'returned';
 
 export interface AuditFormData {
   auditDob: string;
   auditDivisionId: string;
   approveAge: boolean;
   approvePhysical: boolean;
+  rejectBirthCert: boolean;
+  rejectBirthCertReason: string;
+  rejectPhysical: boolean;
+  rejectPhysicalReason: string;
   leagueFormSigned?: boolean; // undefined = not applicable (baseball) — don't write
   parentalAgreementSigned?: boolean; // same semantics as leagueFormSigned
 }
@@ -106,6 +126,14 @@ interface PlayerTableProps {
   onWaiveFee?: (player: PlayerWithDocs, enrollment: EnrollmentRecord) => void;
   /** When provided, waitlisted rows get a "Promote from Waitlist" action */
   onPromoteWaitlist?: (player: PlayerWithDocs, enrollment: EnrollmentRecord) => void;
+  /** Football: show the volunteer deposit check chip under the payment badge */
+  showDeposit?: boolean;
+  /**
+   * Deposit + payment-status writes land on the enrollment doc, which
+   * firestore.rules restricts to Admins — Board Members get the chip read-only.
+   */
+  canEditPayment?: boolean;
+  onSetDepositStatus?: (enrollment: EnrollmentRecord, next: DepositStatus | null) => Promise<void>;
 }
 
 function getPaymentStatus(e?: EnrollmentRecord): string | null {
@@ -114,9 +142,50 @@ function getPaymentStatus(e?: EnrollmentRecord): string | null {
   return e.payment_status ?? e.paymentStatus ?? 'pending';
 }
 
-type PaymentFilter = 'all' | 'pending' | 'paid' | 'fee_waived' | 'waitlisted';
+/**
+ * Per-document verdict. A rejection outranks a prior approval — rejecting an
+ * already-verified document also clears its verified flag, so the two can never
+ * disagree.
+ */
+type DocStatus = 'verified' | 'rejected' | 'pending' | 'none';
 
-function paymentBucket(status: string | null): Exclude<PaymentFilter, 'all'> | 'other' {
+function birthCertStatus(p: PlayerWithDocs): DocStatus {
+  if (p.compliance?.birthCertificateRejected) return 'rejected';
+  if (p.ageVerified) return 'verified';
+  return p.birthCertificateUrl ? 'pending' : 'none';
+}
+
+function physicalStatus(p: PlayerWithDocs): DocStatus {
+  if (p.compliance?.physicalRejected) return 'rejected';
+  if (p.compliance?.physicalVerified) return 'verified';
+  return p.physicalFormUrl ? 'pending' : 'none';
+}
+
+function DocStatusBadge({ status }: { status: DocStatus }) {
+  switch (status) {
+    case 'verified':
+      return <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>;
+    case 'rejected':
+      return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-none">Rejected</Badge>;
+    case 'pending':
+      return <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>;
+    default:
+      return <Badge variant="outline">No Document</Badge>;
+  }
+}
+
+const DOC_STATUS_LABEL: Record<DocStatus, string> = {
+  verified: 'Verified',
+  rejected: 'Rejected',
+  pending: 'Pending',
+  none: 'No Document',
+};
+
+type PaymentFilter =
+  | 'all' | 'pending' | 'paid' | 'fee_waived' | 'waitlisted'
+  | 'deposit_held' | 'deposit_missing';
+
+function paymentBucket(status: string | null): 'pending' | 'paid' | 'fee_waived' | 'waitlisted' | 'other' {
   if (status === 'pending' || status === 'pending_payment') return 'pending';
   if (status === 'paid') return 'paid';
   if (status === 'fee_waived') return 'fee_waived';
@@ -150,6 +219,164 @@ function PaymentBadge({ enrollment }: { enrollment?: EnrollmentRecord }) {
   }
 }
 
+/**
+ * Approve/reject verdict for one document in the audit dialog. The two are
+ * mutually exclusive (the caller clears the other on select). Reject stays
+ * available on an already-approved document — admins do catch a bad file after
+ * the fact, and rejecting clears the approval.
+ */
+function DocVerdict({
+  label,
+  alreadyApproved,
+  standingRejection,
+  approve,
+  onApprove,
+  reject,
+  onReject,
+  reason,
+  onReason,
+}: {
+  label: string;
+  alreadyApproved: boolean;
+  standingRejection: boolean;
+  approve: boolean;
+  onApprove: (next: boolean) => void;
+  reject: boolean;
+  onReject: (next: boolean) => void;
+  reason: string;
+  onReason: (next: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {alreadyApproved && !reject ? (
+        <p className="text-xs text-green-600 flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" /> Already approved
+        </p>
+      ) : !alreadyApproved ? (
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={approve}
+            onChange={e => onApprove(e.target.checked)}
+            className="h-4 w-4 accent-green-600"
+          />
+          <span className="text-sm font-medium">Approve {label}</span>
+        </label>
+      ) : null}
+
+      <label className="flex items-center gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={reject}
+          onChange={e => onReject(e.target.checked)}
+          className="h-4 w-4 accent-red-600"
+        />
+        <span className="text-sm font-medium text-red-700">Reject — ask parent to re-upload</span>
+      </label>
+
+      {reject && (
+        <div className="space-y-1">
+          <Label className="text-xs text-red-700">Reason (shown to the parent)</Label>
+          <Input
+            value={reason}
+            onChange={e => onReason(e.target.value)}
+            placeholder="e.g. Photo is too blurry to read the date"
+            className="rounded-xl h-8 text-sm border-red-200 focus-visible:ring-red-400"
+          />
+        </div>
+      )}
+
+      {standingRejection && !reject && (
+        <p className="text-xs text-amber-700 flex items-start gap-1">
+          <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+          Currently rejected — unchecking clears it without a new document.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The volunteer deposit check a family writes and the league holds until their
+ * shifts are met. Read-only badge for Board Members; a transition menu for
+ * Admins, who are the only role firestore.rules lets write enrollment fields.
+ */
+function DepositChip({
+  enrollment,
+  canEdit,
+  disabled,
+  onSet,
+}: {
+  enrollment?: EnrollmentRecord;
+  canEdit: boolean;
+  disabled: boolean;
+  onSet?: (enrollment: EnrollmentRecord, next: DepositStatus | null) => Promise<void>;
+}) {
+  const status = enrollment?.volunteerDepositStatus;
+  const stampedBy = status === 'returned'
+    ? enrollment?.volunteerDepositReturnedByName
+    : enrollment?.volunteerDepositReceivedByName;
+  const stampedAt = status === 'returned'
+    ? enrollment?.volunteerDepositReturnedAt
+    : enrollment?.volunteerDepositReceivedAt;
+
+  const chip = (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+        status === 'held'
+          ? 'bg-amber-50 border-amber-200 text-amber-800'
+          : status === 'returned'
+          ? 'bg-green-50 border-green-200 text-green-700'
+          : 'bg-muted/40 border-muted-foreground/20 text-muted-foreground'
+      }`}
+    >
+      <Wallet className="h-3 w-3" />
+      {status === 'held' ? 'Deposit held' : status === 'returned' ? 'Deposit returned' : 'No deposit'}
+    </span>
+  );
+
+  const stamp = stampedBy || stampedAt ? (
+    <p className="text-[10px] text-muted-foreground mt-0.5">
+      {stampedBy}
+      {stampedAt && `${stampedBy ? ' · ' : ''}${format(new Date(stampedAt), 'MMM d, yyyy')}`}
+    </p>
+  ) : null;
+
+  if (!canEdit || !enrollment || !onSet) {
+    return <div className="mt-1">{chip}{stamp}</div>;
+  }
+
+  return (
+    <div className="mt-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild disabled={disabled}>
+          <button type="button" className="disabled:opacity-50" aria-label="Change deposit status">
+            {chip}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {status !== 'held' && (
+            <DropdownMenuItem onClick={() => { void onSet(enrollment, 'held'); }}>
+              <Wallet className="mr-2 h-4 w-4 text-amber-600" /> Mark deposit received
+            </DropdownMenuItem>
+          )}
+          {status === 'held' && (
+            <DropdownMenuItem onClick={() => { void onSet(enrollment, 'returned'); }}>
+              <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" /> Mark deposit returned
+            </DropdownMenuItem>
+          )}
+          {status && (
+            <DropdownMenuItem onClick={() => { void onSet(enrollment, null); }}>
+              <XCircle className="mr-2 h-4 w-4 text-muted-foreground" /> Clear deposit
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {stamp}
+    </div>
+  );
+}
+
 export function PlayerTable({
   players,
   enrollments,
@@ -165,6 +392,9 @@ export function PlayerTable({
   onBulkVerify,
   onWaiveFee,
   onPromoteWaitlist,
+  showDeposit = false,
+  canEditPayment = false,
+  onSetDepositStatus,
 }: PlayerTableProps) {
   const isMobile = useIsMobile();
   const { user } = useUser();
@@ -174,6 +404,7 @@ export function PlayerTable({
   const [divisionFilter, setDivisionFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
   const [missingPhysicalOnly, setMissingPhysicalOnly] = useState(false);
+  const [rejectedOnly, setRejectedOnly] = useState(false);
   const [search, setSearch] = useState('');
 
   const [auditingPlayer, setAuditingPlayer] = useState<PlayerWithDocs | null>(null);
@@ -186,6 +417,10 @@ export function PlayerTable({
   const [auditDivisionId, setAuditDivisionId] = useState('');
   const [approveAge, setApproveAge] = useState(false);
   const [approvePhysical, setApprovePhysical] = useState(false);
+  const [rejectBirthCert, setRejectBirthCert] = useState(false);
+  const [rejectBirthCertReason, setRejectBirthCertReason] = useState('');
+  const [rejectPhysical, setRejectPhysical] = useState(false);
+  const [rejectPhysicalReason, setRejectPhysicalReason] = useState('');
   const [leagueFormSigned, setLeagueFormSigned] = useState(false);
   const [parentalAgreementSigned, setParentalAgreementSigned] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
@@ -277,12 +512,17 @@ export function PlayerTable({
         const playerDivisionId = enrollment?.divisionId ?? p.divisionId;
         const matchesDivision = divisionFilter === 'all' || playerDivisionId === divisionFilter;
         const matchesPayment =
-          paymentFilter === 'all' || paymentBucket(getPaymentStatus(enrollment)) === paymentFilter;
+          paymentFilter === 'all' ? true :
+          paymentFilter === 'deposit_held' ? enrollment?.volunteerDepositStatus === 'held' :
+          paymentFilter === 'deposit_missing' ? !enrollment?.volunteerDepositStatus :
+          paymentBucket(getPaymentStatus(enrollment)) === paymentFilter;
         const matchesPhysical =
           !missingPhysicalOnly || (!p.physicalFormUrl && !p.compliance?.physicalVerified);
+        const matchesRejected =
+          !rejectedOnly || birthCertStatus(p) === 'rejected' || physicalStatus(p) === 'rejected';
         const matchesSearch =
           q === '' || `${p.firstName} ${p.lastName}`.toLowerCase().includes(q);
-        return matchesStatus && matchesDivision && matchesPayment && matchesPhysical && matchesSearch;
+        return matchesStatus && matchesDivision && matchesPayment && matchesPhysical && matchesRejected && matchesSearch;
       })
       // Pending payment first, then waitlisted, then everyone else; alphabetical within each group
       .sort((a, b) => {
@@ -295,7 +535,7 @@ export function PlayerTable({
           (a.firstName ?? '').localeCompare(b.firstName ?? '', undefined, { sensitivity: 'base' })
         );
       });
-  }, [players, statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, search, playerEnrollmentMap]);
+  }, [players, statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, rejectedOnly, search, playerEnrollmentMap]);
 
   // ── Bulk selection ──────────────────────────────────────────────────────────
   const bulkEnabled = canAudit && !!onBulkVerify;
@@ -304,7 +544,7 @@ export function PlayerTable({
   // admin can no longer see — clear it instead.
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, search]);
+  }, [statusFilter, divisionFilter, paymentFilter, missingPhysicalOnly, rejectedOnly, search]);
 
   const selectedPlayers = useMemo(
     () => filteredPlayers.filter(p => selectedIds.has(p.id)),
@@ -341,7 +581,7 @@ export function PlayerTable({
   // Counts for the one-click triage chips — respect only the division filter so
   // the numbers stay meaningful while other filters change
   const attentionCounts = useMemo(() => {
-    let paymentPending = 0, docsToVerify = 0, missingPhysical = 0, waitlisted = 0;
+    let paymentPending = 0, docsToVerify = 0, missingPhysical = 0, waitlisted = 0, rejected = 0;
     players.forEach(p => {
       const enrollment = playerEnrollmentMap.get(p.id);
       const playerDivisionId = enrollment?.divisionId ?? p.divisionId;
@@ -349,13 +589,15 @@ export function PlayerTable({
       const bucket = paymentBucket(getPaymentStatus(enrollment));
       if (bucket === 'pending') paymentPending++;
       if (bucket === 'waitlisted') waitlisted++;
-      const hasUnverifiedDoc =
-        (!!p.birthCertificateUrl && !p.ageVerified) ||
-        (!!p.physicalFormUrl && !p.compliance?.physicalVerified);
-      if (hasUnverifiedDoc) docsToVerify++;
+      const bc = birthCertStatus(p);
+      const phys = physicalStatus(p);
+      // A rejected document is waiting on the parent, not the admin — it gets
+      // its own chip instead of padding the verify queue.
+      if (bc === 'pending' || phys === 'pending') docsToVerify++;
+      if (bc === 'rejected' || phys === 'rejected') rejected++;
       if (!p.physicalFormUrl && !p.compliance?.physicalVerified) missingPhysical++;
     });
-    return { paymentPending, docsToVerify, missingPhysical, waitlisted };
+    return { paymentPending, docsToVerify, missingPhysical, waitlisted, rejected };
   }, [players, divisionFilter, playerEnrollmentMap]);
 
   const openAudit = (player: PlayerWithDocs) => {
@@ -363,6 +605,12 @@ export function PlayerTable({
     setAuditDivisionId('');
     setApproveAge(false);
     setApprovePhysical(false);
+    // Seed from the stored verdict so a returning admin sees the standing
+    // rejection and its reason rather than a blank form.
+    setRejectBirthCert(player.compliance?.birthCertificateRejected ?? false);
+    setRejectBirthCertReason(player.compliance?.birthCertificateRejectionReason ?? '');
+    setRejectPhysical(player.compliance?.physicalRejected ?? false);
+    setRejectPhysicalReason(player.compliance?.physicalRejectionReason ?? '');
     setLeagueFormSigned(player.compliance?.leagueFormSigned ?? false);
     setParentalAgreementSigned(player.compliance?.parentalAgreementSigned ?? false);
     setAuditDocTab('birthCert');
@@ -377,8 +625,10 @@ export function PlayerTable({
 
   // One labeled menu per row, shared by the desktop table and mobile cards.
   const renderRowMenu = (player: PlayerWithDocs, enrollment: EnrollmentRecord | undefined) => {
-    const canWaive = !!onWaiveFee && !!enrollment && !['paid', 'fee_waived'].includes(getPaymentStatus(enrollment) ?? '');
-    const canPromote = !!onPromoteWaitlist && !!enrollment && getPaymentStatus(enrollment) === 'waitlisted';
+    // Both of these write paymentStatus, which firestore.rules allows Admins
+    // only — showing them to a Board Member just produces a permission error.
+    const canWaive = canEditPayment && !!onWaiveFee && !!enrollment && !['paid', 'fee_waived'].includes(getPaymentStatus(enrollment) ?? '');
+    const canPromote = canEditPayment && !!onPromoteWaitlist && !!enrollment && getPaymentStatus(enrollment) === 'waitlisted';
     if (!showLeagueForm && !canWaive && !canPromote && !isSiteAdmin) return null;
     return (
       <DropdownMenu>
@@ -440,12 +690,26 @@ export function PlayerTable({
 
   const handleAuditSubmit = async () => {
     if (!auditingPlayer) return;
+    // The reason is the whole point of a rejection — it's what the parent sees
+    // and acts on, so an empty one is never worth saving.
+    if ((rejectBirthCert && !rejectBirthCertReason.trim()) || (rejectPhysical && !rejectPhysicalReason.trim())) {
+      toast({
+        variant: 'destructive',
+        title: 'Reason Required',
+        description: 'Tell the parent what needs to be fixed before rejecting a document.',
+      });
+      return;
+    }
     setLocalProcessing(true);
     const success = await onAuditSubmit(auditingPlayer, {
       auditDob,
       auditDivisionId,
       approveAge,
       approvePhysical,
+      rejectBirthCert,
+      rejectBirthCertReason: rejectBirthCertReason.trim(),
+      rejectPhysical,
+      rejectPhysicalReason: rejectPhysicalReason.trim(),
       leagueFormSigned: showLeagueForm ? leagueFormSigned : undefined,
       parentalAgreementSigned: showLeagueForm ? parentalAgreementSigned : undefined,
     });
@@ -463,19 +727,27 @@ export function PlayerTable({
 
   const exportCSV = () => {
     const headers = ['Player Name', 'Division', 'Age', 'Grade', 'DOB', 'Payment Status', 'Birth Cert Status', 'Physical Status'];
+    if (showDeposit) headers.push('Volunteer Deposit');
     if (showLeagueForm) headers.push('Registration Form', 'Parent/Player Agreement');
     const rows = filteredPlayers.map(player => {
       const divName = player.divisionId ? (divisionNameMap.get(player.divisionId) ?? '') : '';
       const age = getLeagueAge(player.dateOfBirth) ?? '';
       const enrollment = playerEnrollmentMap.get(player.id);
       const payStatus = getPaymentStatus(enrollment) ?? '—';
-      const birthCertStatus = player.ageVerified ? 'Verified' : player.birthCertificateUrl ? 'Pending' : 'No Document';
-      const physicalStatus = player.compliance?.physicalVerified ? 'Verified' : player.physicalFormUrl ? 'Pending' : 'No Document';
       const row = [
         `${player.firstName} ${player.lastName}`,
         divName, String(age), player.grade ?? '', player.dateOfBirth ?? '',
-        payStatus, birthCertStatus, physicalStatus,
+        payStatus,
+        DOC_STATUS_LABEL[birthCertStatus(player)],
+        DOC_STATUS_LABEL[physicalStatus(player)],
       ];
+      if (showDeposit) {
+        row.push(
+          enrollment?.volunteerDepositStatus === 'held' ? 'Held'
+            : enrollment?.volunteerDepositStatus === 'returned' ? 'Returned'
+            : 'Not Received'
+        );
+      }
       if (showLeagueForm) {
         row.push(player.compliance?.leagueFormSigned ? 'Signed' : 'Not Signed');
         row.push(player.compliance?.parentalAgreementSigned ? 'Signed' : 'Not Signed');
@@ -510,7 +782,7 @@ export function PlayerTable({
           {/* One-click triage chips — what still needs attention, at a glance.
               Each chip is a single-purpose view: click to isolate, click again
               to clear. Chips with nothing to show stay hidden. */}
-          {(attentionCounts.paymentPending > 0 || attentionCounts.docsToVerify > 0 || attentionCounts.missingPhysical > 0 || attentionCounts.waitlisted > 0) && (
+          {(attentionCounts.paymentPending > 0 || attentionCounts.docsToVerify > 0 || attentionCounts.missingPhysical > 0 || attentionCounts.waitlisted > 0 || attentionCounts.rejected > 0) && (
             <div className="flex flex-wrap gap-2">
               {([
                 {
@@ -541,6 +813,13 @@ export function PlayerTable({
                   active: paymentFilter === 'waitlisted' && statusFilter === 'all' && !missingPhysicalOnly,
                   apply: () => setPaymentFilter('waitlisted'),
                 },
+                {
+                  key: 'rejected',
+                  label: 'Rejected — waiting on parent',
+                  count: attentionCounts.rejected,
+                  active: rejectedOnly,
+                  apply: () => setRejectedOnly(true),
+                },
               ] as const).filter(c => c.count > 0).map(c => (
                 <button
                   key={c.key}
@@ -549,6 +828,7 @@ export function PlayerTable({
                     setStatusFilter('all');
                     setPaymentFilter('all');
                     setMissingPhysicalOnly(false);
+                    setRejectedOnly(false);
                     setSearch('');
                     if (!c.active) c.apply();
                   }}
@@ -614,6 +894,12 @@ export function PlayerTable({
                 <SelectItem value="paid">Paid</SelectItem>
                 <SelectItem value="fee_waived">Waived</SelectItem>
                 <SelectItem value="waitlisted">Waitlisted</SelectItem>
+                {showDeposit && (
+                  <>
+                    <SelectItem value="deposit_held">Deposit held</SelectItem>
+                    <SelectItem value="deposit_missing">No deposit on file</SelectItem>
+                  </>
+                )}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground ml-auto">
@@ -674,8 +960,8 @@ export function PlayerTable({
                 const enrollment = playerEnrollmentMap.get(player.id);
                 const divisionId = enrollment?.divisionId ?? player.divisionId;
                 const divisionName = divisionId ? (divisionNameMap.get(divisionId) ?? '—') : '—';
-                const birthCertStatus = player.ageVerified ? 'verified' : player.birthCertificateUrl ? 'pending' : 'none';
-                const physicalStatus = player.compliance?.physicalVerified ? 'verified' : player.physicalFormUrl ? 'pending' : 'none';
+                const bcStatus = birthCertStatus(player);
+                const physStatus = physicalStatus(player);
                 return (
                   <Card key={player.id} className="border shadow-sm">
                     <CardContent className="p-4 space-y-3">
@@ -694,23 +980,23 @@ export function PlayerTable({
                             <p className="text-xs text-muted-foreground">{divisionName} · DOB {player.dateOfBirth}{player.grade ? ` · Grade ${player.grade}` : ''}</p>
                           </div>
                         </div>
-                        <PaymentBadge enrollment={enrollment} />
+                        <div className="text-right shrink-0">
+                          <PaymentBadge enrollment={enrollment} />
+                          {showDeposit && (
+                            <DepositChip
+                              enrollment={enrollment}
+                              canEdit={canEditPayment}
+                              disabled={busy}
+                              onSet={onSetDepositStatus}
+                            />
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
                         <span className="text-xs text-muted-foreground">Birth Cert:</span>
-                        {birthCertStatus === 'verified'
-                          ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
-                          : birthCertStatus === 'pending'
-                          ? <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
-                          : <Badge variant="outline">No Document</Badge>
-                        }
+                        <DocStatusBadge status={bcStatus} />
                         <span className="text-xs text-muted-foreground ml-2">Physical:</span>
-                        {physicalStatus === 'verified'
-                          ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
-                          : physicalStatus === 'pending'
-                          ? <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
-                          : <Badge variant="outline">No Document</Badge>
-                        }
+                        <DocStatusBadge status={physStatus} />
                         {showLeagueForm && (
                           <>
                             <span className="text-xs text-muted-foreground ml-2">Registration Form:</span>
@@ -726,6 +1012,11 @@ export function PlayerTable({
                           </>
                         )}
                       </div>
+                      {(bcStatus === 'rejected' || physStatus === 'rejected') && (
+                        <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">
+                          {player.compliance?.rejectionReason || 'Waiting on the parent to re-upload.'}
+                        </p>
+                      )}
                       {(canAudit || showLeagueForm || !!onWaiveFee) && (
                         <div className="flex gap-2 pt-1">
                           {canAudit && (
@@ -776,6 +1067,8 @@ export function PlayerTable({
                     const enrollment = playerEnrollmentMap.get(player.id);
                     const divisionId = enrollment?.divisionId ?? player.divisionId;
                     const divisionName = divisionId ? (divisionNameMap.get(divisionId) ?? '—') : '—';
+                    const bcStatus = birthCertStatus(player);
+                    const physStatus = physicalStatus(player);
                     return (
                       <TableRow key={player.id} data-state={selectedIds.has(player.id) ? 'selected' : undefined}>
                         {bulkEnabled && (
@@ -794,45 +1087,49 @@ export function PlayerTable({
                         <TableCell className="text-sm text-muted-foreground">{divisionName}</TableCell>
                         <TableCell>
                           <PaymentBadge enrollment={enrollment} />
+                          {showDeposit && (
+                            <DepositChip
+                              enrollment={enrollment}
+                              canEdit={canEditPayment}
+                              disabled={busy}
+                              onSet={onSetDepositStatus}
+                            />
+                          )}
                         </TableCell>
 
                         {/* Birth Cert */}
                         <TableCell>
-                          {player.ageVerified ? (
-                            <div className="space-y-0.5">
-                              <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
-                              {player.verifiedBy && (
-                                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                  <History className="h-3 w-3" />
-                                  {player.verifiedByName || player.verifiedBy.slice(0, 8)}
-                                  {player.verifiedAt && ` · ${format(new Date(player.verifiedAt), 'MMM d, yyyy')}`}
-                                </p>
-                              )}
-                            </div>
-                          ) : player.birthCertificateUrl ? (
-                            <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
-                          ) : (
-                            <Badge variant="outline">No Document</Badge>
-                          )}
+                          <div className="space-y-0.5">
+                            <DocStatusBadge status={bcStatus} />
+                            {bcStatus === 'rejected' ? (
+                              <p className="text-[10px] text-red-700 max-w-[16rem]">
+                                {player.compliance?.birthCertificateRejectionReason || 'Waiting on re-upload'}
+                              </p>
+                            ) : bcStatus === 'verified' && player.verifiedBy ? (
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                <History className="h-3 w-3" />
+                                {player.verifiedByName || player.verifiedBy.slice(0, 8)}
+                                {player.verifiedAt && ` · ${format(new Date(player.verifiedAt), 'MMM d, yyyy')}`}
+                              </p>
+                            ) : null}
+                          </div>
                         </TableCell>
 
                         {/* Physical */}
                         <TableCell>
-                          {player.compliance?.physicalVerified ? (
-                            <div className="space-y-0.5">
-                              <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
-                              {player.compliance.verifiedAt && (
-                                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                  <History className="h-3 w-3" />
-                                  {format(new Date(player.compliance.verifiedAt), 'MMM d, yyyy')}
-                                </p>
-                              )}
-                            </div>
-                          ) : player.physicalFormUrl ? (
-                            <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Pending</Badge>
-                          ) : (
-                            <Badge variant="outline">No Document</Badge>
-                          )}
+                          <div className="space-y-0.5">
+                            <DocStatusBadge status={physStatus} />
+                            {physStatus === 'rejected' ? (
+                              <p className="text-[10px] text-red-700 max-w-[16rem]">
+                                {player.compliance?.physicalRejectionReason || 'Waiting on re-upload'}
+                              </p>
+                            ) : physStatus === 'verified' && player.compliance?.verifiedAt ? (
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                <History className="h-3 w-3" />
+                                {format(new Date(player.compliance.verifiedAt), 'MMM d, yyyy')}
+                              </p>
+                            ) : null}
+                          </div>
                         </TableCell>
 
                         {/* Forms — football only: registration form + parent/player agreement */}
@@ -1019,41 +1316,33 @@ export function PlayerTable({
                         </p>
                       )}
                     </div>
-                    {liveAuditingPlayer?.ageVerified ? (
-                      <p className="text-xs text-green-600 flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3" /> Already approved
-                      </p>
-                    ) : (
-                      <label className="flex items-center gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={approveAge}
-                          onChange={e => setApproveAge(e.target.checked)}
-                          className="h-4 w-4 accent-green-600"
-                        />
-                        <span className="text-sm font-medium">Approve Birth Certificate</span>
-                      </label>
-                    )}
+                    <DocVerdict
+                      label="Birth Certificate"
+                      alreadyApproved={liveAuditingPlayer?.ageVerified === true}
+                      standingRejection={liveAuditingPlayer?.compliance?.birthCertificateRejected === true}
+                      approve={approveAge}
+                      onApprove={next => { setApproveAge(next); if (next) setRejectBirthCert(false); }}
+                      reject={rejectBirthCert}
+                      onReject={next => { setRejectBirthCert(next); if (next) setApproveAge(false); }}
+                      reason={rejectBirthCertReason}
+                      onReason={setRejectBirthCertReason}
+                    />
                   </div>
 
                   {/* Physical Form */}
                   <div className="space-y-3 p-3 rounded-xl bg-secondary/10 border">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Physical Form</p>
-                    {liveAuditingPlayer?.compliance?.physicalVerified ? (
-                      <p className="text-xs text-green-600 flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3" /> Already approved
-                      </p>
-                    ) : (
-                      <label className="flex items-center gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={approvePhysical}
-                          onChange={e => setApprovePhysical(e.target.checked)}
-                          className="h-4 w-4 accent-green-600"
-                        />
-                        <span className="text-sm font-medium">Approve Physical Form</span>
-                      </label>
-                    )}
+                    <DocVerdict
+                      label="Physical Form"
+                      alreadyApproved={liveAuditingPlayer?.compliance?.physicalVerified === true}
+                      standingRejection={liveAuditingPlayer?.compliance?.physicalRejected === true}
+                      approve={approvePhysical}
+                      onApprove={next => { setApprovePhysical(next); if (next) setRejectPhysical(false); }}
+                      reject={rejectPhysical}
+                      onReject={next => { setRejectPhysical(next); if (next) setApprovePhysical(false); }}
+                      reason={rejectPhysicalReason}
+                      onReason={setRejectPhysicalReason}
+                    />
                   </div>
 
                   {/* League Forms — football only; reversible toggles, unlike the approve-once doc checkboxes */}

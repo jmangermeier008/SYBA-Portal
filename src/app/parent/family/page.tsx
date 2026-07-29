@@ -11,11 +11,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Loader2, User as UserIcon, Calendar, ChevronRight, Trophy, CheckCircle2, AlertTriangle, Pencil, UserPlus, Clock } from 'lucide-react';
+import { Loader2, User as UserIcon, Calendar, ChevronRight, Trophy, CheckCircle2, AlertTriangle, Pencil, UserPlus, Clock, Upload } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import type { LinkRequest } from '@/types/scheduling';
+import { uploadPlayerDocument } from '@/lib/player-documents';
+import type { PlayerDocType } from '@/lib/document-packet';
 import { searchAndRequestLink } from './actions';
 
 interface Enrollment {
@@ -47,9 +49,118 @@ interface Player {
   medicalNotes?: string;
   ageVerified?: boolean;
   birthCertificateUrl?: string;
+  physicalFormUrl?: string;
   emergencyContacts?: EmergencyContact[];
   primaryParentId?: string;
   secondaryParentId?: string;
+  compliance?: {
+    birthCertificateVerified?: boolean;
+    physicalVerified?: boolean;
+    verificationStatus?: 'pending' | 'approved' | 'rejected';
+    birthCertificateRejected?: boolean;
+    birthCertificateRejectionReason?: string;
+    physicalRejected?: boolean;
+    physicalRejectionReason?: string;
+  };
+}
+
+/** The two documents every registration needs, in the order parents see them. */
+const PLAYER_DOCS = [
+  { docType: 'birthCertificate' as PlayerDocType, label: 'Birth Certificate' },
+  { docType: 'physicalForm' as PlayerDocType, label: 'Physical Form' },
+];
+
+function docState(player: Player, docType: PlayerDocType) {
+  const c = player.compliance;
+  if (docType === 'birthCertificate') {
+    return {
+      rejected: c?.birthCertificateRejected === true,
+      reason: c?.birthCertificateRejectionReason,
+      verified: player.ageVerified === true || c?.birthCertificateVerified === true,
+      uploaded: !!player.birthCertificateUrl,
+    };
+  }
+  return {
+    rejected: c?.physicalRejected === true,
+    reason: c?.physicalRejectionReason,
+    verified: c?.physicalVerified === true,
+    uploaded: !!player.physicalFormUrl,
+  };
+}
+
+/**
+ * Per-document status and upload control. This is where the dashboard's
+ * "re-upload" prompts land, so every document must be replaceable here —
+ * verified ones included, in case a family needs to submit a corrected copy.
+ */
+function PlayerDocuments({
+  player,
+  uploadingKey,
+  onUpload,
+}: {
+  player: Player;
+  uploadingKey: string | null;
+  onUpload: (player: Player, docType: PlayerDocType, files: File[]) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Documents</p>
+      {PLAYER_DOCS.map(({ docType, label }) => {
+        const state = docState(player, docType);
+        const busy = uploadingKey === `${player.id}:${docType}`;
+        return (
+          <div
+            key={docType}
+            className={`rounded-xl border px-3 py-2.5 space-y-1.5 ${
+              state.rejected ? 'border-amber-200 bg-amber-50' : 'bg-secondary/10'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm font-medium">{label}</span>
+              {state.rejected ? (
+                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-none">Needs Attention</Badge>
+              ) : state.verified ? (
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
+                </Badge>
+              ) : state.uploaded ? (
+                <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-none">Pending Review</Badge>
+              ) : (
+                <Badge variant="outline">Not Uploaded</Badge>
+              )}
+            </div>
+            {state.rejected && (
+              <p className="text-xs text-amber-800">
+                {state.reason || 'An admin asked for a new copy of this document.'}
+              </p>
+            )}
+            <Label
+              className={`cursor-pointer text-xs font-medium px-3 rounded-full border bg-white transition-colors inline-flex items-center gap-1.5 min-h-[40px] md:min-h-[30px] ${
+                state.rejected
+                  ? 'border-amber-300 text-amber-800 hover:bg-amber-100'
+                  : 'border-input text-foreground hover:bg-secondary/40'
+              }`}
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {state.rejected ? 'Re-upload' : state.uploaded ? 'Replace' : 'Upload'}
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png"
+                multiple
+                disabled={!!uploadingKey}
+                onChange={e => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) onUpload(player, docType, files);
+                  e.target.value = '';
+                }}
+              />
+            </Label>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function FamilyPage() {
@@ -74,6 +185,8 @@ export default function FamilyPage() {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkForm, setLinkForm] = useState({ firstName: '', lastName: '', dateOfBirth: '' });
   const [linkSubmitting, setLinkSubmitting] = useState(false);
+  // `{playerId}:{docType}` while an upload is in flight — one at a time
+  const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
 
   const playersQuery = useMemoFirebase(() => {
     if (!db || !user) return null;
@@ -134,6 +247,34 @@ export default function FamilyPage() {
     });
     return ids;
   }, [enrollments, activeSeasons]);
+
+  /**
+   * Upload or replace one of a player's documents. Co-parented children live
+   * under the PRIMARY parent's subcollection, so the ref path follows the owner
+   * rather than the signed-in user — same rule as handleSavePlayer below.
+   */
+  const handleDocUpload = async (player: Player, docType: PlayerDocType, files: File[]) => {
+    if (!user || !db) return;
+    const ownerUid = player.primaryParentId || player.parentUserId || user.uid;
+    setUploadingDoc(`${player.id}:${docType}`);
+    try {
+      await uploadPlayerDocument({
+        user,
+        db,
+        refPath: `userProfiles/${ownerUid}/players/${player.id}`,
+        docType,
+        files,
+      });
+      toast({
+        title: 'Document uploaded',
+        description: 'An admin will review it — we’ll let you know once it’s verified.',
+      });
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Upload Failed', description: error.message });
+    } finally {
+      setUploadingDoc(null);
+    }
+  };
 
   const openEditDialog = (player: Player) => {
     setEditingPlayer(player);
@@ -268,7 +409,11 @@ export default function FamilyPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {player.ageVerified ? (
+                      {player.compliance?.verificationStatus === 'rejected' ? (
+                        <Badge variant="default" className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-none">
+                          <AlertTriangle className="h-3 w-3 mr-1" /> Needs Attention
+                        </Badge>
+                      ) : player.ageVerified ? (
                         <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100 border-none">
                           <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
                         </Badge>
@@ -307,6 +452,12 @@ export default function FamilyPage() {
                         </Link>
                       </Button>
                     )}
+
+                    <PlayerDocuments
+                      player={player}
+                      uploadingKey={uploadingDoc}
+                      onUpload={handleDocUpload}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -355,6 +506,12 @@ export default function FamilyPage() {
                         <Pencil className="h-4 w-4 mr-2 text-primary" />
                         <span className="text-sm">Edit Profile</span>
                       </Button>
+
+                      <PlayerDocuments
+                        player={player}
+                        uploadingKey={uploadingDoc}
+                        onUpload={handleDocUpload}
+                      />
                     </div>
                   </CardContent>
                 </Card>

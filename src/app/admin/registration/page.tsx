@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, increment, Timestamp } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, increment, Timestamp } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,10 +30,10 @@ import { useToast } from '@/hooks/use-toast';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { MetricsCards } from '@/components/admin/registration/metrics-cards';
-import { PlayerTable, type PlayerWithDocs, type AuditFormData, type EnrollmentRecord } from '@/components/admin/registration/player-table';
+import { PlayerTable, type PlayerWithDocs, type AuditFormData, type EnrollmentRecord, type DepositStatus } from '@/components/admin/registration/player-table';
 import { CoachComplianceTable } from '@/components/admin/registration/coach-compliance-table';
 import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
-import type { Division } from '@/types/scheduling';
+import { combinedRejectionReason, rollupVerificationStatus, type Division } from '@/types/scheduling';
 import { countIssuedEquipment } from '@/lib/equipment';
 import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 
@@ -55,6 +55,11 @@ interface Enrollment {
   sport?: string;
   parentWeightEstimate?: number;
   emergencyContacts?: { name: string; phone: string; relationship: string }[];
+  volunteerDepositStatus?: 'held' | 'returned';
+  volunteerDepositReceivedAt?: string;
+  volunteerDepositReceivedByName?: string;
+  volunteerDepositReturnedAt?: string;
+  volunteerDepositReturnedByName?: string;
 }
 
 interface CoachProfile {
@@ -303,6 +308,41 @@ export default function RegistrationDashboardPage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
+  // A rejected document is only useful if the family hears about it. Mirrors
+  // notifyClearanceDecision below — in-app notification plus a best-effort push
+  // to any opted-in device. Co-parents get it too; either can fix the upload.
+  const notifyDocumentRejection = async (
+    player: PlayerWithDocs,
+    compliance: Parameters<typeof combinedRejectionReason>[0]
+  ) => {
+    if (!db) return;
+    const primaryUid = player.parentUserId ?? (player as any)._refPath?.split('/')[1];
+    const recipients = [primaryUid, player.secondaryParentId].filter(
+      (uid): uid is string => !!uid
+    );
+    if (recipients.length === 0) return;
+
+    const title = 'Document Needs Attention';
+    const body =
+      `${player.firstName}'s registration needs a corrected document. ` +
+      `${combinedRejectionReason(compliance)}. Re-upload it from your dashboard.`;
+
+    await Promise.all(recipients.map(userId =>
+      setDoc(doc(db, 'notifications', crypto.randomUUID()), {
+        userId,
+        type: 'documentRejected',
+        title,
+        body: body.slice(0, 120),
+        relatedDocId: player.id,
+        relatedDocType: 'player',
+        read: false,
+        createdAt: Timestamp.now(),
+        sport: activeSport,
+      })
+    ));
+    pushToUsersBestEffort(recipients, { title, body, url: '/parent/dashboard' });
+  };
+
   const handleAuditSubmit = async (player: PlayerWithDocs, formData: AuditFormData): Promise<boolean> => {
     if (!db || !user) return false;
     const refPath = (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`;
@@ -325,6 +365,31 @@ export default function RegistrationDashboardPage() {
     if (formData.approvePhysical) {
       updateData['compliance.physicalVerified'] = true;
     }
+
+    // ── Rejections ──────────────────────────────────────────────────────────
+    // Rejecting also clears the approval, so a document is never simultaneously
+    // "verified" and "rejected". Unchecking a standing rejection clears it.
+    const wasBirthCertRejected = player.compliance?.birthCertificateRejected === true;
+    const wasPhysicalRejected = player.compliance?.physicalRejected === true;
+
+    updateData['compliance.birthCertificateRejected'] = formData.rejectBirthCert;
+    updateData['compliance.birthCertificateRejectionReason'] = formData.rejectBirthCert ? formData.rejectBirthCertReason : '';
+    if (formData.rejectBirthCert) {
+      updateData.ageVerified = false;
+      updateData['compliance.birthCertificateVerified'] = false;
+    }
+
+    updateData['compliance.physicalRejected'] = formData.rejectPhysical;
+    updateData['compliance.physicalRejectionReason'] = formData.rejectPhysical ? formData.rejectPhysicalReason : '';
+    if (formData.rejectPhysical) {
+      updateData['compliance.physicalVerified'] = false;
+    }
+
+    if (formData.rejectBirthCert || formData.rejectPhysical) {
+      updateData['compliance.rejectedBy'] = user.uid;
+      updateData['compliance.rejectedByName'] = profile?.displayName || 'Admin';
+      updateData['compliance.rejectedAt'] = now;
+    }
     // League waiver is a standalone paper-tracking flag — it never feeds into
     // verificationStatus, which only reflects document verification.
     if (typeof formData.leagueFormSigned === 'boolean') {
@@ -333,14 +398,37 @@ export default function RegistrationDashboardPage() {
     if (typeof formData.parentalAgreementSigned === 'boolean') {
       updateData['compliance.parentalAgreementSigned'] = formData.parentalAgreementSigned;
     }
-    const bothVerified =
-      (formData.approveAge || player.ageVerified === true) &&
-      (formData.approvePhysical || player.compliance?.physicalVerified === true);
-    updateData['compliance.verificationStatus'] = bothVerified ? 'approved' : 'pending';
+    const nextCompliance = {
+      birthCertificateVerified: !formData.rejectBirthCert && (formData.approveAge || player.ageVerified === true),
+      physicalVerified: !formData.rejectPhysical && (formData.approvePhysical || player.compliance?.physicalVerified === true),
+      birthCertificateRejected: formData.rejectBirthCert,
+      birthCertificateRejectionReason: formData.rejectBirthCertReason,
+      physicalRejected: formData.rejectPhysical,
+      physicalRejectionReason: formData.rejectPhysicalReason,
+    };
+    updateData['compliance.verificationStatus'] = rollupVerificationStatus(nextCompliance);
+    updateData['compliance.rejectionReason'] = combinedRejectionReason(nextCompliance);
 
     try {
       await updateDoc(playerRef, updateData as any);
       toast({ title: 'Audit Saved', description: 'Player compliance record updated.' });
+      // A newly rejected document is the parent's cue to act — tell them.
+      // The audit itself is already saved, so a notification failure must not
+      // read as a failed save.
+      const newlyRejected =
+        (formData.rejectBirthCert && !wasBirthCertRejected) ||
+        (formData.rejectPhysical && !wasPhysicalRejected);
+      if (newlyRejected) {
+        try {
+          await notifyDocumentRejection(player, nextCompliance);
+        } catch {
+          toast({
+            variant: 'destructive',
+            title: 'Saved, but the parent was not notified',
+            description: 'Let them know directly that a document needs to be re-uploaded.',
+          });
+        }
+      }
       return true;
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
@@ -365,8 +453,12 @@ export default function RegistrationDashboardPage() {
     const updates: { path: string; data: Record<string, unknown> }[] = [];
     let skipped = 0;
     for (const player of targets) {
-      const canVerifyAge = !!opts.approveAge && !!player.birthCertificateUrl && player.ageVerified !== true;
-      const canVerifyPhysical = !!opts.approvePhysical && !!player.physicalFormUrl && player.compliance?.physicalVerified !== true;
+      // Rejected documents are deliberately skipped — clearing a rejection is a
+      // per-player decision that belongs in the audit dialog with its reason.
+      const canVerifyAge = !!opts.approveAge && !!player.birthCertificateUrl &&
+        player.ageVerified !== true && player.compliance?.birthCertificateRejected !== true;
+      const canVerifyPhysical = !!opts.approvePhysical && !!player.physicalFormUrl &&
+        player.compliance?.physicalVerified !== true && player.compliance?.physicalRejected !== true;
       if (!canVerifyAge && !canVerifyPhysical) {
         skipped++;
         continue;
@@ -386,10 +478,14 @@ export default function RegistrationDashboardPage() {
       if (canVerifyPhysical) {
         data['compliance.physicalVerified'] = true;
       }
-      const bothVerified =
-        (canVerifyAge || player.ageVerified === true) &&
-        (canVerifyPhysical || player.compliance?.physicalVerified === true);
-      data['compliance.verificationStatus'] = bothVerified ? 'approved' : 'pending';
+      // Bulk approve never touches rejections — it must not silently clear a
+      // standing rejection on the document it isn't verifying.
+      data['compliance.verificationStatus'] = rollupVerificationStatus({
+        birthCertificateVerified: canVerifyAge || player.ageVerified === true,
+        physicalVerified: canVerifyPhysical || player.compliance?.physicalVerified === true,
+        birthCertificateRejected: player.compliance?.birthCertificateRejected,
+        physicalRejected: player.compliance?.physicalRejected,
+      });
       updates.push({
         path: (player as any)._refPath ?? `userProfiles/${player.parentUserId}/players/${player.id}`,
         data,
@@ -778,12 +874,75 @@ export default function RegistrationDashboardPage() {
     }
   };
 
+  /**
+   * Tick the volunteer deposit check on an enrollment. Football families write
+   * a check the league holds until their shifts are met; this is the manual
+   * record of it changing hands. Admin-only — firestore.rules blocks Board
+   * Members from writing non-equipment enrollment fields.
+   */
+  const handleSetDepositStatus = async (enrollment: EnrollmentRecord, next: DepositStatus | null) => {
+    if (!db || !user || !enrollment.parentUserId) return;
+    const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
+    const now = new Date().toISOString();
+    const adminName = profile?.displayName || 'Admin';
+
+    const updateData: Record<string, unknown> = { updatedAt: now };
+    if (next === 'held') {
+      updateData.volunteerDepositStatus = 'held';
+      updateData.volunteerDepositReceivedAt = now;
+      updateData.volunteerDepositReceivedBy = user.uid;
+      updateData.volunteerDepositReceivedByName = adminName;
+      // Re-receiving after a return starts a fresh cycle
+      updateData.volunteerDepositReturnedAt = deleteField();
+      updateData.volunteerDepositReturnedBy = deleteField();
+      updateData.volunteerDepositReturnedByName = deleteField();
+    } else if (next === 'returned') {
+      updateData.volunteerDepositStatus = 'returned';
+      updateData.volunteerDepositReturnedAt = now;
+      updateData.volunteerDepositReturnedBy = user.uid;
+      updateData.volunteerDepositReturnedByName = adminName;
+    } else {
+      // Ticked by mistake — remove the fields entirely so the enrollment looks
+      // exactly like one that never had a deposit, per the type's "absent = not
+      // received" contract.
+      for (const field of [
+        'volunteerDepositStatus',
+        'volunteerDepositReceivedAt', 'volunteerDepositReceivedBy', 'volunteerDepositReceivedByName',
+        'volunteerDepositReturnedAt', 'volunteerDepositReturnedBy', 'volunteerDepositReturnedByName',
+      ]) {
+        updateData[field] = deleteField();
+      }
+    }
+
+    try {
+      await updateDoc(enrollmentRef, updateData as any);
+      toast({
+        title: next === 'held' ? 'Deposit Recorded'
+          : next === 'returned' ? 'Deposit Returned'
+          : 'Deposit Cleared',
+        description: next === 'held' ? 'The check is marked as held by the league.'
+          : next === 'returned' ? 'The check is marked as returned to the family.'
+          : 'No deposit is on file for this registration.',
+      });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: enrollmentRef.path,
+          operation: 'update',
+          requestResourceData: updateData,
+        }));
+      } else {
+        toast({ variant: 'destructive', title: 'Deposit Update Failed', description: error.message });
+      }
+    }
+  };
+
   const exportRegistrationsCSV = () => {
     if (!enrollments.length) return;
     const divisionNameMap = new Map(
       (sportFilteredDivisions ?? []).map(d => [d.id, d.name])
     );
-    const headers = ['First Name', 'Last Name', 'Division', 'Season', 'Payment Status', 'Fee Amount', 'Shirt Size', 'Uniform # Preference', 'Registered Date'];
+    const headers = ['First Name', 'Last Name', 'Division', 'Season', 'Payment Status', 'Volunteer Deposit', 'Fee Amount', 'Shirt Size', 'Uniform # Preference', 'Registered Date'];
     const rows = enrollments.map(e => {
       const p = allPlayers?.find(p => p.id === e.playerId);
       return [
@@ -792,6 +951,9 @@ export default function RegistrationDashboardPage() {
         divisionNameMap.get(e.divisionId) ?? e.divisionId,
         e.seasonId,
         getEnrollmentStatus(e),
+        e.volunteerDepositStatus === 'held' ? 'Held'
+          : e.volunteerDepositStatus === 'returned' ? 'Returned'
+          : 'Not Received',
         e.registrationFeeAmount != null ? formatCents(e.registrationFeeAmount) : '',
         e.shirtSize ?? e.jerseySize ?? '',
         e.uniformNumberPreference ?? '',
@@ -909,6 +1071,9 @@ export default function RegistrationDashboardPage() {
                 onBulkVerify={handleBulkVerify}
                 onWaiveFee={(player, enrollment) => setFeeWaiverDialog({ open: true, player, enrollment, reason: '', loading: false })}
                 onPromoteWaitlist={(player, enrollment) => setPromoteDialog({ open: true, player, enrollment, loading: false })}
+                showDeposit={activeSport === 'football'}
+                canEditPayment={isAdmin}
+                onSetDepositStatus={handleSetDepositStatus}
               />
             )}
           </TabsContent>

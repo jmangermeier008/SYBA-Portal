@@ -339,6 +339,7 @@ export type NotificationType =
   | 'gameReminder'
   | 'clearanceApproved'
   | 'clearanceRejected'
+  | 'documentRejected'
   | 'announcement'
   | 'coachActivity'
   | 'gameCancelled'
@@ -355,7 +356,8 @@ export type NotificationRelatedDocType =
   | 'practiceSlot'
   | 'clearance'
   | 'announcement'
-  | 'enrollment';
+  | 'enrollment'
+  | 'player';
 
 /** An in-app notification written to the notifications collection when league events occur. */
 export interface Notification {
@@ -450,16 +452,68 @@ export interface Player {
     status: 'none' | 'issued' | 'returned';
     helmetNumber?: string;
   };
+  // Uploaded document URLs — long-lived signed URLs returned by /api/upload
+  birthCertificateUrl?: string;
+  physicalFormUrl?: string;
+  ageVerified?: boolean;       // Mirrors compliance.birthCertificateVerified
+  verifiedBy?: string;
+  verifiedByName?: string;
+  verifiedAt?: string;
   compliance?: {
     birthCertificateVerified: boolean;
     physicalVerified: boolean;
     verifiedBy?: string;         // UID of the admin who last verified
     verifiedAt?: string;         // ISO timestamp of last verification
     verificationStatus?: 'pending' | 'approved' | 'rejected';
-    rejectionReason?: string;    // Set when admin rejects; cleared on re-upload
+    rejectionReason?: string;    // Combined human-readable reason — what the parent dashboard shows
+    // Per-document rejection. There are two documents but only one
+    // verificationStatus, so the parent can't tell which file to re-send
+    // without these. Cleared for a document when that document is re-uploaded.
+    birthCertificateRejected?: boolean;
+    birthCertificateRejectionReason?: string;
+    physicalRejected?: boolean;
+    physicalRejectionReason?: string;
+    rejectedBy?: string;         // UID of the admin who last rejected
+    rejectedByName?: string;
+    rejectedAt?: string;         // ISO timestamp of last rejection
     leagueFormSigned?: boolean;  // Football: signed Shenango Valley league agreement received
     parentalAgreementSigned?: boolean; // Football: signed SVMFL Child/Parent Contract + Adult Code of Ethics received
   };
+}
+
+/**
+ * Rolls the two per-document verdicts up into the single status the parent
+ * surfaces read. A rejection always wins — a family with one bad document has
+ * work to do regardless of how the other one looks.
+ */
+export function rollupVerificationStatus(c: {
+  birthCertificateVerified?: boolean;
+  physicalVerified?: boolean;
+  birthCertificateRejected?: boolean;
+  physicalRejected?: boolean;
+}): 'pending' | 'approved' | 'rejected' {
+  if (c.birthCertificateRejected || c.physicalRejected) return 'rejected';
+  return c.birthCertificateVerified && c.physicalVerified ? 'approved' : 'pending';
+}
+
+/**
+ * Flattens the per-document reasons into the single string the parent
+ * dashboard has always displayed. Empty string when nothing is rejected.
+ */
+export function combinedRejectionReason(c: {
+  birthCertificateRejected?: boolean;
+  birthCertificateRejectionReason?: string;
+  physicalRejected?: boolean;
+  physicalRejectionReason?: string;
+}): string {
+  const parts: string[] = [];
+  if (c.birthCertificateRejected) {
+    parts.push(`Birth certificate: ${c.birthCertificateRejectionReason?.trim() || 'needs to be re-submitted'}`);
+  }
+  if (c.physicalRejected) {
+    parts.push(`Physical form: ${c.physicalRejectionReason?.trim() || 'needs to be re-submitted'}`);
+  }
+  return parts.join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +598,16 @@ export interface Enrollment {
   fee_waived: boolean;
   waiver_reason: string;
   registrationFeeAmount: number;
+  // Volunteer deposit check — football. A family writes a check that the league
+  // holds until their volunteer shifts are met, then returns it. Admin-ticked
+  // on /admin/registration; absent status means no check has been received.
+  volunteerDepositStatus?: 'held' | 'returned';
+  volunteerDepositReceivedAt?: string;      // ISO datetime
+  volunteerDepositReceivedBy?: string;      // Admin UID
+  volunteerDepositReceivedByName?: string;
+  volunteerDepositReturnedAt?: string;      // ISO datetime
+  volunteerDepositReturnedBy?: string;      // Admin UID
+  volunteerDepositReturnedByName?: string;
   // Timestamps
   registered_at: string;       // ISO datetime
   enrollmentDate: string;      // ISO datetime — backward-compat alias for registered_at

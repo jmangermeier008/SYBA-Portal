@@ -3,7 +3,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import Link from 'next/link';
 import {
   Loader2,
   CreditCard,
@@ -16,6 +15,7 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import type { LinkRequest } from '@/types/scheduling';
+import type { PlayerDocType } from '@/lib/document-packet';
 
 interface TaskPlayer {
   id: string;
@@ -23,18 +23,64 @@ interface TaskPlayer {
   lastName?: string;
 }
 
+interface RejectedDoc {
+  docType: PlayerDocType;
+  label: string;
+  reason?: string;
+}
+
 interface TaskCenterProps {
   pendingPayment: { playerName: string; amountCents: number } | null;
   onResumePayment: () => void;
   resumingPayment: boolean;
-  rejectedPlayers: (TaskPlayer & { reason?: string })[];
+  rejectedPlayers: (TaskPlayer & { reason?: string; rejectedDocs: RejectedDoc[] })[];
   missingPhysicalPlayers: TaskPlayer[];
   uploadingPhysicalFor: string | null;
-  onPhysicalUpload: (playerId: string, files: File[]) => void;
+  onDocUpload: (playerId: string, docType: PlayerDocType, files: File[]) => void;
   linkRequests: LinkRequest[];
   onApproveLink: (req: LinkRequest) => void;
   onDenyLink: (req: LinkRequest) => void;
   pendingReviewPlayers: TaskPlayer[];
+}
+
+/** Pill-shaped file picker — the one upload affordance used across task rows. */
+function UploadButton({
+  tint,
+  label,
+  busy,
+  disabled,
+  onFiles,
+}: {
+  tint: 'amber' | 'blue';
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  onFiles: (files: File[]) => void;
+}) {
+  const tints = {
+    amber: 'border-amber-300 text-amber-800 hover:bg-amber-100',
+    blue: 'border-blue-300 text-blue-700 hover:bg-blue-100',
+  };
+  return (
+    <Label
+      className={`cursor-pointer text-xs font-medium px-4 rounded-full border bg-white transition-colors flex items-center gap-1.5 min-h-[44px] md:min-h-[32px] ${tints[tint]}`}
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+      {label}
+      <input
+        type="file"
+        className="hidden"
+        accept=".pdf,.jpg,.jpeg,.png"
+        multiple
+        disabled={disabled}
+        onChange={e => {
+          const fs = Array.from(e.target.files ?? []);
+          if (fs.length) onFiles(fs);
+          e.target.value = '';
+        }}
+      />
+    </Label>
+  );
 }
 
 function TaskRow({
@@ -77,18 +123,27 @@ export function TaskCenter({
   rejectedPlayers,
   missingPhysicalPlayers,
   uploadingPhysicalFor,
-  onPhysicalUpload,
+  onDocUpload,
   linkRequests,
   onApproveLink,
   onDenyLink,
   pendingReviewPlayers,
 }: TaskCenterProps) {
+  // One row per rejected document, not per player — each needs its own upload
+  const rejectedRows = rejectedPlayers.flatMap(p =>
+    (p.rejectedDocs.length > 0
+      ? p.rejectedDocs
+      : [{ docType: 'physicalForm' as PlayerDocType, label: 'Document', reason: p.reason }]
+    ).map(doc => ({ player: p, doc }))
+  );
+
   const actionableCount =
     (pendingPayment ? 1 : 0) +
-    rejectedPlayers.length +
+    rejectedRows.length +
     missingPhysicalPlayers.length +
     linkRequests.length;
   const totalRows = actionableCount + pendingReviewPlayers.length;
+
 
   if (totalRows === 0) return null;
 
@@ -128,17 +183,21 @@ export function TaskCenter({
           />
         )}
 
-        {rejectedPlayers.map(p => (
+        {rejectedRows.map(({ player, doc }) => (
           <TaskRow
-            key={`rejected-${p.id}`}
+            key={`rejected-${player.id}-${doc.docType}`}
             tint="amber"
             icon={<FileWarning className="h-4 w-4" />}
-            title={`One more step for ${p.firstName ?? 'your player'}`}
-            detail={p.reason ?? 'A document needs to be re-submitted.'}
+            title={`${doc.label} needs re-uploading for ${player.firstName ?? 'your player'}`}
+            detail={doc.reason ?? player.reason ?? 'A document needs to be re-submitted.'}
             action={
-              <Button size="sm" asChild className="min-h-[44px] md:min-h-0 md:h-8 rounded-full bg-amber-600 hover:bg-amber-700">
-                <Link href="/parent/family">Re-upload</Link>
-              </Button>
+              <UploadButton
+                tint="amber"
+                label="Re-upload"
+                busy={uploadingPhysicalFor === player.id}
+                disabled={!!uploadingPhysicalFor}
+                onFiles={files => onDocUpload(player.id, doc.docType, files)}
+              />
             }
           />
         ))}
@@ -151,24 +210,13 @@ export function TaskCenter({
             title={`Physical form needed for ${p.firstName ?? 'your player'}`}
             detail="Upload a copy to complete registration."
             action={
-              <Label className="cursor-pointer text-xs font-medium px-4 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-100 transition-colors flex items-center gap-1.5 min-h-[44px] md:min-h-[32px]">
-                {uploadingPhysicalFor === p.id
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  : <Upload className="h-3.5 w-3.5" />}
-                Upload
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  multiple
-                  disabled={!!uploadingPhysicalFor}
-                  onChange={e => {
-                    const fs = Array.from(e.target.files ?? []);
-                    if (fs.length) onPhysicalUpload(p.id, fs);
-                    e.target.value = '';
-                  }}
-                />
-              </Label>
+              <UploadButton
+                tint="blue"
+                label="Upload"
+                busy={uploadingPhysicalFor === p.id}
+                disabled={!!uploadingPhysicalFor}
+                onFiles={files => onDocUpload(p.id, 'physicalForm', files)}
+              />
             }
           />
         ))}

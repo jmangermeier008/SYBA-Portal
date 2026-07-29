@@ -29,7 +29,8 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { usePushNudge } from '@/hooks/use-push-nudge';
-import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
+import { uploadPlayerDocument } from '@/lib/player-documents';
+import type { PlayerDocType } from '@/lib/document-packet';
 import { useRouter } from 'next/navigation';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
 import { SubscribeCalendarDialog } from '@/components/calendar/subscribe-calendar-dialog';
@@ -82,9 +83,16 @@ export default function ParentDashboard() {
     waiverSignedName?: string;
     birthCertificateUrl?: string;
     physicalFormUrl?: string;
+    // Injected by useCollection — the player may live under a co-parent's UID,
+    // so never rebuild this path from the signed-in user's uid.
+    _refPath?: string;
     compliance?: {
       verificationStatus?: 'pending' | 'approved' | 'rejected';
       rejectionReason?: string;
+      birthCertificateRejected?: boolean;
+      birthCertificateRejectionReason?: string;
+      physicalRejected?: boolean;
+      physicalRejectionReason?: string;
       parentalAgreementSigned?: boolean;
     };
   }>(db, user?.uid);
@@ -176,30 +184,24 @@ export default function ParentDashboard() {
     }
   };
 
-  const handlePhysicalUpload = async (playerId: string, files: File[]) => {
+  /**
+   * Upload or replace a player's document. Routes through the shared helper so
+   * the post-upload bookkeeping — clearing that document's rejection and
+   * re-deriving the verification status — matches every other surface.
+   */
+  const handleDocUpload = async (playerId: string, docType: PlayerDocType, files: File[]) => {
     if (!user || !db) return;
+    const player = players?.find(p => p.id === playerId);
+    // The player may live under a co-parent's UID, so use the path the
+    // subscription resolved rather than assuming the signed-in user owns it.
+    const refPath = player?._refPath ?? `userProfiles/${user.uid}/players/${playerId}`;
     setUploadingPhysicalFor(playerId);
     try {
-      // Validates type/size, compresses oversized photos, and merges multiple
-      // photos into one PDF; throws user-friendly messages.
-      const file = await prepareDocumentForUpload(files, 'physical');
-      const idToken = await user.getIdToken();
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('path', `players/${playerId}/physical_${Date.now()}.${uploadExtensionFor(file)}`);
-      const resp = await fetch('/api/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${idToken}` },
-        body: formData,
+      await uploadPlayerDocument({ user, db, refPath, docType, files });
+      toast({
+        title: docType === 'birthCertificate' ? 'Birth certificate uploaded' : 'Physical form uploaded',
+        description: 'It will be reviewed by an admin.',
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'Upload failed');
-      await updateDoc(doc(db, 'userProfiles', user.uid, 'players', playerId), {
-        physicalFormUrl: data.url,
-        'compliance.physicalVerified': false,
-        'compliance.verificationStatus': 'pending',
-      });
-      toast({ title: 'Physical form uploaded', description: "It will be reviewed by an admin." });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Upload failed', description: err.message });
     } finally {
@@ -374,14 +376,42 @@ export default function ParentDashboard() {
     return players.filter(p =>
       enrolledIds.has(p.id) &&
       !p.physicalFormUrl &&
-      p.compliance?.verificationStatus !== 'rejected'
+      // Only a rejected *physical* is excluded — that already has its own
+      // re-upload row. A rejected birth certificate must not hide the fact that
+      // the physical was never submitted at all.
+      p.compliance?.physicalRejected !== true
     );
   }, [players, enrollments]);
 
+  // Each rejected document gets its own row with its own upload button — a
+  // family told only "a document was rejected" has no idea which one to re-send.
   const rejectedPlayers = useMemo(() =>
     playersNeedingAction
       .filter(p => p.compliance?.verificationStatus === 'rejected')
-      .map(p => ({ id: p.id, firstName: p.firstName, reason: p.compliance?.rejectionReason })),
+      .map(p => {
+        const docs: { docType: PlayerDocType; label: string; reason?: string }[] = [];
+        if (p.compliance?.birthCertificateRejected) {
+          docs.push({
+            docType: 'birthCertificate',
+            label: 'Birth certificate',
+            reason: p.compliance.birthCertificateRejectionReason,
+          });
+        }
+        if (p.compliance?.physicalRejected) {
+          docs.push({
+            docType: 'physicalForm',
+            label: 'Physical form',
+            reason: p.compliance.physicalRejectionReason,
+          });
+        }
+        return {
+          id: p.id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          reason: p.compliance?.rejectionReason,
+          rejectedDocs: docs,
+        };
+      }),
   [playersNeedingAction]);
 
   const pendingReviewPlayers = useMemo(() =>
@@ -510,7 +540,7 @@ export default function ParentDashboard() {
             rejectedPlayers={rejectedPlayers}
             missingPhysicalPlayers={playersMissingPhysical}
             uploadingPhysicalFor={uploadingPhysicalFor}
-            onPhysicalUpload={handlePhysicalUpload}
+            onDocUpload={handleDocUpload}
             linkRequests={incomingLinkRequests ?? []}
             onApproveLink={handleApproveLinkRequest}
             onDenyLink={handleDenyLinkRequest}

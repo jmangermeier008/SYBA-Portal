@@ -1,14 +1,18 @@
-import { doc, updateDoc, type Firestore } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, type Firestore } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import type { PlayerDocType } from '@/lib/document-packet';
 import { prepareDocumentForUpload, uploadExtensionFor } from '@/lib/upload-compressor';
+import { combinedRejectionReason, rollupVerificationStatus } from '@/types/scheduling';
 
 /**
- * Admin upload/replace of a player's birth certificate or physical form.
- * Uploads through /api/upload (same pipeline parents use), then points the
- * player doc at the new file and resets its verification to pending — a
- * replaced document always goes back through the verify flow, mirroring the
- * parent re-upload on the dashboard.
+ * Upload/replace a player's birth certificate or physical form. Shared by the
+ * admin audit dialog and every parent surface, so the post-upload bookkeeping
+ * only has to be right in one place.
+ *
+ * Uploads through /api/upload, points the player doc at the new file, clears
+ * any rejection on *that* document, and sends it back through the verify flow.
+ * The other document's verdict is left alone — replacing a bad physical must
+ * not quietly un-reject the birth certificate.
  *
  * Throws with a user-friendly message on any failure; callers toast.
  */
@@ -45,19 +49,45 @@ export async function uploadPlayerDocument(opts: {
     throw new Error(data?.error || 'Upload failed.');
   }
 
+  const playerRef = doc(db, refPath);
+
+  // Read the current verdicts so the rollup reflects the *other* document too —
+  // a family can have both rejected, and fixing one shouldn't clear the other.
+  const snap = await getDoc(playerRef);
+  const current = (snap.data()?.compliance ?? {}) as {
+    birthCertificateVerified?: boolean;
+    physicalVerified?: boolean;
+    birthCertificateRejected?: boolean;
+    birthCertificateRejectionReason?: string;
+    physicalRejected?: boolean;
+    physicalRejectionReason?: string;
+  };
+
+  const next = {
+    ...current,
+    ...(docType === 'birthCertificate'
+      ? { birthCertificateVerified: false, birthCertificateRejected: false, birthCertificateRejectionReason: '' }
+      : { physicalVerified: false, physicalRejected: false, physicalRejectionReason: '' }),
+  };
+
   const update: Record<string, string | boolean> = {
-    'compliance.verificationStatus': 'pending',
+    'compliance.verificationStatus': rollupVerificationStatus(next),
+    'compliance.rejectionReason': combinedRejectionReason(next),
     updatedAt: new Date().toISOString(),
   };
   if (docType === 'birthCertificate') {
     update.birthCertificateUrl = data.url;
     update['compliance.birthCertificateVerified'] = false;
+    update['compliance.birthCertificateRejected'] = false;
+    update['compliance.birthCertificateRejectionReason'] = '';
     update.ageVerified = false;
   } else {
     update.physicalFormUrl = data.url;
     update['compliance.physicalVerified'] = false;
+    update['compliance.physicalRejected'] = false;
+    update['compliance.physicalRejectionReason'] = '';
   }
-  await updateDoc(doc(db, refPath), update);
+  await updateDoc(playerRef, update);
 
   return { url: data.url };
 }
