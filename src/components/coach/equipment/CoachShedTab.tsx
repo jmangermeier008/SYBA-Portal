@@ -38,6 +38,7 @@ export function CoachShedTab({
   onIssue,
   onReturn,
   saving,
+  slots,
 }: {
   items: ShedItem[] | null;
   isLoading: boolean;
@@ -47,6 +48,9 @@ export function CoachShedTab({
   onIssue: (item: ShedItem) => void;
   onReturn: (item: ShedItem) => void;
   saving: boolean;
+  /** Every tracked type slug, so the stock summary can show one with nothing
+   *  in stock as "0 available" instead of omitting it. */
+  slots?: string[];
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'issued'>('all');
@@ -59,6 +63,8 @@ export function CoachShedTab({
 
   const stockByType = useMemo(() => {
     const map = new Map<string, { available: number; bySize: Map<string, number> }>();
+    // Seed every tracked type so an empty shelf still shows as "0 available"
+    (slots ?? []).forEach((slug) => map.set(slug, { available: 0, bySize: new Map<string, number>() }));
     activeItems.forEach((item) => {
       const entry = map.get(item.type) ?? { available: 0, bySize: new Map<string, number>() };
       if (item.status === 'available') {
@@ -83,7 +89,7 @@ export function CoachShedTab({
         return { slug, available: entry.available, sizes };
       })
       .sort((a, b) => typeLabel(a.slug, labels).localeCompare(typeLabel(b.slug, labels)));
-  }, [activeItems, labels]);
+  }, [activeItems, labels, slots]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();

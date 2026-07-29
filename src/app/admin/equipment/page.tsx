@@ -971,6 +971,10 @@ export default function EquipmentPage() {
   // issued stock surface as ×0 so shortages are visible
   const stockByType = useMemo(() => {
     const map = new Map<string, { available: number; bySize: Map<string, number> }>();
+    // Seed every tracked type first, so one with nothing in stock still appears
+    // as "0 available" — an empty shelf is the point of this card. Grouping
+    // straight off the inventory would silently omit it.
+    adminSlots.forEach((slug) => map.set(slug, { available: 0, bySize: new Map<string, number>() }));
     (shedItems ?? []).forEach((item) => {
       if (item.status === 'retired') return;
       const entry = map.get(item.type) ?? { available: 0, bySize: new Map<string, number>() };
@@ -996,7 +1000,7 @@ export default function EquipmentPage() {
         return { slug, available: entry.available, sizes };
       })
       .sort((a, b) => typeLabel(a.slug, typeLabels).localeCompare(typeLabel(b.slug, typeLabels)));
-  }, [shedItems, typeLabels]);
+  }, [shedItems, typeLabels, adminSlots]);
 
   const checkOutPlayerOptions = useMemo<ComboboxOption[]>(
     () => (enrollments ?? [])

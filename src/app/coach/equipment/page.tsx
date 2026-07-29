@@ -508,6 +508,7 @@ export default function CoachEquipmentPage() {
               onIssue={(item) => { setShedIssueItem(item); setShedIssueEnrollmentId(''); }}
               onReturn={(item) => setShedReturnItem(item)}
               saving={shedSaving}
+              slots={allSlots}
             />
           </TabsContent>
         </Tabs>
