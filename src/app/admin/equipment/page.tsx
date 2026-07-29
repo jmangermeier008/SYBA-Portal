@@ -67,6 +67,7 @@ import {
   Settings2,
   History,
   CalendarCheck,
+  Wallet,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -74,6 +75,8 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 import { PlayerPickList } from '@/components/equipment/PlayerPickList';
+import { DepositBadge } from '@/components/equipment/DepositBadge';
+import { isDepositMissing, type DepositStatus } from '@/lib/deposit';
 import { PlayerEquipmentSheet } from '@/components/equipment/PlayerEquipmentSheet';
 import { IssueItemDialog, type IssueTarget, type UnavailableEntry } from '@/components/equipment/IssueItemDialog';
 import {
@@ -130,6 +133,9 @@ interface EnrollmentRow {
   // exist. Present on the Firestore docs (Enrollment in src/types/scheduling.ts).
   jerseySize?: string;
   shirtSize?: string;
+  // Volunteer deposit check, set on /admin/registration. Absent = no check
+  // received, which is the "don't hand out gear" signal here.
+  volunteerDepositStatus?: DepositStatus;
   footballEquipment?: FootballEquipment;
 }
 
@@ -205,21 +211,64 @@ interface ImportError {
   rawData: Record<string, string>;
 }
 
-const ALL_INVENTORY_ID_FIELDS: (keyof FootballEquipment)[] = [
-  'helmetInventoryId',
-  'padInventoryId',
-  'gameJerseyInventoryId',
-  'scrimmageJerseyInventoryId',
-  'practiceJerseyInventoryId',
-  'gamePantsInventoryId',
-  'practicePantsInventoryId',
-];
-
-function getEquippedStatus(enrollment: EnrollmentRow, customSlotCount = 0) {
+/** Issued tally over the slots actually rendered. Keyed on the status field —
+ *  the same source of truth the assignment panel counts — so the table and the
+ *  panel can't disagree on legacy rows that carry a status with no inventory link. */
+function getEquippedStatus(enrollment: EnrollmentRow, slots: string[]) {
   const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
-  const count = Object.entries(fe).filter(([k, v]) => k.endsWith('InventoryId') && Boolean(v)).length;
-  const total = ALL_INVENTORY_ID_FIELDS.length + customSlotCount;
-  return { count, total, isComplete: count >= total };
+  const count = slots.filter((s) => fe[slotFieldsForType(s).statusField] === 'issued').length;
+  return { count, total: slots.length, isComplete: slots.length > 0 && count === slots.length };
+}
+
+/** Short chip label for an equipment slot: initials for multi-word types
+ *  (Game Jersey → GJ), first three letters otherwise (Helmet → HLM). Custom
+ *  types can collide; the chip's title attribute disambiguates. */
+function slotAbbr(label: string): string {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 3);
+  return (words[0] ?? '?').slice(0, 3).toUpperCase();
+}
+
+/** Compact at-a-glance gear strip: one chip per slot, filled when issued.
+ *  Hover text uses the native `title` attribute rather than a Radix Tooltip —
+ *  a full roster is ~50 rows x 7-12 chips, far too many tooltip instances. */
+function EquipmentChips({
+  enrollment,
+  slots,
+  labels,
+}: {
+  enrollment: EnrollmentRow;
+  slots: string[];
+  labels: Record<string, string>;
+}) {
+  const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {slots.map((slug) => {
+        const { statusField, sizeField, tagField } = slotFieldsForType(slug);
+        const issued = fe[statusField] === 'issued';
+        const tag = fe[tagField] as string | undefined;
+        const size = sizeField ? (fe[sizeField] as string | undefined) : undefined;
+        const name = typeLabel(slug, labels);
+        return (
+          <span
+            key={slug}
+            title={issued
+              ? `${name} · #${tag ?? '—'}${size ? ` · ${size}` : ''}`
+              : `${name} · not issued`}
+            className={cn(
+              'inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-semibold leading-none border min-w-[26px]',
+              issued
+                ? 'bg-blue-100 text-blue-700 border-blue-200'
+                : 'bg-muted/40 text-muted-foreground/70 border-muted-foreground/20'
+            )}
+          >
+            {slotAbbr(name)}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Jersey # editor for the assignment sheet header. Uncontrolled (blur-saved),
@@ -278,6 +327,7 @@ export default function EquipmentPage() {
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [outstandingOnly, setOutstandingOnly] = useState(false);
+  const [noDepositOnly, setNoDepositOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [bulkSaving, setBulkSaving] = useState(false);
@@ -465,16 +515,22 @@ export default function EquipmentPage() {
     const q = searchQuery.toLowerCase();
     return enrollments.filter((e) => {
       if (outstandingOnly && !hasOutstandingGear(e)) return false;
+      if (noDepositOnly && !isDepositMissing(e.volunteerDepositStatus)) return false;
       if (!q) return true;
       const name = (playerNameMap.get(e.playerId) ?? e.playerId).toLowerCase();
       const div = (divisionMap.get(e.divisionId) ?? '').toLowerCase();
       const team = (e.teamId ? teamMap.get(e.teamId) ?? '' : '').toLowerCase();
       return name.includes(q) || div.includes(q) || team.includes(q);
     });
-  }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap, outstandingOnly]);
+  }, [enrollments, searchQuery, playerNameMap, divisionMap, teamMap, outstandingOnly, noDepositOnly]);
 
   const outstandingCount = useMemo(
     () => (enrollments ?? []).filter(hasOutstandingGear).length,
+    [enrollments]
+  );
+
+  const noDepositCount = useMemo(
+    () => (enrollments ?? []).filter((e) => isDepositMissing(e.volunteerDepositStatus)).length,
     [enrollments]
   );
 
@@ -1619,6 +1675,9 @@ export default function EquipmentPage() {
   const tableLoading = enrollmentsLoading || playersLoading;
 
   return (
+    // One TooltipProvider for the page — a roster is ~50 rows, each of which
+    // would otherwise construct its own.
+    <TooltipProvider>
     <div className="flex min-h-screen bg-background">
       <Sidebar />
       {/* min-w-0 lets the wide assignments table scroll inside its card instead of stretching the page */}
@@ -1683,6 +1742,16 @@ export default function EquipmentPage() {
                     <Filter className="h-3.5 w-3.5" />
                     Outstanding gear only
                     <Badge variant={outstandingOnly ? 'secondary' : 'outline'} className="ml-1">{outstandingCount}</Badge>
+                  </Button>
+                  <Button
+                    variant={noDepositOnly ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setNoDepositOnly((v) => !v)}
+                    className="rounded-full gap-1.5 h-9"
+                  >
+                    <Wallet className="h-3.5 w-3.5" />
+                    No deposit on file
+                    <Badge variant={noDepositOnly ? 'secondary' : 'outline'} className="ml-1">{noDepositCount}</Badge>
                   </Button>
                   <Button
                     variant="outline"
@@ -1759,21 +1828,18 @@ export default function EquipmentPage() {
                   <div className="overflow-auto max-h-[70vh]">
                     <table className="w-full text-sm">
                       <thead>
+                        {/* Six columns fit without horizontal scroll, so no
+                            sticky/shadowed edge columns are needed — only the
+                            header pins, for the vertical scroller below. */}
                         <tr className="border-b">
-                          <th className="px-3 py-3 w-10 sticky top-0 left-0 z-30 bg-muted">
+                          <th className="px-3 py-3 w-10 sticky top-0 z-20 bg-muted">
                             <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
                           </th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 left-10 z-30 bg-muted border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">Player</th>
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Player</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Division</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['helmet'] ? `${typeLabels['helmet']} Tag` : 'Helmet Tag'}</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['shoulder_pads'] ? `${typeLabels['shoulder_pads']} Tag` : 'Pads Tag'}</th>
                           <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Jersey #</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['game_jersey'] ?? 'Game Jersey'}</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['scrimmage_jersey'] ?? 'Scrimmage'}</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['practice_jersey'] ?? 'Practice Jersey'}</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['game_pants'] ? `${typeLabels['game_pants']} Tag` : 'Game Pants Tag'}</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">{typeLabels['practice_pants'] ? `${typeLabels['practice_pants']} Tag` : 'Practice Pants Tag'}</th>
-                          <th className="px-4 py-3 sticky top-0 right-0 z-30 bg-muted border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]" />
+                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground whitespace-nowrap sticky top-0 z-20 bg-muted">Equipment</th>
+                          <th className="px-4 py-3 sticky top-0 z-20 bg-muted" />
                         </tr>
                       </thead>
                       <tbody>
@@ -1783,15 +1849,7 @@ export default function EquipmentPage() {
                           const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
                           const divisionName = divisionMap.get(enrollment.divisionId) ?? enrollment.divisionId;
                           const fe = enrollment.footballEquipment ?? {};
-
-                          // Compact read-only slot cell — editing happens in the side panel
-                          const slotCell = (slug: ShedItemType) => {
-                            const { statusField, tagField } = EQUIP_FIELD_MAP[slug];
-                            const tag = fe[tagField] as string | undefined;
-                            return fe[statusField] === 'issued' && tag
-                              ? <span className="text-blue-700 font-medium whitespace-nowrap">#{tag}</span>
-                              : <span className="text-muted-foreground">—</span>;
-                          };
+                          const { count, total, isComplete } = getEquippedStatus(enrollment, adminSlots);
 
                           return (
                             <tr
@@ -1803,33 +1861,28 @@ export default function EquipmentPage() {
                                 isSaving && 'opacity-60'
                               )}
                             >
-                              <td className={cn('px-3 py-2 sticky left-0 z-10', isSelected ? 'bg-primary/5' : 'bg-background')} onClick={(e) => e.stopPropagation()}>
+                              <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                                 <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(enrollment.id)} aria-label={`Select ${playerName}`} />
                               </td>
 
-                              <td className={cn('px-4 py-2 font-medium whitespace-nowrap sticky left-10 z-10 border-r shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]', isSelected ? 'bg-primary/5' : 'bg-background')}>
-                                <div className="flex items-center gap-2">
+                              <td className="px-4 py-2 font-medium">
+                                <div className="flex items-center gap-2 whitespace-nowrap">
                                   {playerName}
                                   {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                                   {!(playerComplianceMap.get(enrollment.playerId) ?? false) && (
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
-                                        </TooltipTrigger>
-                                        <TooltipContent>Physical not verified</TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>Physical not verified</TooltipContent>
+                                    </Tooltip>
                                   )}
                                 </div>
+                                <DepositBadge status={enrollment.volunteerDepositStatus} className="mt-1" />
                               </td>
                               <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{divisionName}</td>
 
-                              {/* Helmet Tag */}
-                              <td className="px-4 py-2">{slotCell('helmet')}</td>
-                              {/* Pads Tag */}
-                              <td className="px-4 py-2">{slotCell('shoulder_pads')}</td>
-                              {/* Jersey # */}
+                              {/* Jersey # — edited inline; numbers get assigned in bulk */}
                               <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center gap-1.5">
                                   <Input
@@ -1844,32 +1897,32 @@ export default function EquipmentPage() {
                                     }}
                                   />
                                   {duplicateJerseys.has(enrollment.id) && (
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                          Duplicate #{fe.jerseyNumber} in {divisionName}: also {duplicateJerseys.get(enrollment.id)!.join(', ')}
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        Duplicate #{fe.jerseyNumber} in {divisionName}: also {duplicateJerseys.get(enrollment.id)!.join(', ')}
+                                      </TooltipContent>
+                                    </Tooltip>
                                   )}
                                 </div>
                               </td>
 
-                              {/* Game Jersey Tag */}
-                              <td className="px-4 py-2">{slotCell('game_jersey')}</td>
-                              {/* Scrimmage Jersey Tag */}
-                              <td className="px-4 py-2">{slotCell('scrimmage_jersey')}</td>
-                              {/* Practice Jersey Tag */}
-                              <td className="px-4 py-2">{slotCell('practice_jersey')}</td>
-                              {/* Game Pants Tag */}
-                              <td className="px-4 py-2">{slotCell('game_pants')}</td>
-                              {/* Practice Pants Tag */}
-                              <td className="px-4 py-2">{slotCell('practice_pants')}</td>
-                              {/* Actions — pinned to the right edge so they're reachable without horizontal scroll */}
-                              <td className={cn('px-4 py-2 sticky right-0 z-10 border-l shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]', isSelected ? 'bg-primary/5' : 'bg-background')} onClick={(e) => e.stopPropagation()}>
+                              {/* Equipment — one chip per slot, covers custom types too */}
+                              <td className="px-4 py-2">
+                                <div className="flex items-center gap-3">
+                                  <EquipmentChips enrollment={enrollment} slots={adminSlots} labels={typeLabels} />
+                                  {isComplete
+                                    ? <Badge className="bg-green-100 text-green-700 border-green-200 gap-1 shrink-0 whitespace-nowrap hover:bg-green-100">
+                                        <CheckCircle2 className="h-3 w-3" /> Fully Equipped
+                                      </Badge>
+                                    : <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{count} of {total}</span>
+                                  }
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center gap-1.5">
                                   <Button
                                     size="sm"
@@ -1907,7 +1960,7 @@ export default function EquipmentPage() {
                     const isSelected = selectedIds.has(enrollment.id);
                     const playerName = playerNameMap.get(enrollment.playerId) ?? enrollment.playerId;
                     const divisionName = divisionMap.get(enrollment.divisionId) ?? '';
-                    const { count, total, isComplete } = getEquippedStatus(enrollment, customTypes.length);
+                    const { count, total, isComplete } = getEquippedStatus(enrollment, adminSlots);
 
                     return (
                       <Card
@@ -1929,17 +1982,16 @@ export default function EquipmentPage() {
                                 <div className="flex items-center gap-1.5">
                                   <p className="font-semibold text-sm">{playerName}</p>
                                   {!(playerComplianceMap.get(enrollment.playerId) ?? false) && (
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
-                                        </TooltipTrigger>
-                                        <TooltipContent>Physical not verified</TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 flex-shrink-0" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>Physical not verified</TooltipContent>
+                                    </Tooltip>
                                   )}
                                 </div>
                                 {divisionName && <p className="text-xs text-muted-foreground">{divisionName}</p>}
+                                <DepositBadge status={enrollment.volunteerDepositStatus} className="mt-1" />
                               </div>
                             </div>
                             {isComplete
@@ -1948,6 +2000,10 @@ export default function EquipmentPage() {
                                 </Badge>
                               : <Badge variant="outline" className="shrink-0">{count}/{total} Items</Badge>
                             }
+                          </div>
+                          {/* Same gear strip as the desktop table so both viewports read alike */}
+                          <div className="mt-3">
+                            <EquipmentChips enrollment={enrollment} slots={adminSlots} labels={typeLabels} />
                           </div>
                         </CardContent>
                       </Card>
@@ -2099,7 +2155,6 @@ export default function EquipmentPage() {
                       <tr className="border-b bg-muted/30">
                         <th className="px-3 py-3 w-10">
                           {recertEligibleVisible.length > 0 && (
-                            <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <span>
@@ -2108,7 +2163,6 @@ export default function EquipmentPage() {
                                 </TooltipTrigger>
                                 <TooltipContent>Select helmets &amp; shoulder pads for bulk recert</TooltipContent>
                               </Tooltip>
-                            </TooltipProvider>
                           )}
                         </th>
                         {([['tag', 'Tag #'], ['type', 'Type'], ['size', 'Size'], ['status', 'Status']] as const).map(([key, label]) => (
@@ -2958,7 +3012,6 @@ export default function EquipmentPage() {
                             </Button>
                           )}
                           {!isStandard && (
-                            <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <span>
@@ -2978,7 +3031,6 @@ export default function EquipmentPage() {
                                   {count > 0 ? `${count} item${count !== 1 ? 's' : ''} use this type — delete or re-type them first` : 'Delete this type'}
                                 </TooltipContent>
                               </Tooltip>
-                            </TooltipProvider>
                           )}
                         </>
                       )}
@@ -3042,13 +3094,16 @@ export default function EquipmentPage() {
           allowSwap
           preventOpenAutoFocus
           headerExtra={openEnrollment && (
-            <JerseyNumberField
-              key={openEnrollment.id}
-              enrollment={openEnrollment}
-              duplicateNames={duplicateJerseys.get(openEnrollment.id)}
-              disabled={savingIds.has(openEnrollment.id)}
-              onSave={(val) => saveField(openEnrollment, 'footballEquipment.jerseyNumber', val)}
-            />
+            <>
+              <DepositBadge status={openEnrollment.volunteerDepositStatus} />
+              <JerseyNumberField
+                key={openEnrollment.id}
+                enrollment={openEnrollment}
+                duplicateNames={duplicateJerseys.get(openEnrollment.id)}
+                disabled={savingIds.has(openEnrollment.id)}
+                onSave={(val) => saveField(openEnrollment, 'footballEquipment.jerseyNumber', val)}
+              />
+            </>
           )}
           footerExtra={openEnrollment && (
             <Button
@@ -3094,5 +3149,6 @@ export default function EquipmentPage() {
 
       </main>
     </div>
+    </TooltipProvider>
   );
 }

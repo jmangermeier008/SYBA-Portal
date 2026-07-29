@@ -25,6 +25,8 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { notifySportAdmins } from '@/lib/coach-notifications';
 import { PlayerEquipmentSheet } from '@/components/equipment/PlayerEquipmentSheet';
+import { DepositBadge } from '@/components/equipment/DepositBadge';
+import type { DepositStatus } from '@/lib/deposit';
 import { IssueItemDialog, type IssueTarget } from '@/components/equipment/IssueItemDialog';
 import { CoachShedTab } from '@/components/coach/equipment/CoachShedTab';
 import { IssueFromShedDialog } from '@/components/coach/equipment/IssueFromShedDialog';
@@ -57,6 +59,9 @@ interface EnrollmentRow {
   // Top-level sizes captured at registration (the only registered sizes that exist)
   jerseySize?: string;
   shirtSize?: string;
+  // Volunteer deposit check, admin-set on /admin/registration. Absent = no
+  // check received. Read-only here — rules don't let coaches write it.
+  volunteerDepositStatus?: DepositStatus;
 }
 
 interface Player {
@@ -477,6 +482,7 @@ export default function CoachEquipmentPage() {
                         <p className="text-xs text-muted-foreground truncate">
                           {issuedCount} of {allSlots.length} issued{(teams ?? []).length > 1 && teamName ? ` · ${teamName}` : ''}
                         </p>
+                        <DepositBadge status={enrollment.volunteerDepositStatus} className="mt-1" />
                       </div>
                       <Progress
                         value={(issuedCount / allSlots.length) * 100}
@@ -519,6 +525,9 @@ export default function CoachEquipmentPage() {
           availableByType={inventory ? availableByType : undefined}
           registeredJerseySize={openRow ? (openRow.enrollment.jerseySize || openRow.enrollment.shirtSize) : undefined}
           slots={allSlots}
+          headerExtra={openRow && (
+            <DepositBadge status={openRow.enrollment.volunteerDepositStatus} />
+          )}
         />
 
         <IssueItemDialog

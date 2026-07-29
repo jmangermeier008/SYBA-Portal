@@ -20,6 +20,7 @@ import { getLeagueAge } from '@/lib/registration-logic';
 import { openPrintTab } from '@/lib/print-job';
 import { openDocumentPacket } from '@/lib/document-packet';
 import { uploadPlayerDocument } from '@/lib/player-documents';
+import { depositLabel, type DepositStatus } from '@/lib/deposit';
 import { DocViewerPane } from '@/components/documents/document-viewer';
 import { useFirestore, useUser } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -87,8 +88,9 @@ export interface EnrollmentRecord {
   volunteerDepositReturnedByName?: string;
 }
 
-/** Absent = no check received. Held = league has it. Returned = handed back. */
-export type DepositStatus = 'held' | 'returned';
+/** Absent = no check received. Held = league has it. Returned = handed back.
+ *  Re-exported from @/lib/deposit so existing importers keep working. */
+export type { DepositStatus };
 
 export interface AuditFormData {
   auditDob: string;
@@ -331,7 +333,7 @@ function DepositChip({
       }`}
     >
       <Wallet className="h-3 w-3" />
-      {status === 'held' ? 'Deposit held' : status === 'returned' ? 'Deposit returned' : 'No deposit'}
+      {depositLabel(status)}
     </span>
   );
 
