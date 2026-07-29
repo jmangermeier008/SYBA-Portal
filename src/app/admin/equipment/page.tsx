@@ -91,8 +91,10 @@ import {
   commitAssignItem,
   commitReturnItem,
   customSlugFromStatusField,
+  normalizeTypeSlug,
   recertState,
   recertYear,
+  resolveNewTypeSlug,
   sizesForType,
   slotFieldsForType,
   typeLabel,
@@ -158,10 +160,6 @@ interface Team {
 const CONDITION_LABELS: Record<ItemCondition, string> = {
   new: 'New', good: 'Good', fair: 'Fair', poor: 'Poor',
 };
-
-function normalizeTypeSlug(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s+/g, '_');
-}
 
 
 function RecertBadge({ item }: { item: ShedItem }) {
@@ -1084,14 +1082,16 @@ export default function EquipmentPage() {
 
   async function handleAddType() {
     if (!db || !newTypeLabel.trim()) return;
-    const slug = normalizeTypeSlug(newTypeLabel);
-    if (!slug) return;
-    const labelTaken = Object.values(SHED_ITEM_TYPES).concat(Object.values(typeLabels))
-      .some((l) => l.trim().toLowerCase() === newTypeLabel.trim().toLowerCase());
-    if (slug in SHED_ITEM_TYPES || typeLabels[slug] || customTypes.includes(slug) || labelTaken) {
+    const slug = resolveNewTypeSlug(
+      newTypeLabel,
+      [...(Object.keys(SHED_ITEM_TYPES) as string[]), ...customTypes],
+      typeLabels
+    );
+    if (!slug) {
       toast({ title: 'Type already exists', description: `"${newTypeLabel.trim()}" matches an existing type.`, variant: 'destructive' });
       return;
     }
+
     setTypeSaving(true);
     try {
       await setDoc(doc(db, 'equipmentTypes', slug), { label: newTypeLabel.trim() });
@@ -1456,7 +1456,8 @@ export default function EquipmentPage() {
       ['H-001', label('helmet'), 'YM', '2024', '2025', 'Example row — replace with your real inventory'],
       ['SP-001', label('shoulder_pads'), 'YM', '2024', '2025', ''],
       ['GJ-001', label('game_jersey'), 'YL', '', '', ''],
-      ['SJ-001', label('scrimmage_jersey'), 'YL', '', '', ''],
+      ['WGJ-001', label('scrimmage_jersey'), 'YL', '', '', ''],
+      ['SJ-001', label('scrimmage_jersey_2'), 'YL', '', '', ''],
       ['PJ-001', label('practice_jersey'), 'YL', '', '', ''],
       ['GP-001', label('game_pants'), 'YM', '', '', ''],
       ['PP-001', label('practice_pants'), 'YM', '', '', ''],
@@ -1534,9 +1535,13 @@ export default function EquipmentPage() {
     const seenTags = new Set<string>();
 
     // Display labels (including renames, e.g. "Head Protector" for helmet) resolve
-    // to their existing slug instead of minting a new type
+    // to their existing slug instead of minting a new type. A built-in name only
+    // counts while that slug still uses it — once a standard type is renamed, its
+    // original name may belong to a new custom type and must not be shadowed.
     const labelToSlug = new Map<string, string>();
-    Object.entries(SHED_ITEM_TYPES).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
+    Object.entries(SHED_ITEM_TYPES).forEach(([slug, label]) => {
+      if (!typeLabels[slug]) labelToSlug.set(label.toLowerCase(), slug);
+    });
     Object.entries(typeLabels).forEach(([slug, label]) => labelToSlug.set(label.toLowerCase(), slug));
 
     const valid: ImportRow[] = [];
@@ -2942,7 +2947,8 @@ export default function EquipmentPage() {
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
                 Rename any type to change how it&apos;s shown everywhere — assignments, inventory, coach pages, and print-outs.
-                Custom types are tracked in Shed Inventory but don&apos;t get a Player Assignments column.
+                Types you add here are fully assignable: they get their own slot on Player Assignments and count toward each player&apos;s total.
+                Renaming a standard type frees its original name, so you can then add a new type using it.
               </p>
 
               <div className="flex gap-2">

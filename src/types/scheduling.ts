@@ -668,10 +668,15 @@ export interface Enrollment {
     gameJerseyStatus?: 'not_issued' | 'issued' | 'returned';
     gameJerseyInventoryId?: string;      // equipmentInventory doc ID of assigned item
     gameJerseyTagNumber?: string;
-    // Scrimmage jersey
+    // White game jersey — the `scrimmage` field names are original and kept
+    // as-is; renaming them would orphan every existing assignment
     scrimmageJerseyStatus?: 'not_issued' | 'issued' | 'returned';
     scrimmageJerseyInventoryId?: string; // equipmentInventory doc ID of assigned item
     scrimmageJerseyTagNumber?: string;
+    // Scrimmage jersey (the actual one — see SHED_ITEM_TYPES in lib/equipment.ts)
+    scrimmageJersey2Status?: 'not_issued' | 'issued' | 'returned';
+    scrimmageJersey2InventoryId?: string; // equipmentInventory doc ID of assigned item
+    scrimmageJersey2TagNumber?: string;
     // Practice jersey
     practiceJerseyStatus?: 'not_issued' | 'issued' | 'returned';
     practiceJerseyInventoryId?: string;  // equipmentInventory doc ID of assigned item

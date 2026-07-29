@@ -32,9 +32,16 @@ export interface FootballEquipment {
   gameJerseyStatus?: EquipmentStatus;
   gameJerseyInventoryId?: string;
   gameJerseyTagNumber?: string;
+  // Historical note: this slot is SYFA's white game jersey. The `scrimmage`
+  // field names are the original ones and are kept as-is — 85 inventory items
+  // and every enrollment mirror reference them. The real scrimmage jersey is
+  // the separate `scrimmageJersey2*` slot below.
   scrimmageJerseyStatus?: EquipmentStatus;
   scrimmageJerseyInventoryId?: string;
   scrimmageJerseyTagNumber?: string;
+  scrimmageJersey2Status?: EquipmentStatus;
+  scrimmageJersey2InventoryId?: string;
+  scrimmageJersey2TagNumber?: string;
   practiceJerseyStatus?: EquipmentStatus;
   practiceJerseyInventoryId?: string;
   practiceJerseyTagNumber?: string;
@@ -50,7 +57,15 @@ export interface FootballEquipment {
   verifiedWeight?: number;
 }
 
-export type ShedItemType = 'helmet' | 'shoulder_pads' | 'game_jersey' | 'scrimmage_jersey' | 'practice_jersey' | 'game_pants' | 'practice_pants';
+export type ShedItemType =
+  | 'helmet'
+  | 'shoulder_pads'
+  | 'game_jersey'
+  | 'scrimmage_jersey'
+  | 'scrimmage_jersey_2'
+  | 'practice_jersey'
+  | 'game_pants'
+  | 'practice_pants';
 
 export type ItemCondition = 'new' | 'good' | 'fair' | 'poor';
 
@@ -82,24 +97,44 @@ export const PAD_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', '
 export const JERSEY_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
 export const PANTS_SIZES = ['XXS', 'XS', 'YXXS', 'YXS', 'YS', 'YM', 'YL', 'YXL', 'AS', 'AM', 'AL', 'AXL'] as const;
 
+/** Slots whose registered size falls back to the enrollment's top-level
+ *  jerseySize/shirtSize (the only size captured at registration). Declared
+ *  above sizesForType so it stays the single source of truth for "is a jersey". */
+export const JERSEY_SLOTS = new Set<ShedItemType>([
+  'game_jersey',
+  'scrimmage_jersey',
+  'scrimmage_jersey_2',
+  'practice_jersey',
+]);
+
 /** Standard size list for a type slug, or null for custom types (free text). */
 export function sizesForType(slug: string): readonly string[] | null {
   if (slug === 'helmet') return HELMET_SIZES;
   if (slug === 'shoulder_pads') return PAD_SIZES;
+  // Membership first: scrimmage_jersey_2 is a jersey but doesn't end in "_jersey".
+  if (JERSEY_SLOTS.has(slug as ShedItemType)) return JERSEY_SIZES;
   if (slug.endsWith('_jersey')) return JERSEY_SIZES;
   if (slug.endsWith('_pants')) return PANTS_SIZES;
   return null;
 }
 
-/** Slots whose registered size falls back to the enrollment's top-level
- *  jerseySize/shirtSize (the only size captured at registration). */
-export const JERSEY_SLOTS = new Set<ShedItemType>(['game_jersey', 'scrimmage_jersey', 'practice_jersey']);
-
+/**
+ * The eight tracked types, in display order. Keys are permanent — they are the
+ * `type` value on every equipmentInventory doc — so the labels, not the slugs,
+ * carry SYFA's naming:
+ *   - `game_jersey` is the BLUE game jersey
+ *   - `scrimmage_jersey` is the WHITE game jersey (renamed in 2026; 85 items)
+ *   - `scrimmage_jersey_2` is the actual scrimmage jersey, added afterwards
+ *     because the obvious slug was already spoken for.
+ * Renaming a slug would mean rewriting every inventory doc and enrollment
+ * mirror field, so we don't.
+ */
 export const SHED_ITEM_TYPES: Record<ShedItemType, string> = {
   helmet: 'Helmet',
   shoulder_pads: 'Shoulder Pads',
-  game_jersey: 'Game Jersey',
-  scrimmage_jersey: 'Scrimmage Jersey',
+  game_jersey: 'Blue Game Jersey',
+  scrimmage_jersey: 'White Game Jersey',
+  scrimmage_jersey_2: 'Scrimmage Jersey',
   practice_jersey: 'Practice Jersey',
   game_pants: 'Game Pants',
   practice_pants: 'Practice Pants',
@@ -116,6 +151,42 @@ export function typeLabel(type: string, overrides?: TypeLabelOverrides): string 
   );
 }
 
+/** Normalizes a display name to a slug: "Mouth Guard" → "mouth_guard". */
+export function normalizeTypeSlug(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * Decides the slug for a newly-added equipment type, or null when the name is
+ * already in use.
+ *
+ * Two subtleties, both of which used to block a legitimate add:
+ *  - Uniqueness is judged on the EFFECTIVE label (renames applied), not the
+ *    built-in name. Renaming `scrimmage_jersey` to "White Game Jersey" frees
+ *    the name "Scrimmage Jersey" for a genuinely new type.
+ *  - The slug derived from that freed name still collides with the standard
+ *    slot it came from, so we suffix it (`scrimmage_jersey_2`) instead of
+ *    refusing. Slugs are internal; only the label is ever displayed.
+ */
+export function resolveNewTypeSlug(
+  label: string,
+  existingSlugs: string[],
+  overrides: TypeLabelOverrides
+): string | null {
+  const base = normalizeTypeSlug(label);
+  if (!base) return null;
+
+  const wanted = label.trim().toLowerCase();
+  if (existingSlugs.some((s) => typeLabel(s, overrides).trim().toLowerCase() === wanted)) return null;
+
+  const taken = new Set(existingSlugs);
+  let slug = base;
+  for (let n = 2; taken.has(slug) || slug in SHED_ITEM_TYPES || overrides[slug]; n++) {
+    slug = `${base}_${n}`;
+  }
+  return slug;
+}
+
 export const EQUIP_FIELD_MAP: Record<ShedItemType, {
   statusField: keyof FootballEquipment;
   sizeField: keyof FootballEquipment | null;
@@ -126,6 +197,7 @@ export const EQUIP_FIELD_MAP: Record<ShedItemType, {
   shoulder_pads:    { statusField: 'padStatus',              sizeField: 'shoulderPadSize',  inventoryIdField: 'padInventoryId',             tagField: 'padTagNumber' },
   game_jersey:      { statusField: 'gameJerseyStatus',       sizeField: 'jerseySize',       inventoryIdField: 'gameJerseyInventoryId',      tagField: 'gameJerseyTagNumber' },
   scrimmage_jersey: { statusField: 'scrimmageJerseyStatus',  sizeField: null,               inventoryIdField: 'scrimmageJerseyInventoryId', tagField: 'scrimmageJerseyTagNumber' },
+  scrimmage_jersey_2: { statusField: 'scrimmageJersey2Status', sizeField: null,             inventoryIdField: 'scrimmageJersey2InventoryId', tagField: 'scrimmageJersey2TagNumber' },
   practice_jersey:  { statusField: 'practiceJerseyStatus',   sizeField: null,               inventoryIdField: 'practiceJerseyInventoryId',  tagField: 'practiceJerseyTagNumber' },
   game_pants:       { statusField: 'gamePantsStatus',        sizeField: 'gamePantsSize',    inventoryIdField: 'gamePantsInventoryId',       tagField: 'gamePantsTagNumber' },
   practice_pants:   { statusField: 'practicePantsStatus',    sizeField: 'practicePantsSize',inventoryIdField: 'practicePantsInventoryId',   tagField: 'practicePantsTagNumber' },
