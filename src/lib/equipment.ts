@@ -177,6 +177,32 @@ export function hasIssuedEquipment(fe?: FootballEquipment): boolean {
   return countIssuedEquipment(fe) > 0;
 }
 
+/** Helmets and shoulder pads carry NOCSAE-style recert obligations. */
+export const RECERT_TYPES = new Set<string>(['helmet', 'shoulder_pads']);
+export const RECERT_CYCLE_YEARS = 2;
+export const MAX_SERVICE_YEARS = 10;
+
+export type RecertState = 'retire' | 'due' | 'no-record' | 'ok';
+
+/** Extracts the 4-digit year from a stored recert value — new records store
+ *  "YYYY", legacy live data may still be "YYYY-MM-DD". */
+export function recertYear(value?: string): number | null {
+  if (!value) return null;
+  const y = Number(value.slice(0, 4));
+  return Number.isInteger(y) && y > 0 ? y : null;
+}
+
+/** Recert/service-life state for an item, or null for types with no
+ *  recert obligation. */
+export function recertState(item: ShedItem): RecertState | null {
+  if (!RECERT_TYPES.has(item.type)) return null;
+  const nowYear = new Date().getFullYear();
+  if (item.purchaseYear && nowYear - item.purchaseYear >= MAX_SERVICE_YEARS) return 'retire';
+  const baselineYear = recertYear(item.lastRecertDate) ?? item.purchaseYear;
+  if (!baselineYear) return 'no-record';
+  return nowYear - baselineYear >= RECERT_CYCLE_YEARS ? 'due' : 'ok';
+}
+
 export interface EquipmentNotifyInfo {
   parentUserId: string;
   /** Linked co-parents on the enrollment — notified alongside the primary. */
@@ -261,17 +287,28 @@ export class ItemAlreadyIssuedError extends Error {
   }
 }
 
+/** Optional extras for the parent-facing notification the commit helpers write. */
+export interface EquipmentCommitOptions {
+  /** Linked co-parents on the enrollment — notified alongside the primary. */
+  additionalParentUids?: string[];
+  /** Admin-renamed display label; defaults to the built-in typeLabel(). */
+  itemLabel?: string;
+}
+
 /** Issue an inventory item to a player: updates the enrollment's
  *  footballEquipment fields and the inventory doc in one batch, releasing any
- *  previously-assigned item for the same slot. Throws on failure. */
+ *  previously-assigned item for the same slot. Throws on failure.
+ *  Returns the notification payload (or null) so callers can push AFTER the
+ *  batch commits. */
 export async function commitAssignItem(
   db: Firestore,
   enrollment: EquipmentEnrollmentRef,
   item: ShedItem,
   equipType: string,
   actor: { uid: string; name: string },
-  playerName?: string
-): Promise<void> {
+  playerName?: string,
+  opts?: EquipmentCommitOptions
+): Promise<{ recipients: string[]; title: string; body: string } | null> {
   // Pre-check for race condition: verify item is still free (or already assigned here)
   const freshSnap = await getDoc(doc(db, 'equipmentInventory', item.id));
   const freshData = freshSnap.data();
@@ -316,11 +353,12 @@ export async function commitAssignItem(
     actorName: actor.name,
   });
 
-  addEquipmentNotificationToBatch(batch, db, {
+  const notif = addEquipmentNotificationToBatch(batch, db, {
     parentUserId: enrollment.parentUserId,
+    additionalParentUids: opts?.additionalParentUids,
     actorUid: actor.uid,
     event: 'issued',
-    itemLabel: typeLabel(equipType),
+    itemLabel: opts?.itemLabel ?? typeLabel(equipType),
     tagNumber: item.tagNumber,
     playerName,
   });
@@ -345,18 +383,21 @@ export async function commitAssignItem(
   }
 
   await batch.commit();
+  return notif;
 }
 
 /** Return an issued item: clears the enrollment's inventory/tag fields and
- *  frees the inventory doc. Throws on failure. */
+ *  frees the inventory doc. Throws on failure. Returns the notification
+ *  payload (or null) so callers can push AFTER the batch commits. */
 export async function commitReturnItem(
   db: Firestore,
   enrollment: EquipmentEnrollmentRef,
   item: ShedItem,
   equipType: string,
   actor?: { uid: string; name: string },
-  playerName?: string
-): Promise<void> {
+  playerName?: string,
+  opts?: EquipmentCommitOptions
+): Promise<{ recipients: string[]; title: string; body: string } | null> {
   const { statusField, inventoryIdField, tagField } = slotFieldsForType(equipType);
 
   const batch = writeBatch(db);
@@ -376,6 +417,7 @@ export async function commitReturnItem(
     returnedAt: now,
   });
 
+  let notif: { recipients: string[]; title: string; body: string } | null = null;
   if (actor) {
     addHistoryToBatch(batch, db, item.id, {
       event: 'returned',
@@ -385,15 +427,17 @@ export async function commitReturnItem(
       actorUid: actor.uid,
       actorName: actor.name,
     });
-    addEquipmentNotificationToBatch(batch, db, {
+    notif = addEquipmentNotificationToBatch(batch, db, {
       parentUserId: enrollment.parentUserId,
+      additionalParentUids: opts?.additionalParentUids,
       actorUid: actor.uid,
       event: 'returned',
-      itemLabel: typeLabel(equipType),
+      itemLabel: opts?.itemLabel ?? typeLabel(equipType),
       tagNumber: item.tagNumber,
       playerName,
     });
   }
 
   await batch.commit();
+  return notif;
 }

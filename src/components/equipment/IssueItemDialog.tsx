@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BellRing, Check, Loader2, PackageOpen, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { sizesForType, typeLabel, type ShedItem, type TypeLabelOverrides } from '@/lib/equipment';
+import { recertState, sizesForType, typeLabel, type ShedItem, type TypeLabelOverrides } from '@/lib/equipment';
 
 export interface IssueTarget {
   /** Standard slot slug or an admin-created custom type slug. */
@@ -23,12 +23,38 @@ export interface IssueTarget {
   registeredSize?: string;
 }
 
+/** An item of this type currently checked out to someone else. Rendered dimmed
+ *  and non-clickable so a search for a tag that's out still explains itself. */
+export interface UnavailableEntry {
+  item: ShedItem;
+  /** Display name of the player holding it; falls back to "Issued". */
+  holderName?: string;
+}
+
 const byTagNumber = (a: ShedItem, b: ShedItem) =>
   a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true });
 
+/** NOCSAE recert/service-life flag. Only the actionable states render — an
+ *  "OK"/"no record" badge would be noise on a picker whose job is "grab a helmet". */
+function RecertWarning({ item }: { item: ShedItem }) {
+  const state = recertState(item);
+  if (state === 'retire')
+    return <Badge className="bg-red-100 text-red-700 border-red-200 hover:bg-red-100 text-[10px] whitespace-nowrap">Retire (10+ yrs)</Badge>;
+  if (state === 'due')
+    return <Badge className="bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100 text-[10px] whitespace-nowrap">Recert due</Badge>;
+  return null;
+}
+
 /** Shed-inventory picker for one equipment slot. Shows the player's registered
  *  size, lists matching-size items first, and offers a tag/size search plus
- *  one-tap size chips so the right gear is quick to find in a big shed. */
+ *  one-tap size chips so the right gear is quick to find in a big shed.
+ *
+ *  Deliberately a plain Dialog with an in-place list: a Popover-based picker
+ *  rendered inside the modal player Sheet has its search input starved of focus
+ *  by the Sheet's focus trap — the same trap documented on PlayerPickList.
+ *
+ *  Shared by the coach and admin equipment pages. Keep it presentational (no
+ *  Firestore, no role checks) and keep every role-specific prop optional. */
 export function IssueItemDialog({
   target,
   items,
@@ -36,8 +62,11 @@ export function IssueItemDialog({
   onOpenChange,
   onSelect,
   onRequestRestock,
-  restockRequested,
+  restockRequested = false,
   labels,
+  unavailableItems,
+  showRecertBadges = false,
+  emptyStateAction,
 }: {
   target: IssueTarget | null;
   /** Available items of target.equipType — provided by the page's inventory subscription. */
@@ -45,9 +74,16 @@ export function IssueItemDialog({
   isLoading: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (item: ShedItem) => void;
-  onRequestRestock: () => void;
-  restockRequested: boolean;
+  /** Coach-only "Request restock" CTA. Omit to hide it — admin *is* the restocker. */
+  onRequestRestock?: () => void;
+  restockRequested?: boolean;
   labels?: TypeLabelOverrides;
+  /** Items issued to OTHER players, shown dimmed. Coach omits → available-only. */
+  unavailableItems?: UnavailableEntry[];
+  /** Flag recert-due / retire-eligible helmets and pads. Rows stay selectable. */
+  showRecertBadges?: boolean;
+  /** Replaces the restock CTA in the empty state (admin: "Add item to shed"). */
+  emptyStateAction?: ReactNode;
 }) {
   const [search, setSearch] = useState('');
   const [sizeFilter, setSizeFilter] = useState<string | null>(null);
@@ -60,7 +96,8 @@ export function IssueItemDialog({
 
   const availableItems = items ?? [];
 
-  // Size chips: the sizes actually in stock, in canonical order
+  // Size chips: the sizes actually in stock, in canonical order. Built from
+  // available items only — a chip that yields an all-dimmed list is a dead end.
   const sizeChips = useMemo(() => {
     if (!target) return [];
     const present = [...new Set(availableItems.map((i) => i.size))];
@@ -75,10 +112,10 @@ export function IssueItemDialog({
     });
   }, [availableItems, target]);
 
-  const filterActive = search.trim() !== '' || sizeFilter !== null;
+  const q = search.trim().toLowerCase();
+  const filterActive = q !== '' || sizeFilter !== null;
 
   const { matching, other, flat } = useMemo(() => {
-    const q = search.trim().toLowerCase();
     const filtered = availableItems.filter((i) => {
       if (sizeFilter && i.size !== sizeFilter) return false;
       if (!q) return true;
@@ -93,25 +130,61 @@ export function IssueItemDialog({
       other: filtered.filter(i => i.size.trim().toLowerCase() !== wanted).sort(byTagNumber),
       flat: [] as ShedItem[],
     };
-  }, [availableItems, target?.registeredSize, search, sizeFilter, filterActive]);
+  }, [availableItems, target?.registeredSize, q, sizeFilter, filterActive]);
+
+  // The same search/size predicate applies to the dimmed section, so searching
+  // for a tag that's checked out still surfaces it — with who has it.
+  const filteredUnavailable = useMemo(() => {
+    return (unavailableItems ?? [])
+      .filter(({ item }) => {
+        if (sizeFilter && item.size !== sizeFilter) return false;
+        if (!q) return true;
+        return item.tagNumber.toLowerCase().includes(q) || item.size.toLowerCase().includes(q);
+      })
+      .sort((a, b) => byTagNumber(a.item, b.item));
+  }, [unavailableItems, q, sizeFilter]);
 
   const typeName = target ? typeLabel(target.equipType, labels) : '';
-  const visibleCount = filterActive || !target?.registeredSize ? flat.length : matching.length + other.length;
+  const unavailableCount = unavailableItems?.length ?? 0;
+  const isEmpty = availableItems.length === 0 && unavailableCount === 0;
+  const visibleCount =
+    (filterActive || !target?.registeredSize ? flat.length : matching.length + other.length) +
+    filteredUnavailable.length;
 
   const itemRow = (item: ShedItem, highlight: boolean) => (
     <button
       key={item.id}
       onClick={() => onSelect(item)}
       className={cn(
-        'w-full flex items-center justify-between rounded-xl border px-4 min-h-[48px] text-sm transition-colors hover:bg-secondary/40',
+        'w-full flex items-center justify-between gap-2 rounded-xl border px-4 min-h-[48px] text-sm transition-colors hover:bg-secondary/40',
         highlight && 'ring-1 ring-primary/40 bg-primary/5'
       )}
     >
       <span className="font-semibold">Tag #{item.tagNumber}</span>
-      <Badge variant={highlight ? 'default' : 'secondary'} className="text-xs">
-        {item.size || 'No size'}
-      </Badge>
+      <span className="flex items-center gap-1.5 shrink-0">
+        {showRecertBadges && <RecertWarning item={item} />}
+        <Badge variant={highlight ? 'default' : 'secondary'} className="text-xs">
+          {item.size || 'No size'}
+        </Badge>
+      </span>
     </button>
+  );
+
+  const unavailableRow = ({ item, holderName }: UnavailableEntry) => (
+    <div
+      key={item.id}
+      aria-disabled
+      className="w-full flex items-center justify-between gap-2 rounded-xl border border-dashed px-4 min-h-[48px] text-sm opacity-50 cursor-not-allowed"
+    >
+      <span className="font-semibold">Tag #{item.tagNumber}</span>
+      <span className="flex items-center gap-1.5 shrink-0 min-w-0">
+        {showRecertBadges && <RecertWarning item={item} />}
+        <Badge variant="outline" className="text-xs">{item.size || 'No size'}</Badge>
+        <span className="text-xs text-muted-foreground truncate max-w-[9rem]">
+          {holderName || 'Issued'}
+        </span>
+      </span>
+    </div>
   );
 
   return (
@@ -131,28 +204,35 @@ export function IssueItemDialog({
           <div className="flex justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
-        ) : availableItems.length === 0 ? (
+        ) : isEmpty ? (
           <div className="py-4 text-center space-y-3">
             <PackageOpen className="h-10 w-10 text-muted-foreground/40 mx-auto" />
             <p className="text-sm text-muted-foreground">
               No available {typeName.toLowerCase()} in the shed.
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-xl"
-              disabled={restockRequested}
-              onClick={onRequestRestock}
-            >
-              {restockRequested ? (
-                <><Check className="mr-1.5 h-4 w-4" /> Restock requested</>
-              ) : (
-                <><BellRing className="mr-1.5 h-4 w-4" /> Request restock</>
-              )}
-            </Button>
+            {emptyStateAction ?? (onRequestRestock ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                disabled={restockRequested}
+                onClick={onRequestRestock}
+              >
+                {restockRequested ? (
+                  <><Check className="mr-1.5 h-4 w-4" /> Restock requested</>
+                ) : (
+                  <><BellRing className="mr-1.5 h-4 w-4" /> Request restock</>
+                )}
+              </Button>
+            ) : null)}
           </div>
         ) : (
           <div className="space-y-3">
+            {availableItems.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                None available — all {unavailableCount} {unavailableCount === 1 ? 'is' : 'are'} checked out.
+              </p>
+            )}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -202,6 +282,12 @@ export function IssueItemDialog({
                   </>
                 )}
                 {flat.map(item => itemRow(item, false))}
+                {filteredUnavailable.length > 0 && (
+                  <>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground pt-2">Issued to another player</p>
+                    {filteredUnavailable.map(unavailableRow)}
+                  </>
+                )}
               </div>
             )}
           </div>

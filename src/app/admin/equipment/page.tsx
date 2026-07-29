@@ -41,9 +41,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
-import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
+import { type ComboboxOption } from '@/components/ui/combobox';
 import {
   ShieldCheck,
   Lock,
@@ -75,16 +74,22 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 import { PlayerPickList } from '@/components/equipment/PlayerPickList';
+import { PlayerEquipmentSheet } from '@/components/equipment/PlayerEquipmentSheet';
+import { IssueItemDialog, type IssueTarget, type UnavailableEntry } from '@/components/equipment/IssueItemDialog';
 import {
   EQUIP_FIELD_MAP,
   HELMET_SIZES,
+  JERSEY_SLOTS,
   PAD_SIZES,
+  RECERT_TYPES,
   SHED_ITEM_TYPES,
   addEquipmentNotificationToBatch,
   addHistoryToBatch,
   commitAssignItem,
   commitReturnItem,
   customSlugFromStatusField,
+  recertState,
+  recertYear,
   sizesForType,
   slotFieldsForType,
   typeLabel,
@@ -92,6 +97,7 @@ import {
   type EquipmentStatus,
   type FootballEquipment,
   type ItemCondition,
+  type RecertState,
   type ShedItem,
   type ShedItemType,
 } from '@/lib/equipment';
@@ -120,6 +126,10 @@ interface EnrollmentRow {
   seasonId: string;
   divisionId: string;
   teamId?: string;
+  // Top-level sizes captured at registration — the only registered sizes that
+  // exist. Present on the Firestore docs (Enrollment in src/types/scheduling.ts).
+  jerseySize?: string;
+  shirtSize?: string;
   footballEquipment?: FootballEquipment;
 }
 
@@ -142,30 +152,6 @@ interface Team {
 const CONDITION_LABELS: Record<ItemCondition, string> = {
   new: 'New', good: 'Good', fair: 'Fair', poor: 'Poor',
 };
-
-/** Helmets and shoulder pads carry NOCSAE-style recert obligations. */
-const RECERT_TYPES = new Set<string>(['helmet', 'shoulder_pads']);
-const RECERT_CYCLE_YEARS = 2;
-const MAX_SERVICE_YEARS = 10;
-
-type RecertState = 'retire' | 'due' | 'no-record' | 'ok';
-
-/** Extracts the 4-digit year from a stored recert value — new records store
- *  "YYYY", legacy live data may still be "YYYY-MM-DD". */
-function recertYear(value?: string): number | null {
-  if (!value) return null;
-  const y = Number(value.slice(0, 4));
-  return Number.isInteger(y) && y > 0 ? y : null;
-}
-
-function recertState(item: ShedItem): RecertState | null {
-  if (!RECERT_TYPES.has(item.type)) return null;
-  const nowYear = new Date().getFullYear();
-  if (item.purchaseYear && nowYear - item.purchaseYear >= MAX_SERVICE_YEARS) return 'retire';
-  const baselineYear = recertYear(item.lastRecertDate) ?? item.purchaseYear;
-  if (!baselineYear) return 'no-record';
-  return nowYear - baselineYear >= RECERT_CYCLE_YEARS ? 'due' : 'ok';
-}
 
 function normalizeTypeSlug(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, '_');
@@ -236,6 +222,46 @@ function getEquippedStatus(enrollment: EnrollmentRow, customSlotCount = 0) {
   return { count, total, isComplete: count >= total };
 }
 
+/** Jersey # editor for the assignment sheet header. Uncontrolled (blur-saved),
+ *  so the caller MUST key it on the enrollment id — otherwise a typed value can
+ *  survive a switch to another player. */
+function JerseyNumberField({
+  enrollment,
+  duplicateNames,
+  disabled,
+  onSave,
+}: {
+  enrollment: EnrollmentRow;
+  duplicateNames?: string[];
+  disabled: boolean;
+  onSave: (value: string) => void;
+}) {
+  const current = enrollment.footballEquipment?.jerseyNumber ?? '';
+  return (
+    <>
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-medium w-32 shrink-0">Jersey #</span>
+        <Input
+          defaultValue={current}
+          placeholder="—"
+          className={cn('w-20 h-9 text-center text-xs', duplicateNames && 'ring-2 ring-destructive border-destructive')}
+          disabled={disabled}
+          onBlur={(e) => {
+            const val = e.target.value.trim();
+            if (val !== current) onSave(val);
+          }}
+        />
+      </div>
+      {duplicateNames && (
+        <p className="text-xs text-destructive flex items-center gap-1.5">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          Duplicate #{current} in this division: also {duplicateNames.join(', ')}
+        </p>
+      )}
+    </>
+  );
+}
+
 function hasOutstandingGear(enrollment: EnrollmentRow): boolean {
   const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
   return Object.entries(fe).some(([k, v]) => k.endsWith('Status') && v === 'issued');
@@ -257,7 +283,10 @@ export default function EquipmentPage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [playerNameMap, setPlayerNameMap] = useState<Map<string, string>>(new Map());
   const [playersLoading, setPlayersLoading] = useState(false);
-  const [drawerEnrollment, setDrawerEnrollment] = useState<EnrollmentRow | null>(null);
+  // Track the open player by id, not by object — the row must stay live as
+  // issues/returns land, and a filter change mid-edit must not freeze it.
+  const [drawerEnrollmentId, setDrawerEnrollmentId] = useState<string | null>(null);
+  const [issueSlot, setIssueSlot] = useState<{ enrollmentId: string; equipType: string } | null>(null);
   const [playerComplianceMap, setPlayerComplianceMap] = useState<Map<string, boolean>>(new Map());
 
   // Shed Inventory state
@@ -469,34 +498,6 @@ export default function EquipmentPage() {
     return dupes;
   }, [enrollments, playerNameMap]);
 
-  // Pre-build combobox options per type (standard AND custom) from the live shed subscription
-  const inventoryOptionsByType = useMemo(() => {
-    const result: Record<string, ComboboxOption[]> = {};
-    (shedItems ?? []).forEach((item) => {
-      if (item.status === 'retired') return;
-      (result[item.type] ??= []).push({
-        value: item.id,
-        label: `#${item.tagNumber} · ${item.size}`,
-        sublabel: item.status === 'issued'
-          ? (item.issuedToPlayerId ? (playerNameMap.get(item.issuedToPlayerId) ?? 'Issued') : 'Issued')
-          : undefined,
-        disabled: item.status === 'issued',
-      });
-    });
-    Object.values(result).forEach((opts) =>
-      opts.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true })));
-    return result;
-  }, [shedItems, playerNameMap]);
-
-  // Per-row: re-enable the item currently assigned to this enrollment so it still shows
-  function getOptionsForType(type: string, currentInventoryId: string | undefined): ComboboxOption[] {
-    return (inventoryOptionsByType[type] ?? []).map((opt) =>
-      opt.value === currentInventoryId
-        ? { ...opt, disabled: false, sublabel: 'Assigned' }
-        : opt
-    );
-  }
-
   const allIds = filteredEnrollments.map((e) => e.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
   const someSelected = selectedIds.size > 0;
@@ -547,14 +548,16 @@ export default function EquipmentPage() {
 
     setSavingIds((prev) => new Set(prev).add(enrollmentId));
     try {
-      await commitAssignItem(
+      const notif = await commitAssignItem(
         db,
         { id: enrollmentId, parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
         item,
         equipType,
         currentActor,
-        playerNameMap.get(enrollment.playerId)
+        playerNameMap.get(enrollment.playerId),
+        { additionalParentUids: enrollment.additionalParentUids, itemLabel: typeLabel(equipType, typeLabels) }
       );
+      if (notif) pushToUsersBestEffort(notif.recipients, { title: notif.title, body: notif.body, url: '/parent/dashboard' });
       toast({ title: 'Assigned', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(enrollment.playerId) ?? 'player'}.` });
     } catch (err: any) {
       toast({ title: 'Assignment failed', description: err.message, variant: 'destructive' });
@@ -574,14 +577,16 @@ export default function EquipmentPage() {
 
     setSavingIds((prev) => new Set(prev).add(enrollmentId));
     try {
-      await commitReturnItem(
+      const notif = await commitReturnItem(
         db,
         { id: enrollmentId, parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
         item,
         equipType,
         currentActor,
-        playerNameMap.get(enrollment.playerId)
+        playerNameMap.get(enrollment.playerId),
+        { additionalParentUids: enrollment.additionalParentUids, itemLabel: typeLabel(equipType, typeLabels) }
       );
+      if (notif) pushToUsersBestEffort(notif.recipients, { title: notif.title, body: notif.body, url: '/parent/dashboard' });
       toast({ title: 'Returned', description: `Tag #${item.tagNumber} is now available.` });
     } catch (err: any) {
       toast({ title: 'Return failed', description: err.message, variant: 'destructive' });
@@ -592,6 +597,33 @@ export default function EquipmentPage() {
         return next;
       });
     }
+  }
+
+  /** Picker selection → assign. Closes the dialog first so the sheet is the
+   *  visible surface while the write lands. */
+  async function handleIssueSelect(item: ShedItem) {
+    if (!issueSlot) return;
+    const enrollment = (enrollments ?? []).find((e) => e.id === issueSlot.enrollmentId);
+    if (!enrollment) return;
+    const { equipType } = issueSlot;
+    setIssueSlot(null);
+    await assignInventoryItem(enrollment, item, equipType);
+  }
+
+  /** Sheet row Return → free the item held in that slot. */
+  async function handleSlotReturn(equipType: string) {
+    const enrollment = openEnrollment;
+    if (!enrollment) return;
+    const { inventoryIdField, tagField } = slotFieldsForType(equipType);
+    const fe = (enrollment.footballEquipment ?? {}) as Record<string, unknown>;
+    const inventoryId = fe[inventoryIdField] as string | undefined;
+    if (!inventoryId) {
+      toast({ title: 'Return failed', description: 'No inventory record for this item.', variant: 'destructive' });
+      return;
+    }
+    const item = (shedItems ?? []).find((i) => i.id === inventoryId)
+      ?? { id: inventoryId, tagNumber: (fe[tagField] as string | undefined) ?? '', type: equipType, size: '', status: 'issued' as const };
+    await returnInventoryItem(enrollment, item, equipType);
   }
 
   async function returnAll(enrollment: EnrollmentRow) {
@@ -760,6 +792,68 @@ export default function EquipmentPage() {
     });
     return [...custom].sort((a, b) => typeLabel(a, typeLabels).localeCompare(typeLabel(b, typeLabels)));
   }, [shedItems, managedTypes, typeLabels]);
+
+  // ── Player assignment sheet + item picker ────────────────────────────────
+  // Every assignable slot, in the order the old sheet rendered them.
+  const adminSlots = useMemo(
+    () => [...(Object.keys(EQUIP_FIELD_MAP) as ShedItemType[]), ...customTypes] as string[],
+    [customTypes]
+  );
+
+  const openEnrollment = useMemo(
+    () => (enrollments ?? []).find((e) => e.id === drawerEnrollmentId) ?? null,
+    [enrollments, drawerEnrollmentId]
+  );
+
+  const issueTarget = useMemo<IssueTarget | null>(() => {
+    if (!issueSlot) return null;
+    const e = (enrollments ?? []).find((x) => x.id === issueSlot.enrollmentId);
+    if (!e) return null;
+    const { sizeField } = slotFieldsForType(issueSlot.equipType);
+    const fe = (e.footballEquipment ?? {}) as Record<string, unknown>;
+    const feSize = sizeField ? (fe[sizeField] as string | undefined) : undefined;
+    // Registration only captures a jersey/shirt size — fall back to it for
+    // jersey slots so "matching size" works before anything is issued
+    const registeredSize = feSize
+      || (JERSEY_SLOTS.has(issueSlot.equipType as ShedItemType)
+        ? (e.jerseySize || e.shirtSize)
+        : undefined);
+    const fullName = playerNameMap.get(e.playerId) ?? '';
+    return {
+      equipType: issueSlot.equipType,
+      playerFirstName: fullName.split(' ')[0] || fullName,
+      registeredSize: registeredSize || undefined,
+    };
+  }, [issueSlot, enrollments, playerNameMap]);
+
+  const availableByType = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (shedItems ?? []).forEach((i) => {
+      if (i.status === 'available') counts[i.type] = (counts[i.type] ?? 0) + 1;
+    });
+    adminSlots.forEach((t) => { counts[t] = counts[t] ?? 0; });
+    return counts;
+  }, [shedItems, adminSlots]);
+
+  const dialogItems = useMemo(() => {
+    if (!issueSlot || !shedItems) return null;
+    return shedItems.filter((i) => i.type === issueSlot.equipType && i.status === 'available');
+  }, [shedItems, issueSlot]);
+
+  // Issued elsewhere: shown dimmed so searching a tag that's out still explains
+  // itself. Excludes this enrollment's own item — the sheet row already shows it.
+  const dialogUnavailable = useMemo<UnavailableEntry[]>(() => {
+    if (!issueSlot || !shedItems) return [];
+    return shedItems
+      .filter((i) =>
+        i.type === issueSlot.equipType &&
+        i.status === 'issued' &&
+        i.issuedToEnrollmentId !== issueSlot.enrollmentId)
+      .map((i) => ({
+        item: i,
+        holderName: i.issuedToPlayerId ? playerNameMap.get(i.issuedToPlayerId) : undefined,
+      }));
+  }, [shedItems, issueSlot, playerNameMap]);
 
   const typeItemCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1000,65 +1094,32 @@ export default function EquipmentPage() {
     if (!db || !checkOutDialog.item || !checkOutPlayerId) return;
     const item = checkOutDialog.item;
     const enrollment = (enrollments ?? []).find(e => e.playerId === checkOutPlayerId);
+    // Previously this still flipped the item to `issued` with empty issuedTo*
+    // fields — a ghost nobody could return. The player list is built from
+    // `enrollments`, so this only fires on a stale selection.
+    if (!enrollment?.parentUserId || !enrollment.id) {
+      toast({
+        title: 'Check-out failed',
+        description: 'No enrollment found for that player in this season — refresh and try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setCheckOutSaving(true);
     try {
-      const batch = writeBatch(db);
-      const now = new Date().toISOString();
-
-      batch.update(doc(db, 'equipmentInventory', item.id), {
-        status: 'issued',
-        issuedToPlayerId: checkOutPlayerId,
-        issuedToParentUserId: enrollment?.parentUserId ?? '',
-        issuedToEnrollmentId: enrollment?.id ?? '',
-        issuedAt: now,
-        issuedByUid: user?.uid ?? '',
-        issuedByName: profile?.displayName || profile?.email || '',
-        returnedAt: '',
-      });
-
-      addHistoryToBatch(batch, db, item.id, {
-        event: 'issued',
-        at: now,
-        playerId: checkOutPlayerId,
-        playerName: playerNameMap.get(checkOutPlayerId) ?? '',
-        actorUid: currentActor.uid,
-        actorName: currentActor.name,
-      });
-
-      let issueNotif: { recipients: string[]; title: string; body: string } | null = null;
-      if (enrollment?.parentUserId) {
-        issueNotif = addEquipmentNotificationToBatch(batch, db, {
-          parentUserId: enrollment.parentUserId,
-          additionalParentUids: enrollment.additionalParentUids,
-          actorUid: currentActor.uid,
-          event: 'issued',
-          itemLabel: typeLabel(item.type, typeLabels),
-          tagNumber: item.tagNumber,
-          playerName: playerNameMap.get(checkOutPlayerId),
-        });
-      }
-
-      // Standard and custom types both mirror to the enrollment (custom types
-      // use derived x_{slug}* fields)
-      if (enrollment?.parentUserId && enrollment?.id) {
-        const { statusField, sizeField, inventoryIdField, tagField } = slotFieldsForType(item.type);
-        const enrollmentUpdates: Record<string, any> = {
-          [`footballEquipment.${statusField}`]: 'issued',
-          [`footballEquipment.${inventoryIdField}`]: item.id,
-          [`footballEquipment.${tagField}`]: item.tagNumber,
-          'footballEquipment.issuedAt': now,
-        };
-        if (sizeField) {
-          enrollmentUpdates[`footballEquipment.${sizeField}`] = item.size;
-        }
-        batch.update(
-          doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id),
-          enrollmentUpdates
-        );
-      }
-
-      await batch.commit();
-      if (issueNotif) pushToUsersBestEffort(issueNotif.recipients, { title: issueNotif.title, body: issueNotif.body, url: '/parent/dashboard' });
+      // Shared commit path: adds the race pre-check and auto-returns whatever
+      // the player already had in this slot (the old hand-rolled batch left it
+      // flagged `issued` forever).
+      const notif = await commitAssignItem(
+        db,
+        { id: enrollment.id, parentUserId: enrollment.parentUserId, playerId: enrollment.playerId, footballEquipment: enrollment.footballEquipment },
+        item,
+        item.type,
+        currentActor,
+        playerNameMap.get(checkOutPlayerId),
+        { additionalParentUids: enrollment.additionalParentUids, itemLabel: typeLabel(item.type, typeLabels) }
+      );
+      if (notif) pushToUsersBestEffort(notif.recipients, { title: notif.title, body: notif.body, url: '/parent/dashboard' });
       toast({ title: 'Checked out', description: `Tag #${item.tagNumber} issued to ${playerNameMap.get(checkOutPlayerId) ?? checkOutPlayerId}.` });
       setCheckOutDialog({ open: false, item: null });
       setCheckOutPlayerId('');
@@ -1735,7 +1796,7 @@ export default function EquipmentPage() {
                           return (
                             <tr
                               key={enrollment.id}
-                              onClick={() => setDrawerEnrollment(enrollment)}
+                              onClick={() => setDrawerEnrollmentId(enrollment.id)}
                               className={cn(
                                 'border-b last:border-0 transition-colors cursor-pointer',
                                 isSelected ? 'bg-primary/5' : 'hover:bg-muted/20',
@@ -1814,7 +1875,7 @@ export default function EquipmentPage() {
                                     size="sm"
                                     variant="outline"
                                     disabled={isSaving}
-                                    onClick={() => setDrawerEnrollment(enrollment)}
+                                    onClick={() => setDrawerEnrollmentId(enrollment.id)}
                                     className="rounded-full h-8 gap-1.5 whitespace-nowrap text-xs"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
@@ -1852,7 +1913,7 @@ export default function EquipmentPage() {
                       <Card
                         key={enrollment.id}
                         className={cn('border-none shadow-md cursor-pointer transition-colors', isSelected && 'ring-1 ring-primary')}
-                        onClick={() => setDrawerEnrollment(enrollment)}
+                        onClick={() => setDrawerEnrollmentId(enrollment.id)}
                       >
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between gap-3">
@@ -1894,240 +1955,6 @@ export default function EquipmentPage() {
                   })}
 
                 </div>}
-
-                {/* ── Equipment detail Sheet — the single editing surface for both viewports ── */}
-                <Sheet open={!!drawerEnrollment} onOpenChange={(open) => { if (!open) setDrawerEnrollment(null); }}>
-                    <SheetContent side="right" className="w-full sm:max-w-md flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
-                      {drawerEnrollment && (() => {
-                        const liveEnrollment = filteredEnrollments.find(e => e.id === drawerEnrollment.id) ?? drawerEnrollment;
-                        const isSaving = savingIds.has(liveEnrollment.id);
-                        const fe = liveEnrollment.footballEquipment ?? {};
-                        return (
-                          <>
-                            <SheetHeader className="mb-4">
-                              <SheetTitle className="flex items-center gap-2">
-                                {playerNameMap.get(liveEnrollment.playerId) ?? liveEnrollment.playerId}
-                                {isSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                              </SheetTitle>
-                              <SheetDescription>{divisionMap.get(liveEnrollment.divisionId) ?? ''}</SheetDescription>
-                            </SheetHeader>
-
-                            <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-4">
-                              {/* Jersey # */}
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-medium w-32 shrink-0">Jersey #</span>
-                                <Input
-                                  defaultValue={fe.jerseyNumber ?? ''}
-                                  placeholder="—"
-                                  className={cn('w-20 h-9 text-center text-xs', duplicateJerseys.has(liveEnrollment.id) && 'ring-2 ring-destructive border-destructive')}
-                                  disabled={isSaving}
-                                  onBlur={(e) => {
-                                    const val = e.target.value.trim();
-                                    if (val !== (fe.jerseyNumber ?? ''))
-                                      saveField(liveEnrollment, 'footballEquipment.jerseyNumber', val);
-                                  }}
-                                />
-                              </div>
-                              {duplicateJerseys.has(liveEnrollment.id) && (
-                                <p className="text-xs text-destructive flex items-center gap-1.5">
-                                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                  Duplicate #{fe.jerseyNumber} in this division: also {duplicateJerseys.get(liveEnrollment.id)!.join(', ')}
-                                </p>
-                              )}
-
-                              {/* Helmet */}
-                              <div className="space-y-1.5">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{typeLabel('helmet', typeLabels)}</p>
-                                <div className="flex items-center gap-3">
-                                  <Combobox
-                                    options={getOptionsForType('helmet', fe.helmetInventoryId)}
-                                    value={fe.helmetInventoryId}
-                                    onSelect={(itemId) => {
-                                      const item = (shedItems ?? []).find(i => i.id === itemId);
-                                      if (item) assignInventoryItem(liveEnrollment, item, 'helmet');
-                                    }}
-                                    onClear={() => {
-                                      const item = (shedItems ?? []).find(i => i.id === fe.helmetInventoryId);
-                                      if (item) returnInventoryItem(liveEnrollment, item, 'helmet');
-                                    }}
-                                    disabled={isSaving}
-                                    className="flex-1"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Shoulder Pads */}
-                              <div className="space-y-1.5">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{typeLabel('shoulder_pads', typeLabels)}</p>
-                                <div className="flex items-center gap-3">
-                                  <Combobox
-                                    options={getOptionsForType('shoulder_pads', fe.padInventoryId)}
-                                    value={fe.padInventoryId}
-                                    onSelect={(itemId) => {
-                                      const item = (shedItems ?? []).find(i => i.id === itemId);
-                                      if (item) assignInventoryItem(liveEnrollment, item, 'shoulder_pads');
-                                    }}
-                                    onClear={() => {
-                                      const item = (shedItems ?? []).find(i => i.id === fe.padInventoryId);
-                                      if (item) returnInventoryItem(liveEnrollment, item, 'shoulder_pads');
-                                    }}
-                                    disabled={isSaving}
-                                    className="flex-1"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Jerseys */}
-                              <div className="space-y-1.5">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Jerseys</p>
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">{typeLabel('game_jersey', typeLabels)}</span>
-                                    <Combobox
-                                      options={getOptionsForType('game_jersey', fe.gameJerseyInventoryId)}
-                                      value={fe.gameJerseyInventoryId}
-                                      onSelect={(itemId) => {
-                                        const item = (shedItems ?? []).find(i => i.id === itemId);
-                                        if (item) assignInventoryItem(liveEnrollment, item, 'game_jersey');
-                                      }}
-                                      onClear={() => {
-                                        const item = (shedItems ?? []).find(i => i.id === fe.gameJerseyInventoryId);
-                                        if (item) returnInventoryItem(liveEnrollment, item, 'game_jersey');
-                                      }}
-                                      disabled={isSaving}
-                                      className="flex-1"
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">{typeLabel('scrimmage_jersey', typeLabels)}</span>
-                                    <Combobox
-                                      options={getOptionsForType('scrimmage_jersey', fe.scrimmageJerseyInventoryId)}
-                                      value={fe.scrimmageJerseyInventoryId}
-                                      onSelect={(itemId) => {
-                                        const item = (shedItems ?? []).find(i => i.id === itemId);
-                                        if (item) assignInventoryItem(liveEnrollment, item, 'scrimmage_jersey');
-                                      }}
-                                      onClear={() => {
-                                        const item = (shedItems ?? []).find(i => i.id === fe.scrimmageJerseyInventoryId);
-                                        if (item) returnInventoryItem(liveEnrollment, item, 'scrimmage_jersey');
-                                      }}
-                                      disabled={isSaving}
-                                      className="flex-1"
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">{typeLabel('practice_jersey', typeLabels)}</span>
-                                    <Combobox
-                                      options={getOptionsForType('practice_jersey', fe.practiceJerseyInventoryId)}
-                                      value={fe.practiceJerseyInventoryId}
-                                      onSelect={(itemId) => {
-                                        const item = (shedItems ?? []).find(i => i.id === itemId);
-                                        if (item) assignInventoryItem(liveEnrollment, item, 'practice_jersey');
-                                      }}
-                                      onClear={() => {
-                                        const item = (shedItems ?? []).find(i => i.id === fe.practiceJerseyInventoryId);
-                                        if (item) returnInventoryItem(liveEnrollment, item, 'practice_jersey');
-                                      }}
-                                      disabled={isSaving}
-                                      className="flex-1"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Pants */}
-                              <div className="space-y-1.5">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pants</p>
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">{typeLabel('game_pants', typeLabels)}</span>
-                                    <Combobox
-                                      options={getOptionsForType('game_pants', fe.gamePantsInventoryId)}
-                                      value={fe.gamePantsInventoryId}
-                                      onSelect={(itemId) => {
-                                        const item = (shedItems ?? []).find(i => i.id === itemId);
-                                        if (item) assignInventoryItem(liveEnrollment, item, 'game_pants');
-                                      }}
-                                      onClear={() => {
-                                        const item = (shedItems ?? []).find(i => i.id === fe.gamePantsInventoryId);
-                                        if (item) returnInventoryItem(liveEnrollment, item, 'game_pants');
-                                      }}
-                                      disabled={isSaving}
-                                      className="flex-1"
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs w-28 shrink-0">{typeLabel('practice_pants', typeLabels)}</span>
-                                    <Combobox
-                                      options={getOptionsForType('practice_pants', fe.practicePantsInventoryId)}
-                                      value={fe.practicePantsInventoryId}
-                                      onSelect={(itemId) => {
-                                        const item = (shedItems ?? []).find(i => i.id === itemId);
-                                        if (item) assignInventoryItem(liveEnrollment, item, 'practice_pants');
-                                      }}
-                                      onClear={() => {
-                                        const item = (shedItems ?? []).find(i => i.id === fe.practicePantsInventoryId);
-                                        if (item) returnInventoryItem(liveEnrollment, item, 'practice_pants');
-                                      }}
-                                      disabled={isSaving}
-                                      className="flex-1"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Custom equipment types — assignable via derived x_{slug}* fields */}
-                              {customTypes.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Other Equipment</p>
-                                  <div className="space-y-2">
-                                    {customTypes.map((slug) => {
-                                      const sf = slotFieldsForType(slug);
-                                      const feAny = fe as Record<string, any>;
-                                      const invId = feAny[sf.inventoryIdField] as string | undefined;
-                                      return (
-                                        <div key={slug} className="flex items-center gap-2">
-                                          <span className="text-xs w-28 shrink-0">{typeLabel(slug, typeLabels)}</span>
-                                          <Combobox
-                                            options={getOptionsForType(slug, invId)}
-                                            value={invId}
-                                            onSelect={(itemId) => {
-                                              const item = (shedItems ?? []).find(i => i.id === itemId);
-                                              if (item) assignInventoryItem(liveEnrollment, item, slug);
-                                            }}
-                                            onClear={() => {
-                                              const item = (shedItems ?? []).find(i => i.id === invId);
-                                              if (item) returnInventoryItem(liveEnrollment, item, slug);
-                                            }}
-                                            disabled={isSaving}
-                                            className="flex-1"
-                                          />
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Pinned footer — always reachable without scrolling the equipment list */}
-                            <div className="border-t bg-background pt-3 mt-3">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={isSaving}
-                                onClick={() => returnAll(liveEnrollment)}
-                                className="rounded-full h-8 gap-1.5 text-xs w-full"
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                Return All Equipment
-                              </Button>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </SheetContent>
-                  </Sheet>
 
                 <p className="mt-3 text-xs text-muted-foreground">
                   {filteredEnrollments.length} player{filteredEnrollments.length !== 1 ? 's' : ''} — click a player to assign gear; changes sync automatically.
@@ -3192,6 +3019,78 @@ export default function EquipmentPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* ── Player assignment surfaces ───────────────────────────────────
+            Rendered at page level, not inside the assignments tab: an in-flight
+            filter change must not unmount an open sheet, and the picker Dialog
+            must be a SIBLING of the Sheet — nesting it inside SheetContent puts
+            its search input inside the Sheet's focus trap, which is the bug the
+            old per-slot Combobox had. */}
+        <PlayerEquipmentSheet
+          open={!!openEnrollment}
+          onOpenChange={(next) => { if (!next) setDrawerEnrollmentId(null); }}
+          playerName={openEnrollment ? (playerNameMap.get(openEnrollment.playerId) ?? openEnrollment.playerId) : ''}
+          subtitle={openEnrollment ? (divisionMap.get(openEnrollment.divisionId) ?? '') : undefined}
+          footballEquipment={openEnrollment?.footballEquipment}
+          saving={openEnrollment ? savingIds.has(openEnrollment.id) : false}
+          onIssue={(equipType) => openEnrollment && setIssueSlot({ enrollmentId: openEnrollment.id, equipType })}
+          onReturn={handleSlotReturn}
+          labels={typeLabels}
+          availableByType={shedItems ? availableByType : undefined}
+          registeredJerseySize={openEnrollment ? (openEnrollment.jerseySize || openEnrollment.shirtSize) : undefined}
+          slots={adminSlots}
+          allowSwap
+          preventOpenAutoFocus
+          headerExtra={openEnrollment && (
+            <JerseyNumberField
+              key={openEnrollment.id}
+              enrollment={openEnrollment}
+              duplicateNames={duplicateJerseys.get(openEnrollment.id)}
+              disabled={savingIds.has(openEnrollment.id)}
+              onSave={(val) => saveField(openEnrollment, 'footballEquipment.jerseyNumber', val)}
+            />
+          )}
+          footerExtra={openEnrollment && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={savingIds.has(openEnrollment.id)}
+              onClick={() => returnAll(openEnrollment)}
+              className="rounded-full h-8 gap-1.5 text-xs w-full"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Return All Equipment
+            </Button>
+          )}
+        />
+
+        <IssueItemDialog
+          target={issueTarget}
+          items={dialogItems}
+          isLoading={!shedItems}
+          onOpenChange={(next) => { if (!next) setIssueSlot(null); }}
+          onSelect={handleIssueSelect}
+          labels={typeLabels}
+          unavailableItems={dialogUnavailable}
+          showRecertBadges
+          emptyStateAction={
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl"
+              onClick={() => {
+                const type = issueSlot?.equipType;
+                setIssueSlot(null);
+                setDrawerEnrollmentId(null);
+                setActiveTab('shed');
+                if (type) setAddItemForm((f) => ({ ...f, type, size: '' }));
+                setAddItemDialog(true);
+              }}
+            >
+              <Plus className="mr-1.5 h-4 w-4" /> Add item to shed
+            </Button>
+          }
+        />
 
       </main>
     </div>

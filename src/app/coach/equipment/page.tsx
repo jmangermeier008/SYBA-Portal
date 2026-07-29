@@ -24,8 +24,8 @@ import { ShieldCheck, Loader2, Search, ChevronRight, CheckCircle2, Package } fro
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { notifySportAdmins } from '@/lib/coach-notifications';
-import { PlayerEquipmentSheet } from '@/components/coach/equipment/PlayerEquipmentSheet';
-import { IssueItemDialog, type IssueTarget } from '@/components/coach/equipment/IssueItemDialog';
+import { PlayerEquipmentSheet } from '@/components/equipment/PlayerEquipmentSheet';
+import { IssueItemDialog, type IssueTarget } from '@/components/equipment/IssueItemDialog';
 import { CoachShedTab } from '@/components/coach/equipment/CoachShedTab';
 import { IssueFromShedDialog } from '@/components/coach/equipment/IssueFromShedDialog';
 import type { ComboboxOption } from '@/components/ui/combobox';
@@ -510,7 +510,7 @@ export default function CoachEquipmentPage() {
           open={!!openRow}
           onOpenChange={next => !next && setOpenEnrollmentId(null)}
           playerName={openRow?.name ?? ''}
-          teamName={openRow?.teamName}
+          subtitle={openRow?.teamName}
           footballEquipment={openRow?.enrollment.footballEquipment}
           saving={openRow ? savingIds.has(openRow.enrollment.id) : false}
           onIssue={equipType => openRow && setIssueSlot({ enrollmentId: openRow.enrollment.id, equipType })}
