@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, increment, Timestamp } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, increment, Timestamp } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +31,7 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 import { MetricsCards } from '@/components/admin/registration/metrics-cards';
 import { PlayerTable, type PlayerWithDocs, type AuditFormData, type EnrollmentRecord, type DepositStatus } from '@/components/admin/registration/player-table';
+import { buildDepositUpdate, depositToastCopy } from '@/lib/deposit';
 import { CoachComplianceTable } from '@/components/admin/registration/coach-compliance-table';
 import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
 import { combinedRejectionReason, rollupVerificationStatus, type Division } from '@/types/scheduling';
@@ -883,47 +884,14 @@ export default function RegistrationDashboardPage() {
   const handleSetDepositStatus = async (enrollment: EnrollmentRecord, next: DepositStatus | null) => {
     if (!db || !user || !enrollment.parentUserId) return;
     const enrollmentRef = doc(db, 'userProfiles', enrollment.parentUserId, 'enrollments', enrollment.id);
-    const now = new Date().toISOString();
-    const adminName = profile?.displayName || 'Admin';
-
-    const updateData: Record<string, unknown> = { updatedAt: now };
-    if (next === 'held') {
-      updateData.volunteerDepositStatus = 'held';
-      updateData.volunteerDepositReceivedAt = now;
-      updateData.volunteerDepositReceivedBy = user.uid;
-      updateData.volunteerDepositReceivedByName = adminName;
-      // Re-receiving after a return starts a fresh cycle
-      updateData.volunteerDepositReturnedAt = deleteField();
-      updateData.volunteerDepositReturnedBy = deleteField();
-      updateData.volunteerDepositReturnedByName = deleteField();
-    } else if (next === 'returned') {
-      updateData.volunteerDepositStatus = 'returned';
-      updateData.volunteerDepositReturnedAt = now;
-      updateData.volunteerDepositReturnedBy = user.uid;
-      updateData.volunteerDepositReturnedByName = adminName;
-    } else {
-      // Ticked by mistake — remove the fields entirely so the enrollment looks
-      // exactly like one that never had a deposit, per the type's "absent = not
-      // received" contract.
-      for (const field of [
-        'volunteerDepositStatus',
-        'volunteerDepositReceivedAt', 'volunteerDepositReceivedBy', 'volunteerDepositReceivedByName',
-        'volunteerDepositReturnedAt', 'volunteerDepositReturnedBy', 'volunteerDepositReturnedByName',
-      ]) {
-        updateData[field] = deleteField();
-      }
-    }
+    const updateData = buildDepositUpdate(next, {
+      uid: user.uid,
+      name: profile?.displayName || 'Admin',
+    });
 
     try {
       await updateDoc(enrollmentRef, updateData as any);
-      toast({
-        title: next === 'held' ? 'Deposit Recorded'
-          : next === 'returned' ? 'Deposit Returned'
-          : 'Deposit Cleared',
-        description: next === 'held' ? 'The check is marked as held by the league.'
-          : next === 'returned' ? 'The check is marked as returned to the family.'
-          : 'No deposit is on file for this registration.',
-      });
+      toast(depositToastCopy(next));
     } catch (error: any) {
       if (error?.code === 'permission-denied') {
         errorEmitter.emit('permission-error', new FirestorePermissionError({

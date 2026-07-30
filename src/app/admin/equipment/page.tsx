@@ -76,7 +76,9 @@ import { cn } from '@/lib/utils';
 import { openPrintTab, type EquipmentChaseRow } from '@/lib/print-job';
 import { PlayerPickList } from '@/components/equipment/PlayerPickList';
 import { DepositBadge } from '@/components/equipment/DepositBadge';
-import { isDepositMissing, type DepositStatus } from '@/lib/deposit';
+import { buildDepositUpdate, depositToastCopy, isDepositMissing, type DepositStatus } from '@/lib/deposit';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 import { PlayerEquipmentSheet } from '@/components/equipment/PlayerEquipmentSheet';
 import { IssueItemDialog, type IssueTarget, type UnavailableEntry } from '@/components/equipment/IssueItemDialog';
 import {
@@ -135,10 +137,21 @@ interface EnrollmentRow {
   // exist. Present on the Firestore docs (Enrollment in src/types/scheduling.ts).
   jerseySize?: string;
   shirtSize?: string;
-  // Volunteer deposit check, set on /admin/registration. Absent = no check
-  // received, which is the "don't hand out gear" signal here.
+  // Volunteer deposit check, set here or on /admin/registration. Absent = no
+  // check received, which is the "don't hand out gear" signal here.
   volunteerDepositStatus?: DepositStatus;
+  volunteerDepositReceivedByName?: string;
+  volunteerDepositReceivedAt?: string;
+  volunteerDepositReturnedByName?: string;
+  volunteerDepositReturnedAt?: string;
   footballEquipment?: FootballEquipment;
+}
+
+/** Who recorded the deposit and when, picked to match the current status. */
+function depositStampProps(e: EnrollmentRow): { stampedByName?: string; stampedAt?: string } {
+  return e.volunteerDepositStatus === 'returned'
+    ? { stampedByName: e.volunteerDepositReturnedByName, stampedAt: e.volunteerDepositReturnedAt }
+    : { stampedByName: e.volunteerDepositReceivedByName, stampedAt: e.volunteerDepositReceivedAt };
 }
 
 interface Season {
@@ -583,6 +596,49 @@ export default function EquipmentPage() {
       );
     } catch (err: any) {
       toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  /**
+   * Tick the volunteer deposit check without leaving the handout table — the
+   * check normally changes hands right here, at the shed. Same write as the
+   * chip on /admin/registration (shared via buildDepositUpdate) and Admin-only
+   * for the same reason: firestore.rules blocks Board Members from writing
+   * non-equipment enrollment fields.
+   */
+  async function setDepositStatus(enrollment: EnrollmentRow, next: DepositStatus | null) {
+    if (!db || !user) return;
+    const { parentUserId, id } = enrollment;
+    if (!parentUserId || !id) {
+      toast({ title: 'Save failed', description: 'Missing enrollment reference — please refresh the page.', variant: 'destructive' });
+      return;
+    }
+    const enrollmentRef = doc(db, 'userProfiles', parentUserId, 'enrollments', id);
+    const updateData = buildDepositUpdate(next, {
+      uid: user.uid,
+      name: profile?.displayName || profile?.email || 'Admin',
+    });
+
+    setSavingIds((prev) => new Set(prev).add(id));
+    try {
+      await updateDoc(enrollmentRef, updateData as any);
+      toast(depositToastCopy(next));
+    } catch (err: any) {
+      if (err?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: enrollmentRef.path,
+          operation: 'update',
+          requestResourceData: updateData,
+        }));
+      } else {
+        toast({ title: 'Deposit Update Failed', description: err.message, variant: 'destructive' });
+      }
     } finally {
       setSavingIds((prev) => {
         const next = new Set(prev);
@@ -1887,7 +1943,18 @@ export default function EquipmentPage() {
                                     </Tooltip>
                                   )}
                                 </div>
-                                <DepositBadge status={enrollment.volunteerDepositStatus} className="mt-1" />
+                                {/* Stop the click here — the row opens the sheet, and
+                                    ticking the deposit shouldn't drag the gear drawer open. */}
+                                <span className="inline-block" onClick={(e) => e.stopPropagation()}>
+                                  <DepositBadge
+                                    status={enrollment.volunteerDepositStatus}
+                                    className="mt-1"
+                                    canEdit={isAdmin}
+                                    disabled={isSaving}
+                                    {...depositStampProps(enrollment)}
+                                    onSet={(next) => setDepositStatus(enrollment, next)}
+                                  />
+                                </span>
                               </td>
                               <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">{divisionName}</td>
 
@@ -2000,7 +2067,17 @@ export default function EquipmentPage() {
                                   )}
                                 </div>
                                 {divisionName && <p className="text-xs text-muted-foreground">{divisionName}</p>}
-                                <DepositBadge status={enrollment.volunteerDepositStatus} className="mt-1" />
+                                {/* The card opens the sheet — keep the deposit tap to itself. */}
+                                <span className="inline-block" onClick={(e) => e.stopPropagation()}>
+                                  <DepositBadge
+                                    status={enrollment.volunteerDepositStatus}
+                                    className="mt-1"
+                                    canEdit={isAdmin}
+                                    disabled={savingIds.has(enrollment.id)}
+                                    {...depositStampProps(enrollment)}
+                                    onSet={(next) => setDepositStatus(enrollment, next)}
+                                  />
+                                </span>
                               </div>
                             </div>
                             {isComplete
@@ -3105,7 +3182,13 @@ export default function EquipmentPage() {
           preventOpenAutoFocus
           headerExtra={openEnrollment && (
             <>
-              <DepositBadge status={openEnrollment.volunteerDepositStatus} />
+              <DepositBadge
+                status={openEnrollment.volunteerDepositStatus}
+                canEdit={isAdmin}
+                disabled={savingIds.has(openEnrollment.id)}
+                {...depositStampProps(openEnrollment)}
+                onSet={(next) => setDepositStatus(openEnrollment, next)}
+              />
               <JerseyNumberField
                 key={openEnrollment.id}
                 enrollment={openEnrollment}
