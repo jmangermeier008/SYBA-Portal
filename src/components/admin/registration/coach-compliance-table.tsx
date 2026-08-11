@@ -42,10 +42,7 @@ import {
   clearanceExpiryText,
   clearanceState,
   findClearance,
-  isClearanceOk,
-  todayLocalISO,
-  addDaysLocalISO,
-  EXPIRING_SOON_DAYS,
+  isValidExpirationDate,
   type ClearanceState,
   type ClearanceType,
 } from '@/lib/clearances';
@@ -82,13 +79,20 @@ interface CoachComplianceTableProps {
     userId: string,
     clearanceId: string,
     status: 'Approved' | 'Rejected',
-    reason?: string
+    reason?: string,
+    expirationDate?: string
   ) => Promise<boolean>;
   onUploadClearance: (
     coachUserId: string,
     type: string,
     expirationDate: string,
     file: File
+  ) => Promise<boolean>;
+  /** Corrects a document's expiration date without touching its status or requiring a re-upload. */
+  onUpdateExpiration: (
+    coachUserId: string,
+    clearanceId: string,
+    expirationDate: string
   ) => Promise<boolean>;
   onDeleteCoach: (coach: CoachProfile) => Promise<boolean>;
 }
@@ -115,7 +119,11 @@ function ManualClearanceUpload({
   const inputId = `admin-upload-${coachUserId}-${type}`;
 
   const handleFile = async (file: File) => {
-    if (!expiration) return;
+    // The date is optional here — the reviewer records it off the document.
+    if (expiration && !isValidExpirationDate(expiration)) {
+      toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
+      return;
+    }
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast({ variant: 'destructive', title: 'Invalid File Type', description: 'Please upload a PDF, JPEG, or PNG.' });
       return;
@@ -137,7 +145,7 @@ function ManualClearanceUpload({
       </p>
       <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
         <div className="flex-1 space-y-1">
-          <Label className="text-[10px] uppercase text-muted-foreground">Expiration Date</Label>
+          <Label className="text-[10px] uppercase text-muted-foreground">Expiration Date (optional)</Label>
           <Input
             type="date"
             value={expiration}
@@ -148,7 +156,7 @@ function ManualClearanceUpload({
         <Button
           size="sm"
           className="rounded-lg h-9"
-          disabled={!expiration || uploading}
+          disabled={uploading}
           onClick={() => document.getElementById(inputId)?.click()}
         >
           {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
@@ -166,9 +174,64 @@ function ManualClearanceUpload({
           }}
         />
       </div>
-      {!expiration && (
-        <p className="text-[10px] text-muted-foreground">Enter an expiration date to enable upload.</p>
-      )}
+      <p className="text-[10px] text-muted-foreground">
+        Leave the date blank if you'd rather set it while reviewing the document.
+      </p>
+    </div>
+  );
+}
+
+/** Corrects a document's expiration date in place — no re-upload, no status change. */
+function ExpirationEditor({
+  coachUserId,
+  clearanceId,
+  current,
+  onSave,
+}: {
+  coachUserId: string;
+  clearanceId: string;
+  current?: string;
+  onSave: (coachUserId: string, clearanceId: string, expirationDate: string) => Promise<boolean>;
+}) {
+  const { toast } = useToast();
+  const [value, setValue] = useState(current ?? '');
+  const [saving, setSaving] = useState(false);
+  const dirty = value !== (current ?? '');
+
+  const handleSave = async () => {
+    if (!isValidExpirationDate(value)) {
+      toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(coachUserId, clearanceId, value);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+      <div className="flex-1 space-y-1">
+        <Label className="text-[10px] uppercase text-muted-foreground">Expiration Date</Label>
+        <Input
+          type="date"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          className="rounded-lg h-9"
+        />
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="rounded-lg h-9"
+        disabled={!dirty || saving}
+        onClick={handleSave}
+      >
+        {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+        Save date
+      </Button>
     </div>
   );
 }
@@ -179,6 +242,7 @@ function ClearanceAuditList({
   records,
   isAdmin,
   onUploadClearance,
+  onUpdateExpiration,
   onReview,
   onPrintOne,
 }: {
@@ -186,6 +250,7 @@ function ClearanceAuditList({
   records: Partial<Record<ClearanceType, ClearanceRecord | undefined>>;
   isAdmin: boolean;
   onUploadClearance: (coachUserId: string, type: string, expirationDate: string, file: File) => Promise<boolean>;
+  onUpdateExpiration: (coachUserId: string, clearanceId: string, expirationDate: string) => Promise<boolean>;
   onReview: (clearance: ClearanceRecord) => void;
   onPrintOne: (coach: CoachProfile, record: ClearanceRecord, type: ClearanceType) => Promise<void>;
 }) {
@@ -203,14 +268,14 @@ function ClearanceAuditList({
                 <FileText className="h-5 w-5 text-primary" />
                 <div>
                   <p className="font-bold text-sm">{label}</p>
-                  <p className={`text-[10px] ${state === 'expired' ? 'font-bold text-amber-600' : 'text-muted-foreground'}`}>
-                    {c ? `Expires: ${clearanceExpiryText(c, state)}` : 'Not submitted'}
+                  <p className="text-[10px] text-muted-foreground">
+                    {c ? `Expires: ${clearanceExpiryText(c)}` : 'Not submitted'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 {getClearanceIcon(state)}
-                <Badge variant="outline" className="text-[10px]">{clearanceStateLabel(c, state)}</Badge>
+                <Badge variant="outline" className="text-[10px]">{clearanceStateLabel(c)}</Badge>
               </div>
             </div>
             {c?.verifiedBy && c?.verifiedAt && (
@@ -262,6 +327,21 @@ function ClearanceAuditList({
                 </Button>
               </div>
             )}
+            {c && isAdmin && (
+              <div className="rounded-lg border border-dashed p-3 space-y-2 bg-white/60">
+                <p className="text-xs font-semibold">Expiration date</p>
+                <ExpirationEditor
+                  key={`${c.id}-${c.expirationDate ?? ''}`}
+                  coachUserId={u.id}
+                  clearanceId={c.id}
+                  current={c.expirationDate}
+                  onSave={onUpdateExpiration}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Records the date printed on the document. Saving it does not change the review decision.
+                </p>
+              </div>
+            )}
             <ManualClearanceUpload
               coachUserId={u.id}
               type={type}
@@ -279,48 +359,23 @@ function ClearanceAuditList({
 function getClearanceIcon(state: ClearanceState) {
   switch (state) {
     case 'approved': return <CheckCircle2 className="h-4 w-4 text-green-500" aria-label="Approved" />;
-    case 'expiring': return <Clock className="h-4 w-4 text-amber-500" aria-label="Expiring soon" />;
-    case 'expired': return <AlertTriangle className="h-4 w-4 text-amber-600" aria-label="Expired" />;
     case 'pending': return <Clock className="h-4 w-4 text-amber-500" aria-label="Pending review" />;
     case 'rejected': return <XCircle className="h-4 w-4 text-destructive" aria-label="Rejected" />;
     default: return <AlertTriangle className="h-4 w-4 text-muted-foreground opacity-20" aria-label="Not submitted" />;
   }
 }
 
-/** Badge text for one document — expiry outranks the stored status. */
-function clearanceStateLabel(c: ClearanceRecord | undefined, state: ClearanceState) {
-  if (state === 'missing') return 'Missing';
-  if (state === 'expired') return 'Expired';
-  if (state === 'expiring') return 'Expiring Soon';
+/** Badge text for one document — whatever an admin decided, nothing derived. */
+function clearanceStateLabel(c: ClearanceRecord | undefined) {
   return c?.status ?? 'Missing';
 }
 
-/**
- * Overall standing for one volunteer. EXPIRED is called out separately from
- * INCOMPLETE so a lapsed-but-otherwise-complete volunteer reads as a renewal
- * to chase rather than a missing document. This is display only — expiry never
- * touches complianceStatus, so nobody loses coach access mid-season.
- */
-function overallBadge(row: { isCleared: boolean; hasExpired: boolean; hasExpiring: boolean; hasGap: boolean }) {
-  if (row.isCleared) {
-    return row.hasExpiring
-      ? { text: 'EXPIRING', className: 'bg-amber-50 text-amber-700 hover:bg-amber-50 border-amber-200' }
-      : { text: 'CLEARED', className: 'bg-green-100 text-green-700 hover:bg-green-100 border-none' };
-  }
-  if (row.hasExpired && !row.hasGap) {
-    return { text: 'EXPIRED', className: 'bg-amber-100 text-amber-800 hover:bg-amber-100 border-none' };
-  }
-  return { text: 'INCOMPLETE', className: '' };
-}
-
-/** Status icon plus the expiration line beneath it, used in both layouts. */
+/** Status icon plus the expiration date beneath it, used in both layouts. */
 function ClearanceStatusCell({ record, state }: { record?: ClearanceRecord; state: ClearanceState }) {
   return (
     <>
       <div className="flex justify-center">{getClearanceIcon(state)}</div>
-      <div className={`text-[10px] mt-0.5 ${state === 'expired' ? 'font-bold text-amber-600' : 'text-muted-foreground'}`}>
-        {clearanceExpiryText(record, state)}
-      </div>
+      <div className="text-[10px] mt-0.5 text-muted-foreground">{clearanceExpiryText(record)}</div>
     </>
   );
 }
@@ -333,6 +388,7 @@ export function CoachComplianceTable({
   isAdmin,
   onUpdateStatus,
   onUploadClearance,
+  onUpdateExpiration,
   onDeleteCoach,
 }: CoachComplianceTableProps) {
   const isMobile = useIsMobile();
@@ -341,16 +397,20 @@ export function CoachComplianceTable({
   const [statusFilter, setStatusFilter] = useState<'incomplete' | 'cleared' | 'all'>('incomplete');
   const [reviewingClearance, setReviewingClearance] = useState<{ userId: string; clearance: ClearanceRecord } | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [reviewExpiration, setReviewExpiration] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Opening the review dialog starts from that document's own data — notes
+  // typed for one document must not carry over to the next.
+  const openReview = (userId: string, clearance: ClearanceRecord) => {
+    setRejectionReason('');
+    setReviewExpiration(clearance.expirationDate ?? '');
+    setReviewingClearance({ userId, clearance });
+  };
   const [deletingCoach, setDeletingCoach] = useState<CoachProfile | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const volunteerClearanceData = useMemo(() => {
-    // Compare expirations against a single naive-local date for the whole
-    // render so rows can't disagree if the clock crosses midnight mid-pass.
-    const today = todayLocalISO();
-    const soonCutoff = addDaysLocalISO(EXPIRING_SOON_DAYS);
-
     return coaches
       .map(u => {
         const uc = clearances.filter(c => c.userId === u.id);
@@ -359,19 +419,12 @@ export function CoachComplianceTable({
         for (const { type } of CLEARANCE_TYPES) {
           const record = findClearance(uc, type);
           records[type] = record;
-          states[type] = clearanceState(record, today, soonCutoff);
+          states[type] = clearanceState(record);
         }
-        const allStates = CLEARANCE_TYPES.map(t => states[t.type]);
-        // CLEARED requires all three docs, but portal access (complianceStatus)
-        // still keys off only the two PA clearances. Expiry is display-only —
-        // an expired volunteer drops out of CLEARED but keeps their access.
-        const isCleared = allStates.every(s => isClearanceOk(s));
-        const hasExpired = allStates.some(s => s === 'expired');
-        const hasExpiring = allStates.some(s => s === 'expiring');
-        // A document that was never submitted, is awaiting review, or was
-        // rejected — distinct from one that was fine and simply lapsed.
-        const hasGap = allStates.some(s => s === 'missing' || s === 'pending' || s === 'rejected');
-        return { user: u, records, states, isCleared, hasExpired, hasExpiring, hasGap };
+        // CLEARED requires all three docs approved, but portal access
+        // (complianceStatus) still keys off only the two PA clearances.
+        const isCleared = CLEARANCE_TYPES.every(t => states[t.type] === 'approved');
+        return { user: u, records, states, isCleared };
       })
       .sort((a, b) => (a.user.displayName ?? '').localeCompare(b.user.displayName ?? ''));
   }, [coaches, clearances]);
@@ -467,16 +520,28 @@ export function CoachComplianceTable({
 
   const handleDecision = async (status: 'Approved' | 'Rejected') => {
     if (!reviewingClearance) return;
+    if (reviewExpiration && !isValidExpirationDate(reviewExpiration)) {
+      toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
+      return;
+    }
     setIsProcessing(true);
-    const success = await onUpdateStatus(
-      reviewingClearance.userId,
-      reviewingClearance.clearance.id,
-      status,
-      status === 'Rejected' ? rejectionReason : undefined
-    );
-    setIsProcessing(false);
+    let success = false;
+    try {
+      success = await onUpdateStatus(
+        reviewingClearance.userId,
+        reviewingClearance.clearance.id,
+        status,
+        status === 'Rejected' ? rejectionReason : undefined,
+        reviewExpiration || undefined
+      );
+    } finally {
+      // Without the finally, a rejected promise leaves both buttons disabled
+      // for good and the decision genuinely cannot be changed.
+      setIsProcessing(false);
+    }
     if (success) {
       setRejectionReason('');
+      setReviewExpiration('');
       setReviewingClearance(null);
     }
   };
@@ -563,8 +628,7 @@ export function CoachComplianceTable({
             /* ── Mobile card layout ── */
             <div className="space-y-3">
               {filteredVolunteers.map((row: VolunteerRow) => {
-                const { user: u, records, states } = row;
-                const badge = overallBadge(row);
+                const { user: u, records, states, isCleared } = row;
                 return (
                 <Card key={u.id} className="border shadow-sm">
                   <CardContent className="p-4">
@@ -579,8 +643,8 @@ export function CoachComplianceTable({
                               <div key={type} className="flex items-center gap-2">
                                 {getClearanceIcon(state)}
                                 <span className="text-xs text-muted-foreground">{short}</span>
-                                <span className={`text-[10px] ml-auto ${state === 'expired' ? 'font-bold text-amber-600' : 'text-muted-foreground'}`}>
-                                  {clearanceExpiryText(records[type], state)}
+                                <span className="text-[10px] ml-auto text-muted-foreground">
+                                  {clearanceExpiryText(records[type])}
                                 </span>
                               </div>
                             );
@@ -588,10 +652,10 @@ export function CoachComplianceTable({
                         </div>
                       </div>
                       <Badge
-                        variant={badge.text === 'INCOMPLETE' ? 'outline' : 'default'}
-                        className={`shrink-0 ${badge.className}`}
+                        variant={isCleared ? 'default' : 'outline'}
+                        className={`shrink-0 ${isCleared ? 'bg-green-100 text-green-700 hover:bg-green-100 border-none' : ''}`}
                       >
-                        {badge.text}
+                        {isCleared ? 'CLEARED' : 'INCOMPLETE'}
                       </Badge>
                     </div>
                     <div className="flex gap-2 mt-3">
@@ -611,7 +675,8 @@ export function CoachComplianceTable({
                                 records={records}
                                 isAdmin={isAdmin}
                                 onUploadClearance={onUploadClearance}
-                                onReview={c => setReviewingClearance({ userId: u.id, clearance: c })}
+                                onUpdateExpiration={onUpdateExpiration}
+                                onReview={c => openReview(u.id, c)}
                                 onPrintOne={handlePrintOneClearance}
                               />
                             </ScrollArea>
@@ -651,8 +716,7 @@ export function CoachComplianceTable({
                 </TableHeader>
                 <TableBody>
                   {filteredVolunteers.map((row: VolunteerRow) => {
-                    const { user: u, records, states } = row;
-                    const badge = overallBadge(row);
+                    const { user: u, records, states, isCleared } = row;
                     return (
                     <TableRow key={u.id}>
                       <TableCell className="pl-6 py-4">
@@ -666,10 +730,10 @@ export function CoachComplianceTable({
                       ))}
                       <TableCell className="text-center">
                         <Badge
-                          variant={badge.text === 'INCOMPLETE' ? 'outline' : 'default'}
-                          className={badge.className}
+                          variant={isCleared ? 'default' : 'outline'}
+                          className={isCleared ? 'bg-green-100 text-green-700 hover:bg-green-100 border-none' : ''}
                         >
-                          {badge.text}
+                          {isCleared ? 'CLEARED' : 'INCOMPLETE'}
                         </Badge>
                       </TableCell>
                       <TableCell className="pr-6 text-right">
@@ -690,7 +754,8 @@ export function CoachComplianceTable({
                                   records={records}
                                   isAdmin={isAdmin}
                                   onUploadClearance={onUploadClearance}
-                                  onReview={c => setReviewingClearance({ userId: u.id, clearance: c })}
+                                  onUpdateExpiration={onUpdateExpiration}
+                                  onReview={c => openReview(u.id, c)}
                                   onPrintOne={handlePrintOneClearance}
                                 />
                               </ScrollArea>
@@ -750,9 +815,27 @@ export function CoachComplianceTable({
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
+              <Label>Expiration Date on the Document</Label>
+              <Input
+                type="date"
+                value={reviewExpiration}
+                onChange={e => setReviewExpiration(e.target.value)}
+                className="rounded-xl"
+              />
+              {reviewingClearance?.clearance.expirationDate &&
+                reviewExpiration !== reviewingClearance.clearance.expirationDate && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Currently on record: {reviewingClearance.clearance.expirationDate}
+                  </p>
+                )}
+              <p className="text-[10px] text-muted-foreground">
+                Saved along with your decision. Leaving it blank keeps whatever is already on record.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label>Audit Notes / Rejection Reason</Label>
               <Textarea
-                placeholder="e.g. Document is blurry or expired. Please re-upload."
+                placeholder="e.g. Document is blurry or unreadable. Please re-upload."
                 value={rejectionReason}
                 onChange={e => setRejectionReason(e.target.value)}
                 className="rounded-xl h-24"

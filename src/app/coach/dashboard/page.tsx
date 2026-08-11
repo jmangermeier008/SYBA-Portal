@@ -6,8 +6,7 @@ import { Sidebar } from '@/components/navigation/sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useUser, useFirestore, useMemoFirebase, useCollection, useSport } from '@/firebase';
 import { collection, collectionGroup, query, where, orderBy, limit, doc, updateDoc, getDocs } from 'firebase/firestore';
-import { Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, ChevronRight, ShieldAlert, Trophy } from 'lucide-react';
-import { isBefore, addMonths } from 'date-fns';
+import { Users, Calendar, Star, Loader2, UserCheck, Megaphone, ClipboardList, ChevronRight, Trophy } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -392,23 +391,6 @@ export default function CoachDashboard() {
       .slice(0, 2);
   }, [rawAnnouncements, teamIds]);
 
-  // Surface expiring/expired clearances here — the compliance page computes the
-  // same thresholds, but coaches only see it if they happen to open that page.
-  const clearancesQuery = useMemoFirebase(() => {
-    if (!db || !user) return null;
-    return collection(db, 'userProfiles', user.uid, 'clearances');
-  }, [db, user?.uid]);
-  const { data: clearances } = useCollection<{ id: string; expirationDate?: string }>(clearancesQuery);
-
-  const clearanceAlert = useMemo(() => {
-    if (!clearances || clearances.length === 0) return null;
-    const now = new Date();
-    const expired = clearances.some(c => c.expirationDate && isBefore(new Date(c.expirationDate), now));
-    if (expired) return 'expired' as const;
-    const expiringSoon = clearances.some(c => c.expirationDate && isBefore(new Date(c.expirationDate), addMonths(now, 2)));
-    return expiringSoon ? ('expiring' as const) : null;
-  }, [clearances]);
-
   if (loadingUser) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -436,30 +418,6 @@ export default function CoachDashboard() {
 
         {/* Opt-in to push alerts for cancellations and schedule changes */}
         <PushPrompt />
-
-        {clearanceAlert && (
-          <div className={cn(
-            'mb-4 flex items-start gap-3 p-4 rounded-xl border',
-            clearanceAlert === 'expired'
-              ? 'bg-destructive/10 border-destructive/20 text-destructive'
-              : 'bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-950/20 dark:border-yellow-900 dark:text-yellow-300'
-          )}>
-            <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <p className="font-bold text-sm">
-                {clearanceAlert === 'expired' ? 'Clearance Expired' : 'Clearance Expiring Soon'}
-              </p>
-              <p className="text-sm">
-                {clearanceAlert === 'expired'
-                  ? 'One of your background clearances has expired — you may not be eligible to coach until it\'s renewed.'
-                  : 'One of your background clearances expires within 2 months. Renew it early to avoid losing coach access.'}
-              </p>
-            </div>
-            <Button asChild size="sm" variant={clearanceAlert === 'expired' ? 'destructive' : 'outline'} className="shrink-0">
-              <Link href="/coach/compliance">Renew</Link>
-            </Button>
-          </div>
-        )}
 
         {/* Team selector — tap-to-switch, shows team name in title */}
         {teams && teams.length > 1 && (

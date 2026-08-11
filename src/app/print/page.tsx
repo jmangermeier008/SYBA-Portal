@@ -15,8 +15,6 @@ import type { ClearanceState } from '@/lib/clearances';
 // so status has to survive without color.
 const COMPLIANCE_MARKS: Record<ClearanceState, string> = {
   approved: '✓',
-  expiring: '!',
-  expired: '⚠',
   pending: '○',
   rejected: '✗',
   missing: '—',
@@ -177,11 +175,7 @@ export default function PrintPage() {
                     {row.cells.map((cell, j) => (
                       <td key={j} className="border border-black px-2 py-1 align-top whitespace-nowrap">
                         <span className="font-bold">{COMPLIANCE_MARKS[cell.state]}</span>{' '}
-                        {cell.state === 'missing'
-                          ? 'not submitted'
-                          : cell.state === 'expired'
-                            ? `EXPIRED ${cell.expirationDate ?? ''}`.trim()
-                            : cell.expirationDate ?? 'no date'}
+                        {cell.state === 'missing' ? 'not submitted' : cell.expirationDate ?? 'no date'}
                       </td>
                     ))}
                   </tr>
@@ -189,7 +183,7 @@ export default function PrintPage() {
               </tbody>
             </table>
             <p className="text-[10px] pt-3">
-              ✓ approved &nbsp; ! expiring soon &nbsp; ⚠ expired &nbsp; ○ pending review &nbsp; ✗ rejected &nbsp; — not submitted
+              ✓ approved &nbsp; ○ pending review &nbsp; ✗ rejected &nbsp; — not submitted &nbsp;&nbsp; (dates shown are the recorded expiration)
             </p>
             <p className="text-xs pt-1">
               {job.rows.length} volunteer{job.rows.length === 1 ? '' : 's'}

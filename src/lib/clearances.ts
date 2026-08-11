@@ -66,70 +66,40 @@ export function findClearance<T extends { type?: string }>(
   return records?.find(r => accepted.includes((r.type ?? '').toLowerCase()));
 }
 
-export type ClearanceState =
-  | 'missing'
-  | 'rejected'
-  | 'expired'
-  | 'pending'
-  | 'expiring'
-  | 'approved';
-
-/** Days before expiration that a clearance starts reading as "expiring soon". */
-export const EXPIRING_SOON_DAYS = 60;
+export type ClearanceState = 'missing' | 'rejected' | 'pending' | 'approved';
 
 /**
- * Today as a naive local YYYY-MM-DD string, matching how expirationDate is
- * stored. Never derive this from toISOString() — that is UTC and lands on the
- * wrong day for evening use in US Eastern.
- */
-export function todayLocalISO(now: Date = new Date()): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** The same naive local date, offset by a number of days. */
-export function addDaysLocalISO(days: number, now: Date = new Date()): string {
-  const shifted = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
-  return todayLocalISO(shifted);
-}
-
-/**
- * Resolves a clearance record to the single state the UI should render.
+ * Resolves a clearance record to the state the UI should render.
  *
- * Expiry outranks an Approved status: a document whose date has passed is
- * `expired` even though nobody revoked the approval. That is display-only —
- * complianceStatus and coach portal access are deliberately left alone, so an
- * expired volunteer is flagged for chasing rather than locked out mid-season.
- *
- * Both dates are compared as YYYY-MM-DD strings, which sorts correctly and
- * sidesteps timezone drift.
+ * Status only, deliberately. The expiration date is a fact a reviewer records
+ * off the document — it never computes a verdict on its own. An earlier version
+ * ranked expiry above status, which made approving an expired document change
+ * nothing on screen and left admins with no way to correct a date.
  */
-export function clearanceState(
-  c: Pick<Clearance, 'status' | 'expirationDate'> | undefined,
-  today: string = todayLocalISO(),
-  soonCutoff: string = addDaysLocalISO(EXPIRING_SOON_DAYS)
-): ClearanceState {
+export function clearanceState(c: Pick<Clearance, 'status'> | undefined): ClearanceState {
   if (!c) return 'missing';
   if (c.status === 'Rejected') return 'rejected';
-  if (c.expirationDate && c.expirationDate < today) return 'expired';
   if (c.status !== 'Approved') return 'pending';
-  if (c.expirationDate && c.expirationDate < soonCutoff) return 'expiring';
   return 'approved';
 }
 
-/** True when the state still counts as good standing for the CLEARED badge. */
-export function isClearanceOk(state: ClearanceState): boolean {
-  return state === 'approved' || state === 'expiring';
+/** Short text for the expiration line under a status icon — plain information. */
+export function clearanceExpiryText(c: Pick<Clearance, 'expirationDate'> | undefined): string {
+  if (!c) return '—';
+  return c.expirationDate || 'no date';
 }
 
-/** Short text for the expiration line under a status icon. */
-export function clearanceExpiryText(
-  c: Pick<Clearance, 'expirationDate'> | undefined,
-  state: ClearanceState
-): string {
-  if (state === 'missing') return '—';
-  if (state === 'expired') return 'EXPIRED';
-  return c?.expirationDate || 'no date';
+/**
+ * Guards the date every writer stores. `<input type="date">` will happily emit
+ * a two-digit year as `0027-06-30`, or a six-digit one as `20257-06-30`, and
+ * nothing downstream would flag either as nonsense.
+ */
+export function isValidExpirationDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  if (year < 1900 || year > 2200) return false;
+  // Rejects impossible days like 2027-02-31, which Date silently rolls over.
+  const [y, m, d] = value.split('-').map(Number);
+  const parsed = new Date(y, m - 1, d);
+  return parsed.getFullYear() === y && parsed.getMonth() === m - 1 && parsed.getDate() === d;
 }

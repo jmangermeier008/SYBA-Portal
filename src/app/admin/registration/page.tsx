@@ -36,7 +36,7 @@ import { CoachComplianceTable } from '@/components/admin/registration/coach-comp
 import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
 import { combinedRejectionReason, rollupVerificationStatus, type Division } from '@/types/scheduling';
 import { countIssuedEquipment } from '@/lib/equipment';
-import { REQUIRED_CLEARANCE_TYPES, clearanceLabel } from '@/lib/clearances';
+import { REQUIRED_CLEARANCE_TYPES, clearanceLabel, findClearance, isValidExpirationDate } from '@/lib/clearances';
 import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 
 interface Enrollment {
@@ -571,19 +571,24 @@ export default function RegistrationDashboardPage() {
   };
 
   // Coach portal access is gated on userProfiles.complianceStatus (see
-  // hasCoachAccess in sport-context). Re-derive it from the pair of clearance
-  // docs after every review so approvals actually unlock the coach pages.
+  // hasCoachAccess in sport-context). Re-derive it from the pair of required
+  // clearance docs after every review so approvals actually unlock the coach
+  // pages. Status only — expiration dates never gate access.
   //
-  // Deliberately status-only: an expired-but-Approved clearance is surfaced as
-  // EXPIRED in the audit table but does not revoke portal access mid-season.
+  // Reads the whole subcollection and matches alias-tolerantly rather than
+  // fetching clearances/{canonicalType} directly: a legacy record stored at
+  // 'child_abuse' is reviewable in the audit table, and fetching by canonical
+  // ID alone would miss it, leaving the coach locked out however many times an
+  // admin approved them.
   const syncCoachComplianceStatus = async (
     userId: string
   ): Promise<'approved' | 'pending' | 'action_required'> => {
     if (!db) return 'pending';
-    const snaps = await Promise.all(
-      REQUIRED_CLEARANCE_TYPES.map(c => getDoc(doc(db, 'userProfiles', userId, 'clearances', c.type)))
+    const snap = await getDocs(collection(db, 'userProfiles', userId, 'clearances'));
+    const records = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    const statuses = REQUIRED_CLEARANCE_TYPES.map(
+      c => findClearance(records, c.type)?.status as string | undefined
     );
-    const statuses = snaps.map(s => (s.exists() ? (s.data() as any).status : undefined));
     const overall = statuses.every(s => s === 'Approved')
       ? 'approved'
       : statuses.some(s => s === 'Rejected')
@@ -629,17 +634,25 @@ export default function RegistrationDashboardPage() {
     userId: string,
     clearanceId: string,
     status: 'Approved' | 'Rejected',
-    reason?: string
+    reason?: string,
+    expirationDate?: string
   ): Promise<boolean> => {
     if (!db || !user) return false;
     if (status === 'Rejected' && !reason?.trim()) {
       toast({ variant: 'destructive', title: 'Reason Required', description: 'Please provide a reason for rejection.' });
       return false;
     }
+    if (expirationDate && !isValidExpirationDate(expirationDate)) {
+      toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
+      return false;
+    }
     const clearanceRef = doc(db, 'userProfiles', userId, 'clearances', clearanceId);
     const updateData = {
       status,
       rejectionReason: status === 'Rejected' ? reason : null,
+      // The reviewer reads the date off the document, so a decision records it
+      // alongside the verdict. Omitted when blank so an existing date survives.
+      ...(expirationDate ? { expirationDate } : {}),
       verifiedBy: user.uid,
       verifiedByName: profile?.displayName || 'Admin',
       verifiedAt: new Date().toISOString(),
@@ -681,7 +694,11 @@ export default function RegistrationDashboardPage() {
     expirationDate: string,
     file: File
   ): Promise<boolean> => {
-    if (!db || !user || !expirationDate) return false;
+    if (!db || !user) return false;
+    if (expirationDate && !isValidExpirationDate(expirationDate)) {
+      toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
+      return false;
+    }
     try {
       const idToken = await user.getIdToken();
       const formData = new FormData();
@@ -703,7 +720,8 @@ export default function RegistrationDashboardPage() {
         type,
         status: 'Approved',
         fileUrl: data.url as string,
-        expirationDate,
+        // Optional — a reviewer can record it later from the audit dialog.
+        expirationDate: expirationDate || null,
         verifiedBy: user.uid,
         verifiedByName: profile?.displayName || 'Admin',
         verifiedAt: now,
@@ -715,6 +733,35 @@ export default function RegistrationDashboardPage() {
       return true;
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Upload Failed', description: error.message });
+      return false;
+    }
+  };
+
+  // Corrects the expiration date on a document already on file. Separate from
+  // the review decision so a mistyped date, or a renewal confirmed off-portal,
+  // can be fixed without asking the volunteer to upload the document again.
+  const handleUpdateClearanceExpiration = async (
+    coachUserId: string,
+    clearanceId: string,
+    expirationDate: string
+  ): Promise<boolean> => {
+    if (!db) return false;
+    if (!isValidExpirationDate(expirationDate)) {
+      toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
+      return false;
+    }
+    const clearanceRef = doc(db, 'userProfiles', coachUserId, 'clearances', clearanceId);
+    const updateData = { expirationDate, updatedAt: new Date().toISOString() };
+    try {
+      await updateDoc(clearanceRef, updateData);
+      toast({ title: 'Expiration Date Saved', description: `Now expires ${expirationDate}. The review decision is unchanged.` });
+      return true;
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        errorEmitter.emit('permission-error', new FirestorePermissionError({ path: clearanceRef.path, operation: 'update', requestResourceData: updateData }));
+      } else {
+        toast({ variant: 'destructive', title: 'Update Failed', description: error.message });
+      }
       return false;
     }
   };
@@ -1173,6 +1220,7 @@ export default function RegistrationDashboardPage() {
               isAdmin={isAdmin}
               onUpdateStatus={handleUpdateClearanceStatus}
               onUploadClearance={handleUploadClearance}
+              onUpdateExpiration={handleUpdateClearanceExpiration}
               onDeleteCoach={handleDeleteCoach}
             />
           </TabsContent>
