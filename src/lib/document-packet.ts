@@ -1,6 +1,14 @@
 import type { User } from 'firebase/auth';
+import type { ClearanceType } from '@/lib/clearances';
 
 export type PlayerDocType = 'birthCertificate' | 'physicalForm';
+
+/**
+ * Everything the packet route can merge. Player doc types and clearance types
+ * never collide by name, so the server picks its branch straight from this
+ * value — no extra discriminator is passed over the wire.
+ */
+export type PacketDocType = PlayerDocType | ClearanceType;
 
 export interface DocumentPacketResult {
   ok: boolean;
@@ -9,10 +17,10 @@ export interface DocumentPacketResult {
 }
 
 /**
- * Requests a merged, labeled PDF of player documents from the server and
- * shows it in a new tab, where the browser's native PDF viewer handles
- * printing on every platform (including iOS, where in-app PDF iframes and
- * cross-origin print calls both fail).
+ * Requests a merged, labeled PDF of player documents or volunteer clearances
+ * from the server and shows it in a new tab, where the browser's native PDF
+ * viewer handles printing on every platform (including iOS, where in-app PDF
+ * iframes and cross-origin print calls both fail).
  *
  * Must be called synchronously inside a click handler: the tab is opened
  * before any await so popup blockers treat it as user-initiated — the same
@@ -20,7 +28,7 @@ export interface DocumentPacketResult {
  */
 export async function openDocumentPacket(opts: {
   user: User;
-  docType: PlayerDocType;
+  docType: PacketDocType;
   refPaths: string[];
 }): Promise<DocumentPacketResult> {
   const tab = window.open('', '_blank');

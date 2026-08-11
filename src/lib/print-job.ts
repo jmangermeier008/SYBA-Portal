@@ -1,4 +1,5 @@
 import type { WaiverPrintEntry } from '@/components/registration/ShenangoValleyWaiverPrintable';
+import type { ClearanceState } from '@/lib/clearances';
 
 export interface RosterPrintRow {
   playerName: string;
@@ -18,10 +19,19 @@ export interface EquipmentChaseRow {
   parentEmail: string;
 }
 
+/** One volunteer's row on the compliance summary sheet. */
+export interface CompliancePrintRow {
+  name: string;
+  email: string;
+  /** One cell per CLEARANCE_TYPES entry, in that order. */
+  cells: { state: ClearanceState; expirationDate?: string }[];
+}
+
 export type PrintJobPayload =
   | { kind: 'waivers'; entries: WaiverPrintEntry[] }
   | { kind: 'roster'; title: string; subtitle?: string; rows: RosterPrintRow[]; showWeight: boolean }
-  | { kind: 'equipment-chase'; title: string; subtitle?: string; rows: EquipmentChaseRow[] };
+  | { kind: 'equipment-chase'; title: string; subtitle?: string; rows: EquipmentChaseRow[] }
+  | { kind: 'compliance'; title: string; subtitle?: string; columns: string[]; rows: CompliancePrintRow[] };
 
 const KEY_PREFIX = 'syba:print:';
 

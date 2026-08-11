@@ -9,6 +9,18 @@ import {
   AdultCodeOfEthicsSheet,
 } from '@/components/registration/SvmflParentalAgreementPrintable';
 import { readPrintJob, type PrintJobPayload } from '@/lib/print-job';
+import type { ClearanceState } from '@/lib/clearances';
+
+// Plain glyphs rather than icons — this sheet is printed in black and white,
+// so status has to survive without color.
+const COMPLIANCE_MARKS: Record<ClearanceState, string> = {
+  approved: '✓',
+  expiring: '!',
+  expired: '⚠',
+  pending: '○',
+  rejected: '✗',
+  missing: '—',
+};
 
 /**
  * Standalone print tab. Host pages stash a payload in localStorage and open
@@ -103,7 +115,9 @@ export default function PrintPage() {
             <p className="text-xs text-muted-foreground">
               {job.kind === 'waivers'
                 ? `${sheetCount} packet${sheetCount === 1 ? '' : 's'} — three pages per player`
-                : `${job.rows.length} player${job.rows.length === 1 ? '' : 's'}`}
+                : job.kind === 'compliance'
+                  ? `${job.rows.length} volunteer${job.rows.length === 1 ? '' : 's'}`
+                  : `${job.rows.length} player${job.rows.length === 1 ? '' : 's'}`}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -138,6 +152,49 @@ export default function PrintPage() {
               </div>
             ));
           })
+        ) : job.kind === 'compliance' ? (
+          <div className="w-[7.5in] mx-auto bg-white text-black p-8 shadow-lg print:shadow-none print:p-0">
+            <div className="text-center space-y-1 pb-4">
+              <h1 className="text-xl font-bold tracking-wide">{job.title}</h1>
+              {job.subtitle && <p className="text-sm text-neutral-600">{job.subtitle}</p>}
+            </div>
+            <table className="w-full border border-black border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="border border-black px-2 py-1 text-left">Volunteer</th>
+                  {job.columns.map(col => (
+                    <th key={col} className="border border-black px-2 py-1 text-left">{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {job.rows.map((row, i) => (
+                  <tr key={i}>
+                    <td className="border border-black px-2 py-1 align-top">
+                      <span className="block font-medium whitespace-nowrap">{row.name}</span>
+                      <span className="block text-[10px] text-neutral-600 break-all">{row.email}</span>
+                    </td>
+                    {row.cells.map((cell, j) => (
+                      <td key={j} className="border border-black px-2 py-1 align-top whitespace-nowrap">
+                        <span className="font-bold">{COMPLIANCE_MARKS[cell.state]}</span>{' '}
+                        {cell.state === 'missing'
+                          ? 'not submitted'
+                          : cell.state === 'expired'
+                            ? `EXPIRED ${cell.expirationDate ?? ''}`.trim()
+                            : cell.expirationDate ?? 'no date'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-[10px] pt-3">
+              ✓ approved &nbsp; ! expiring soon &nbsp; ⚠ expired &nbsp; ○ pending review &nbsp; ✗ rejected &nbsp; — not submitted
+            </p>
+            <p className="text-xs pt-1">
+              {job.rows.length} volunteer{job.rows.length === 1 ? '' : 's'}
+            </p>
+          </div>
         ) : job.kind === 'equipment-chase' ? (
           <div className="w-[7.5in] mx-auto bg-white text-black p-8 shadow-lg print:shadow-none print:p-0">
             <div className="text-center space-y-1 pb-4">

@@ -439,6 +439,30 @@ export interface UserProfile {
 }
 
 // ---------------------------------------------------------------------------
+// Clearances  (subcollection: userProfiles/{userId}/clearances)
+// ---------------------------------------------------------------------------
+
+/**
+ * A volunteer compliance document. The Firestore document ID *is* the type
+ * string, so a volunteer holds at most one record per clearance type and a
+ * re-upload overwrites in place. Constants and status helpers live in
+ * src/lib/clearances.ts.
+ */
+export interface Clearance {
+  id: string;
+  userId: string;            // Duplicated onto the doc so the admin collectionGroup query can filter
+  type: string;              // Usually a ClearanceType, but legacy aliases exist — match via findClearance()
+  status: 'Pending' | 'Approved' | 'Rejected' | string;
+  fileUrl?: string;          // 10-year signed Storage URL returned by /api/upload
+  expirationDate?: string;   // YYYY-MM-DD — naive local, never compare against an ISO/UTC timestamp
+  rejectionReason?: string | null;
+  verifiedBy?: string;
+  verifiedByName?: string;
+  verifiedAt?: string;
+  updatedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Players  (subcollection: userProfiles/{userId}/players)
 // ---------------------------------------------------------------------------
 

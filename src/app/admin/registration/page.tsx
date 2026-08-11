@@ -36,6 +36,7 @@ import { CoachComplianceTable } from '@/components/admin/registration/coach-comp
 import { ManualRegistrationDialog } from '@/components/admin/registration/manual-registration-dialog';
 import { combinedRejectionReason, rollupVerificationStatus, type Division } from '@/types/scheduling';
 import { countIssuedEquipment } from '@/lib/equipment';
+import { REQUIRED_CLEARANCE_TYPES, clearanceLabel } from '@/lib/clearances';
 import { pushToUsersBestEffort } from '@/lib/coach-notifications';
 
 interface Enrollment {
@@ -68,21 +69,6 @@ interface CoachProfile {
   displayName: string;
   email: string;
 }
-
-// The two PA Act 153 clearance docs every coach/volunteer must hold — only
-// these gate coach portal access via complianceStatus. Labels mirror
-// src/app/coach/compliance/page.tsx so notifications read the same.
-const REQUIRED_CLEARANCE_DOCS = [
-  { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance' },
-  { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check' },
-];
-
-// All reviewable compliance docs, including tracking-only ones that never
-// block portal access.
-const ALL_CLEARANCE_DOCS = [
-  ...REQUIRED_CLEARANCE_DOCS,
-  { id: 'USAFootball', label: 'USA Football Coach Certification' },
-];
 
 function getEnrollmentStatus(e: Enrollment) {
   if (e.fee_waived) return 'fee_waived';
@@ -587,12 +573,15 @@ export default function RegistrationDashboardPage() {
   // Coach portal access is gated on userProfiles.complianceStatus (see
   // hasCoachAccess in sport-context). Re-derive it from the pair of clearance
   // docs after every review so approvals actually unlock the coach pages.
+  //
+  // Deliberately status-only: an expired-but-Approved clearance is surfaced as
+  // EXPIRED in the audit table but does not revoke portal access mid-season.
   const syncCoachComplianceStatus = async (
     userId: string
   ): Promise<'approved' | 'pending' | 'action_required'> => {
     if (!db) return 'pending';
     const snaps = await Promise.all(
-      REQUIRED_CLEARANCE_DOCS.map(c => getDoc(doc(db, 'userProfiles', userId, 'clearances', c.id)))
+      REQUIRED_CLEARANCE_TYPES.map(c => getDoc(doc(db, 'userProfiles', userId, 'clearances', c.type)))
     );
     const statuses = snaps.map(s => (s.exists() ? (s.data() as any).status : undefined));
     const overall = statuses.every(s => s === 'Approved')
@@ -615,7 +604,7 @@ export default function RegistrationDashboardPage() {
     reason?: string
   ) => {
     if (!db) return;
-    const label = ALL_CLEARANCE_DOCS.find(c => c.id === clearanceId)?.label ?? clearanceId;
+    const label = clearanceLabel(clearanceId);
     const title = status === 'Approved' ? 'Clearance Approved' : 'Clearance Needs Attention';
     const body = status === 'Approved'
       ? overall === 'approved'
@@ -1181,6 +1170,7 @@ export default function RegistrationDashboardPage() {
               clearances={allClearances ?? []}
               isLoading={loadingCoaches}
               isSiteAdmin={isSiteAdmin}
+              isAdmin={isAdmin}
               onUpdateStatus={handleUpdateClearanceStatus}
               onUploadClearance={handleUploadClearance}
               onDeleteCoach={handleDeleteCoach}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { getAdminAuth, getAdminFirestore } from '@/lib/firebase-admin';
+import { CLEARANCE_TYPES, isClearanceType } from '@/lib/clearances';
 
 const DOC_FIELDS = {
   birthCertificate: { field: 'birthCertificateUrl', label: 'Birth Certificate', filename: 'birth-certificates.pdf' },
@@ -9,8 +10,10 @@ const DOC_FIELDS = {
 
 type DocType = keyof typeof DOC_FIELDS;
 
-// Only player docs may be read through this route — never arbitrary Firestore paths.
+// Only player docs and volunteer clearances may be read through this route —
+// never arbitrary Firestore paths.
 const PLAYER_REF_PATH = /^userProfiles\/[A-Za-z0-9_-]+\/players\/[A-Za-z0-9_-]+$/;
+const CLEARANCE_REF_PATH = /^userProfiles\/[A-Za-z0-9_-]+\/clearances\/[A-Za-z0-9_-]+$/;
 
 const LETTER = { width: 612, height: 792 } as const; // points
 const MARGIN = 36; // 0.5in
@@ -32,9 +35,9 @@ export async function POST(req: NextRequest) {
 
     const db = getAdminFirestore();
 
-    // Children's documents are the most sensitive files in the app — Admin only.
-    // Mirrors the client derivation: isSiteAdmin flag, legacy roles array, or
-    // 'Admin' in any sport's sportRoles.
+    // Children's documents and volunteer background checks are the most
+    // sensitive files in the app — Admin only. Mirrors the client derivation:
+    // isSiteAdmin flag, legacy roles array, or 'Admin' in any sport's sportRoles.
     const callerSnap = await db.doc(`userProfiles/${decoded.uid}`).get();
     const caller = callerSnap.data();
     const isAdminUser =
@@ -49,20 +52,23 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const docType = body?.docType as DocType;
+    const docType = body?.docType;
     const refPaths = body?.refPaths;
-    if (!DOC_FIELDS[docType] || !Array.isArray(refPaths) || refPaths.length === 0) {
+
+    // Player doc types and clearance types share one parameter — their names
+    // never collide, so whichever map the value lands in selects the branch.
+    const isPlayerDoc = typeof docType === 'string' && docType in DOC_FIELDS;
+    const isClearanceDoc = isClearanceType(docType);
+    if ((!isPlayerDoc && !isClearanceDoc) || !Array.isArray(refPaths) || refPaths.length === 0) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
     if (refPaths.length > 200) {
       return NextResponse.json({ error: 'Too many documents requested (max 200)' }, { status: 400 });
     }
-    if (!refPaths.every((p) => typeof p === 'string' && PLAYER_REF_PATH.test(p))) {
+    const refPattern = isPlayerDoc ? PLAYER_REF_PATH : CLEARANCE_REF_PATH;
+    if (!refPaths.every((p) => typeof p === 'string' && refPattern.test(p))) {
       return NextResponse.json({ error: 'Invalid document reference' }, { status: 400 });
     }
-
-    const { field, label, filename } = DOC_FIELDS[docType];
-    const snaps = await db.getAll(...refPaths.map((p: string) => db.doc(p)));
 
     const out = await PDFDocument.create();
     const font = await out.embedFont(StandardFonts.Helvetica);
@@ -88,47 +94,58 @@ export async function POST(req: NextRequest) {
       });
     };
 
-    for (const snap of snaps) {
-      const player = snap.exists ? snap.data() : undefined;
-      const name = player ? `${player.firstName ?? ''} ${player.lastName ?? ''}`.trim() : snap.id;
-      const url = player?.[field];
-      if (!url || typeof url !== 'string') {
-        skipped.push(name || snap.id);
-        continue;
-      }
-      const labelText = [name, player?.dateOfBirth ? `DOB ${player.dateOfBirth}` : null, label]
-        .filter(Boolean)
-        .join(' — ');
+    const snaps = await db.getAll(...refPaths.map((p: string) => db.doc(p)));
+    let filename: string;
 
-      try {
-        const res = await fetch(url);
-        if (!res.ok) {
+    if (isPlayerDoc) {
+      const { field, label, filename: playerFilename } = DOC_FIELDS[docType as DocType];
+      filename = playerFilename;
+
+      for (const snap of snaps) {
+        const player = snap.exists ? snap.data() : undefined;
+        const name = player ? `${player.firstName ?? ''} ${player.lastName ?? ''}`.trim() : snap.id;
+        const url = player?.[field];
+        if (!url || typeof url !== 'string') {
+          skipped.push(name || snap.id);
+          continue;
+        }
+        const labelText = [name, player?.dateOfBirth ? `DOB ${player.dateOfBirth}` : null, label]
+          .filter(Boolean)
+          .join(' — ');
+        const added = await appendDocument(out, url, labelText, drawLabel, snap.ref.path);
+        if (!added) skipped.push(name || snap.id);
+      }
+    } else {
+      const slot = CLEARANCE_TYPES.find((c) => c.type === docType)!;
+      filename = slot.filename;
+
+      // A clearance document carries only its owner's uid — the volunteer's
+      // name lives on the parent userProfiles doc, so resolve those in one
+      // batch before labeling the pages.
+      const ownerUids = [
+        ...new Set(snaps.map((s) => s.ref.parent.parent?.id).filter((id): id is string => !!id)),
+      ];
+      const ownerSnaps = ownerUids.length
+        ? await db.getAll(...ownerUids.map((uid) => db.doc(`userProfiles/${uid}`)))
+        : [];
+      const names = new Map(
+        ownerSnaps.map((s) => [s.id, (s.data()?.displayName as string) || (s.data()?.email as string) || s.id])
+      );
+
+      for (const snap of snaps) {
+        const record = snap.exists ? snap.data() : undefined;
+        const ownerUid = snap.ref.parent.parent?.id ?? '';
+        const name = names.get(ownerUid) ?? ownerUid;
+        const url = record?.fileUrl;
+        if (!url || typeof url !== 'string') {
           skipped.push(name);
           continue;
         }
-        const contentType = res.headers.get('content-type') ?? '';
-        const pathname = new URL(url).pathname.toLowerCase();
-        const bytes = new Uint8Array(await res.arrayBuffer());
-
-        if (contentType.includes('pdf') || pathname.endsWith('.pdf')) {
-          const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
-          const pages = await out.copyPages(src, src.getPageIndices());
-          for (const page of pages) {
-            out.addPage(page);
-            drawLabel(page, labelText);
-          }
-        } else if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.jpe?g$/.test(pathname)) {
-          const img = await out.embedJpg(bytes);
-          addImagePage(out, img, drawLabel, labelText);
-        } else if (contentType.includes('png') || pathname.endsWith('.png')) {
-          const img = await out.embedPng(bytes);
-          addImagePage(out, img, drawLabel, labelText);
-        } else {
-          skipped.push(name);
-        }
-      } catch (err) {
-        console.error(`[documents/packet] failed for ${snap.ref.path}:`, err);
-        skipped.push(name);
+        const labelText = [name, slot.label, record?.expirationDate ? `Expires ${record.expirationDate}` : null]
+          .filter(Boolean)
+          .join(' — ');
+        const added = await appendDocument(out, url, labelText, drawLabel, snap.ref.path);
+        if (!added) skipped.push(name);
       }
     }
 
@@ -150,6 +167,53 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('[documents/packet] error:', err);
     return NextResponse.json({ error: err.message || 'Failed to build document packet' }, { status: 500 });
+  }
+}
+
+/**
+ * Fetches one uploaded document and appends it to the packet, labeling every
+ * page it contributes. Returns false when the file could not be included.
+ *
+ * Content-type is checked before the URL extension on purpose: compliance
+ * uploads are stored as `compliance/{uid}/{type}_{timestamp}` with no
+ * extension at all, so extension sniffing alone would skip every clearance.
+ */
+async function appendDocument(
+  out: PDFDocument,
+  url: string,
+  labelText: string,
+  drawLabel: (page: ReturnType<PDFDocument['addPage']>, text: string) => void,
+  refPath: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return false;
+
+    const contentType = res.headers.get('content-type') ?? '';
+    const pathname = new URL(url).pathname.toLowerCase();
+    const bytes = new Uint8Array(await res.arrayBuffer());
+
+    if (contentType.includes('pdf') || pathname.endsWith('.pdf')) {
+      const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      const pages = await out.copyPages(src, src.getPageIndices());
+      for (const page of pages) {
+        out.addPage(page);
+        drawLabel(page, labelText);
+      }
+      return true;
+    }
+    if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.jpe?g$/.test(pathname)) {
+      addImagePage(out, await out.embedJpg(bytes), drawLabel, labelText);
+      return true;
+    }
+    if (contentType.includes('png') || pathname.endsWith('.png')) {
+      addImagePage(out, await out.embedPng(bytes), drawLabel, labelText);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error(`[documents/packet] failed for ${refPath}:`, err);
+    return false;
   }
 }
 

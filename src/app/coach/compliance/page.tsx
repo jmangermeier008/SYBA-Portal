@@ -24,12 +24,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { format, isBefore, addMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
-
-const CLEARANCE_TYPES = [
-  { id: 'ChildAbuse', label: 'PA Child Abuse History Clearance', description: 'Mandatory state background check.' },
-  { id: 'CriminalRecord', label: 'PA State Police Criminal Record Check', description: 'State police criminal history report.' },
-  { id: 'USAFootball', label: 'USA Football Coach Certification', description: 'Annual USA Football coaching certification (football coaches).' },
-];
+import { CLEARANCE_TYPES } from '@/lib/clearances';
 
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
@@ -175,12 +170,12 @@ export default function CoachCompliancePage() {
 
               <div className="grid gap-6">
                 {CLEARANCE_TYPES.map((clearanceType) => {
-                  const clearance = getClearance(clearanceType.id);
+                  const clearance = getClearance(clearanceType.type);
                   const isExpiringSoon = clearance?.expirationDate && isBefore(new Date(clearance.expirationDate), addMonths(new Date(), 2));
                   const isExpired = clearance?.expirationDate && isBefore(new Date(clearance.expirationDate), new Date());
 
                   return (
-                    <Card key={clearanceType.id} className="border-none shadow-lg overflow-hidden">
+                    <Card key={clearanceType.type} className="border-none shadow-lg overflow-hidden">
                       <div className="flex flex-col md:flex-row">
                         <div className="flex-1 p-6">
                           <div className="flex items-center justify-between mb-4">
@@ -229,7 +224,7 @@ export default function CoachCompliancePage() {
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                             {(() => {
-                              const expValue = expDates[clearanceType.id] ?? clearance?.expirationDate ?? '';
+                              const expValue = expDates[clearanceType.type] ?? clearance?.expirationDate ?? '';
                               return (
                                 <>
                                   <div className="space-y-2">
@@ -237,25 +232,25 @@ export default function CoachCompliancePage() {
                                     <Input
                                       type="date"
                                       className="rounded-xl"
-                                      id={`exp-${clearanceType.id}`}
+                                      id={`exp-${clearanceType.type}`}
                                       value={expValue}
-                                      onChange={(e) => setExpDates(prev => ({ ...prev, [clearanceType.id]: e.target.value }))}
+                                      onChange={(e) => setExpDates(prev => ({ ...prev, [clearanceType.type]: e.target.value }))}
                                     />
                                   </div>
                                   <div className="relative">
                                     <Button
                                       className="w-full rounded-xl"
-                                      disabled={uploading === clearanceType.id || !expValue}
+                                      disabled={uploading === clearanceType.type || !expValue}
                                       onClick={() => {
                                         if (clearance?.status === 'Approved') {
-                                          setConfirmReplaceType(clearanceType.id);
+                                          setConfirmReplaceType(clearanceType.type);
                                           return;
                                         }
-                                        const fileInput = document.getElementById(`file-${clearanceType.id}`) as HTMLInputElement;
+                                        const fileInput = document.getElementById(`file-${clearanceType.type}`) as HTMLInputElement;
                                         fileInput.click();
                                       }}
                                     >
-                                      {uploading === clearanceType.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                                      {uploading === clearanceType.type ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
                                       {clearance ? "Update / Replace Document" : "Upload Document"}
                                     </Button>
                                     {!expValue && (
@@ -263,12 +258,12 @@ export default function CoachCompliancePage() {
                                     )}
                                     <input
                                       type="file"
-                                      id={`file-${clearanceType.id}`}
+                                      id={`file-${clearanceType.type}`}
                                       className="hidden"
                                       accept=".pdf,.jpg,.jpeg,.png"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
-                                        if (file) handleFileUpload(clearanceType.id, expValue, file);
+                                        if (file) handleFileUpload(clearanceType.type, expValue, file);
                                         e.currentTarget.value = '';
                                       }}
                                     />
