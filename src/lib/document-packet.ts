@@ -40,6 +40,44 @@ export function packetFilename(docType: PacketDocType): string {
   return `${FILE_STEMS[docType] ?? 'documents'}-${todayStamp()}.pdf`;
 }
 
+/** Phones and tablets — where the browser can't pop a print dialog for a PDF. */
+function isTouchFirstDevice(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+}
+
+/**
+ * Replaces the "Preparing documents…" placeholder in the already-open tab with
+ * a launch page. Inline styles only — this tab has no app context. The blob
+ * URL stays alive for the page's lifetime; one object URL is an acceptable
+ * cost for links that keep working however long the tab sits open.
+ */
+function writeMobileReadyPage(tab: Window, blobUrl: string, filename: string) {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const printHint = isIOS
+    ? 'open the packet, tap the Share button, then choose Print.'
+    : 'open the packet, tap the ⋮ menu (or Share), then choose Print.';
+  tab.document.open();
+  tab.document.write(
+    '<html><head><title>Packet ready</title>' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1"></head>' +
+    '<body style="font-family:-apple-system,sans-serif;display:flex;flex-direction:column;align-items:center;' +
+    'justify-content:center;min-height:100vh;margin:0;padding:24px;box-sizing:border-box;background:#f6f7f9;color:#1a1a1a">' +
+    '<div style="max-width:24rem;width:100%;text-align:center">' +
+    '<p style="font-size:2.5rem;margin:0 0 8px">📄</p>' +
+    '<h1 style="font-size:1.25rem;margin:0 0 4px">Your packet is ready</h1>' +
+    `<p style="font-size:.8rem;color:#666;margin:0 0 24px;word-break:break-all">${esc(filename)}</p>` +
+    `<a href="${blobUrl}" style="display:block;background:#16a34a;color:#fff;text-decoration:none;` +
+    'padding:14px;border-radius:12px;font-weight:600;margin-bottom:12px">Open Packet</a>' +
+    `<a href="${blobUrl}" download="${esc(filename)}" style="display:block;background:#fff;color:#1a1a1a;` +
+    'text-decoration:none;padding:14px;border-radius:12px;font-weight:600;border:1px solid #d4d4d8;margin-bottom:24px">' +
+    'Download PDF</a>' +
+    `<p style="font-size:.8rem;color:#666;line-height:1.5;margin:0">To print from your phone: ${printHint}</p>` +
+    '</div></body></html>'
+  );
+  tab.document.close();
+}
+
 /**
  * Requests a merged, labeled PDF of player documents or volunteer clearances
  * from the server.
@@ -111,6 +149,13 @@ export async function openDocumentPacket(opts: {
       a.remove();
       // Safari needs the URL alive until the save has actually started
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } else if (tab && isTouchFirstDevice()) {
+      // No mobile browser lets a page open the print dialog for a PDF — the
+      // print action lives behind the share/⋮ menu, which nobody finds. So on
+      // phones the tab becomes a launch page that says where Print actually
+      // is, with the packet and a download one tap away. Desktop skips this:
+      // its native PDF viewer has a visible print button.
+      writeMobileReadyPage(tab, blobUrl, packetFilename(opts.docType));
     } else if (tab) {
       tab.location.href = blobUrl;
     } else {
