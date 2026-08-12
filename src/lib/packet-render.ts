@@ -14,6 +14,10 @@
  *    Capping them at print resolution costs nothing visible on paper.
  */
 
+import { createRequire } from 'module';
+import path from 'path';
+import fs from 'fs';
+
 /** 200 DPI across the 8.5in printable width — the long edge of a letter page. */
 const MAX_IMAGE_EDGE_PX = 1700;
 const JPEG_QUALITY = 82;
@@ -21,6 +25,44 @@ const RENDER_DPI = 200;
 
 /** Guards against one pathological upload eating the whole request budget. */
 const MAX_RENDERED_PAGES = 20;
+
+/**
+ * Locates PDF.js's own asset directories on disk.
+ *
+ * Not resolved through `pdfjs-dist/package.json` — that file is not in the
+ * deployed function's trace. `legacy/build/pdf.mjs` is (it's the module we
+ * import), so we walk up from there, with a cwd-relative fallback.
+ */
+function resolvePdfjsAssetDir(name: 'standard_fonts' | 'wasm' | 'iccs'): string | undefined {
+  const candidates: string[] = [];
+  try {
+    const require = createRequire(path.join(process.cwd(), 'index.js'));
+    const buildDir = path.dirname(require.resolve('pdfjs-dist/legacy/build/pdf.mjs'));
+    candidates.push(path.join(buildDir, '..', '..', name) + path.sep);
+  } catch { /* fall through to the cwd guess */ }
+  candidates.push(path.join(process.cwd(), 'node_modules', 'pdfjs-dist', name) + path.sep);
+
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(dir)) return dir;
+    } catch { /* unreadable path — try the next */ }
+  }
+  // Degraded text beats a failed packet, so this warns rather than throwing.
+  console.warn(`[packet-render] pdfjs ${name} directory not found; rendering may be degraded`);
+  return undefined;
+}
+
+let assetDirs: { standardFontDataUrl?: string; wasmUrl?: string; iccUrl?: string } | null = null;
+function pdfjsAssetOptions() {
+  if (!assetDirs) {
+    assetDirs = {
+      standardFontDataUrl: resolvePdfjsAssetDir('standard_fonts'),
+      wasmUrl: resolvePdfjsAssetDir('wasm'),
+      iccUrl: resolvePdfjsAssetDir('iccs'),
+    };
+  }
+  return assetDirs;
+}
 
 /** JPEG/PNG bytes ready to embed, plus which of the two it is. */
 export interface PreparedImage {
@@ -43,7 +85,14 @@ export async function renderPdfPages(bytes: Uint8Array): Promise<Uint8Array[]> {
   const loadingTask = pdfjs.getDocument({
     data: bytes,
     isEvalSupported: false,
+    // The PA clearance certificates embed no fonts at all. Without its own
+    // font data PDF.js draws every glyph with ctx.fillText against an
+    // operating-system font — which a dev Mac has and the Linux serverless
+    // runtime does not, so pages arrived with the form rules but no text.
+    // Supplying these makes PDF.js draw the glyph outlines itself, identically
+    // everywhere. useSystemFonts stays false: there are none to use.
     useSystemFonts: false,
+    ...pdfjsAssetOptions(),
     // Missing glyphs render as blanks rather than rejecting the whole document
     stopAtErrors: false,
   });
