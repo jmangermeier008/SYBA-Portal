@@ -35,7 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { openDocumentPacket } from '@/lib/document-packet';
+import { openDocumentPacket, type PacketMode } from '@/lib/document-packet';
 import { openPrintTab, type CompliancePrintRow } from '@/lib/print-job';
 import {
   CLEARANCE_TYPES,
@@ -409,6 +409,14 @@ export function CoachComplianceTable({
   };
   const [deletingCoach, setDeletingCoach] = useState<CoachProfile | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [packetBusy, setPacketBusy] = useState<ClearanceType | null>(null);
+  const [packetResult, setPacketResult] = useState<{
+    label: string;
+    mode: PacketMode;
+    included: number;
+    noDocument: string[];
+    failed: string[];
+  } | null>(null);
 
   const volunteerClearanceData = useMemo(() => {
     return coaches
@@ -442,20 +450,31 @@ export function CoachComplianceTable({
 
   const filterLabel = statusFilter === 'all' ? 'All' : statusFilter === 'cleared' ? 'Cleared' : 'Incomplete';
 
+  /** How many displayed volunteers actually have a file for each clearance type. */
+  const availableCounts = useMemo(() => {
+    const counts = {} as Record<ClearanceType, number>;
+    for (const { type } of CLEARANCE_TYPES) {
+      counts[type] = filteredVolunteers.filter(v => !!v.records[type]?.fileUrl).length;
+    }
+    return counts;
+  }, [filteredVolunteers]);
+
   /**
    * Builds one merged, labeled PDF of every displayed volunteer's document of a
    * given type, via the server packet endpoint. Runs synchronously in the click
    * handler — openDocumentPacket opens its tab before awaiting anything.
    */
-  const handleBulkClearancePrint = (type: ClearanceType) => {
+  const handleBulkClearancePacket = (type: ClearanceType, mode: PacketMode) => {
     if (!user) return;
     const label = CLEARANCE_TYPES.find(t => t.type === type)!.label;
     // Address each document by its owning profile, not the record's own userId
     // field — legacy clearance docs predate that field being written.
     const withDoc = filteredVolunteers
-      .map(v => ({ uid: v.user.id, record: v.records[type] }))
-      .filter((r): r is { uid: string; record: ClearanceRecord } => !!r.record?.fileUrl);
-    const missing = filteredVolunteers.length - withDoc.length;
+      .map(v => ({ uid: v.user.id, name: v.user.displayName, record: v.records[type] }))
+      .filter((r): r is { uid: string; name: string; record: ClearanceRecord } => !!r.record?.fileUrl);
+    const noDocument = filteredVolunteers
+      .filter(v => !v.records[type]?.fileUrl)
+      .map(v => v.user.displayName);
 
     if (withDoc.length === 0) {
       toast({
@@ -465,20 +484,29 @@ export function CoachComplianceTable({
       });
       return;
     }
-    if (missing > 0) {
-      toast({
-        title: `${missing} volunteer${missing === 1 ? '' : 's'} skipped`,
-        description: `No ${label} uploaded for ${missing} of ${filteredVolunteers.length} displayed volunteers.`,
-      });
-    }
+    setPacketBusy(type);
     // filteredVolunteers is already sorted by name, so the packet comes out in
     // the same order as the table on screen.
     openDocumentPacket({
       user,
       docType: type,
+      mode,
       refPaths: withDoc.map(r => `userProfiles/${r.uid}/clearances/${r.record.id}`),
     }).then(r => {
-      if (!r.ok) toast({ variant: 'destructive', title: 'Print failed', description: r.error });
+      setPacketBusy(null);
+      if (!r.ok) {
+        toast({ variant: 'destructive', title: 'Could not build the packet', description: r.error });
+        return;
+      }
+      // A persistent panel rather than a toast: an admin chasing paperwork
+      // needs these names to still be on screen a minute later.
+      setPacketResult({
+        label,
+        mode,
+        included: withDoc.length - (r.skippedCount ?? 0),
+        noDocument,
+        failed: r.skippedNames ?? [],
+      });
     });
   };
 
@@ -584,34 +612,99 @@ export function CoachComplianceTable({
                 </button>
               ))}
             </div>
-            {isAdmin && (
-              <DropdownMenu>
+            {isAdmin && (['print', 'download'] as const).map(mode => (
+              <DropdownMenu key={mode}>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="rounded-xl h-9">
-                    <Printer className="h-4 w-4 mr-2" /> Print
+                  <Button variant="outline" size="sm" className="rounded-xl h-9" disabled={!!packetBusy}>
+                    {packetBusy ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : mode === 'print' ? (
+                      <Printer className="h-4 w-4 mr-2" />
+                    ) : (
+                      <Download className="h-4 w-4 mr-2" />
+                    )}
+                    {mode === 'print' ? 'Print' : 'Download'}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuContent align="start" className="w-72">
                   {CLEARANCE_TYPES.map(({ type, label }) => (
-                    <DropdownMenuItem key={type} onClick={() => handleBulkClearancePrint(type)}>
-                      <FileText className="h-4 w-4 mr-2" /> Print {label}
+                    <DropdownMenuItem
+                      key={type}
+                      disabled={availableCounts[type] === 0}
+                      onClick={() => handleBulkClearancePacket(type, mode)}
+                    >
+                      <FileText className="h-4 w-4 mr-2 shrink-0" />
+                      <span className="flex-1 truncate">{label}</span>
+                      {/* The count is the guard rail — a short packet is
+                          visible before you click, not after. */}
+                      <span className="ml-2 text-xs text-muted-foreground">({availableCounts[type]})</span>
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handlePrintComplianceSummary}>
-                    <ShieldCheck className="h-4 w-4 mr-2" /> Print Compliance Summary
+                    <ShieldCheck className="h-4 w-4 mr-2 shrink-0" />
+                    <span className="flex-1 truncate">
+                      Compliance Summary{mode === 'download' ? ' (Save as PDF)' : ''}
+                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">({filteredVolunteers.length})</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            )}
+            ))}
             <p className="text-xs text-muted-foreground ml-auto">
               {filteredVolunteers.length} volunteer{filteredVolunteers.length !== 1 ? 's' : ''}
             </p>
           </div>
           {isAdmin && (
             <p className="text-[11px] text-muted-foreground -mt-2">
-              Print builds one merged PDF of every volunteer shown above — change the filter to change who is included.
+              Both build one merged PDF of every volunteer shown above — change the filter to change who is included.
+              Download saves it for emailing; Print opens it ready to print.
             </p>
+          )}
+
+          {packetResult && (
+            <div className="rounded-xl border bg-secondary/20 p-3 text-xs space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-semibold">
+                  {packetResult.mode === 'download' ? 'Downloaded' : 'Printed'}: {packetResult.label}
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-[10px] shrink-0"
+                  onClick={() => setPacketResult(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+              <p className="flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                <span>{packetResult.included} document{packetResult.included === 1 ? '' : 's'} included</span>
+              </p>
+              {packetResult.noDocument.length > 0 && (
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                  <p>
+                    <span className="font-medium">
+                      {packetResult.noDocument.length} with nothing uploaded:
+                    </span>{' '}
+                    <span className="text-muted-foreground">{packetResult.noDocument.join(', ')}</span>
+                  </p>
+                </div>
+              )}
+              {packetResult.failed.length > 0 && (
+                <div className="flex items-start gap-2">
+                  <XCircle className="h-3.5 w-3.5 text-destructive mt-0.5 shrink-0" />
+                  <p>
+                    <span className="font-medium">
+                      {packetResult.failed.length} could not be merged:
+                    </span>{' '}
+                    <span className="text-muted-foreground">{packetResult.failed.join(', ')}</span>
+                    {' — '}open each from their Audit dialog. A placeholder page marks the spot in the packet.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Table */}

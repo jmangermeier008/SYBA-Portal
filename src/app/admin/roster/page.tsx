@@ -21,7 +21,7 @@ import { PlayerCard } from '@/components/admin/PlayerCard';
 import { Download, Loader2, CheckCircle2, AlertCircle, Users, Lock, MoreHorizontal, Upload, Pencil, Trash2, Printer, FileText, LayoutGrid, List } from 'lucide-react';
 import { type WaiverPrintEntry } from '@/components/registration/ShenangoValleyWaiverPrintable';
 import { openPrintTab, type RosterPrintRow } from '@/lib/print-job';
-import { openDocumentPacket, type PlayerDocType } from '@/lib/document-packet';
+import { openDocumentPacket, type PlayerDocType, type PacketMode } from '@/lib/document-packet';
 import { DocumentViewerDialog } from '@/components/documents/document-viewer';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
@@ -144,6 +144,14 @@ export default function MasterRosterPage() {
   // Stores the id, not a player snapshot, so the open dialog picks up the new
   // URL from the real-time players subscription after an admin replaces a doc.
   const [docViewer, setDocViewer] = useState<{ open: boolean; playerId: string | null }>({ open: false, playerId: null });
+  const [packetBusy, setPacketBusy] = useState<PlayerDocType | null>(null);
+  const [packetResult, setPacketResult] = useState<{
+    label: string;
+    mode: PacketMode;
+    included: number;
+    noDocument: string[];
+    failed: string[];
+  } | null>(null);
 
   // Delete enrollment dialog state
   const [deleteDialog, setDeleteDialog] = useState<{
@@ -630,25 +638,45 @@ export default function MasterRosterPage() {
   // Builds one combined, labeled PDF of every displayed player's document via
   // the server packet endpoint. Must run synchronously in the click handler —
   // openDocumentPacket opens its tab before awaiting anything.
-  const handleBulkDocPrint = (docType: PlayerDocType) => {
+  const handleBulkDocPacket = (docType: PlayerDocType, mode: PacketMode) => {
     if (!user) return;
-    const docLabel = docType === 'birthCertificate' ? 'birth certificate' : 'physical form';
+    const docLabel = docType === 'birthCertificate' ? 'Birth Certificates' : 'Physical Forms';
     const urlField = docType === 'birthCertificate' ? 'birthCertificateUrl' : 'physicalFormUrl';
     const rows = (displayEnrollments ?? []).map(e => players?.find(pl => pl.id === e.playerId));
     const withDoc = rows.filter((p): p is Player => !!p && !!p[urlField] && !!p._refPath);
-    const missing = rows.length - withDoc.length;
+    const noDocument = rows
+      .filter(p => !p || !p[urlField] || !p._refPath)
+      .map(p => (p ? `${p.firstName} ${p.lastName}` : 'Unknown player'));
     if (withDoc.length === 0) {
-      toast({ variant: 'destructive', title: 'No documents', description: `None of the displayed players have a ${docLabel} uploaded.` });
+      toast({ variant: 'destructive', title: 'No documents', description: `None of the displayed players have a ${docLabel.toLowerCase()} uploaded.` });
       return;
     }
-    if (missing > 0) {
-      toast({ title: `${missing} player${missing === 1 ? '' : 's'} skipped`, description: `No ${docLabel} uploaded for ${missing} of ${rows.length} displayed players.` });
-    }
-    openDocumentPacket({ user, docType, refPaths: withDoc.map(p => p._refPath!) })
+    setPacketBusy(docType);
+    openDocumentPacket({ user, docType, mode, refPaths: withDoc.map(p => p._refPath!) })
       .then(r => {
-        if (!r.ok) toast({ variant: 'destructive', title: 'Print failed', description: r.error });
+        setPacketBusy(null);
+        if (!r.ok) {
+          toast({ variant: 'destructive', title: 'Could not build the packet', description: r.error });
+          return;
+        }
+        // Persistent panel rather than a toast — these names are a work list.
+        setPacketResult({
+          label: docLabel,
+          mode,
+          included: withDoc.length - (r.skippedCount ?? 0),
+          noDocument,
+          failed: r.skippedNames ?? [],
+        });
       });
   };
+
+  /** How many displayed players actually have each document on file. */
+  const docCounts = useMemo(() => {
+    const rows = (displayEnrollments ?? []).map(e => players?.find(pl => pl.id === e.playerId));
+    const count = (field: 'birthCertificateUrl' | 'physicalFormUrl') =>
+      rows.filter(p => !!p && !!p[field] && !!p._refPath).length;
+    return { birthCertificate: count('birthCertificateUrl'), physicalForm: count('physicalFormUrl') };
+  }, [displayEnrollments, players]);
 
   const handleAssignJersey = async (enrollment: Enrollment, value: string) => {
     if (!db) return;
@@ -863,11 +891,18 @@ export default function MasterRosterPage() {
                 )}
                 {isAdmin && (
                   <>
-                    <DropdownMenuItem onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
-                      <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates
+                    <DropdownMenuItem onClick={() => handleBulkDocPacket('birthCertificate', 'print')} disabled={!docCounts.birthCertificate}>
+                      <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates ({docCounts.birthCertificate})
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleBulkDocPrint('physicalForm')} disabled={!displayEnrollments?.length}>
-                      <FileText className="mr-2 h-4 w-4" /> Print Physical Forms
+                    <DropdownMenuItem onClick={() => handleBulkDocPacket('physicalForm', 'print')} disabled={!docCounts.physicalForm}>
+                      <FileText className="mr-2 h-4 w-4" /> Print Physical Forms ({docCounts.physicalForm})
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleBulkDocPacket('birthCertificate', 'download')} disabled={!docCounts.birthCertificate}>
+                      <Download className="mr-2 h-4 w-4" /> Download Birth Certificates ({docCounts.birthCertificate})
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleBulkDocPacket('physicalForm', 'download')} disabled={!docCounts.physicalForm}>
+                      <Download className="mr-2 h-4 w-4" /> Download Physical Forms ({docCounts.physicalForm})
                     </DropdownMenuItem>
                   </>
                 )}
@@ -903,16 +938,36 @@ export default function MasterRosterPage() {
                   {isAdmin && (
                     <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => handleBulkDocPrint('birthCertificate')} disabled={!displayEnrollments?.length}>
-                        <FileText className="mr-2 h-4 w-4" /> Print Birth Certificates
+                      <DropdownMenuItem onClick={() => handleBulkDocPacket('birthCertificate', 'print')} disabled={!docCounts.birthCertificate}>
+                        <FileText className="mr-2 h-4 w-4" /> Birth Certificates ({docCounts.birthCertificate})
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleBulkDocPrint('physicalForm')} disabled={!displayEnrollments?.length}>
-                        <FileText className="mr-2 h-4 w-4" /> Print Physical Forms
+                      <DropdownMenuItem onClick={() => handleBulkDocPacket('physicalForm', 'print')} disabled={!docCounts.physicalForm}>
+                        <FileText className="mr-2 h-4 w-4" /> Physical Forms ({docCounts.physicalForm})
                       </DropdownMenuItem>
                     </>
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
+              {isAdmin && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="rounded-full" disabled={!!packetBusy}>
+                      {packetBusy
+                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        : <Download className="mr-2 h-4 w-4" />}
+                      Download Documents
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleBulkDocPacket('birthCertificate', 'download')} disabled={!docCounts.birthCertificate}>
+                      <FileText className="mr-2 h-4 w-4" /> Birth Certificates ({docCounts.birthCertificate})
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleBulkDocPacket('physicalForm', 'download')} disabled={!docCounts.physicalForm}>
+                      <FileText className="mr-2 h-4 w-4" /> Physical Forms ({docCounts.physicalForm})
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <Button variant="outline" onClick={exportContactsCSV} className="rounded-full" disabled={!displayEnrollments?.length}>
                 <Download className="mr-2 h-4 w-4" /> Export Contacts
               </Button>
@@ -922,6 +977,37 @@ export default function MasterRosterPage() {
             </div>
           )}
         </header>
+
+        {packetResult && (
+          <div className="rounded-xl border bg-secondary/20 p-3 text-xs space-y-2 mb-4">
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-semibold">
+                {packetResult.mode === 'download' ? 'Downloaded' : 'Printed'}: {packetResult.label}
+              </p>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] shrink-0" onClick={() => setPacketResult(null)}>
+                Dismiss
+              </Button>
+            </div>
+            <p>✓ {packetResult.included} document{packetResult.included === 1 ? '' : 's'} included</p>
+            {packetResult.noDocument.length > 0 && (
+              <p>
+                <span className="font-medium text-amber-700">
+                  {packetResult.noDocument.length} with nothing uploaded:
+                </span>{' '}
+                <span className="text-muted-foreground">{packetResult.noDocument.join(', ')}</span>
+              </p>
+            )}
+            {packetResult.failed.length > 0 && (
+              <p>
+                <span className="font-medium text-destructive">
+                  {packetResult.failed.length} could not be merged:
+                </span>{' '}
+                <span className="text-muted-foreground">{packetResult.failed.join(', ')}</span>
+                {' — '}a placeholder page marks the spot in the packet.
+              </p>
+            )}
+          </div>
+        )}
 
         <Card className="border-none shadow-md mb-4">
           <CardContent className="p-4">

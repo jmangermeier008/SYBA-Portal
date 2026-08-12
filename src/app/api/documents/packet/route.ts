@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { getAdminAuth, getAdminFirestore } from '@/lib/firebase-admin';
 import { CLEARANCE_TYPES, isClearanceType } from '@/lib/clearances';
+import { prepareImage, renderPdfPages } from '@/lib/packet-render';
+
+// Rasterizing encrypted PDFs and downscaling photos is slower than a plain
+// merge; a large packet needs more than the default serverless budget.
+export const maxDuration = 60;
 
 const DOC_FIELDS = {
   birthCertificate: { field: 'birthCertificateUrl', label: 'Birth Certificate', filename: 'birth-certificates.pdf' },
@@ -113,7 +118,10 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(' — ');
         const added = await appendDocument(out, url, labelText, drawLabel, snap.ref.path);
-        if (!added) skipped.push(name || snap.id);
+        if (!added) {
+          skipped.push(name || snap.id);
+          addPlaceholderPage(out, font, drawLabel, labelText);
+        }
       }
     } else {
       const slot = CLEARANCE_TYPES.find((c) => c.type === docType)!;
@@ -145,7 +153,10 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(' — ');
         const added = await appendDocument(out, url, labelText, drawLabel, snap.ref.path);
-        if (!added) skipped.push(name);
+        if (!added) {
+          skipped.push(name);
+          addPlaceholderPage(out, font, drawLabel, labelText);
+        }
       }
     }
 
@@ -162,6 +173,9 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `inline; filename="${filename}"`,
         'X-Skipped-Count': String(skipped.length),
+        // Names, not just a count — the admin needs to know WHO to chase.
+        // URL-encoded and capped so a long list can't blow the header limit.
+        'X-Skipped-Names': encodeURIComponent(skipped.join('|')).slice(0, 2000),
       },
     });
   } catch (err: any) {
@@ -173,6 +187,12 @@ export async function POST(req: NextRequest) {
 /**
  * Fetches one uploaded document and appends it to the packet, labeling every
  * page it contributes. Returns false when the file could not be included.
+ *
+ * PDFs go through a two-tier ladder. A straight pdf-lib merge handles phone
+ * scans, jsPDF output and iOS exports, and keeps the text vector. It cannot
+ * handle the genuine PA CWIS clearance certificates, which are AES-128
+ * encrypted — pdf-lib has no decryption at all and dies on the ciphertext —
+ * so those fall through to PDF.js, which decrypts them, and get rasterized.
  *
  * Content-type is checked before the URL extension on purpose: compliance
  * uploads are stored as `compliance/{uid}/{type}_{timestamp}` with no
@@ -194,20 +214,33 @@ async function appendDocument(
     const bytes = new Uint8Array(await res.arrayBuffer());
 
     if (contentType.includes('pdf') || pathname.endsWith('.pdf')) {
-      const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      const pages = await out.copyPages(src, src.getPageIndices());
-      for (const page of pages) {
-        out.addPage(page);
-        drawLabel(page, labelText);
+      try {
+        const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        const pages = await out.copyPages(src, src.getPageIndices());
+        for (const page of pages) {
+          out.addPage(page);
+          drawLabel(page, labelText);
+        }
+        return true;
+      } catch {
+        const rendered = await renderPdfPages(bytes);
+        if (rendered.length === 0) return false;
+        for (const jpeg of rendered) {
+          addImagePage(out, await out.embedJpg(jpeg), drawLabel, labelText);
+        }
+        return true;
       }
-      return true;
     }
-    if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.jpe?g$/.test(pathname)) {
-      addImagePage(out, await out.embedJpg(bytes), drawLabel, labelText);
-      return true;
-    }
-    if (contentType.includes('png') || pathname.endsWith('.png')) {
-      addImagePage(out, await out.embedPng(bytes), drawLabel, labelText);
+
+    const isJpeg =
+      contentType.includes('jpeg') || contentType.includes('jpg') || /\.jpe?g$/.test(pathname);
+    const isPng = contentType.includes('png') || pathname.endsWith('.png');
+    if (isJpeg || isPng) {
+      const prepared = await prepareImage(bytes, isJpeg);
+      const img = prepared.isJpeg
+        ? await out.embedJpg(prepared.bytes)
+        : await out.embedPng(prepared.bytes);
+      addImagePage(out, img, drawLabel, labelText);
       return true;
     }
     return false;
@@ -215,6 +248,34 @@ async function appendDocument(
     console.error(`[documents/packet] failed for ${refPath}:`, err);
     return false;
   }
+}
+
+/**
+ * Stands in for a document that could not be merged. A gap in the printed
+ * stack is far easier to act on than a document that silently vanished.
+ */
+function addPlaceholderPage(
+  out: PDFDocument,
+  font: Awaited<ReturnType<PDFDocument['embedFont']>>,
+  drawLabel: (page: ReturnType<PDFDocument['addPage']>, text: string) => void,
+  labelText: string
+) {
+  const page = out.addPage([LETTER.width, LETTER.height]);
+  const lines = [
+    'This document could not be added to the packet.',
+    'Open it directly from the volunteer\'s Audit dialog to view or print it.',
+  ];
+  lines.forEach((line, i) => {
+    const width = font.widthOfTextAtSize(line, 12);
+    page.drawText(line, {
+      x: Math.max((LETTER.width - width) / 2, MARGIN),
+      y: LETTER.height / 2 - i * 20,
+      size: 12,
+      font,
+      color: rgb(0.4, 0.4, 0.4),
+    });
+  });
+  drawLabel(page, labelText);
 }
 
 function addImagePage(
