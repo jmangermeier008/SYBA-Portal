@@ -450,6 +450,8 @@ export interface UserProfile {
  */
 export interface Clearance {
   id: string;
+  /** Injected by useCollection — full Firestore path, the reliable owner key. */
+  _refPath?: string;
   userId: string;            // Duplicated onto the doc so the admin collectionGroup query can filter
   type: string;              // Usually a ClearanceType, but legacy aliases exist — match via findClearance()
   status: 'Pending' | 'Approved' | 'Rejected' | string;

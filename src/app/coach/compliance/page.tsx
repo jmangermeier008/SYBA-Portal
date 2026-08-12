@@ -23,10 +23,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { format, parseISO } from 'date-fns';
-import { CLEARANCE_TYPES, isValidExpirationDate } from '@/lib/clearances';
-
-const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+import { CLEARANCE_TYPES, findClearance, isValidExpirationDate, type ClearanceType } from '@/lib/clearances';
+import { prepareDocumentForUpload } from '@/lib/upload-compressor';
 
 export default function CoachCompliancePage() {
   const { user } = useUser();
@@ -48,7 +46,7 @@ export default function CoachCompliancePage() {
 
   const { data: clearances, isLoading } = useCollection<any>(clearancesQuery);
 
-  const handleFileUpload = async (type: string, expirationDate: string, file: File) => {
+  const handleFileUpload = async (type: string, expirationDate: string, files: File[]) => {
     if (!user || !db) return;
 
     // The date is optional — the board records the authoritative one when they
@@ -58,19 +56,15 @@ export default function CoachCompliancePage() {
       return;
     }
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      toast({ variant: "destructive", title: "Invalid File Type", description: "Please upload a PDF, JPEG, or PNG." });
-      return;
-    }
-
-    if (file.size > MAX_SIZE) {
-      toast({ variant: "destructive", title: "File Too Large", description: "Maximum file size is 5MB." });
-      return;
-    }
-
     setUploading(type);
 
     try {
+      // Same on-device preparation as player documents: phone photos are
+      // downscaled below the 5 MB upload limit, and multiple photos
+      // (front/back of a card) merge into one PDF. Type and size validation
+      // live inside the preparer and throw user-friendly messages.
+      const file = await prepareDocumentForUpload(files, type);
+
       // Upload through the server route — client SDK storage access is disabled
       const idToken = await user.getIdToken();
       const formData = new FormData();
@@ -112,7 +106,10 @@ export default function CoachCompliancePage() {
     }
   };
 
-  const getClearance = (type: string) => clearances?.find(c => c.type === type);
+  // Alias-tolerant on purpose: a record stored under a legacy id like
+  // 'childabuse' must still show as submitted here, or the coach re-uploads
+  // and creates a duplicate alongside it.
+  const getClearance = (type: ClearanceType) => findClearance(clearances ?? [], type);
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -226,16 +223,19 @@ export default function CoachCompliancePage() {
                                       {clearance ? "Update / Replace Document" : "Upload Document"}
                                     </Button>
                                     <p className="text-[11px] text-muted-foreground mt-1">
-                                      The board confirms the expiration date when they review your document — you can leave it blank.
+                                      Photos are shrunk on your phone before uploading — pick several to combine
+                                      them into one document. The board confirms the expiration date on review;
+                                      you can leave it blank.
                                     </p>
                                     <input
                                       type="file"
                                       id={`file-${clearanceType.type}`}
                                       className="hidden"
                                       accept=".pdf,.jpg,.jpeg,.png"
+                                      multiple
                                       onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload(clearanceType.type, expValue, file);
+                                        const files = Array.from(e.target.files ?? []);
+                                        if (files.length) handleFileUpload(clearanceType.type, expValue, files);
                                         e.currentTarget.value = '';
                                       }}
                                     />

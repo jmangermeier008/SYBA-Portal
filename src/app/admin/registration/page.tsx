@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Sidebar } from '@/components/navigation/sidebar';
 import { useFirestore, useCollection, useMemoFirebase, useUser, useSport } from '@/firebase';
-import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, increment, Timestamp } from 'firebase/firestore';
+import { collectionGroup, collection, query, where, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, increment, Timestamp } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -274,13 +274,26 @@ export default function RegistrationDashboardPage() {
     if (!coaches) return [];
     return coaches.filter(c => {
       const profile = c as any;
+      // An explicit staff grant in this sport always wins. The team/division
+      // intersection below only scopes legacy sport-blind roles — applying it
+      // to everyone hid football coaches whose profiles still carried stale
+      // baseball teamIds from last spring.
+      const sportRoles: string[] = (activeSport && profile.sportRoles?.[activeSport]) || [];
+      if (profile.isSiteAdmin === true || sportRoles.length > 0) return true;
       const coachTeamIds: string[] = profile.teamIds ?? [];
       const coachDivIds: string[] = profile.divisionIds ?? [];
       if (coachTeamIds.length === 0 && coachDivIds.length === 0) return true;
       return coachTeamIds.some((id: string) => sportTeamIds.has(id)) ||
              coachDivIds.some((id: string) => sportDivisionIds.has(id));
     });
-  }, [coaches, sportTeamIds, sportDivisionIds]);
+  }, [coaches, activeSport, sportTeamIds, sportDivisionIds]);
+
+  // Documents sitting in review — surfaces as the amber badge on the Coaches
+  // tab so an upload can't wait unseen until someone happens to open the tab.
+  const pendingClearances = useMemo(
+    () => (allClearances ?? []).filter((c: any) => c.status === 'Pending').length,
+    [allClearances]
+  );
 
   // Count from sportFilteredPlayers — the same population the table renders.
   // Counting allPlayers made the badge include players with no enrollment in
@@ -557,12 +570,28 @@ export default function RegistrationDashboardPage() {
     }
   };
 
+  // Server route so the delete is real: profile + subcollections + uploaded
+  // background-check files (whose 10-year signed URLs die with them) + Auth
+  // user. The old deleteDoc-only version orphaned all of that while the
+  // dialog claimed otherwise.
   const handleDeleteCoach = async (coach: CoachProfile): Promise<boolean> => {
-    if (!db) return false;
-    const coachRef = doc(db, 'userProfiles', coach.id);
+    if (!user) return false;
     try {
-      await deleteDoc(coachRef);
-      toast({ title: 'Coach Removed', description: `${coach.displayName} has been deleted.` });
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/admin/delete-coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ uid: coach.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      const warnings: string[] = data.warnings ?? [];
+      toast({
+        title: 'Coach Removed',
+        description: warnings.length
+          ? `${coach.displayName} was deleted, but: ${warnings.join(' ')}`
+          : `${coach.displayName}, their compliance records, and their uploaded files have been deleted.`,
+      });
       return true;
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Delete Failed', description: error.message });
@@ -1050,6 +1079,11 @@ export default function RegistrationDashboardPage() {
             <TabsTrigger value="coaches" className="rounded-lg px-6 h-10 data-[state=active]:bg-primary data-[state=active]:text-white">
               <ShieldCheck className="h-4 w-4 mr-2" />
               Coaches
+              {pendingClearances > 0 && (
+                <span className="ml-2 bg-yellow-100 text-yellow-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  {pendingClearances}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 

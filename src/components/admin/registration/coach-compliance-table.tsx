@@ -36,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { openDocumentPacket, type PacketMode } from '@/lib/document-packet';
+import { prepareDocumentForUpload } from '@/lib/upload-compressor';
 import { openPrintTab, type CompliancePrintRow } from '@/lib/print-job';
 import {
   CLEARANCE_TYPES,
@@ -97,9 +98,6 @@ interface CoachComplianceTableProps {
   onDeleteCoach: (coach: CoachProfile) => Promise<boolean>;
 }
 
-const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB
-
 
 /** Admin-side upload of a clearance on behalf of a coach who hasn't submitted one. */
 function ManualClearanceUpload({
@@ -118,24 +116,24 @@ function ManualClearanceUpload({
   const [uploading, setUploading] = useState(false);
   const inputId = `admin-upload-${coachUserId}-${type}`;
 
-  const handleFile = async (file: File) => {
+  const handleFiles = async (files: File[]) => {
     // The date is optional here — the reviewer records it off the document.
     if (expiration && !isValidExpirationDate(expiration)) {
       toast({ variant: 'destructive', title: 'Check the Expiration Date', description: 'Enter a real date with a four-digit year.' });
       return;
     }
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      toast({ variant: 'destructive', title: 'Invalid File Type', description: 'Please upload a PDF, JPEG, or PNG.' });
-      return;
-    }
-    if (file.size > MAX_SIZE) {
-      toast({ variant: 'destructive', title: 'File Too Large', description: 'Maximum file size is 5MB.' });
-      return;
-    }
     setUploading(true);
-    const ok = await onUpload(coachUserId, type, expiration, file);
-    setUploading(false);
-    if (ok) setExpiration('');
+    try {
+      // Same on-device shrink as the coach's own upload — type/size checks
+      // live inside the preparer and throw user-friendly messages.
+      const file = await prepareDocumentForUpload(files, type);
+      const ok = await onUpload(coachUserId, type, expiration, file);
+      if (ok) setExpiration('');
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Could Not Prepare File', description: err.message });
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -167,9 +165,10 @@ function ManualClearanceUpload({
           type="file"
           className="hidden"
           accept=".pdf,.jpg,.jpeg,.png"
+          multiple
           onChange={e => {
-            const f = e.target.files?.[0];
-            if (f) handleFile(f);
+            const files = Array.from(e.target.files ?? []);
+            if (files.length) handleFiles(files);
             e.currentTarget.value = '';
           }}
         />
@@ -421,7 +420,12 @@ export function CoachComplianceTable({
   const volunteerClearanceData = useMemo(() => {
     return coaches
       .map(u => {
-        const uc = clearances.filter(c => c.userId === u.id);
+        // Owner is derived from the document's PATH first — legacy records
+        // predate the userId field and would otherwise render as Missing
+        // forever while the file sits right there in the subcollection.
+        const uc = clearances.filter(
+          c => c._refPath?.startsWith(`userProfiles/${u.id}/`) || c.userId === u.id
+        );
         const records = {} as Record<ClearanceType, ClearanceRecord | undefined>;
         const states = {} as Record<ClearanceType, ClearanceState>;
         for (const { type } of CLEARANCE_TYPES) {
@@ -492,6 +496,7 @@ export function CoachComplianceTable({
       docType: type,
       mode,
       refPaths: withDoc.map(r => `userProfiles/${r.uid}/clearances/${r.record.id}`),
+      labels: withDoc.map(r => r.name),
     }).then(r => {
       setPacketBusy(null);
       if (!r.ok) {
@@ -519,6 +524,7 @@ export function CoachComplianceTable({
       user,
       docType: type,
       refPaths: [`userProfiles/${coach.id}/clearances/${record.id}`],
+      labels: [coach.displayName],
     });
     if (!result.ok) toast({ variant: 'destructive', title: 'Print failed', description: result.error });
   };
@@ -644,7 +650,9 @@ export function CoachComplianceTable({
                   <DropdownMenuItem onClick={handlePrintComplianceSummary}>
                     <ShieldCheck className="h-4 w-4 mr-2 shrink-0" />
                     <span className="flex-1 truncate">
-                      Compliance Summary{mode === 'download' ? ' (Save as PDF)' : ''}
+                      {/* The summary is an HTML sheet, not a server-built PDF —
+                          both modes open the print view; saving happens there. */}
+                      Compliance Summary{mode === 'download' ? ' — opens print view (use Save as PDF)' : ''}
                     </span>
                     <span className="ml-2 text-xs text-muted-foreground">({filteredVolunteers.length})</span>
                   </DropdownMenuItem>

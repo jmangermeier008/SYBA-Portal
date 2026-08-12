@@ -652,7 +652,13 @@ export default function MasterRosterPage() {
       return;
     }
     setPacketBusy(docType);
-    openDocumentPacket({ user, docType, mode, refPaths: withDoc.map(p => p._refPath!) })
+    openDocumentPacket({
+      user,
+      docType,
+      mode,
+      refPaths: withDoc.map(p => p._refPath!),
+      labels: withDoc.map(p => `${p.firstName} ${p.lastName}`),
+    })
       .then(r => {
         setPacketBusy(null);
         if (!r.ok) {

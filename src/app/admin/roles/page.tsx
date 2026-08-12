@@ -3,7 +3,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from '@/components/navigation/sidebar';
-import { updateDoc, doc, collection, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { updateDoc, doc, collection, setDoc, deleteField } from 'firebase/firestore';
 import { useFirestore, useMemoFirebase, useCollection, useUser } from '@/firebase';
 import { useSport } from '@/firebase/sport-context';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -73,7 +73,7 @@ const EMPTY_NEW_USER = {
 export default function RolesPage() {
   const db = useFirestore();
   const { toast } = useToast();
-  const { isSiteAdmin, loading: loadingUser } = useUser();
+  const { user, isSiteAdmin, loading: loadingUser } = useUser();
   const { activeSport, isBoardMember } = useSport();
 
   // Create user dialog
@@ -259,12 +259,28 @@ export default function RolesPage() {
     }
   };
 
+  // Server route so the delete is real: profile + subcollections (players,
+  // clearances, enrollments) + uploaded compliance files + Auth user — the old
+  // deleteDoc-only version orphaned everything under the profile.
   const handleRemoveUser = async () => {
-    if (!removeTarget || !db) return;
+    if (!removeTarget || !user) return;
     setRemoving(true);
     try {
-      await deleteDoc(doc(db, 'userProfiles', removeTarget.id));
-      toast({ title: "User Removed", description: `${removeTarget.displayName} has been removed from the portal.` });
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/admin/delete-coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ uid: removeTarget.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      const warnings: string[] = data.warnings ?? [];
+      toast({
+        title: "User Removed",
+        description: warnings.length
+          ? `${removeTarget.displayName} was removed, but: ${warnings.join(' ')}`
+          : `${removeTarget.displayName} and all their records have been removed from the portal.`,
+      });
       setRemoveTarget(null);
     } catch (error: any) {
       toast({ title: "Removal Failed", description: error.message, variant: "destructive" });
