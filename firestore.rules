@@ -196,6 +196,10 @@ service cloud.firestore {
           (isBoardMemberForSport(resource.data.sport) &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['footballEquipment'])) ||
+          // Board members (sport-scoped) can grant manual volunteer credits
+          (isBoardMemberForSport(resource.data.get('sport', '')) &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['manualConcessionCredits', 'manualTaggingCredits'])) ||
           // The player's team coach can record weigh-ins and issue/return equipment
           (isCoach() && isTeamCoach(resource.data.get('teamId', '')) &&
             request.resource.data.diff(resource.data).affectedKeys()

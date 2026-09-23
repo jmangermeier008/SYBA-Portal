@@ -16,12 +16,12 @@ import {
   where,
   collectionGroup,
   updateDoc,
-  arrayRemove,
-  arrayUnion,
+  runTransaction,
   writeBatch,
 } from 'firebase/firestore';
 import { LeagueCalendar } from '@/components/calendar/LeagueCalendar';
-import type { VolunteerShiftType } from '@/types/scheduling';
+import type { VolunteerShiftType, Sport } from '@/types/scheduling';
+import { notifyUsers } from '@/lib/coach-notifications';
 import {
   VOLUNTEER_TYPES_COUNTING_TOWARD_REQUIREMENT,
   FOOTBALL_PER_PLAYER_REQUIREMENTS,
@@ -56,6 +56,8 @@ import {
   ChevronRight,
   CheckCheck,
   Pencil,
+  X,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO } from 'date-fns';
@@ -86,6 +88,7 @@ interface ConcessionSlot {
   cancelCutoffHours: number;
   description?: string;
   signups: ConcessionSignup[];
+  status?: 'active' | 'cancelled';
   createdAt: string;
 }
 
@@ -110,6 +113,17 @@ interface Season {
   sport?: string;
 }
 
+// Admin-granted credits per requirement bucket. Each bucket maps to its own
+// enrollment field; a family's credit is the sum across their enrollments.
+type CreditType = 'concessions' | 'tagging';
+type ManualCredits = Record<CreditType, number>;
+const CREDIT_FIELD: Record<CreditType, 'manualConcessionCredits' | 'manualTaggingCredits'> = {
+  concessions: 'manualConcessionCredits',
+  tagging: 'manualTaggingCredits',
+};
+const CREDIT_LABEL: Record<CreditType, string> = { concessions: 'Concessions', tagging: 'Tagging' };
+const CREDIT_TYPES = Object.keys(CREDIT_FIELD) as CreditType[];
+
 // Roster of enrolled families for a season — fetched once, then combined with
 // the live `slots` collection to compute compliance reactively.
 interface FamilyRoster {
@@ -117,7 +131,7 @@ interface FamilyRoster {
   displayName: string;
   email: string;
   enrollmentCount: number;
-  manualCredits: number;
+  manualCredits: ManualCredits;
   playerNames: string[];
   divisionIds: string[];   // every division this family has a player enrolled in
   divisionNames: string[]; // resolved names for display / CSV
@@ -197,9 +211,25 @@ function isMarkableSlot(gameDate: string): boolean {
   return gameDate <= format(new Date(), 'yyyy-MM-dd');
 }
 
-// Total worked credit (manual credits apply to the concessions bucket).
+function creditTotal(f: FamilyRoster) {
+  return f.manualCredits.concessions + f.manualCredits.tagging;
+}
+// Identifies one signup spot. Legacy signups predate signupId, so they fall
+// back to who signed up and when.
+function isSameSignup(a: ConcessionSignup, b: ConcessionSignup): boolean {
+  if (a.signupId || b.signupId) return a.signupId === b.signupId;
+  return a.parentUserId === b.parentUserId && a.signedUpAt === b.signedUpAt;
+}
+
+// Worked shifts + manual credits, per bucket and in total.
+function concessionsDone(f: FamilyCompliance) {
+  return f.concessionsWorked + f.manualCredits.concessions;
+}
+function taggingDone(f: FamilyCompliance) {
+  return f.taggingWorked + f.manualCredits.tagging;
+}
 function workedTotal(f: FamilyCompliance) {
-  return f.concessionsWorked + f.taggingWorked + f.manualCredits;
+  return concessionsDone(f) + taggingDone(f);
 }
 function pendingTotal(f: FamilyCompliance) {
   return f.concessionsPending + f.taggingPending;
@@ -208,8 +238,8 @@ function pendingTotal(f: FamilyCompliance) {
 function complianceStatus(family: FamilyCompliance): 'met' | 'partial' | 'none' {
   if (family.isFootball) {
     // Both a concession shift AND a tagging shift are required per player.
-    const concessionsMet = family.concessionsWorked + family.manualCredits >= family.perTypeRequired;
-    const taggingMet = family.taggingWorked >= family.perTypeRequired;
+    const concessionsMet = concessionsDone(family) >= family.perTypeRequired;
+    const taggingMet = taggingDone(family) >= family.perTypeRequired;
     if (concessionsMet && taggingMet) return 'met';
     const anyProgress = workedTotal(family) > 0 || pendingTotal(family) > 0;
     return anyProgress ? 'partial' : 'none';
@@ -271,7 +301,7 @@ function AttendanceToggle({
   const effective = pending ?? current;
 
   return (
-    <div role="group" aria-label="Mark attendance" className="grid grid-cols-3 gap-1 w-full sm:max-w-xs">
+    <div role="group" aria-label="Mark attendance" className="flex gap-1.5 w-full">
       {(['pending', 'worked', 'no-show'] as AttendanceStatus[]).map(status => {
         const Icon = ATTENDANCE_ICON[status];
         const selected = effective === status;
@@ -281,9 +311,11 @@ function AttendanceToggle({
             type="button"
             disabled={isSaving}
             aria-pressed={selected}
+            aria-label={ATTENDANCE_CONFIG[status].label}
+            title={ATTENDANCE_CONFIG[status].label}
             onClick={() => { setPending(status); onSelect(status); }}
             className={cn(
-              'flex items-center justify-center gap-1.5 min-h-[44px] px-2 rounded-md border text-sm font-medium transition-colors disabled:cursor-not-allowed',
+              'flex flex-1 min-w-0 items-center justify-center gap-1 min-h-[44px] px-1.5 rounded-md border text-sm font-medium transition-colors disabled:cursor-not-allowed',
               selected
                 ? ATTENDANCE_SELECTED[status]
                 : 'border-transparent bg-muted/50 text-muted-foreground hover:bg-muted disabled:opacity-60'
@@ -292,7 +324,7 @@ function AttendanceToggle({
             {isSaving && pending === status
               ? <Loader2 className="h-4 w-4 animate-spin shrink-0" />
               : <Icon className="h-4 w-4 shrink-0" />}
-            <span>{ATTENDANCE_CONFIG[status].label}</span>
+            <span className="whitespace-nowrap">{ATTENDANCE_CONFIG[status].label}</span>
           </button>
         );
       })}
@@ -304,7 +336,7 @@ function AttendanceToggle({
 
 export default function ConcessionsAdminPage() {
   const db = useFirestore();
-  const { loading: loadingUser } = useUser();
+  const { user, loading: loadingUser } = useUser();
   const { activeSport, isAdmin, isBoardMember } = useSport();
   const { toast } = useToast();
 
@@ -322,7 +354,10 @@ export default function ConcessionsAdminPage() {
   const [slotView, setSlotView] = useState<'list' | 'calendar'>('list');
   const [calFilters, setCalFilters] = useState({ games: false, practices: false, concessions: true });
   const [overriding, setOverriding] = useState<Set<string>>(new Set());
-  const [creditDialog, setCreditDialog] = useState<{ open: boolean; parentId: string; currentCredits: number }>({ open: false, parentId: '', currentCredits: 0 });
+  const [creditDialog, setCreditDialog] = useState<{ open: boolean; parentId: string; displayName: string; isFootball: boolean; credits: ManualCredits }>(
+    { open: false, parentId: '', displayName: '', isFootball: false, credits: { concessions: 0, tagging: 0 } }
+  );
+  const [creditType, setCreditType] = useState<CreditType>('concessions');
   const [creditInput, setCreditInput] = useState<number>(1);
   const [creditSaving, setCreditSaving] = useState(false);
 
@@ -338,6 +373,13 @@ export default function ConcessionsAdminPage() {
   const [assignDialog, setAssignDialog] = useState<{ open: boolean; slot: ConcessionSlot | null }>({ open: false, slot: null });
   const [assignParentId, setAssignParentId] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
+  // Remove one volunteer from a shift (confirm-gated)
+  const [unassignDialog, setUnassignDialog] = useState<{ slot: ConcessionSlot; signup: ConcessionSignup } | null>(null);
+  const [unassignSaving, setUnassignSaving] = useState(false);
+  // Move one volunteer to a different shift
+  const [moveDialog, setMoveDialog] = useState<{ slot: ConcessionSlot; signup: ConcessionSignup } | null>(null);
+  const [moveTargetId, setMoveTargetId] = useState('');
+  const [moveSaving, setMoveSaving] = useState(false);
   // parent lookup: parentUserId → displayName
   const [parentMap, setParentMap] = useState<Map<string, string>>(new Map());
   const [parentMapLoading, setParentMapLoading] = useState(false);
@@ -641,9 +683,18 @@ export default function ConcessionsAdminPage() {
     const key = `${slotId}_${signupId ?? parentUserId}`;
     setAttendanceSaving(prev => new Set(prev).add(key));
     try {
+      // Rewrite the one entry in place, atomically — never drop and re-add it,
+      // which briefly frees the spot and reorders the list.
       const slotRef = doc(db, 'concessionSlots', slotId);
-      await updateDoc(slotRef, { signups: arrayRemove(signup) });
-      await updateDoc(slotRef, { signups: arrayUnion({ ...signup, attendance: newStatus }) });
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists()) throw new Error('Shift no longer exists.');
+        const current = (snap.data() as ConcessionSlot).signups ?? [];
+        const idx = current.findIndex(s => isSameSignup(s, signup));
+        if (idx === -1) throw new Error('That volunteer is no longer on this shift.');
+        const next = current.map((s, i) => (i === idx ? { ...s, attendance: newStatus } : s));
+        tx.update(slotRef, { signups: next });
+      });
       toast({ title: 'Attendance updated' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -738,28 +789,49 @@ export default function ConcessionsAdminPage() {
     if (seasonId) loadParentsForSeason(seasonId);
   }
 
+  const slotLabel = (slot: ConcessionSlot) =>
+    `${slot.gameDate ? format(parseISO(slot.gameDate), 'EEE, MMM d') : slot.gameDate} (${formatTime(slot.startTime)}–${formatTime(slot.endTime)})`;
+  const typeLabel = (t?: VolunteerShiftType) =>
+    VOLUNTEER_TYPE_OPTIONS.find(o => o.value === (t ?? 'concessions'))?.label ?? 'Volunteer';
+
+  // Notifications are best-effort: the shift change already succeeded, so a
+  // failed notification must never surface as a failed action.
+  function notifyVolunteer(uid: string, type: 'shiftMoved' | 'concessionSignupCancelled' | 'concessionSignupConfirmed', title: string, body: string, slotId: string) {
+    if (!db || !activeSport) return;
+    notifyUsers(db, [uid], user?.uid ?? '', {
+      type, title, body, sport: activeSport as Sport, relatedDocId: slotId, relatedDocType: 'concessionSlot',
+    }).catch(() => { /* best-effort */ });
+  }
+
   async function handleManualAssign() {
     if (!db || !assignDialog.slot || !assignParentId) return;
     setAssignSaving(true);
     try {
       const slot = assignDialog.slot;
-      // Guard: already in slot
-      if (slot.signups.some(s => s.parentUserId === assignParentId)) {
-        toast({ title: 'Already assigned', description: 'This parent is already on this slot.', variant: 'destructive' });
-        return;
-      }
+      // Future shifts are a commitment (Pending); today/past records the work.
+      const attendance: AttendanceStatus = isMarkableSlot(slot.gameDate) ? 'worked' : 'pending';
       const displayName = parentMap.get(assignParentId) ?? assignParentId;
-      const newSignup: ConcessionSignup = {
-        signupId: crypto.randomUUID(),
-        parentUserId: assignParentId,
-        displayName,
-        signedUpAt: new Date().toISOString(),
-        attendance: 'worked',
-      };
-      await updateDoc(doc(db, 'concessionSlots', slot.id), {
-        signups: arrayUnion(newSignup),
+      const slotRef = doc(db, 'concessionSlots', slot.id);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists()) throw new Error('Shift no longer exists.');
+        const signups = (snap.data() as ConcessionSlot).signups ?? [];
+        if (signups.some(s => s.parentUserId === assignParentId)) throw new Error('This parent is already on this shift.');
+        if (signups.length >= slot.capacity) throw new Error('This shift is full.');
+        const next = [...signups, {
+          signupId: crypto.randomUUID(),
+          parentUserId: assignParentId,
+          displayName,
+          signedUpAt: new Date().toISOString(),
+          attendance,
+        }];
+        tx.update(slotRef, { signups: next, claimedCount: next.length });
       });
-      toast({ title: 'Volunteer assigned', description: `${displayName} marked as Worked.` });
+      toast({ title: 'Volunteer assigned', description: `${displayName} ${attendance === 'worked' ? 'marked as Worked' : 'signed up'}.` });
+      if (attendance === 'pending') {
+        notifyVolunteer(assignParentId, 'concessionSignupConfirmed', 'Volunteer Shift Assigned',
+          `A league admin signed you up for the ${typeLabel(slot.type).toLowerCase()} shift on ${slotLabel(slot)}.`, slot.id);
+      }
       setAssignDialog({ open: false, slot: null });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -767,6 +839,78 @@ export default function ConcessionsAdminPage() {
       setAssignSaving(false);
     }
   }
+
+  async function handleUnassignSignup() {
+    if (!db || !unassignDialog) return;
+    const { slot, signup } = unassignDialog;
+    setUnassignSaving(true);
+    try {
+      const slotRef = doc(db, 'concessionSlots', slot.id);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(slotRef);
+        if (!snap.exists()) throw new Error('Shift no longer exists.');
+        const signups = (snap.data() as ConcessionSlot).signups ?? [];
+        const next = signups.filter(s => !isSameSignup(s, signup));
+        if (next.length === signups.length) throw new Error('That volunteer is no longer on this shift.');
+        tx.update(slotRef, { signups: next, claimedCount: next.length });
+      });
+      toast({ title: 'Volunteer removed', description: `${signup.displayName} was removed from this shift.` });
+      notifyVolunteer(signup.parentUserId, 'concessionSignupCancelled', 'Volunteer Shift Removed',
+        `A league admin removed you from the ${typeLabel(slot.type).toLowerCase()} shift on ${slotLabel(slot)}.`, slot.id);
+      setUnassignDialog(null);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setUnassignSaving(false);
+    }
+  }
+
+  async function handleMoveSignup() {
+    if (!db || !moveDialog || !moveTargetId) return;
+    const { slot: source, signup } = moveDialog;
+    const target = (slots ?? []).find(s => s.id === moveTargetId);
+    if (!target) return;
+    setMoveSaving(true);
+    try {
+      const sourceRef = doc(db, 'concessionSlots', source.id);
+      const targetRef = doc(db, 'concessionSlots', target.id);
+      await runTransaction(db, async (tx) => {
+        const [srcSnap, dstSnap] = await Promise.all([tx.get(sourceRef), tx.get(targetRef)]);
+        if (!srcSnap.exists() || !dstSnap.exists()) throw new Error('One of these shifts no longer exists.');
+        const srcSignups = (srcSnap.data() as ConcessionSlot).signups ?? [];
+        const dst = dstSnap.data() as ConcessionSlot;
+        const dstSignups = dst.signups ?? [];
+        const moving = srcSignups.find(s => isSameSignup(s, signup));
+        if (!moving) throw new Error('That volunteer is no longer on this shift.');
+        if (dstSignups.length >= dst.capacity) throw new Error('The destination shift is full.');
+        if (dstSignups.some(s => s.parentUserId === moving.parentUserId)) throw new Error('This parent is already on the destination shift.');
+        // Same commitment, new time: keep signupId, signedUpAt and attendance.
+        const nextSrc = srcSignups.filter(s => s !== moving);
+        const nextDst = [...dstSignups, { ...moving, signupId: moving.signupId ?? crypto.randomUUID() }];
+        tx.update(sourceRef, { signups: nextSrc, claimedCount: nextSrc.length });
+        tx.update(targetRef, { signups: nextDst, claimedCount: nextDst.length });
+      });
+      toast({ title: 'Volunteer moved', description: `${signup.displayName} moved to ${slotLabel(target)}.` });
+      notifyVolunteer(signup.parentUserId, 'shiftMoved', 'Volunteer Shift Changed',
+        `A league admin moved your ${typeLabel(source.type).toLowerCase()} shift on ${slotLabel(source)} to the ${typeLabel(target.type).toLowerCase()} shift on ${slotLabel(target)}.`, target.id);
+      setMoveDialog(null);
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setMoveSaving(false);
+    }
+  }
+
+  // Shifts a volunteer can be moved to: same sport + season window (sortedSlots),
+  // not cancelled, not the source, with room. Same-type shifts listed first.
+  const moveTargets = useMemo(() => {
+    if (!moveDialog) return [];
+    const sourceType = moveDialog.slot.type ?? 'concessions';
+    return sortedSlots
+      .filter(s => s.id !== moveDialog.slot.id && s.status !== 'cancelled' && (s.signups?.length ?? 0) < s.capacity)
+      .sort((a, b) => Number((b.type ?? 'concessions') === sourceType) - Number((a.type ?? 'concessions') === sourceType)
+        || a.gameDate.localeCompare(b.gameDate) || a.startTime.localeCompare(b.startTime));
+  }, [moveDialog, sortedSlots]);
 
   // ── Family Compliance ─────────────────────────────────────────────────────
   // Fetch the season's enrolled-family roster ONCE (enrollments rarely change).
@@ -797,7 +941,7 @@ export default function ConcessionsAdminPage() {
       );
       const parentIds = new Set<string>();
       const enrollmentCountByParent = new Map<string, number>();
-      const manualCreditsMap = new Map<string, number>();
+      const manualCreditsMap = new Map<string, ManualCredits>();
       const playerIdsByParent = new Map<string, string[]>();
       const divisionIdsByParent = new Map<string, Set<string>>();
       enrollmentsSnap.docs.forEach(d => {
@@ -808,8 +952,9 @@ export default function ConcessionsAdminPage() {
         if (pid) {
           parentIds.add(pid);
           enrollmentCountByParent.set(pid, (enrollmentCountByParent.get(pid) ?? 0) + 1);
-          const mc = (data.manualConcessionCredits as number) ?? 0;
-          if (mc > 0) manualCreditsMap.set(pid, (manualCreditsMap.get(pid) ?? 0) + mc);
+          const mc = manualCreditsMap.get(pid) ?? { concessions: 0, tagging: 0 };
+          CREDIT_TYPES.forEach(t => { mc[t] += Number(data[CREDIT_FIELD[t]] ?? 0) || 0; });
+          manualCreditsMap.set(pid, mc);
           if (playerId) {
             const existing = playerIdsByParent.get(pid) ?? [];
             if (!existing.includes(playerId)) playerIdsByParent.set(pid, [...existing, playerId]);
@@ -867,7 +1012,7 @@ export default function ConcessionsAdminPage() {
           displayName: profileMap.get(pid)?.displayName ?? pid,
           email: profileMap.get(pid)?.email ?? '',
           enrollmentCount: enrollmentCountByParent.get(pid) ?? 1,
-          manualCredits: manualCreditsMap.get(pid) ?? 0,
+          manualCredits: manualCreditsMap.get(pid) ?? { concessions: 0, tagging: 0 },
           playerNames: playerNamesMap.get(pid) ?? [],
           linkedParentIds: Array.from(linkedParentsMap.get(pid) ?? new Set([pid])),
           divisionIds,
@@ -945,7 +1090,18 @@ export default function ConcessionsAdminPage() {
     });
   }, [roster, slots, selectedSeason]);
 
-  async function handleAddManualCredits(parentUserId: string, credits: number) {
+  function openCreditDialog(family: FamilyCompliance) {
+    // Default to the bucket the family is short on (tagging only if concessions is met).
+    const type: CreditType = family.isFootball && concessionsDone(family) >= family.perTypeRequired ? 'tagging' : 'concessions';
+    setCreditDialog({ open: true, parentId: family.parentUserId, displayName: family.displayName, isFootball: family.isFootball, credits: family.manualCredits });
+    setCreditType(type);
+    setCreditInput(family.manualCredits[type] || 1);
+  }
+
+  // Sets the family's credit for one bucket to exactly `credits`. The total goes
+  // on the first enrollment and the rest are zeroed, since the roster sums the
+  // field across every enrollment the family has this season.
+  async function handleSetManualCredits(parentUserId: string, type: CreditType, credits: number) {
     if (!db || !selectedSeasonId) return;
     setCreditSaving(true);
     try {
@@ -956,9 +1112,15 @@ export default function ConcessionsAdminPage() {
         toast({ title: 'No enrollments found', variant: 'destructive' });
         return;
       }
-      await updateDoc(snap.docs[0].ref, { manualConcessionCredits: credits });
-      toast({ title: 'Credits applied', description: `${credits} manual credit(s) applied.` });
-      setCreditDialog({ open: false, parentId: '', currentCredits: 0 });
+      const field = CREDIT_FIELD[type];
+      const batch = writeBatch(db);
+      snap.docs.forEach((d, i) => {
+        const value = i === 0 ? credits : 0;
+        if ((d.data()[field] ?? 0) !== value) batch.update(d.ref, { [field]: value });
+      });
+      await batch.commit();
+      toast({ title: 'Credits applied', description: `${CREDIT_LABEL[type]} credit set to ${credits}.` });
+      setCreditDialog(prev => ({ ...prev, open: false }));
       loadFamilyRoster(selectedSeasonId);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -974,7 +1136,9 @@ export default function ConcessionsAdminPage() {
       const snap = await getDocs(
         query(collectionGroup(db, 'enrollments'), where('parentUserId', '==', parentUserId), where('seasonId', '==', selectedSeasonId))
       );
-      await Promise.all(snap.docs.map(d => updateDoc(d.ref, { manualConcessionCredits: 0 })));
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.update(d.ref, { manualConcessionCredits: 0, manualTaggingCredits: 0 }));
+      await batch.commit();
       toast({ title: 'Credits reset', description: 'Manual credits cleared for this family.' });
       loadFamilyRoster(selectedSeasonId);
     } catch (err: any) {
@@ -1009,8 +1173,8 @@ export default function ConcessionsAdminPage() {
           ['Family Name', 'Email', 'Division', 'Concessions Worked', 'Concessions Required', 'Tagging Worked', 'Tagging Required', 'Pending Shifts', 'Status'],
           ...filteredFamilies.map(f => [
             f.displayName, f.email, f.divisionNames.join('; '),
-            String(f.concessionsWorked + f.manualCredits), String(f.perTypeRequired),
-            String(f.taggingWorked), String(f.perTypeRequired),
+            String(concessionsDone(f)), String(f.perTypeRequired),
+            String(taggingDone(f)), String(f.perTypeRequired),
             String(pendingTotal(f)), statusLabel(f),
           ]),
         ]
@@ -1128,9 +1292,35 @@ export default function ConcessionsAdminPage() {
                 const key = `${slot.id}_${s.signupId ?? s.parentUserId}`;
                 const isSaving = attendanceSaving.has(key);
                 const current = s.attendance ?? 'pending';
+                // Always stacked: shift cards sit 3-up on desktop, too narrow to
+                // put the name and the attendance toggle side by side.
                 return (
-                  <div key={s.signupId ?? i} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                    <span className="text-xs font-medium text-foreground sm:truncate">{s.displayName}</span>
+                  <div key={s.signupId ?? i} className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-foreground truncate">{s.displayName}</span>
+                      <div className="flex items-center shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          onClick={() => { setMoveDialog({ slot, signup: s }); setMoveTargetId(''); }}
+                          title={`Move ${s.displayName} to another shift`}
+                          aria-label={`Move ${s.displayName} to another shift`}
+                        >
+                          <ArrowRightLeft className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => setUnassignDialog({ slot, signup: s })}
+                          title={`Remove ${s.displayName} from this shift`}
+                          aria-label={`Remove ${s.displayName} from this shift`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
                     {canMark ? (
                       <AttendanceToggle
                         current={current}
@@ -1146,8 +1336,8 @@ export default function ConcessionsAdminPage() {
             </div>
           )}
 
-          {/* Manual Assign — once the shift day has arrived */}
-          {canMark && (
+          {/* Manual Assign — future shifts sign up as Pending, today/past as Worked */}
+          {!isFull && (
             <Button
               variant="outline"
               size="sm"
@@ -1234,8 +1424,14 @@ export default function ConcessionsAdminPage() {
           <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
             {family.isFootball ? (
               <span className="font-medium flex flex-col gap-0.5">
-                <span>Concessions {family.concessionsWorked + family.manualCredits} / {family.perTypeRequired}</span>
-                <span>Tagging {family.taggingWorked} / {family.perTypeRequired}</span>
+                <span>
+                  Concessions {concessionsDone(family)} / {family.perTypeRequired}
+                  {family.manualCredits.concessions > 0 && <span className="text-xs font-normal text-muted-foreground"> (incl. {family.manualCredits.concessions} credit)</span>}
+                </span>
+                <span>
+                  Tagging {taggingDone(family)} / {family.perTypeRequired}
+                  {family.manualCredits.tagging > 0 && <span className="text-xs font-normal text-muted-foreground"> (incl. {family.manualCredits.tagging} credit)</span>}
+                </span>
               </span>
             ) : (
               <span className="font-medium">
@@ -1255,19 +1451,19 @@ export default function ConcessionsAdminPage() {
             {isExpanded ? 'Hide shifts' : `View ${family.shifts.length} signed-up shift${family.shifts.length !== 1 ? 's' : ''}`}
           </button>
           {isExpanded && <div className="mt-2">{renderFamilyShifts(family)}</div>}
-          {(status !== 'met' || family.manualCredits > 0) && (
+          {(status !== 'met' || creditTotal(family) > 0) && (
             <div className="flex gap-2 mt-3 flex-wrap">
               {status !== 'met' && (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => { setCreditDialog({ open: true, parentId: family.parentUserId, currentCredits: family.manualCredits }); setCreditInput(1); }}
+                  onClick={() => openCreditDialog(family)}
                   className="rounded-full text-xs gap-1.5"
                 >
                   <CheckCircle2 className="h-3.5 w-3.5" /> Adjust Credits
                 </Button>
               )}
-              {family.manualCredits > 0 && (
+              {creditTotal(family) > 0 && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1824,12 +2020,30 @@ export default function ConcessionsAdminPage() {
           <DialogHeader>
             <DialogTitle>Adjust Manual Credits</DialogTitle>
             <DialogDescription>
-              How many manual concession credits should be applied for this family?
+              {creditDialog.isFootball
+                ? <>Set how many {CREDIT_LABEL[creditType].toLowerCase()} shifts <strong>{creditDialog.displayName}</strong> gets credit for without working them.</>
+                : <>Set how many volunteer shifts <strong>{creditDialog.displayName}</strong> gets credit for without working them.</>}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {creditDialog.isFootball && (
+              <div className="space-y-1">
+                <Label>Shift Type</Label>
+                <Select
+                  value={creditType}
+                  onValueChange={v => { const t = v as CreditType; setCreditType(t); setCreditInput(creditDialog.credits[t] || 1); }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CREDIT_TYPES.map(t => (
+                      <SelectItem key={t} value={t}>{CREDIT_LABEL[t]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1">
-              <Label>Credits to Apply</Label>
+              <Label>Credits</Label>
               <Input
                 type="number"
                 min={1}
@@ -1837,15 +2051,86 @@ export default function ConcessionsAdminPage() {
                 value={creditInput}
                 onChange={e => setCreditInput(Number(e.target.value))}
               />
+              {creditDialog.credits[creditType] > 0 && (
+                <p className="text-xs text-muted-foreground">Currently {creditDialog.credits[creditType]}. This replaces it.</p>
+              )}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreditDialog({ open: false, parentId: '', currentCredits: 0 })} disabled={creditSaving}>
+            <Button variant="outline" onClick={() => setCreditDialog(prev => ({ ...prev, open: false }))} disabled={creditSaving}>
               Cancel
             </Button>
-            <Button onClick={() => handleAddManualCredits(creditDialog.parentId, creditInput)} disabled={creditSaving || creditInput < 1}>
+            <Button onClick={() => handleSetManualCredits(creditDialog.parentId, creditType, creditInput)} disabled={creditSaving || creditInput < 1}>
               {creditSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Apply Credits
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove Volunteer Dialog */}
+      <Dialog open={!!unassignDialog} onOpenChange={(open) => !open && !unassignSaving && setUnassignDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Volunteer</DialogTitle>
+            <DialogDescription>
+              Remove <strong>{unassignDialog?.signup.displayName}</strong> from the{' '}
+              {unassignDialog && `${typeLabel(unassignDialog.slot.type).toLowerCase()} shift on ${slotLabel(unassignDialog.slot)}`}?
+              {unassignDialog?.signup.attendance === 'worked' && ' They were marked as Worked, so they will lose credit for this shift.'}
+              {' '}They will be notified.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUnassignDialog(null)} disabled={unassignSaving}>Cancel</Button>
+            <Button variant="destructive" onClick={handleUnassignSignup} disabled={unassignSaving}>
+              {unassignSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move Volunteer Dialog */}
+      <Dialog open={!!moveDialog} onOpenChange={(open) => !open && !moveSaving && setMoveDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move Volunteer</DialogTitle>
+            <DialogDescription>
+              Move <strong>{moveDialog?.signup.displayName}</strong> from the{' '}
+              {moveDialog && `${typeLabel(moveDialog.slot.type).toLowerCase()} shift on ${slotLabel(moveDialog.slot)}`} to another shift.
+              Their attendance status carries over, and they will be notified.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label>Move to</Label>
+            {moveTargets.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No other shifts this season have open spots.</p>
+            ) : (
+              <Select value={moveTargetId} onValueChange={setMoveTargetId}>
+                <SelectTrigger><SelectValue placeholder="Choose a shift…" /></SelectTrigger>
+                <SelectContent>
+                  {moveTargets.map(t => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {typeLabel(t.type)} · {slotLabel(t)}{t.title ? ` · ${t.title}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {(() => {
+              const target = moveTargets.find(t => t.id === moveTargetId);
+              if (!moveDialog || !target || (target.type ?? 'concessions') === (moveDialog.slot.type ?? 'concessions')) return null;
+              return (
+                <p className="flex items-start gap-1.5 text-xs text-amber-700">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  This is a {typeLabel(target.type).toLowerCase()} shift, not {typeLabel(moveDialog.slot.type).toLowerCase()}. The family&apos;s credit will count toward {typeLabel(target.type).toLowerCase()} instead.
+                </p>
+              );
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveDialog(null)} disabled={moveSaving}>Cancel</Button>
+            <Button onClick={handleMoveSignup} disabled={moveSaving || !moveTargetId}>
+              {moveSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Move
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1857,10 +2142,13 @@ export default function ConcessionsAdminPage() {
           <DialogHeader>
             <DialogTitle>Manual Assign Volunteer</DialogTitle>
             <DialogDescription>
-              Select a parent to mark as <strong>Worked</strong> for{' '}
+              {assignDialog.slot && isMarkableSlot(assignDialog.slot.gameDate)
+                ? <>Select a parent to mark as <strong>Worked</strong> for </>
+                : <>Select a parent to sign up for </>}
               {assignDialog.slot?.gameDate
                 ? format(parseISO(assignDialog.slot.gameDate), 'EEE, MMM d, yyyy')
                 : 'this slot'}.
+              {assignDialog.slot && !isMarkableSlot(assignDialog.slot.gameDate) && ' They will show as Pending and be notified.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1893,7 +2181,7 @@ export default function ConcessionsAdminPage() {
             </Button>
             <Button onClick={handleManualAssign} disabled={assignSaving || !assignParentId || parentMapLoading}>
               {assignSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Mark as Worked
+              {assignDialog.slot && !isMarkableSlot(assignDialog.slot.gameDate) ? 'Sign Up' : 'Mark as Worked'}
             </Button>
           </DialogFooter>
         </DialogContent>

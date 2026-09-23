@@ -665,6 +665,11 @@ export interface Enrollment {
   volunteerDepositReturnedAt?: string;      // ISO datetime
   volunteerDepositReturnedBy?: string;      // Admin UID
   volunteerDepositReturnedByName?: string;
+  // Admin-granted volunteer credits, per requirement bucket. A family's credit
+  // is the SUM across all their enrollments for the season (see
+  // /admin/volunteers). Baseball pools shifts, so it only uses the concessions field.
+  manualConcessionCredits?: number;
+  manualTaggingCredits?: number;
   // Timestamps
   registered_at: string;       // ISO datetime
   enrollmentDate: string;      // ISO datetime — backward-compat alias for registered_at
